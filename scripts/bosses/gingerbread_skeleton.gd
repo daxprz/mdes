@@ -91,6 +91,8 @@ func _ground_slam() -> void:
 
 
 func _apply_slam_damage() -> void:
+	if is_dead or not is_inside_tree():
+		return
 	var players := get_tree().get_nodes_in_group("players")
 	for p in players:
 		if not p is Node2D:
@@ -103,18 +105,22 @@ func _apply_slam_damage() -> void:
 
 
 func _summon_mini_skeletons() -> void:
+	if is_dead or not is_inside_tree():
+		return
+	var scene := get_tree().current_scene
+	if not scene:
+		return
 	var count := 2 if current_phase == 2 else 3
 	for i in range(count):
 		var skeleton: Node2D
 		if _mini_skeleton_scene:
 			skeleton = _mini_skeleton_scene.instantiate()
 		else:
-			# Fallback: create a simple enemy placeholder
 			skeleton = _create_placeholder_skeleton()
 
 		var offset_x := (i - count / 2.0) * 60.0
 		skeleton.global_position = global_position + Vector2(offset_x, -20)
-		get_tree().current_scene.add_child(skeleton)
+		scene.add_child(skeleton)
 
 
 func _create_placeholder_skeleton() -> CharacterBody2D:

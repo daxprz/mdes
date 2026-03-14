@@ -101,7 +101,8 @@ func _muffin_slam() -> void:
 
 
 func _apply_slam_shockwave() -> void:
-	# Damage nearby players
+	if is_dead or not is_inside_tree():
+		return
 	var players := get_tree().get_nodes_in_group("players")
 	for p in players:
 		if not p is Node2D:
@@ -125,7 +126,9 @@ func _create_shockwave_visual() -> void:
 	ring.size = Vector2(20, 20)
 	ring.position = global_position - Vector2(10, 10)
 	ring.color = Color(0.9, 0.7, 0.4, 0.7)
-	get_tree().current_scene.add_child(ring)
+	var _scene := get_tree().current_scene
+	if _scene:
+		_scene.add_child(ring)
 
 	var tween := ring.create_tween()
 	tween.set_parallel(true)
@@ -145,16 +148,21 @@ func _crumb_burst() -> void:
 
 
 func _summon_mini_muffins() -> void:
+	if is_dead or not is_inside_tree():
+		return
 	var count := 2 if current_phase < 3 else 4
 	for i in range(count):
 		var muffin := _create_mini_muffin_enemy()
 		var offset_x := (i - count / 2.0) * 50.0
 		muffin.global_position = global_position + Vector2(offset_x, -30)
-		get_tree().current_scene.add_child(muffin)
+		var sc := get_tree().current_scene
+		if sc:
+			sc.add_child(muffin)
 
 
 func _summon_previous_boss_minions() -> void:
-	# Berserk mode: summon minions from previous bosses
+	if is_dead or not is_inside_tree():
+		return
 	var scenes_to_try: Array[String] = [
 		"res://scenes/enemies/skeleton_basic.tscn",
 	]
@@ -164,13 +172,17 @@ func _summon_previous_boss_minions() -> void:
 			var scene: PackedScene = load(scene_path)
 			var enemy: Node2D = scene.instantiate()
 			enemy.global_position = global_position + Vector2(randf_range(-80, 80), -20)
-			get_tree().current_scene.add_child(enemy)
+			var esc := get_tree().current_scene
+			if esc:
+				esc.add_child(enemy)
 
 	# Also spawn a couple placeholder minions
 	for i in range(2):
 		var minion := _create_mini_muffin_enemy()
 		minion.global_position = global_position + Vector2(randf_range(-100, 100), -20)
-		get_tree().current_scene.add_child(minion)
+		var msc := get_tree().current_scene
+		if msc:
+			msc.add_child(minion)
 
 
 func _create_mini_muffin_enemy() -> CharacterBody2D:

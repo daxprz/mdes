@@ -75,11 +75,12 @@ func _physics_process(delta: float) -> void:
 		if _flash_timer <= 0.0:
 			modulate = _original_modulate
 
-	# Attack timer
-	_attack_timer -= delta
-	if _attack_timer <= 0.0:
-		_attack_timer = _attack_cooldown
-		_choose_attack()
+	# Attack timer (don't attack if dead)
+	if not is_dead:
+		_attack_timer -= delta
+		if _attack_timer <= 0.0:
+			_attack_timer = _attack_cooldown
+			_choose_attack()
 
 	_boss_process(delta)
 	move_and_slide()

@@ -92,7 +92,9 @@ func _spawn_puddle() -> void:
 			body.remove_slow()
 	)
 
-	get_tree().current_scene.add_child(puddle)
+	var scene := get_tree().current_scene
+	if scene:
+		scene.add_child(puddle)
 
 	# Auto-remove puddle
 	var tween := puddle.create_tween()

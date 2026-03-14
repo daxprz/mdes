@@ -119,7 +119,9 @@ func _tail_swipe() -> void:
 	rect.size = Vector2(TAIL_RANGE * 2, 20)
 	rect.position = swipe_center - Vector2(TAIL_RANGE, 10)
 	rect.color = Color(1.0, 0.5, 0.0, 0.5)
-	get_tree().current_scene.add_child(rect)
+	var scene := get_tree().current_scene
+	if scene:
+		scene.add_child(rect)
 	var tween := rect.create_tween()
 	tween.tween_property(rect, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(rect.queue_free)
@@ -136,7 +138,11 @@ func _start_fly() -> void:
 
 
 func _rain_sprinkles() -> void:
-	# Rain sprinkle projectiles downward across the arena
+	if is_dead or not is_inside_tree():
+		return
+	var scene := get_tree().current_scene
+	if not scene:
+		return
 	var count := 4 if current_phase < 3 else 7
 	for i in range(count):
 		var x_offset := randf_range(-200, 200)
@@ -150,7 +156,7 @@ func _rain_sprinkles() -> void:
 		proj.speed = 180.0
 		proj.damage = RAIN_DAMAGE
 		proj.color = col
-		get_tree().current_scene.add_child(proj)
+		scene.add_child(proj)
 
 
 func _end_fly() -> void:

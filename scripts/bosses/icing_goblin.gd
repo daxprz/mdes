@@ -103,7 +103,8 @@ func _belly_flop() -> void:
 
 
 func _apply_flop_damage() -> void:
-	# Screen shake effect placeholder
+	if is_dead or not is_inside_tree():
+		return
 	var players := get_tree().get_nodes_in_group("players")
 	for p in players:
 		if not p is Node2D:
