@@ -381,4 +381,5 @@ func _show_victory() -> void:
 
 
 func _return_to_overworld() -> void:
-	GameManager.go_to_overworld()
+	if is_inside_tree():
+		GameManager.go_to_overworld()

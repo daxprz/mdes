@@ -159,7 +159,13 @@ func _play_death_animation() -> void:
 func _on_death_complete() -> void:
 	AudioManager.play("boss_defeat")
 	defeated.emit()
-	queue_free()
+	# Don't queue_free - let the arena handle cleanup during scene transition
+	# Just hide and disable
+	visible = false
+	collision_layer = 0
+	collision_mask = 0
+	set_physics_process(false)
+	set_process(false)
 
 
 # -- Helpers -------------------------------------------------------------------
@@ -187,6 +193,8 @@ func get_nearest_player() -> Node2D:
 
 func spawn_projectile(target_dir: Vector2, speed: float, damage: int,
 		color: Color = Color.WHITE, leave_puddle: bool = false) -> void:
+	if is_dead or not is_inside_tree():
+		return
 	var proj_scene := preload("res://scenes/bosses/boss_projectile.tscn")
 	var proj: Node2D = proj_scene.instantiate()
 	proj.global_position = global_position
@@ -195,4 +203,6 @@ func spawn_projectile(target_dir: Vector2, speed: float, damage: int,
 	proj.damage = damage
 	proj.color = color
 	proj.leave_puddle = leave_puddle
-	get_tree().current_scene.add_child(proj)
+	var scene := get_tree().current_scene
+	if scene:
+		scene.add_child(proj)
