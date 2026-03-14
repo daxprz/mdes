@@ -356,6 +356,98 @@ Universal combat mechanics that apply to ALL classes.
 
 ---
 
+---
+
+## EPIC 12: Character Leveling System (`progression`, `classes`)
+Skill-based leveling: abilities improve through effective use.
+
+### Story 12.1: XP & Level Framework
+- [ ] Task: Define XP curve per level (e.g. level 1=100xp, level 2=250xp, scaling formula)
+- [ ] Task: Add level and xp fields to player data in PlayerManager
+- [ ] Task: XP earned on successful hit (attack lands on enemy = xp for that skill)
+- [ ] Task: XP earned on kill (bonus xp for finishing blow)
+- [ ] Task: XP earned on boss defeat (large bonus, scales with boss difficulty)
+- [ ] Task: Level-up VFX + sound when threshold reached (gold flash, fanfare)
+- [ ] Task: Max level cap (e.g. 20 per skill, 50 overall)
+
+### Story 12.2: Per-Skill Leveling
+- [ ] Task: Track XP separately for: basic attack, special ability, charge attack, block/parry
+- [ ] Task: Each skill levels independently based on successful use
+- [ ] Task: Basic attack: each landed hit grants 1-3 xp (scales with enemy difficulty)
+- [ ] Task: Special ability: each successful use grants 5-10 xp
+- [ ] Task: Charge attack: damage dealt during charge converts to xp (1 xp per 5 damage)
+- [ ] Task: Block: each blocked hit grants 3 xp. Perfect parry grants 15 xp
+- [ ] Task: Healing (Healer): each HP healed on allies grants 0.5 xp
+- [ ] Task: Summoning (Summoner): donut buddy damage contributes xp to summoner
+
+### Story 12.3: Skill Level Benefits
+- [ ] Task: Each skill level grants a small bonus:
+  - Attack levels: +2% damage per level
+  - Special levels: -2% cooldown per level, +1% effect per level
+  - Charge levels: +3% charge speed per level, +2% max charge damage
+  - Block levels: +1% damage reduction per level, +0.02s parry window per 5 levels
+- [ ] Task: Milestone bonuses at levels 5, 10, 15, 20 (unlock new visual effects, sound changes)
+- [ ] Task: Display skill levels on pause menu stat screen
+
+### Story 12.4: Overall Character Level
+- [ ] Task: Overall level = average of all skill levels (rounded down)
+- [ ] Task: Overall level grants: +5 max HP per level, +3 max mana per level
+- [ ] Task: Level displayed next to player name (e.g. "P1 - Melee Lv.7")
+- [ ] Task: Level shown on title screen class selection slots
+
+---
+
+## EPIC 13: Persistent Profiles & Save System (`progression`, `ui`)
+Player profiles that survive game crashes and sessions.
+
+### Story 13.1: Profile Storage
+- [ ] Task: Save/load system using Godot's FileAccess (JSON file in user://)
+- [ ] Task: Profile data structure: name, class_preferences, per_class_stats, created_date
+- [ ] Task: Per-class stats within profile: level, skill_xp, total_kills, total_muffins, boss_kills
+- [ ] Task: Auto-save after each tower completion and boss defeat
+- [ ] Task: Auto-save on quit to menu
+- [ ] Task: Load profiles on game launch
+
+### Story 13.2: Profile Creation Flow
+- [ ] Task: When controller connects: show "Choose Profile" or "Create New" screen
+- [ ] Task: Create new profile step 1: Enter name (3-16 characters)
+  - On-screen keyboard for controller input
+  - Direct keyboard typing support
+  - Name validation (no empty, no duplicates)
+- [ ] Task: Create new profile step 2: Stack-rank class preferences (drag/reorder list)
+  - Shows all 7 classes in a list
+  - D-pad up/down to select, X to grab, move up/down, X to drop
+  - Top preference = default class when joining
+- [ ] Task: Create new profile step 3: Optionally name each sub-character per class
+  - E.g. "BladeMaster" for their Melee, "BoomBoy" for their Demolitionist
+  - Skip button to use defaults
+- [ ] Task: Create new profile step 4: Accept/confirm screen showing summary
+- [ ] Task: Profile select screen shows existing profiles with level + preferred class icon
+
+### Story 13.3: Profile-Linked Gameplay
+- [ ] Task: When player joins (START press), auto-assign their profile's top available class
+- [ ] Task: If preferred class is taken, use next preference in stack-rank
+- [ ] Task: Player label shows profile name instead of "P1" (e.g. "Dax - Melee Lv.7")
+- [ ] Task: XP and level progress saved to profile after each session
+- [ ] Task: Track lifetime stats per profile: total playtime, total muffins, bosses defeated
+
+### Story 13.4: Pause Menu - Profile Stats Display
+- [ ] Task: Pause menu shows paused player's profile name + avatar
+- [ ] Task: Show class avatar/icon (character sprite preview)
+- [ ] Task: Show current level + XP bar (progress to next level)
+- [ ] Task: Show per-skill levels (attack Lv.X, special Lv.X, charge Lv.X, block Lv.X)
+- [ ] Task: Show session stats: muffins collected, enemies killed, damage dealt
+- [ ] Task: Show acquired items/artifacts this session
+- [ ] Task: Show lifetime stats from profile (total kills, total muffins, bosses defeated)
+
+### Story 13.5: Multiple Profiles Management
+- [ ] Task: Support up to 8 saved profiles
+- [ ] Task: Delete profile option (with confirmation)
+- [ ] Task: Profile selection remembers last-used profile per controller
+- [ ] Task: Guest mode: play without a profile (no progress saved, labeled "Guest")
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)
