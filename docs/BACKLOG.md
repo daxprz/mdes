@@ -188,16 +188,16 @@ The overworld needs structure - players shouldn't access everything immediately.
 Bomb-throwing specialist with upgradeable explosives.
 
 ### Story 9.1: Base Demolitionist Class
-- [ ] Task: Add DEMOLITIONIST to CharacterClass enum + stats (100 HP, 100 mana, 105 speed, 1.5 mana regen)
-- [ ] Task: Create demolitionist topdown + side spritesheets
-- [ ] Task: Basic attack: throw bomb (arcs with gravity, bounces once, explodes after 1.5s or on enemy contact)
-- [ ] Task: Bomb explosion: 25 damage, 60px radius, knockback, VFX + screen shake
-- [ ] Task: Special: Big Bomb (costs 40 mana, 50 damage, 90px radius, bigger VFX)
+- [x] Task: Add DEMOLITIONIST to CharacterClass enum + stats (100 HP, 100 mana, 105 speed, 1.5 mana regen)
+- [x] Task: Create demolitionist topdown + side spritesheets
+- [x] Task: Basic attack: throw bomb (arcs with gravity, bounces once, explodes after 1.5s or on enemy contact)
+- [x] Task: Bomb explosion: 25 damage, 60px radius, knockback, VFX + screen shake
+- [x] Task: Special: Big Bomb (costs 40 mana, 50 damage, 90px radius, bigger VFX)
 
 ### Story 9.2: Bomb Upgrade System
 - [ ] Task: Explosive Power upgrades (damage multiplier tiers)
 - [ ] Task: Blast Size upgrades (radius multiplier tiers)
-- [ ] Task: Fragment Bombs (split into 3-5 mini-bombs after first bounce)
+- [x] Task: Fragment Bombs (split into 3-5 mini-bombs after first bounce) - via charge attack
 - [ ] Task: Napalm Bombs (leave burning ground for 3s, DoT damage)
 
 ### Story 9.3: Bomb Aspects (elemental types)
@@ -212,23 +212,23 @@ Bomb-throwing specialist with upgradeable explosives.
 Support class with healing staff and buff abilities.
 
 ### Story 10.1: Base Healer Class
-- [ ] Task: Add HEALER to CharacterClass enum + stats (90 HP, 130 mana, 95 speed, 2.5 mana regen)
-- [ ] Task: Create healer topdown + side spritesheets
-- [ ] Task: Basic attack: staff swing (10 damage) that ALSO heals closest allied player for 8 HP
-- [ ] Task: Auto-target: healing beam visual arcs to nearest injured ally
-- [ ] Task: Special: Healing Burst (costs 50 mana, heals all allies in 80px for 30 HP)
+- [x] Task: Add HEALER to CharacterClass enum + stats (90 HP, 130 mana, 95 speed, 2.5 mana regen)
+- [x] Task: Create healer topdown + side spritesheets
+- [x] Task: Basic attack: staff swing (10 damage) that ALSO heals closest allied player for 8 HP
+- [x] Task: Auto-target: healing beam visual arcs to nearest injured ally
+- [x] Task: Special: Healing Burst (costs 50 mana, heals all allies in 80px for 30 HP)
 
 ### Story 10.2: Healer Charge Attack
-- [ ] Task: Charge attack sends healing blast wave (circular pulse outward)
-- [ ] Task: Wave distance + healing power scales with charge duration (1-3s)
-- [ ] Task: Visual: circular ring expands outward from healer
-- [ ] Task: Allies in wave radius get healed + temporary buff (10% speed + 10% damage for 5s)
-- [ ] Task: Enemies hit by wave get stunned for 1.5s
+- [x] Task: Charge attack sends healing blast wave (circular pulse outward)
+- [x] Task: Wave distance + healing power scales with charge duration (1-3s)
+- [x] Task: Visual: circular ring expands outward from healer
+- [x] Task: Allies in wave radius get healed + temporary buff (10% speed + 10% damage for 5s)
+- [x] Task: Enemies hit by wave get stunned for 1.5s
 
 ### Story 10.3: Healer Dash
-- [ ] Task: Dash creates perpendicular wave pulse (line expanding outward from dash direction)
-- [ ] Task: Wave heals allies and pushes enemies aside
-- [ ] Task: Visual: bright line expanding perpendicular to movement
+- [x] Task: Dash creates perpendicular wave pulse (line expanding outward from dash direction)
+- [x] Task: Wave heals allies and pushes enemies aside
+- [x] Task: Visual: bright line expanding perpendicular to movement
 
 ---
 
@@ -236,16 +236,16 @@ Support class with healing staff and buff abilities.
 Universal combat mechanics that apply to ALL classes.
 
 ### Story 11.1: Melee Buff
-- [ ] Task: Increase melee swing range by 40% (20→28, 22→31, 28→39)
-- [ ] Task: Visible swing arc VFX (colored arc that follows the attack area)
-- [ ] Task: Arc color matches combo stage (white→yellow→orange)
-- [ ] Task: Add distinct sound per combo hit (light→medium→heavy slash)
+- [x] Task: Increase melee swing range by 40% (20→28, 22→31, 28→39)
+- [x] Task: Visible swing arc VFX (colored arc that follows the attack area)
+- [x] Task: Arc color matches combo stage (white→yellow→orange)
+- [x] Task: Add distinct sound per combo hit (light→medium→heavy slash)
 
 ### Story 11.2: Charge Attack System (ALL classes)
-- [ ] Task: Hold attack button to charge (0.5s minimum, 3s maximum)
-- [ ] Task: Visual: character glows brighter the longer they charge, particles emit
-- [ ] Task: Release to fire charged attack (damage/effect scales with charge time)
-- [ ] Task: Per-class charge behavior:
+- [x] Task: Hold attack button to charge (0.5s minimum, 3s maximum)
+- [x] Task: Visual: character glows brighter the longer they charge, particles emit
+- [x] Task: Release to fire charged attack (damage/effect scales with charge time)
+- [x] Task: Per-class charge behavior:
   - Melee: Ground pound (hover, wiggle, smoke, then blast. Radius + damage scales with charge)
   - Ranged: Charged shot (pierces enemies, bigger projectile)
   - Mage: Charged bolt (larger, explodes on impact, AoE scales with charge)
@@ -255,34 +255,34 @@ Universal combat mechanics that apply to ALL classes.
   - Healer: Healing blast wave (radius + heal amount scales with charge)
 
 ### Story 11.3: Melee Ground Pound Improvements
-- [ ] Task: While charging in air: character hovers in place
-- [ ] Task: Hover wiggle animation (oscillate position ±2px)
-- [ ] Task: Smoke/particle VFX builds during hover
-- [ ] Task: On release: slam down with blast radius proportional to charge (40px min → 120px max)
-- [ ] Task: Damage scales: 30 min → 80 max based on charge
-- [ ] Task: Screen shake on impact (intensity scales with charge)
+- [x] Task: While charging in air: character hovers in place
+- [x] Task: Hover wiggle animation (oscillate position ±2px)
+- [x] Task: Smoke/particle VFX builds during hover
+- [x] Task: On release: slam down with blast radius proportional to charge (40px min → 120px max)
+- [x] Task: Damage scales: 30 min → 80 max based on charge
+- [x] Task: Screen shake on impact (intensity scales with charge)
 
 ### Story 11.4: Stagger Mechanic
-- [ ] Task: Getting hit while charging → "staggered" state
-- [ ] Task: Staggered: character wiggles rapidly for 1s, cannot act
-- [ ] Task: Staggered players take 25% more damage
-- [ ] Task: Visual: rapid left-right shake + stars above head
+- [x] Task: Getting hit while charging → "staggered" state
+- [x] Task: Staggered: character wiggles rapidly for 1s, cannot act
+- [x] Task: Staggered players take 25% more damage
+- [x] Task: Visual: rapid left-right shake + stars above head
 - [ ] Task: Sound: dazed/dizzy sound effect
 
 ### Story 11.5: Block/Parry System (ALL classes)
-- [ ] Task: Map block to a button (L2 / Left Shift)
-- [ ] Task: Holding block: reduce incoming damage by 50%, movement speed halved
-- [ ] Task: Visual: shield/guard VFX in front of character
-- [ ] Task: Perfect parry: block within 0.2s of being hit → attacker stunned for 1.5s
-- [ ] Task: Perfect parry VFX: bright flash + metallic clang sound
-- [ ] Task: Perfect parry window indicator (brief white flash on character when block starts)
+- [x] Task: Map block to a button (R2 / Left Shift)
+- [x] Task: Holding block: reduce incoming damage by 50%, movement speed halved
+- [x] Task: Visual: shield/guard VFX in front of character
+- [x] Task: Perfect parry: block within 0.2s of being hit → attacker stunned for 1.5s
+- [x] Task: Perfect parry VFX: bright flash + metallic clang sound
+- [x] Task: Perfect parry window indicator (brief white flash on character when block starts)
 
 ### Story 11.6: Dash Wave
-- [ ] Task: All class dashes create a perpendicular wave pulse
-- [ ] Task: Wave pushes enemies sideways (away from dash line)
-- [ ] Task: Wave visual: line expanding outward perpendicular to dash direction
-- [ ] Task: Wave damage: 5 (minor, mainly for crowd control)
-- [ ] Task: Rogue shadow dash wave is larger and deals 10 damage
+- [x] Task: All class dashes create a perpendicular wave pulse
+- [x] Task: Wave pushes enemies sideways (away from dash line)
+- [x] Task: Wave visual: line expanding outward perpendicular to dash direction
+- [x] Task: Wave damage: 5 (minor, mainly for crowd control)
+- [x] Task: Rogue shadow dash wave is larger and deals 10 damage
 
 ---
 
