@@ -104,7 +104,7 @@ func _fire_streams() -> void:
 func _spawn_icing_projectile(dir: Vector2) -> void:
 	var proj: Node2D = PROJECTILE_SCENE.instantiate()
 	proj.global_position = global_position + Vector2(0, -16)
-	var normalized_dir := Vector2(dir.x, dir.y).normalized()
+	var normalized_dir: Vector2 = Vector2(dir.x, dir.y).normalized()
 	proj.direction = normalized_dir
 	proj.speed = PROJECTILE_SPEED
 	proj.damage = PROJECTILE_DAMAGE

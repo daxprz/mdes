@@ -22,7 +22,11 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_new_classes.py)",
-      "Bash(killall:*)"
+      "Bash(killall:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Read(//Users/jeremy/dev/dax/test123/**)",
+      "Bash(done)"
     ]
   }
 }

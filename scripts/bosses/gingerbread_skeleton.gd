@@ -73,7 +73,7 @@ func _choose_attack() -> void:
 
 
 func _bone_throw(target: Node2D) -> void:
-	var dir := (target.global_position - global_position).normalized()
+	var dir: Vector2 = (target.global_position - global_position).normalized()
 	spawn_projectile(dir, BONE_SPEED, BONE_DAMAGE, Color(0.85, 0.75, 0.55))
 
 	# Phase 3: throw two extra bones at slight angles

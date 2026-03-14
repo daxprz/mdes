@@ -89,7 +89,7 @@ func _choose_attack() -> void:
 
 
 func _sprinkle_breath(target: Node2D) -> void:
-	var base_dir := (target.global_position - global_position).normalized()
+	var base_dir: Vector2 = (target.global_position - global_position).normalized()
 	var count := 3 if current_phase < 3 else 5
 
 	for i in range(count):
@@ -140,7 +140,7 @@ func _rain_sprinkles() -> void:
 	var count := 4 if current_phase < 3 else 7
 	for i in range(count):
 		var x_offset := randf_range(-200, 200)
-		var dir := Vector2(randf_range(-0.2, 0.2), 1.0).normalized()
+		var dir: Vector2 = Vector2(randf_range(-0.2, 0.2), 1.0).normalized()
 		var col: Color = SPRINKLE_COLORS[randi() % SPRINKLE_COLORS.size()]
 
 		var proj_scene := preload("res://scenes/bosses/boss_projectile.tscn")

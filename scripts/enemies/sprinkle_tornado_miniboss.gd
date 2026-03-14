@@ -222,7 +222,7 @@ func _physics_process(delta: float) -> void:
 		if p is Node2D:
 			var d2: float = global_position.distance_to(p.global_position)
 			if d2 < _pull_range and d2 > 1.0:
-				var pull_dir := (global_position - p.global_position).normalized()
+				var pull_dir: Vector2 = (global_position - p.global_position).normalized()
 				if 'velocity' in p:
 					p.velocity += pull_dir * _pull_force * delta
 	move_and_slide()

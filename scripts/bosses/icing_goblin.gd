@@ -81,7 +81,7 @@ func _choose_attack() -> void:
 
 
 func _icing_spit(target: Node2D) -> void:
-	var dir := (target.global_position - global_position).normalized()
+	var dir: Vector2 = (target.global_position - global_position).normalized()
 	# Icing spit leaves a slowing puddle
 	spawn_projectile(dir, ICING_SPEED, ICING_DAMAGE, Color(0.7, 0.85, 1.0), true)
 
