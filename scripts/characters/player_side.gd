@@ -69,8 +69,19 @@ var _is_charging: bool = false
 var _was_pressing_attack: bool = false
 var _charge_smoke_timer: float = 0.0
 var _charge_hover_time: float = 0.0
+var _healer_channel_heal_timer: float = 0.0
+var _healer_channel_pulse_timer: float = 0.0
+var _healer_channel_ring: ColorRect = null
+var _healer_channel_glow: ColorRect = null
 const CHARGE_MIN := 0.5
 const CHARGE_MAX := 3.0
+const HEALER_CHANNEL_HPS := 5.0  # HP per second to nearby allies
+const HEALER_CHANNEL_RADIUS := 80.0
+const HEALER_CHANNEL_DMG_MULT := 1.25  # 25% more damage taken while channeling
+const HEALER_BURST_MIN_HEAL := 10
+const HEALER_BURST_MAX_HEAL := 40
+const HEALER_BURST_MIN_RADIUS := 60.0
+const HEALER_BURST_MAX_RADIUS := 150.0
 
 # Stagger mechanic
 var _is_staggered: bool = false
@@ -215,6 +226,11 @@ func _apply_gravity(delta: float) -> void:
 
 
 func _handle_movement() -> void:
+	# Healer cannot move while channeling
+	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
+		velocity.x = 0.0
+		return
+
 	var h_input := 0.0
 	if _is_device_action_pressed("move_left"):
 		h_input -= 1.0
@@ -627,8 +643,16 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 			# Regular block - 50% damage reduction
 			amount = int(amount * 0.5)
 
+	# Healer takes 25% more damage while channeling
+	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
+		amount = int(amount * HEALER_CHANNEL_DMG_MULT)
+
 	# Interrupt charge → apply stagger
 	if _is_charging:
+		# Healer channel interrupted: fire burst heal proportional to charge time
+		if character_class == PlayerManager.CharacterClass.HEALER and _charge_time >= CHARGE_MIN:
+			_healer_channel_burst()
+		_healer_channel_stop_vfx()
 		_apply_stagger()
 
 	PlayerManager.damage_player(player_index, amount)
@@ -922,6 +946,7 @@ func _apply_stagger() -> void:
 	_stagger_timer = STAGGER_DURATION
 	_is_charging = false
 	_charge_time = 0.0
+	_healer_channel_stop_vfx()
 	modulate = Color(1.0, 1.0, 0.5)
 	# Spawn star VFX above head
 	var stars := Label.new()
@@ -940,36 +965,75 @@ func _handle_charge(delta: float) -> void:
 	var pressing_attack: bool = _is_device_action_pressed("attack")
 
 	if pressing_attack and not _was_pressing_attack:
-		# Button just pressed - start potential charge (normal attack fires via _handle_attack)
-		pass
-	elif pressing_attack and _was_pressing_attack:
-		# Button held - charging
+		# Button just pressed - start charge immediately
 		if not _is_charging and _attack_cooldown <= 0.0:
 			_is_charging = true
 			_charge_time = 0.0
 			_charge_smoke_timer = 0.0
 			_charge_hover_time = 0.0
-		if _is_charging:
-			_charge_time = minf(_charge_time + delta, CHARGE_MAX)
-			var charge_ratio: float = clampf(_charge_time / CHARGE_MAX, 0.0, 1.0)
-			# Glow toward yellow while charging
-			var glow_color := Color(1.0, 1.0, 1.0 - charge_ratio * 0.7, 1.0)
-			modulate = glow_color
-			# Spawn small charge particles periodically
-			_charge_smoke_timer += delta
-			if _charge_smoke_timer >= 0.1:
-				_charge_smoke_timer -= 0.1
-				var particle_color := Color(1.0, 0.9, 0.3, 0.4 * charge_ratio)
-				_spawn_vfx(particle_color, Vector2(6, 6))
-			# If airborne + melee, hover and oscillate
+			_healer_channel_heal_timer = 0.0
+			_healer_channel_pulse_timer = 0.0
+			# Melee airborne: immediately freeze in air
 			if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
 				velocity.y = 0.0
-				_charge_hover_time += delta
-				position.x += sin(_charge_hover_time * 20.0) * 2.0 * delta * 20.0
+			# Healer: immediately stop movement and start channeling
+			if character_class == PlayerManager.CharacterClass.HEALER:
+				velocity.x = 0.0
+				_healer_channel_start_vfx()
+
+	if pressing_attack and _is_charging:
+		# Button held - charging
+		_charge_time = minf(_charge_time + delta, CHARGE_MAX)
+		var charge_ratio: float = clampf(_charge_time / CHARGE_MAX, 0.0, 1.0)
+
+		# Healer: constant healing aura while channeling
+		if character_class == PlayerManager.CharacterClass.HEALER:
+			# Freeze in place - cannot move while channeling
+			velocity.x = 0.0
+			# Green glow instead of yellow
+			var glow_intensity: float = 0.5 + sin(_charge_time * 4.0) * 0.2
+			modulate = Color(0.6, 1.0, 0.6, 1.0).lerp(Color(0.3, 1.0, 0.3, 1.0), glow_intensity)
+			# Heal nearby allies continuously (~5 HP/sec, scaled by proximity)
+			_healer_channel_heal_timer += delta
+			if _healer_channel_heal_timer >= 0.2:
+				_healer_channel_heal_timer -= 0.2
+				_healer_channel_heal_tick()
+			# Pulsing ring VFX
+			_healer_channel_pulse_timer += delta
+			if _healer_channel_pulse_timer >= 0.8:
+				_healer_channel_pulse_timer -= 0.8
+				_spawn_expanding_ring(global_position, HEALER_CHANNEL_RADIUS, Color(0.3, 1.0, 0.4, 0.35), 0.7)
+			# Update glow VFX size based on charge
+			_healer_channel_update_vfx(charge_ratio)
+		else:
+			# Non-healer: glow toward yellow while charging
+			var glow_color := Color(1.0, 1.0, 1.0 - charge_ratio * 0.7, 1.0)
+			modulate = glow_color
+
+		# Spawn small charge particles periodically
+		_charge_smoke_timer += delta
+		if _charge_smoke_timer >= 0.1:
+			_charge_smoke_timer -= 0.1
+			if character_class == PlayerManager.CharacterClass.HEALER:
+				var particle_color := Color(0.3, 1.0, 0.4, 0.3 + charge_ratio * 0.3)
+				_spawn_vfx(particle_color, Vector2(6, 6))
+			else:
+				var particle_color := Color(1.0, 0.9, 0.3, 0.4 * charge_ratio)
+				_spawn_vfx(particle_color, Vector2(6, 6))
+
+		# If airborne + melee, hover and oscillate every frame
+		if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
+			velocity.y = 0.0
+			_charge_hover_time += delta
+			position.x += sin(_charge_hover_time * 20.0) * 2.0 * delta * 20.0
+
 	elif not pressing_attack and _was_pressing_attack and _is_charging:
 		# Button released while charging
 		_is_charging = false
 		modulate = Color.WHITE
+		# Clean up healer channel VFX
+		if character_class == PlayerManager.CharacterClass.HEALER:
+			_healer_channel_stop_vfx()
 		if _charge_time >= CHARGE_MIN:
 			# Fire charged attack
 			_attack_cooldown = ATTACK_COOLDOWN_TIME
@@ -1188,33 +1252,92 @@ func _spawn_fragment_bomb(pos: Vector2, damage: int) -> void:
 
 
 func _charged_healer_wave(charge_ratio: float) -> void:
-	var wave_radius: float = lerpf(60.0, 200.0, charge_ratio)
-	var heal_amount: int = int(lerpf(15.0, 50.0, charge_ratio))
+	# Final burst heal on release - proportional to charge time
+	_healer_channel_burst()
 
-	if not PlayerManager.use_mana(player_index, 35):
-		_spawn_fail_flash()
-		return
 
-	AudioManager.play("summon", 0.0, 1.3)
-	_spawn_expanding_ring(global_position, wave_radius, Color(0.3, 1.0, 0.4, 0.6), 0.5)
+func _healer_channel_burst() -> void:
+	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0)
+	var burst_radius: float = lerpf(HEALER_BURST_MIN_RADIUS, HEALER_BURST_MAX_RADIUS, charge_ratio)
+	var burst_heal: int = int(lerpf(float(HEALER_BURST_MIN_HEAL), float(HEALER_BURST_MAX_HEAL), charge_ratio))
 
-	# Heal all allies within radius
+	AudioManager.play("player_revive", 0.0, 1.2)
+	_spawn_expanding_ring(global_position, burst_radius, Color(0.2, 1.0, 0.3, 0.7), 0.4)
+	_spawn_vfx(Color(0.3, 1.0, 0.4, 0.6), Vector2(burst_radius, burst_radius))
+
+	# Heal all allies within burst radius
 	for p in get_tree().get_nodes_in_group("players"):
 		if not p is Node2D:
 			continue
 		var dist: float = global_position.distance_to(p.global_position)
-		if dist < wave_radius and p.has_method("receive_heal"):
-			p.receive_heal(heal_amount)
+		if dist < burst_radius and p.has_method("receive_heal"):
+			p.receive_heal(burst_heal)
 	# Self heal
-	receive_heal(heal_amount)
+	receive_heal(burst_heal)
 
-	# Stun nearby enemies
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
+
+func _healer_channel_heal_tick() -> void:
+	# Heal nearby allies for ~5 HP/sec (this fires every 0.2s = 1 HP per tick)
+	# Scale with proximity: closer = more healing
+	var heal_per_tick: float = HEALER_CHANNEL_HPS * 0.2
+	for p in get_tree().get_nodes_in_group("players"):
+		if not p is Node2D:
 			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < wave_radius and body.has_method("apply_stun"):
-			body.apply_stun(1.5)
+		if p.get("_is_dead"):
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < HEALER_CHANNEL_RADIUS:
+			# Proximity scaling: 100% at point blank, 50% at edge
+			var proximity_scale: float = lerpf(1.0, 0.5, dist / HEALER_CHANNEL_RADIUS)
+			var heal_amount: int = int(heal_per_tick * proximity_scale)
+			if heal_amount < 1:
+				heal_amount = 1
+			var p_idx: int = p.get("player_index")
+			PlayerManager.heal_player(p_idx, heal_amount)
+			# Small green line VFX to each healed ally (skip self)
+			if p != self:
+				_spawn_heal_beam(p)
+
+
+func _spawn_heal_beam(target: Node2D) -> void:
+	var beam := ColorRect.new()
+	beam.color = Color(0.3, 1.0, 0.4, 0.4)
+	var dir_to_target: Vector2 = target.global_position - global_position
+	var beam_len: float = dir_to_target.length()
+	beam.size = Vector2(beam_len, 2)
+	beam.position = global_position
+	beam.rotation = dir_to_target.angle()
+	get_parent().add_child(beam)
+	var beam_tween := beam.create_tween()
+	beam_tween.tween_property(beam, "modulate:a", 0.0, 0.15)
+	beam_tween.tween_callback(beam.queue_free)
+
+
+func _healer_channel_start_vfx() -> void:
+	# Soft green glow around healer
+	if _healer_channel_glow == null or not is_instance_valid(_healer_channel_glow):
+		_healer_channel_glow = ColorRect.new()
+		_healer_channel_glow.color = Color(0.2, 0.8, 0.3, 0.2)
+		_healer_channel_glow.size = Vector2(48, 48)
+		_healer_channel_glow.position = Vector2(-24, -24)
+		_healer_channel_glow.z_index = -1
+		add_child(_healer_channel_glow)
+
+
+func _healer_channel_update_vfx(charge_ratio: float) -> void:
+	if _healer_channel_glow and is_instance_valid(_healer_channel_glow):
+		# Pulse the glow size
+		var pulse_scale: float = 1.0 + sin(_charge_time * 3.0) * 0.15
+		var base_size: float = lerpf(48.0, 72.0, charge_ratio)
+		_healer_channel_glow.size = Vector2(base_size, base_size) * pulse_scale
+		_healer_channel_glow.position = -_healer_channel_glow.size / 2.0
+		_healer_channel_glow.color = Color(0.2, 0.8, 0.3, 0.15 + charge_ratio * 0.15)
+
+
+func _healer_channel_stop_vfx() -> void:
+	if _healer_channel_glow and is_instance_valid(_healer_channel_glow):
+		_healer_channel_glow.queue_free()
+		_healer_channel_glow = null
 
 
 func receive_heal(amount: int) -> void:

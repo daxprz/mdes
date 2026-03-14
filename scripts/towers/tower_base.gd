@@ -13,6 +13,10 @@ const MAX_PLATFORM_SPACING := 140.0  # Must be below max jump height (v²/2g = 1
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 const MUFFIN_SCENE_PATH := "res://scenes/items/mini_muffin.tscn"
 const SKELETON_SCENE_PATH := "res://scenes/enemies/skeleton.tscn"
+const FAIRY_CAKE_BAT_SCENE_PATH := "res://scenes/enemies/fairy_cake_bat.tscn"
+const COOKIE_ARCHER_SCENE_PATH := "res://scenes/enemies/cookie_archer.tscn"
+const CANDY_GOLEM_SCENE_PATH := "res://scenes/enemies/candy_golem.tscn"
+const SPRINKLE_SWARM_SCENE_PATH := "res://scenes/enemies/sprinkle_swarm.tscn"
 const SPIKES_SCENE := "res://scenes/traps/spikes.tscn"
 const PENDULUM_SCENE := "res://scenes/traps/pendulum.tscn"
 const ARROW_TRAP_SCENE := "res://scenes/traps/arrow_trap.tscn"
@@ -233,12 +237,85 @@ func _spawn_wind_gust(pos: Vector2, dir: float) -> void:
 
 
 func _spawn_enemy(pos: Vector2, patrol_dist: float) -> void:
-	var enemy_scene := load(SKELETON_SCENE_PATH)
+	_spawn_random_enemy(pos, patrol_dist)
+
+
+func _spawn_random_enemy(pos: Vector2, patrol_dist: float) -> void:
+	var scene_path: String = ""
+	var muffin_drop_count: int = 3
+	var roll: float = randf()
+
+	match tower_id:
+		1:
+			# Tower 1: mostly skeletons + some fairy cake bats
+			if roll < 0.70:
+				scene_path = SKELETON_SCENE_PATH
+			else:
+				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
+				muffin_drop_count = 2
+		2:
+			# Tower 2: skeletons + bats + cookie archers
+			if roll < 0.45:
+				scene_path = SKELETON_SCENE_PATH
+			elif roll < 0.70:
+				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
+				muffin_drop_count = 2
+			else:
+				scene_path = COOKIE_ARCHER_SCENE_PATH
+				muffin_drop_count = 2
+		3:
+			# Tower 3: all types including golems and swarms
+			if roll < 0.25:
+				scene_path = SKELETON_SCENE_PATH
+			elif roll < 0.45:
+				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.60:
+				scene_path = COOKIE_ARCHER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.80:
+				scene_path = CANDY_GOLEM_SCENE_PATH
+				muffin_drop_count = 5
+			else:
+				scene_path = SPRINKLE_SWARM_SCENE_PATH
+				muffin_drop_count = 1
+		_:
+			# Tower 4+: heavy mix of everything, more golems
+			if roll < 0.15:
+				scene_path = SKELETON_SCENE_PATH
+			elif roll < 0.30:
+				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.45:
+				scene_path = COOKIE_ARCHER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.70:
+				scene_path = CANDY_GOLEM_SCENE_PATH
+				muffin_drop_count = 5
+			else:
+				scene_path = SPRINKLE_SWARM_SCENE_PATH
+				muffin_drop_count = 1
+
+	# Handle sprinkle swarm spawning (4-6 individuals)
+	if scene_path == SPRINKLE_SWARM_SCENE_PATH:
+		var swarm_count: int = randi_range(4, 6)
+		for i in range(swarm_count):
+			var offset := Vector2(randf_range(-20, 20), randf_range(-5, 5))
+			var enemy_scene := load(scene_path)
+			if enemy_scene:
+				var enemy: CharacterBody2D = enemy_scene.instantiate()
+				enemy.position = pos + offset
+				enemy.set_patrol_distance(patrol_dist)
+				enemy.died.connect(_on_enemy_died.bind(muffin_drop_count))
+				enemies_container.add_child(enemy)
+		return
+
+	var enemy_scene := load(scene_path)
 	if enemy_scene:
 		var enemy: CharacterBody2D = enemy_scene.instantiate()
 		enemy.position = pos
 		enemy.set_patrol_distance(patrol_dist)
-		enemy.died.connect(_on_enemy_died)
+		enemy.died.connect(_on_enemy_died.bind(muffin_drop_count))
 		enemies_container.add_child(enemy)
 
 
@@ -281,10 +358,10 @@ func _on_muffin_collected(_player_index: int) -> void:
 	_update_muffin_counter()
 
 
-func _on_enemy_died(pos: Vector2) -> void:
+func _on_enemy_died(pos: Vector2, muffin_count: int = 3) -> void:
 	_enemies_killed += 1
 	# Drop muffins at enemy death position.
-	for i in range(3):
+	for i in range(muffin_count):
 		var offset := Vector2(randf_range(-20, 20), randf_range(-10, 10))
 		_spawn_muffin(pos + offset)
 
