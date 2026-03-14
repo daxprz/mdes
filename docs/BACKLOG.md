@@ -66,9 +66,13 @@ Improve all pixel art from placeholder quality to polished retro style.
 - [x] Task: Quit goes to title screen first, separate "Quit Game" exits entirely
 
 ### Story 2.4: Boss Damage Bug
-- [ ] Task: BUG: Players cannot damage the final boss (Giant Muffin) - attacks don't register
-- [ ] Task: Investigate boss collision layers vs player attack area masks
-- [ ] Task: Verify boss is in "enemies" or "bosses" group and take_damage is callable
+- [x] Task: BUG: Players cannot damage the final boss (Giant Muffin) - attacks don't register
+- [x] Task: Investigate boss collision layers vs player attack area masks
+  - ROOT CAUSE: Boss scenes had no collision_layer set (defaulted to 1/world).
+    Player attack areas use collision_mask=8 (enemies). Bosses were invisible to attacks.
+- [x] Task: Verify boss is in "enemies" or "bosses" group and take_damage is callable
+  - FIX: boss_base.gd _ready() now sets collision_layer=8 and adds to both
+    "enemies" and "bosses" groups. All 4 bosses fixed.
 
 ---
 

@@ -32,6 +32,11 @@ var _health_bar: Node2D = null
 func _ready() -> void:
 	health = max_health
 	_original_modulate = modulate
+	# Bosses must be on layer 8 so player attacks (mask 8) can hit them
+	collision_layer = 8
+	collision_mask = 1  # Collide with world
+	add_to_group("enemies")  # So donut buddies and group-based attacks work
+	add_to_group("bosses")
 	_setup_boss()
 	health_changed.emit(health, max_health)
 	AudioManager.play("boss_roar")
