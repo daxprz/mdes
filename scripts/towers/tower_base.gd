@@ -8,7 +8,8 @@ signal tower_cleared(tower_id: int)
 const GRAVITY := 800.0
 const TOWER_WIDTH := 400.0
 const TOWER_HEIGHT := 2400.0
-const PLATFORM_COUNT_BASE := 8
+const PLATFORM_COUNT_BASE := 12
+const MAX_PLATFORM_SPACING := 140.0  # Must be below max jump height (v²/2g = 168px)
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 const MUFFIN_SCENE_PATH := "res://scenes/items/mini_muffin.tscn"
 const SKELETON_SCENE_PATH := "res://scenes/enemies/skeleton.tscn"
@@ -57,14 +58,18 @@ func _on_player_joined_midgame(player_index: int) -> void:
 
 
 func _build_tower() -> void:
-	var platform_count := PLATFORM_COUNT_BASE + tower_id * 2
-	var vertical_spacing := TOWER_HEIGHT / (platform_count + 1)
+	var platform_count: int = PLATFORM_COUNT_BASE + tower_id * 2
+	var vertical_spacing: float = TOWER_HEIGHT / (platform_count + 1)
+	# If spacing exceeds max jump height, add more platforms instead
+	if vertical_spacing > MAX_PLATFORM_SPACING:
+		platform_count = int(TOWER_HEIGHT / MAX_PLATFORM_SPACING)
+		vertical_spacing = TOWER_HEIGHT / (platform_count + 1)
 
 	# Generate platforms ascending the tower.
 	for i in range(platform_count):
 		var y_pos := TOWER_HEIGHT - (i + 1) * vertical_spacing
 		var x_offset := _get_platform_x(i, tower_id)
-		var platform_width := randf_range(80.0, 160.0)
+		var platform_width: float = randf_range(80.0, 160.0)
 		_create_platform(Vector2(x_offset, y_pos), platform_width)
 
 		# Place muffin on some platforms.

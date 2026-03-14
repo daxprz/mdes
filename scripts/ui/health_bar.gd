@@ -53,12 +53,12 @@ func _draw() -> void:
 	draw_rect(rect, bg_color)
 
 	# Damage trail (shows where health was)
-	var display_ratio := clampf(_display_value / max_value, 0.0, 1.0)
+	var display_ratio: float = clampf(_display_value / max_value, 0.0, 1.0)
 	var display_rect := Rect2(-half_w, 0, bar_width * display_ratio, bar_height)
 	draw_rect(display_rect, damage_color)
 
 	# Current health
-	var fill_ratio := clampf(current_value / max_value, 0.0, 1.0)
+	var fill_ratio: float = clampf(current_value / max_value, 0.0, 1.0)
 	var fill_rect := Rect2(-half_w, 0, bar_width * fill_ratio, bar_height)
 
 	# Color shifts from green to yellow to red

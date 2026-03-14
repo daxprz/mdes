@@ -1,13 +1,19 @@
-[gd_scene load_steps=5 format=3]
+[gd_scene load_steps=7 format=3]
 
 [ext_resource type="Script" path="res://scripts/overworld/valley.gd" id="1"]
 [ext_resource type="Script" path="res://scripts/overworld/tower_entrance.gd" id="2"]
 
 [sub_resource type="RectangleShape2D" id="chasm_shape"]
-size = Vector2(200, 30)
+size = Vector2(1300, 30)
 
 [sub_resource type="RectangleShape2D" id="entrance_shape"]
 size = Vector2(80, 80)
+
+[sub_resource type="RectangleShape2D" id="wall_vertical_shape"]
+size = Vector2(40, 740)
+
+[sub_resource type="RectangleShape2D" id="wall_horizontal_shape"]
+size = Vector2(1300, 30)
 
 [node name="Valley" type="Node2D"]
 script = ExtResource("1")
@@ -215,13 +221,25 @@ color = Color(0.8, 0.8, 0.2, 1)
 position = Vector2(640, -5)
 
 [node name="WallTopShape" type="CollisionShape2D" parent="WallTop"]
-shape = SubResource("chasm_shape")
+shape = SubResource("wall_horizontal_shape")
 
 [node name="WallBottom" type="StaticBody2D" parent="."]
 position = Vector2(640, 725)
 
 [node name="WallBottomShape" type="CollisionShape2D" parent="WallBottom"]
-shape = SubResource("chasm_shape")
+shape = SubResource("wall_horizontal_shape")
+
+[node name="WallLeft" type="StaticBody2D" parent="."]
+position = Vector2(-10, 360)
+
+[node name="WallLeftShape" type="CollisionShape2D" parent="WallLeft"]
+shape = SubResource("wall_vertical_shape")
+
+[node name="WallRight" type="StaticBody2D" parent="."]
+position = Vector2(1290, 360)
+
+[node name="WallRightShape" type="CollisionShape2D" parent="WallRight"]
+shape = SubResource("wall_vertical_shape")
 
 [node name="SpawnLabel" type="Label" parent="."]
 offset_left = 570.0

@@ -233,7 +233,7 @@ func _perform_attack() -> void:
 func _perform_melee_combo() -> void:
 	if _melee_combo_timer <= 0.0:
 		_melee_combo = 0
-	var idx := mini(_melee_combo, MELEE_COMBO_DMG.size() - 1)
+	var idx: int = mini(_melee_combo, MELEE_COMBO_DMG.size() - 1)
 	var damage: int = MELEE_COMBO_DMG[idx]
 	var reach: float = MELEE_COMBO_RANGE[idx]
 

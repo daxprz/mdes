@@ -109,7 +109,7 @@ func _hit_flash() -> void:
 
 
 func _check_phase() -> void:
-	var health_pct := float(health) / float(max_health)
+	var health_pct: float = float(health) / float(max_health)
 	var new_phase := 1
 	if health_pct <= 0.25:
 		new_phase = 3

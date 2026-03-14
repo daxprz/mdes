@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Applications/**)",
+      "Bash(mdfind -name Godot -onlyin /Applications)",
+      "Bash(godot:*)",
+      "Bash(python3:*)",
+      "Bash(which godot4:*)",
+      "Bash(ls:*)",
+      "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python -c \"from PIL import Image; print\\('Pillow OK'\\)\")",
+      "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_sprites.py)",
+      "Bash(/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --import 2>&1 | tail -20)",
+      "Bash(/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --script-check 2>&1 | head -30)",
+      "Bash(/Applications/Godot.app/Contents/MacOS/Godot --headless --path . --check-only 2>&1 | head -50)",
+      "Bash(pkill:*)",
+      "Bash(/Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 2>&1 | head -60)",
+      "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_sounds.py)",
+      "Bash(which godot:*)",
+      "Bash(open:*)",
+      "Bash(git init:*)",
+      "Bash(git lfs:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
+    ]
+  }
+}

@@ -35,6 +35,8 @@ var _attack_timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _special_cooldown: float = 0.0
 var _is_wall_sliding: bool = false
+var _wall_jump_stamina: int = 3
+const WALL_JUMP_STAMINA_MAX: int = 3
 var _donut_buddy_count: int = 0
 var _shadow_dash_active: bool = false
 var _is_dead: bool = false
@@ -179,6 +181,10 @@ func _handle_movement() -> void:
 
 
 func _handle_jump() -> void:
+	# Reset wall jump stamina when on the floor
+	if is_on_floor():
+		_wall_jump_stamina = WALL_JUMP_STAMINA_MAX
+
 	if not _is_device_action_just_pressed("jump"):
 		return
 
@@ -186,8 +192,15 @@ func _handle_jump() -> void:
 		velocity.y = JUMP_VELOCITY
 		AudioManager.play("jump", -5.0)
 	elif _is_wall_sliding:
+		if _wall_jump_stamina <= 0:
+			# Out of wall jump stamina - flash red to indicate
+			_flash_wall_jump_exhausted()
+			return
+		_wall_jump_stamina -= 1
 		_wall_jump()
 		AudioManager.play("jump", -5.0, 1.2)
+		if _wall_jump_stamina <= 0:
+			_flash_wall_jump_exhausted()
 
 
 func _handle_wall_slide(_delta: float) -> void:
@@ -203,6 +216,13 @@ func _wall_jump() -> void:
 	velocity.y = WALL_JUMP_VELOCITY.y
 	_facing_right = wall_normal.x > 0.0
 	sprite.flip_h = not _facing_right
+
+
+func _flash_wall_jump_exhausted() -> void:
+	# Brief red flash to indicate wall jump stamina is depleted
+	modulate = Color(1.0, 0.2, 0.2)
+	var tween := create_tween()
+	tween.tween_property(self, "modulate", Color.WHITE, 0.2)
 
 
 # -- Animation -----------------------------------------------------------------
@@ -269,7 +289,7 @@ func _attack_melee() -> void:
 	# Combo: advance if within window, reset if expired
 	if _combo_timer <= 0.0:
 		_combo_count = 0
-	var combo_idx := mini(_combo_count, COMBO_DAMAGES.size() - 1)
+	var combo_idx: int = mini(_combo_count, COMBO_DAMAGES.size() - 1)
 	var damage: int = COMBO_DAMAGES[combo_idx]
 	var reach: float = COMBO_RANGES[combo_idx]
 
@@ -288,7 +308,7 @@ func _attack_melee() -> void:
 			body.take_damage(damage, player_index)
 		# Final hit knocks back
 		if combo_idx == COMBO_DAMAGES.size() - 1 and body.has_method("apply_knockback"):
-			var kb_dir := Vector2(1.0 if _facing_right else -1.0, -0.3).normalized()
+			var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.3).normalized()
 			body.apply_knockback(kb_dir * 200.0)
 	await get_tree().create_timer(0.15).timeout
 	if is_inside_tree():
@@ -389,7 +409,7 @@ func _check_ground_slam_landing() -> void:
 		if dist < 80.0 and body.has_method("take_damage"):
 			body.take_damage(_ground_slam_damage, player_index)
 			if body.has_method("apply_knockback"):
-				var kb := (body.global_position - global_position).normalized()
+				var kb: Vector2 = (body.global_position - global_position).normalized()
 				body.apply_knockback(kb * 250.0)
 
 
@@ -446,7 +466,7 @@ func _special_shield_charge() -> void:
 				body.take_damage(35, player_index)
 				hit_bodies.append(body)
 			if body.has_method("apply_knockback"):
-				var kb_dir := Vector2(1.0 if _facing_right else -1.0, -0.4).normalized()
+				var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.4).normalized()
 				body.apply_knockback(kb_dir * 400.0)
 		_spawn_vfx(Color(0.3, 0.6, 1.0, 0.4), Vector2(20, 28))
 
@@ -661,7 +681,7 @@ func _special_shadow_dash() -> void:
 		1  # mask layer 1 = world/walls
 	)
 	query.exclude = [get_rid()]
-	var result := space.intersect_ray(query)
+	var result: Dictionary = space.intersect_ray(query)
 
 	var target_pos: Vector2
 	if result:

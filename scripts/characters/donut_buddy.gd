@@ -69,7 +69,7 @@ func _find_target() -> void:
 
 
 func _move_toward(target_pos: Vector2, _delta: float) -> void:
-	var dir := (target_pos - global_position).normalized()
+	var dir: Vector2 = (target_pos - global_position).normalized()
 	velocity = dir * MOVE_SPEED
 	if dir.x != 0:
 		sprite.flip_h = dir.x < 0
@@ -82,9 +82,9 @@ func _follow_owner(_delta: float) -> void:
 		velocity = velocity.lerp(Vector2.ZERO, 0.1)
 		return
 
-	var dist := global_position.distance_to(owner_node.global_position)
+	var dist: float = global_position.distance_to(owner_node.global_position)
 	if dist > FOLLOW_DISTANCE:
-		var dir := (owner_node.global_position - global_position).normalized()
+		var dir: Vector2 = (owner_node.global_position - global_position).normalized()
 		velocity = dir * MOVE_SPEED * 0.8
 		if dir.x != 0:
 			sprite.flip_h = dir.x < 0

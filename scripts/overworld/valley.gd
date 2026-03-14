@@ -99,8 +99,15 @@ func _spawn_players() -> void:
 func _on_all_players_at_tower(tower_id: int) -> void:
 	# Check if the final tower is accessible.
 	if tower_id == 4 and not _is_final_tower_accessible():
-		# Show a message that more towers need to be completed.
 		_show_locked_message()
+		return
+
+	# Enforce sequential tower progression: Tower 2 requires Tower 1, Tower 3 requires Tower 2.
+	if tower_id == 2 and not GameManager.is_tower_completed(TOWER_NAMES[1]):
+		_show_prerequisite_message(1)
+		return
+	if tower_id == 3 and not GameManager.is_tower_completed(TOWER_NAMES[2]):
+		_show_prerequisite_message(2)
 		return
 
 	# Check if tower is already completed.
@@ -143,6 +150,19 @@ func _show_locked_message() -> void:
 	label.position = Vector2(440, 10)
 	label.add_theme_font_size_override("font_size", 18)
 	label.modulate = Color.YELLOW
+	add_child(label)
+	var tween := create_tween()
+	tween.tween_property(label, "modulate:a", 0.0, 2.0)
+	tween.tween_callback(label.queue_free)
+
+
+func _show_prerequisite_message(required_tower_id: int) -> void:
+	var label := Label.new()
+	label.text = "Complete Tower %d first!" % required_tower_id
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.position = Vector2(460, 10)
+	label.add_theme_font_size_override("font_size", 18)
+	label.modulate = Color.ORANGE
 	add_child(label)
 	var tween := create_tween()
 	tween.tween_property(label, "modulate:a", 0.0, 2.0)

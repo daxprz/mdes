@@ -6,7 +6,11 @@ extends Node2D
 const ARENA_WIDTH := 800.0
 const ARENA_HEIGHT := 450.0
 const FLOOR_Y := 400.0
+const CEILING_Y := 0.0
 const WALL_THICKNESS := 20.0
+const KILL_ZONE_Y := FLOOR_Y + WALL_THICKNESS + 80.0
+const KILL_ZONE_DAMAGE := 10
+const SPAWN_POSITION := Vector2(100.0, FLOOR_Y - 30.0)
 
 const BOSS_SCENES := {
 	1: "res://scenes/bosses/gingerbread_skeleton.tscn",
@@ -36,6 +40,7 @@ var _boss: Node2D = null
 var _boss_health_bar: ProgressBar = null
 var _boss_name_label: Label = null
 var _victory_shown := false
+var _kill_zone: Area2D = null
 
 
 func _ready() -> void:
@@ -68,6 +73,8 @@ func _setup_camera() -> void:
 # -- Arena Construction --------------------------------------------------------
 
 func _build_arena() -> void:
+	var wall_height: float = FLOOR_Y + WALL_THICKNESS - CEILING_Y
+
 	# Floor
 	var floor_body := StaticBody2D.new()
 	floor_body.position = Vector2(ARENA_WIDTH / 2.0, FLOOR_Y + WALL_THICKNESS / 2.0)
@@ -85,13 +92,41 @@ func _build_arena() -> void:
 	floor_vis.color = Color(0.45, 0.35, 0.25)  # Brown ground
 	add_child(floor_vis)
 
-	# Left wall
-	_add_wall(Vector2(-WALL_THICKNESS / 2.0, ARENA_HEIGHT / 2.0),
-			Vector2(WALL_THICKNESS, ARENA_HEIGHT))
+	# Ceiling
+	var ceiling_body := StaticBody2D.new()
+	ceiling_body.position = Vector2(ARENA_WIDTH / 2.0, CEILING_Y - WALL_THICKNESS / 2.0)
+	var ceiling_shape := CollisionShape2D.new()
+	var ceiling_rect := RectangleShape2D.new()
+	ceiling_rect.size = Vector2(ARENA_WIDTH + WALL_THICKNESS * 2.0, WALL_THICKNESS)
+	ceiling_shape.shape = ceiling_rect
+	ceiling_body.add_child(ceiling_shape)
+	add_child(ceiling_body)
 
-	# Right wall
-	_add_wall(Vector2(ARENA_WIDTH + WALL_THICKNESS / 2.0, ARENA_HEIGHT / 2.0),
-			Vector2(WALL_THICKNESS, ARENA_HEIGHT))
+	# Ceiling visual
+	var ceiling_vis := ColorRect.new()
+	ceiling_vis.size = Vector2(ARENA_WIDTH + WALL_THICKNESS * 2.0, WALL_THICKNESS)
+	ceiling_vis.position = Vector2(-WALL_THICKNESS, CEILING_Y - WALL_THICKNESS)
+	ceiling_vis.color = Color(0.3, 0.25, 0.2)
+	add_child(ceiling_vis)
+
+	# Left wall (full height from ceiling to floor)
+	_add_wall(Vector2(-WALL_THICKNESS / 2.0, CEILING_Y + wall_height / 2.0),
+			Vector2(WALL_THICKNESS, wall_height))
+
+	# Right wall (full height from ceiling to floor)
+	_add_wall(Vector2(ARENA_WIDTH + WALL_THICKNESS / 2.0, CEILING_Y + wall_height / 2.0),
+			Vector2(WALL_THICKNESS, wall_height))
+
+	# Kill zone below the floor - catches players that clip through
+	_kill_zone = Area2D.new()
+	_kill_zone.position = Vector2(ARENA_WIDTH / 2.0, KILL_ZONE_Y)
+	var kz_shape := CollisionShape2D.new()
+	var kz_rect := RectangleShape2D.new()
+	kz_rect.size = Vector2(ARENA_WIDTH + 200.0, 40.0)
+	kz_shape.shape = kz_rect
+	_kill_zone.add_child(kz_shape)
+	_kill_zone.body_entered.connect(_on_kill_zone_body_entered)
+	add_child(_kill_zone)
 
 	# Background
 	var bg := ColorRect.new()
@@ -117,6 +152,17 @@ func _add_wall(pos: Vector2, size: Vector2) -> void:
 	vis.position = pos - size / 2.0
 	vis.color = Color(0.3, 0.25, 0.2)
 	add_child(vis)
+
+
+func _on_kill_zone_body_entered(body: Node2D) -> void:
+	if not body.is_in_group("players"):
+		return
+	# Teleport player back to spawn
+	body.global_position = SPAWN_POSITION
+	body.velocity = Vector2.ZERO
+	# Deal damage if possible
+	if body.has_method("take_damage"):
+		body.take_damage(KILL_ZONE_DAMAGE, -1)
 
 
 # -- Boss UI -------------------------------------------------------------------

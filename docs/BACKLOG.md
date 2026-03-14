@@ -52,13 +52,17 @@ Improve all pixel art from placeholder quality to polished retro style.
 ## EPIC 2: Bug Fixes (`bugs`)
 
 ### Story 2.1: Boss Arena Escape
-- [ ] Task: Add walls/ceiling to boss arena so players can't jump out
-- [ ] Task: Add kill zone below arena floor (respawn player if they fall)
+- [x] Task: Add walls/ceiling to boss arena so players can't jump out
+- [x] Task: Add kill zone below arena floor (respawn player if they fall)
 
 ### Story 2.2: Crash Fixes
-- [ ] Task: Audit all scripts for Variant type inference errors (`sign()`, etc.)
-- [ ] Task: Test all scene transitions (title→overworld→tower→boss→overworld)
-- [ ] Task: Fix any remaining `call_deferred` issues during physics callbacks
+- [x] Task: Audit all scripts for Variant type inference errors (`sign()`, etc.)
+- [x] Task: Test all scene transitions (title→overworld→tower→boss→overworld)
+- [x] Task: Fix any remaining `call_deferred` issues during physics callbacks
+
+### Story 2.3: Pause Menu
+- [x] Task: Only the player who pressed START controls the menu
+- [x] Task: Add navigation cooldown to prevent too-fast scrolling
 
 ---
 
@@ -66,13 +70,13 @@ Improve all pixel art from placeholder quality to polished retro style.
 The overworld needs structure - players shouldn't access everything immediately.
 
 ### Story 3.1: Area Gating
-- [ ] Task: Block paths to Tower 2 and Tower 3 until Tower 1 is complete
+- [x] Task: Block paths to Tower 2 and Tower 3 until Tower 1 is complete
 - [ ] Task: Each tower completion unlocks a zipline to the NEXT area
 - [ ] Task: Zipline is an interactive object players ride across chasms
-- [ ] Task: Final tower area only accessible after all 3 ziplines unlocked
+- [x] Task: Final tower area only accessible after all 3 ziplines unlocked
 
 ### Story 3.2: Overworld Boundaries
-- [ ] Task: Add proper walls/fences around the playable overworld area
+- [x] Task: Add proper walls/fences around the playable overworld area
 - [ ] Task: Add visual boundaries (cliffs, water, dense forest)
 - [ ] Task: Camera limits so players can't see outside the map
 
@@ -105,7 +109,7 @@ The overworld needs structure - players shouldn't access everything immediately.
 ## EPIC 5: Level Design Variety (`design`, `mechanics`)
 
 ### Story 5.1: Tower Layout Improvements
-- [ ] Task: Reduce platform spacing to match jump height with comfortable margin
+- [x] Task: Reduce platform spacing to match jump height with comfortable margin
 - [ ] Task: Add multiple paths up (left route vs right route)
 - [ ] Task: Add secret areas with bonus muffins
 - [ ] Task: Each tower has a unique visual theme (gingerbread, icing, sprinkle)
@@ -121,9 +125,9 @@ The overworld needs structure - players shouldn't access everything immediately.
 ## EPIC 6: Wall Jump Limits (`mechanics`)
 
 ### Story 6.1: Wall Cling Stamina
-- [ ] Task: Add wall-cling stamina (deplete while wall sliding, regen on ground)
-- [ ] Task: Visual indicator showing remaining wall-cling time
-- [ ] Task: Max 2-3 wall jumps before must touch ground
+- [x] Task: Add wall-cling stamina (deplete while wall sliding, regen on ground)
+- [x] Task: Visual indicator showing remaining wall-cling time (red flash when exhausted)
+- [x] Task: Max 2-3 wall jumps before must touch ground (max 3)
 
 ---
 

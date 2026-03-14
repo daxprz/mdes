@@ -1,10 +1,13 @@
 extends CanvasLayer
 
-## Pause menu - any player can press START to pause.
-## Shows RESUME and QUIT options, navigable with controller or keyboard.
+## Pause menu - the player who pressed START controls it.
+## Only that player's device can navigate/confirm. Others are locked out.
 
 var _selected := 0  # 0 = Resume, 1 = Quit
 var _active := false
+var _owner_device: int = -99  # Device that opened the menu (-1 = keyboard)
+var _nav_cooldown: float = 0.0
+const NAV_COOLDOWN_TIME := 0.25  # Prevent too-fast scrolling
 
 var _panel: PanelContainer
 var _resume_label: Label
@@ -19,7 +22,6 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
-	# Dark overlay
 	var overlay := ColorRect.new()
 	overlay.name = "Overlay"
 	overlay.anchors_preset = Control.PRESET_FULL_RECT
@@ -28,7 +30,6 @@ func _build_ui() -> void:
 	overlay.color = Color(0, 0, 0, 0.6)
 	add_child(overlay)
 
-	# Center panel
 	_panel = PanelContainer.new()
 	_panel.anchors_preset = Control.PRESET_CENTER
 	_panel.anchor_left = 0.5
@@ -54,26 +55,22 @@ func _build_ui() -> void:
 	vbox.add_theme_constant_override("separation", 12)
 	_panel.add_child(vbox)
 
-	# Title
 	var title := Label.new()
 	title.text = "PAUSED"
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 32)
 	vbox.add_child(title)
 
-	# Spacer
 	var spacer := Control.new()
 	spacer.custom_minimum_size = Vector2(0, 10)
 	vbox.add_child(spacer)
 
-	# Resume button
 	_resume_label = Label.new()
 	_resume_label.text = "> RESUME"
 	_resume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_resume_label.add_theme_font_size_override("font_size", 24)
 	vbox.add_child(_resume_label)
 
-	# Quit button
 	_quit_label = Label.new()
 	_quit_label.text = "  QUIT"
 	_quit_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -81,13 +78,29 @@ func _build_ui() -> void:
 	vbox.add_child(_quit_label)
 
 
+func _process(delta: float) -> void:
+	if _nav_cooldown > 0.0:
+		_nav_cooldown -= delta
+
+
+func _get_event_device(event: InputEvent) -> int:
+	if event is InputEventKey:
+		return -1
+	return event.device
+
+
 func _input(event: InputEvent) -> void:
+	var device: int = _get_event_device(event)
+
 	# START/Options button or Escape to toggle pause
 	if event.is_action_pressed("pause") or event.is_action_pressed("ps_button"):
 		if _active:
-			_unpause()
-			get_viewport().set_input_as_handled()
+			# Only the player who paused can unpause
+			if device == _owner_device:
+				_unpause()
+				get_viewport().set_input_as_handled()
 		elif GameManager.current_state != GameManager.GameState.TITLE:
+			_owner_device = device
 			_pause()
 			get_viewport().set_input_as_handled()
 		return
@@ -95,16 +108,27 @@ func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 
-	# Navigate menu
+	# Only the player who paused can navigate the menu
+	if device != _owner_device:
+		return
+
+	# Navigation with cooldown to prevent too-fast scrolling
+	if _nav_cooldown > 0.0:
+		return
+
 	if event.is_action_pressed("move_up") or event.is_action_pressed("move_left"):
-		_selected = 0
-		AudioManager.play("menu_select")
-		_update_selection()
+		if _selected != 0:
+			_selected = 0
+			_nav_cooldown = NAV_COOLDOWN_TIME
+			AudioManager.play("menu_select")
+			_update_selection()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
-		_selected = 1
-		AudioManager.play("menu_select")
-		_update_selection()
+		if _selected != 1:
+			_selected = 1
+			_nav_cooldown = NAV_COOLDOWN_TIME
+			AudioManager.play("menu_select")
+			_update_selection()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("attack") or event.is_action_pressed("jump"):
 		AudioManager.play("menu_confirm")
@@ -118,6 +142,7 @@ func _pause() -> void:
 	AudioManager.play("pause")
 	_active = true
 	_selected = 0
+	_nav_cooldown = 0.3  # Brief cooldown so the pause press doesn't immediately navigate
 	_update_selection()
 	visible = true
 	get_tree().paused = true
@@ -125,6 +150,7 @@ func _pause() -> void:
 
 func _unpause() -> void:
 	_active = false
+	_owner_device = -99
 	visible = false
 	get_tree().paused = false
 
