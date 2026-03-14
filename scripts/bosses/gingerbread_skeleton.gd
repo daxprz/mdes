@@ -119,6 +119,8 @@ func _summon_mini_skeletons() -> void:
 
 func _create_placeholder_skeleton() -> CharacterBody2D:
 	var enemy := CharacterBody2D.new()
+	enemy.collision_layer = 8  # Enemy layer - won't push the boss
+	enemy.collision_mask = 1   # Only collide with world
 	enemy.add_to_group("enemies")
 
 	var rect := ColorRect.new()

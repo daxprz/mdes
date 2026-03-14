@@ -58,6 +58,11 @@ func _physics_process(delta: float) -> void:
 	if is_dead:
 		return
 
+	# Safety: if boss falls below the arena, teleport back
+	if global_position.y > 600.0:
+		global_position = Vector2(400.0, 300.0)
+		velocity = Vector2.ZERO
+
 	# Gravity
 	if not is_on_floor():
 		velocity.y += gravity * delta

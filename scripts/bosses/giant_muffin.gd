@@ -160,6 +160,8 @@ func _summon_previous_boss_minions() -> void:
 
 func _create_mini_muffin_enemy() -> CharacterBody2D:
 	var enemy := CharacterBody2D.new()
+	enemy.collision_layer = 8  # Enemy layer - won't collide with boss (also layer 8)
+	enemy.collision_mask = 1   # Only collide with world/floor
 	enemy.add_to_group("enemies")
 
 	var rect := ColorRect.new()

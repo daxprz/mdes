@@ -82,6 +82,15 @@ Improve all pixel art from placeholder quality to polished retro style.
   - FIX: boss_base.gd _ready() now sets collision_layer=8 and adds to both
     "enemies" and "bosses" groups. All 4 bosses fixed.
 
+### Story 2.6: Boss Falls Through Floor
+- [x] Task: BUG: Giant Muffin falls through arena floor during fight
+  - ROOT CAUSE: Summoned mini-muffin enemies had default collision_layer=1 (world).
+    Boss is on layer 8 with mask=1, so boss collided with its own minions and got
+    pushed through the floor.
+  - FIX: All boss-spawned minions now use collision_layer=8 (same as enemies),
+    so they don't push the boss. Added safety teleport in boss_base if boss
+    position.y > 600 (below arena).
+
 ---
 
 ## EPIC 3: Overworld Progression (`design`, `mechanics`)
