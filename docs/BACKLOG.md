@@ -137,30 +137,30 @@ The overworld needs structure - players shouldn't access everything immediately.
 - [ ] Task: Design swarm enemy (sprinkle bugs) - small, fast, come in groups
 
 ### Story 4.2: Enemy Density & Placement
-- [ ] Task: Increase enemy count per tower floor (scale with tower difficulty)
+- [x] Task: Increase enemy count per tower floor (scale with tower difficulty)
 - [ ] Task: Add enemy spawn points that trigger when players reach certain heights
-- [ ] Task: Mix enemy types per floor for tactical variety
+- [x] Task: Mix enemy types per floor for tactical variety
 
 ### Story 4.3: Enemy Behaviors
 - [ ] Task: Enemies should work together (ranged stays back while melee charges)
 - [ ] Task: Enemies should react to player class (focus summoner's donut buddies, etc.)
 
 ### Story 4.4: New Enemy Types - Wave 2
-- [ ] Task: Cupcake Bomber - flies overhead, drops frosting bombs that splat and slow
-- [ ] Task: Licorice Whip - long range tentacle enemy, grabs and pulls players toward it
-- [ ] Task: Gummy Bear Brute - huge, charges in a line, bounces off walls, gets dizzy
-- [ ] Task: Wafer Shield Bearer - has a shield, must be hit from behind or with charge attacks
-- [ ] Task: Candy Corn Spinner - spins rapidly dealing AoE damage, vulnerable when dizzy after
-- [ ] Task: Marshmallow Blob - splits into 2 smaller blobs when killed, those split into 2 more
-- [ ] Task: Peppermint Roller - rolls left/right along platforms, bounces off walls, speeds up over time
-- [ ] Task: Jellybean Sniper - hides in background, fires precise shots, must be flushed out with AoE
+- [x] Task: Cupcake Bomber - flies overhead, drops frosting bombs that splat and slow
+- [x] Task: Licorice Whip - long range tentacle enemy, grabs and pulls players toward it
+- [x] Task: Gummy Bear Brute - huge, charges in a line, bounces off walls, gets dizzy
+- [x] Task: Wafer Shield Bearer - has a shield, must be hit from behind or with charge attacks
+- [x] Task: Candy Corn Spinner - spins rapidly dealing AoE damage, vulnerable when dizzy after
+- [x] Task: Marshmallow Blob - splits into 2 smaller blobs when killed, those split into 2 more
+- [x] Task: Peppermint Roller - rolls left/right along platforms, bounces off walls, speeds up over time
+- [x] Task: Jellybean Sniper - hides in background, fires precise shots, must be flushed out with AoE
 
 ### Story 4.5: Mini-Bosses (mid-tower encounters)
-- [ ] Task: Each tower gets a mini-boss halfway up
-- [ ] Task: Tower 1 mini-boss: Giant Cookie Cutter (slices platforms, must dodge pattern)
-- [ ] Task: Tower 2 mini-boss: Frosting Fountain (sprays icing in rotating pattern)
-- [ ] Task: Tower 3 mini-boss: Sprinkle Tornado (pulls players toward center, throws sprinkles outward)
-- [ ] Task: Tower 4 mini-boss: Batter Elemental (shapeshifting blob, mimics player attacks)
+- [x] Task: Each tower gets a mini-boss halfway up
+- [x] Task: Tower 1 mini-boss: Giant Cookie Cutter (slices platforms, must dodge pattern)
+- [x] Task: Tower 2 mini-boss: Frosting Fountain (sprays icing in rotating pattern)
+- [x] Task: Tower 3 mini-boss: Sprinkle Tornado (pulls players toward center, throws sprinkles outward)
+- [x] Task: Tower 4 mini-boss: Batter Elemental (shapeshifting blob, mimics player attacks)
 
 ---
 
@@ -204,16 +204,16 @@ The overworld needs structure - players shouldn't access everything immediately.
 - [x] Task: Dark rooms where only nearby area is visible - replaced with smoke bomb system
 
 ### Story 7.3: New Obstacles - Wave 2
-- [ ] Task: Rotating saw blades on chains (circle around an anchor point)
-- [ ] Task: Icing waterfall (slippery vertical stream, pushes players down if they enter)
-- [ ] Task: Candy cane poles (bounce pads - launch players upward when touched)
-- [ ] Task: Chocolate lava rising floor (slowly rises from bottom, forces players to climb faster)
-- [ ] Task: Sugar crystal barriers (breakable walls that block paths, require X hits)
-- [ ] Task: Frosting slides (angled platforms that are slippery, players slide down)
-- [ ] Task: Cookie crumble floors (entire sections that collapse after a timer once stepped on)
-- [ ] Task: Caramel sticky zones (slow player movement to 30%, must jump through)
-- [ ] Task: Popcorn geysers (periodic upward blast that launches players + enemies high)
-- [ ] Task: Sprinkle mines (hidden on platforms, explode when stepped on, 15 dmg + knockback)
+- [x] Task: Rotating saw blades on chains (circle around an anchor point)
+- [x] Task: Icing waterfall (slippery vertical stream, pushes players down if they enter)
+- [x] Task: Candy cane poles (bounce pads - launch players upward when touched)
+- [x] Task: Chocolate lava rising floor (slowly rises from bottom, forces players to climb faster)
+- [x] Task: Sugar crystal barriers (breakable walls that block paths, require X hits)
+- [x] Task: Frosting slides (angled platforms that are slippery, players slide down)
+- [x] Task: Cookie crumble floors (entire sections that collapse after a timer once stepped on)
+- [x] Task: Caramel sticky zones (slow player movement to 30%, must jump through)
+- [x] Task: Popcorn geysers (periodic upward blast that launches players + enemies high)
+- [x] Task: Sprinkle mines (hidden on platforms, explode when stepped on, 15 dmg + knockback)
 
 ---
 
