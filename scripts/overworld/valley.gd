@@ -74,6 +74,41 @@ func _on_player_joined_midgame(player_index: int) -> void:
 	add_child(player_node)
 
 
+func _unhandled_key_input(event: InputEvent) -> void:
+	if not event is InputEventKey or not event.pressed or not event.shift_pressed:
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	# SHIFT+1: complete tower 1
+	if key_event.keycode == KEY_1:
+		GameManager.mark_tower_completed(TOWER_NAMES[1])
+		_update_ziplines()
+		_show_cheat_message("Tower 1 completed (cheat)")
+	# SHIFT+2: complete tower 2
+	elif key_event.keycode == KEY_2:
+		GameManager.mark_tower_completed(TOWER_NAMES[2])
+		_update_ziplines()
+		_show_cheat_message("Tower 2 completed (cheat)")
+	# SHIFT+3: complete tower 3
+	elif key_event.keycode == KEY_3:
+		GameManager.mark_tower_completed(TOWER_NAMES[3])
+		_update_ziplines()
+		_show_cheat_message("Tower 3 completed (cheat)")
+
+
+func _show_cheat_message(text: String) -> void:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.position = Vector2(440, 10)
+	label.add_theme_font_size_override("font_size", 18)
+	label.modulate = Color(1.0, 0.5, 1.0)
+	add_child(label)
+	AudioManager.play("menu_confirm")
+	var tween := create_tween()
+	tween.tween_property(label, "modulate:a", 0.0, 2.0)
+	tween.tween_callback(label.queue_free)
+
+
 func _connect_entrance(entrance: Area2D) -> void:
 	if entrance and entrance.has_signal("all_players_at_tower"):
 		entrance.all_players_at_tower.connect(_on_all_players_at_tower)
