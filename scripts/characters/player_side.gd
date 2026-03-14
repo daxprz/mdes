@@ -973,18 +973,25 @@ func _handle_charge(delta: float) -> void:
 	var pressing_attack: bool = _is_device_action_pressed("attack")
 
 	if pressing_attack and not _was_pressing_attack:
-		# Button just pressed - start charge immediately
-		if not _is_charging and _attack_cooldown <= 0.0:
+		# Button just pressed - start tracking hold time but DON'T charge yet
+		# Normal attack fires via _handle_attack on just_pressed
+		_charge_time = 0.0
+		_charge_smoke_timer = 0.0
+		_charge_hover_time = 0.0
+		_healer_channel_heal_timer = 0.0
+		_healer_channel_pulse_timer = 0.0
+
+	# Transition from normal hold to charge after holding for 0.3s
+	if pressing_attack and _was_pressing_attack and not _is_charging and _attack_cooldown <= 0.0:
+		_charge_time += delta
+		if _charge_time >= 0.3:
+			# Now start charging
 			_is_charging = true
-			_charge_time = 0.0
-			_charge_smoke_timer = 0.0
-			_charge_hover_time = 0.0
-			_healer_channel_heal_timer = 0.0
-			_healer_channel_pulse_timer = 0.0
-			# Melee airborne: immediately freeze in air
+			_charge_time = 0.3  # Count the hold time so far
+			# Melee airborne: freeze in air
 			if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
 				velocity.y = 0.0
-			# Healer: immediately stop movement and start channeling
+			# Healer: stop movement and start channeling
 			if character_class == PlayerManager.CharacterClass.HEALER:
 				velocity.x = 0.0
 				_healer_channel_start_vfx()

@@ -65,6 +65,14 @@ Improve all pixel art from placeholder quality to polished retro style.
 - [x] Task: Add navigation cooldown to prevent too-fast scrolling
 - [x] Task: Quit goes to title screen first, separate "Quit Game" exits entirely
 
+### Story 2.5: Attack Button Not Working
+- [x] Task: BUG: Square button (attack) does nothing for any class
+  - ROOT CAUSE: Charge system intercepted EVERY button press on the first frame,
+    setting _is_charging=true before _handle_attack could fire. Normal attacks
+    were permanently blocked.
+  - FIX: Charge only activates after holding attack for 0.3s. Quick taps fire
+    normal attacks. Hold for charge attacks.
+
 ### Story 2.4: Boss Damage Bug
 - [x] Task: BUG: Players cannot damage the final boss (Giant Muffin) - attacks don't register
 - [x] Task: Investigate boss collision layers vs player attack area masks
