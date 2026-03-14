@@ -50,6 +50,44 @@ const MINIBOSS_SCENES: Dictionary = {
 }
 const MINIBOSS_MUFFIN_REWARD := 10
 
+# Task 3: Tower theme color palettes
+# Each entry: { platform_color, bg_color, wall_color }
+const TOWER_THEMES: Dictionary = {
+	1: {  # Gingerbread
+		"platform": Color(0.55, 0.35, 0.15),
+		"background": Color(0.2, 0.15, 0.1),
+		"wall": Color(0.45, 0.28, 0.12),
+	},
+	2: {  # Icing
+		"platform": Color(0.85, 0.85, 0.95),
+		"background": Color(0.15, 0.15, 0.25),
+		"wall": Color(0.9, 0.9, 0.95),
+	},
+	3: {  # Sprinkle
+		"platform": Color(1.0, 0.3, 0.5),  # Base; cycled in _get_sprinkle_color
+		"background": Color(0.1, 0.05, 0.15),
+		"wall": Color(0.3, 0.1, 0.35),
+	},
+	4: {  # Muffin
+		"platform": Color(0.6, 0.45, 0.2),
+		"background": Color(0.15, 0.05, 0.05),
+		"wall": Color(0.25, 0.1, 0.08),
+	},
+}
+
+# Task 1: Fork interval and merge length
+const FORK_INTERVAL := 5          # Every 5th platform section is a fork
+const FORK_PATH_LENGTH := 3       # Each fork side has 3 platforms before merging
+
+# Task 2: Secret area constants
+const SECRET_AREAS_PER_TOWER := 2
+const SECRET_MUFFIN_COUNT_MIN := 5
+const SECRET_MUFFIN_COUNT_MAX := 8
+
+# Task 7: Vertical section constants
+const VERTICAL_SHAFT_WIDTH := 80.0
+const VERTICAL_SHAFT_HEIGHT := 200.0
+
 @export var tower_id: int = 1
 
 var _muffins_collected := 0
@@ -59,6 +97,8 @@ var _exiting := false
 var _miniboss_active := false
 var _miniboss_barrier: StaticBody2D = null
 var _miniboss_trigger: Area2D = null
+var _moving_platforms: Array[Node2D] = []
+var _sprinkle_color_index: int = 0
 
 @onready var camera: Camera2D = $Camera2D
 @onready var platforms_container: Node2D = $Platforms
@@ -78,6 +118,32 @@ func _ready() -> void:
 	_update_muffin_counter()
 
 
+func _process(delta: float) -> void:
+	# Task 4: Update moving platforms
+	for mp: Node2D in _moving_platforms:
+		if not is_instance_valid(mp):
+			continue
+		var data: Dictionary = mp.get_meta("move_data") as Dictionary
+		var start_pos: Vector2 = data["start"] as Vector2
+		var end_pos: Vector2 = data["end"] as Vector2
+		var spd: float = data["speed"] as float
+		var progress: float = data["progress"] as float
+		var direction_sign: float = data["dir"] as float
+
+		progress += spd * delta * direction_sign
+		if progress >= 1.0:
+			progress = 1.0
+			direction_sign = -1.0
+		elif progress <= 0.0:
+			progress = 0.0
+			direction_sign = 1.0
+
+		data["progress"] = progress
+		data["dir"] = direction_sign
+		mp.set_meta("move_data", data)
+		mp.position = start_pos.lerp(end_pos, progress)
+
+
 func _on_player_joined_midgame(player_index: int) -> void:
 	var p_data: Dictionary = PlayerManager.players[player_index]
 	var spawn_pos := Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 40)
@@ -91,6 +157,9 @@ func _on_player_joined_midgame(player_index: int) -> void:
 
 
 func _build_tower() -> void:
+	# Task 3: Apply tower background color
+	_apply_tower_theme()
+
 	var platform_count: int = PLATFORM_COUNT_BASE + tower_id * 2
 	var vertical_spacing: float = TOWER_HEIGHT / (platform_count + 1)
 	# If spacing exceeds max jump height, add more platforms instead
@@ -98,10 +167,90 @@ func _build_tower() -> void:
 		platform_count = int(TOWER_HEIGHT / MAX_PLATFORM_SPACING)
 		vertical_spacing = TOWER_HEIGHT / (platform_count + 1)
 
-	# Generate platforms ascending the tower.
-	for i in range(platform_count):
-		var y_pos := TOWER_HEIGHT - (i + 1) * vertical_spacing
-		var x_offset := _get_platform_x(i, tower_id)
+	# Track which indices are fork zones or vertical shaft to skip normal gen
+	var fork_indices: Array[int] = []
+	var vertical_shaft_index: int = -1
+
+	# Task 7: Determine vertical shaft placement (60-70% height)
+	var shaft_fraction: float = randf_range(0.6, 0.7)
+	vertical_shaft_index = int(platform_count * shaft_fraction)
+
+	# Task 1: Determine fork indices (every FORK_INTERVAL platforms)
+	var fork_start: int = FORK_INTERVAL
+	while fork_start < platform_count - FORK_PATH_LENGTH - 2:
+		fork_indices.append(fork_start)
+		fork_start += FORK_INTERVAL + FORK_PATH_LENGTH + 1  # Skip past the fork zone
+
+	# Track crumbling platform placement for Task 5
+	var crumble_budget: int = 2 + tower_id  # 3 for T1, up to 6 for T4
+	var crumble_placed: int = 0
+	var crumble_interval: int = maxi(platform_count / (crumble_budget + 1), 3)
+
+	# Task 6: Conveyor belt tracking
+	var conveyor_budget: int = 0
+	if tower_id >= 2:
+		conveyor_budget = 1 + (tower_id - 2)  # T2: 1, T3: 2, T4: 3
+	var conveyor_placed: int = 0
+	var conveyor_interval: int = maxi(platform_count / (conveyor_budget + 1), 4)
+
+	# Task 4: Moving platform tracking
+	var moving_budget: int = 1 + (tower_id - 1)  # T1: 1, T4: 4
+	var moving_placed: int = 0
+	var moving_interval: int = maxi(platform_count / (moving_budget + 1), 4)
+
+	# Main platform generation loop
+	var i: int = 0
+	while i < platform_count:
+		var y_pos: float = TOWER_HEIGHT - (i + 1) * vertical_spacing
+		var x_offset: float = _get_platform_x(i, tower_id)
+
+		# --- Task 7: Vertical shaft section ---
+		if i == vertical_shaft_index:
+			_create_vertical_shaft(Vector2(TOWER_WIDTH / 2.0, y_pos), vertical_spacing)
+			# The shaft replaces one platform; the player wall-jumps through it
+			i += 1
+			continue
+
+		# --- Task 1: Fork section (dual paths) ---
+		if i in fork_indices:
+			_create_fork_section(i, y_pos, vertical_spacing)
+			i += FORK_PATH_LENGTH + 1  # Skip past the fork zone indices
+			continue
+
+		# --- Task 5: Crumbling platform replacement ---
+		if crumble_placed < crumble_budget and i > 2 and i % crumble_interval == 0:
+			_create_crumble_platform(Vector2(x_offset, y_pos))
+			crumble_placed += 1
+			# Still place muffin/enemy on crumble platforms
+			if i % 2 == 0:
+				_spawn_muffin(Vector2(x_offset, y_pos - 20))
+			i += 1
+			continue
+
+		# --- Task 6: Conveyor belt platform ---
+		if conveyor_placed < conveyor_budget and i > 3 and (i - 2) % conveyor_interval == 0:
+			var conv_dir: float = 1.0 if conveyor_placed % 2 == 0 else -1.0
+			var conv_speed: float = 60.0 + tower_id * 15.0
+			var conv_width: float = randf_range(100.0, 160.0)
+			_create_conveyor_platform(Vector2(x_offset, y_pos), conv_width, conv_dir, conv_speed)
+			conveyor_placed += 1
+			if i % 2 == 0:
+				_spawn_muffin(Vector2(x_offset, y_pos - 20))
+			i += 1
+			continue
+
+		# --- Task 4: Moving platform ---
+		if moving_placed < moving_budget and i > 2 and (i - 1) % moving_interval == 0:
+			var move_start := Vector2(80.0, y_pos)
+			var move_end := Vector2(TOWER_WIDTH - 80.0, y_pos)
+			var move_speed: float = 0.3 + tower_id * 0.1
+			_create_moving_platform(move_start, move_end, 100.0, move_speed)
+			moving_placed += 1
+			_spawn_muffin(Vector2(TOWER_WIDTH / 2.0, y_pos - 20))
+			i += 1
+			continue
+
+		# --- Normal platform ---
 		var platform_width: float = randf_range(80.0, 160.0)
 		_create_platform(Vector2(x_offset, y_pos), platform_width)
 
@@ -113,11 +262,19 @@ func _build_tower() -> void:
 		if i % 3 == 1 and i > 0:
 			_spawn_enemy(Vector2(x_offset, y_pos - 24), platform_width * 0.4)
 
+		i += 1
+
 	# Floor platform at the bottom.
 	_create_platform(Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 10), TOWER_WIDTH)
 
+	# Task 3: Tower walls with themed color
+	_create_tower_walls()
+
 	# Place traps throughout the tower (more in harder towers)
 	_place_traps(platform_count, vertical_spacing)
+
+	# Task 2: Secret areas
+	_place_secret_areas(platform_count, vertical_spacing)
 
 	# Set up mini-boss trigger at the midpoint of the tower.
 	_setup_miniboss_trigger()
@@ -128,6 +285,112 @@ func _build_tower() -> void:
 		exit_door.body_entered.connect(_on_exit_door_entered)
 
 
+# -- Task 3: Tower Theme System -----------------------------------------------
+
+func _apply_tower_theme() -> void:
+	var theme_id: int = clampi(tower_id, 1, 4)
+	var theme: Dictionary = TOWER_THEMES.get(theme_id, TOWER_THEMES[1]) as Dictionary
+	var bg_color: Color = theme["background"] as Color
+
+	# Create a full-tower background ColorRect
+	var bg := ColorRect.new()
+	bg.size = Vector2(TOWER_WIDTH, TOWER_HEIGHT)
+	bg.position = Vector2.ZERO
+	bg.color = bg_color
+	bg.z_index = -10
+	add_child(bg)
+	move_child(bg, 0)
+
+
+func _get_platform_color(platform_index: int) -> Color:
+	var theme_id: int = clampi(tower_id, 1, 4)
+	if theme_id == 3:
+		return _get_sprinkle_color(platform_index)
+	var theme: Dictionary = TOWER_THEMES.get(theme_id, TOWER_THEMES[1]) as Dictionary
+	return theme["platform"] as Color
+
+
+func _get_sprinkle_color(index: int) -> Color:
+	# Cycle through rainbow colors for Tower 3 (Sprinkle)
+	var colors: Array[Color] = [
+		Color(1.0, 0.3, 0.3),   # Red
+		Color(1.0, 0.6, 0.2),   # Orange
+		Color(1.0, 1.0, 0.3),   # Yellow
+		Color(0.3, 1.0, 0.3),   # Green
+		Color(0.3, 0.6, 1.0),   # Blue
+		Color(0.7, 0.3, 1.0),   # Purple
+		Color(1.0, 0.4, 0.8),   # Pink
+	]
+	var color_idx: int = index % colors.size()
+	return colors[color_idx]
+
+
+func _get_wall_color() -> Color:
+	var theme_id: int = clampi(tower_id, 1, 4)
+	var theme: Dictionary = TOWER_THEMES.get(theme_id, TOWER_THEMES[1]) as Dictionary
+	return theme["wall"] as Color
+
+
+func _create_tower_walls() -> void:
+	var wall_color: Color = _get_wall_color()
+	var wall_thickness: float = 16.0
+
+	# Left wall
+	var left_wall := StaticBody2D.new()
+	left_wall.position = Vector2(-wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
+	var left_col := CollisionShape2D.new()
+	var left_shape := RectangleShape2D.new()
+	left_shape.size = Vector2(wall_thickness, TOWER_HEIGHT)
+	left_col.shape = left_shape
+	left_wall.add_child(left_col)
+
+	var left_rect := ColorRect.new()
+	left_rect.size = Vector2(wall_thickness, TOWER_HEIGHT)
+	left_rect.position = Vector2(-wall_thickness / 2.0, -TOWER_HEIGHT / 2.0)
+	left_rect.color = wall_color
+	left_wall.add_child(left_rect)
+
+	# Task 3: Rainbow streaks on Tower 3 walls
+	if tower_id == 3:
+		_add_rainbow_streaks(left_wall, wall_thickness)
+
+	platforms_container.add_child(left_wall)
+
+	# Right wall
+	var right_wall := StaticBody2D.new()
+	right_wall.position = Vector2(TOWER_WIDTH + wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
+	var right_col := CollisionShape2D.new()
+	var right_shape := RectangleShape2D.new()
+	right_shape.size = Vector2(wall_thickness, TOWER_HEIGHT)
+	right_col.shape = right_shape
+	right_wall.add_child(right_col)
+
+	var right_rect := ColorRect.new()
+	right_rect.size = Vector2(wall_thickness, TOWER_HEIGHT)
+	right_rect.position = Vector2(-wall_thickness / 2.0, -TOWER_HEIGHT / 2.0)
+	right_rect.color = wall_color
+	right_wall.add_child(right_rect)
+
+	if tower_id == 3:
+		_add_rainbow_streaks(right_wall, wall_thickness)
+
+	platforms_container.add_child(right_wall)
+
+
+func _add_rainbow_streaks(wall_node: Node2D, wall_w: float) -> void:
+	var streak_count: int = 12
+	for s in range(streak_count):
+		var streak := ColorRect.new()
+		var streak_y: float = (TOWER_HEIGHT / streak_count) * s
+		streak.size = Vector2(wall_w, 8.0)
+		streak.position = Vector2(-wall_w / 2.0, -TOWER_HEIGHT / 2.0 + streak_y)
+		streak.color = _get_sprinkle_color(s)
+		streak.modulate.a = 0.5
+		wall_node.add_child(streak)
+
+
+# -- Core Platform Creation (Task 3 themed) -----------------------------------
+
 func _get_platform_x(index: int, tid: int) -> float:
 	# Alternate platforms left and right with some variation per tower.
 	var base_x := TOWER_WIDTH / 2.0
@@ -137,7 +400,7 @@ func _get_platform_x(index: int, tid: int) -> float:
 	return clampf(base_x + offset, 60.0, TOWER_WIDTH - 60.0)
 
 
-func _create_platform(pos: Vector2, width: float) -> void:
+func _create_platform(pos: Vector2, width: float, color_override: Color = Color(-1, -1, -1)) -> void:
 	var platform := StaticBody2D.new()
 	platform.position = pos
 
@@ -147,15 +410,287 @@ func _create_platform(pos: Vector2, width: float) -> void:
 	col_shape.shape = shape
 	platform.add_child(col_shape)
 
-	# Visual.
+	# Visual with themed color
 	var rect := ColorRect.new()
 	rect.size = Vector2(width, 16)
 	rect.position = Vector2(-width / 2.0, -8)
-	rect.color = Color(0.45, 0.35, 0.25)  # Brown platform.
+	if color_override.r >= 0.0:
+		rect.color = color_override
+	else:
+		rect.color = _get_platform_color(_sprinkle_color_index)
+	_sprinkle_color_index += 1
 	platform.add_child(rect)
 
 	platforms_container.add_child(platform)
 
+
+# -- Task 1: Multiple Paths (Fork Sections) -----------------------------------
+
+func _create_fork_section(start_index: int, start_y: float, v_spacing: float) -> void:
+	# Create a merge platform at the start of the fork
+	var merge_start_x: float = TOWER_WIDTH / 2.0
+	_create_platform(Vector2(merge_start_x, start_y), 140.0)
+
+	# Left path: more enemies but more muffins
+	for p in range(FORK_PATH_LENGTH):
+		var fork_y: float = start_y - (p + 1) * v_spacing
+		var left_x: float = clampf(70.0 + randf_range(0.0, 40.0), 60.0, TOWER_WIDTH / 2.0 - 20.0)
+		var left_width: float = randf_range(70.0, 110.0)
+		_create_platform(Vector2(left_x, fork_y), left_width)
+
+		# Left path: always muffins, sometimes enemies
+		_spawn_muffin(Vector2(left_x, fork_y - 20))
+		if p % 2 == 0:
+			_spawn_muffin(Vector2(left_x + 20.0, fork_y - 20))  # Extra muffin
+		if p == 1:
+			_spawn_enemy(Vector2(left_x, fork_y - 24), left_width * 0.3)
+
+	# Right path: more traps but shorter (one fewer platform = shortcut)
+	var right_steps: int = maxi(FORK_PATH_LENGTH - 1, 1)
+	var right_v_spacing: float = (FORK_PATH_LENGTH * v_spacing) / right_steps
+	for p in range(right_steps):
+		var fork_y: float = start_y - (p + 1) * right_v_spacing
+		var right_x: float = clampf(TOWER_WIDTH - 70.0 + randf_range(-40.0, 0.0), TOWER_WIDTH / 2.0 + 20.0, TOWER_WIDTH - 60.0)
+		var right_width: float = randf_range(70.0, 110.0)
+		_create_platform(Vector2(right_x, fork_y), right_width)
+
+		# Right path: a muffin but also a trap
+		_spawn_muffin(Vector2(right_x, fork_y - 20))
+		if p == 0:
+			_spawn_trap(SPIKES_SCENE, Vector2(right_x, fork_y - 16))
+
+	# Merge platform at the top of the fork
+	var merge_end_y: float = start_y - (FORK_PATH_LENGTH + 1) * v_spacing
+	_create_platform(Vector2(merge_start_x, merge_end_y), 160.0)
+	_spawn_muffin(Vector2(merge_start_x, merge_end_y - 20))
+
+
+# -- Task 2: Secret Areas -----------------------------------------------------
+
+func _place_secret_areas(platform_count: int, vertical_spacing: float) -> void:
+	var secret_count: int = mini(SECRET_AREAS_PER_TOWER, platform_count - 4)
+	if secret_count <= 0:
+		return
+
+	# Pick random platform indices for secret areas (avoid bottom 3 and top 2)
+	var candidate_indices: Array[int] = []
+	for idx in range(3, platform_count - 2):
+		candidate_indices.append(idx)
+
+	# Shuffle and pick
+	candidate_indices.shuffle()
+	var chosen_count: int = mini(secret_count, candidate_indices.size())
+	for s in range(chosen_count):
+		var idx: int = candidate_indices[s]
+		var y_pos: float = TOWER_HEIGHT - (idx + 1) * vertical_spacing
+		# Secret area on a random side
+		var on_left: bool = randf() > 0.5
+		var alcove_x: float = -40.0 if on_left else TOWER_WIDTH + 40.0
+		var barrier_x: float = 8.0 if on_left else TOWER_WIDTH - 8.0
+
+		_create_secret_alcove(Vector2(alcove_x, y_pos), Vector2(barrier_x, y_pos))
+
+
+func _create_secret_alcove(alcove_pos: Vector2, barrier_pos: Vector2) -> void:
+	# Place crystal barrier at the entrance
+	_spawn_trap(CRYSTAL_BARRIER_SCENE, barrier_pos)
+
+	# Visual hint: a crack-colored rectangle near the barrier
+	var hint := ColorRect.new()
+	hint.size = Vector2(6, 20)
+	hint.position = Vector2(barrier_pos.x - 3, barrier_pos.y - 30)
+	hint.color = Color(0.7, 0.5, 0.3, 0.4)
+	hint.z_index = -1
+	platforms_container.add_child(hint)
+
+	# Create the alcove floor
+	var alcove_floor := StaticBody2D.new()
+	alcove_floor.position = Vector2(alcove_pos.x, alcove_pos.y + 8)
+	var alcove_col := CollisionShape2D.new()
+	var alcove_shape := RectangleShape2D.new()
+	alcove_shape.size = Vector2(60, 16)
+	alcove_col.shape = alcove_shape
+	alcove_floor.add_child(alcove_col)
+
+	var alcove_rect := ColorRect.new()
+	alcove_rect.size = Vector2(60, 16)
+	alcove_rect.position = Vector2(-30, -8)
+	alcove_rect.color = _get_platform_color(_sprinkle_color_index).darkened(0.2)
+	_sprinkle_color_index += 1
+	alcove_floor.add_child(alcove_rect)
+	platforms_container.add_child(alcove_floor)
+
+	# Spawn bonus muffins in the alcove
+	var muffin_count: int = randi_range(SECRET_MUFFIN_COUNT_MIN, SECRET_MUFFIN_COUNT_MAX)
+	for m in range(muffin_count):
+		var offset := Vector2(randf_range(-25, 25), -20 - randf_range(0, 40))
+		_spawn_muffin(alcove_pos + offset)
+
+
+# -- Task 4: Moving Platforms -------------------------------------------------
+
+func _create_moving_platform(start_pos: Vector2, end_pos: Vector2, width: float, speed: float) -> void:
+	var platform := AnimatableBody2D.new()
+	platform.position = start_pos
+	platform.sync_to_physics = true
+
+	var col_shape := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(width, 16)
+	col_shape.shape = shape
+	platform.add_child(col_shape)
+
+	# Visual - slightly different color to indicate movement
+	var rect := ColorRect.new()
+	rect.size = Vector2(width, 16)
+	rect.position = Vector2(-width / 2.0, -8)
+	var base_color: Color = _get_platform_color(_sprinkle_color_index)
+	_sprinkle_color_index += 1
+	rect.color = base_color.lightened(0.15)
+	platform.add_child(rect)
+
+	# Arrow indicators on the platform
+	var arrow := ColorRect.new()
+	arrow.size = Vector2(12, 4)
+	arrow.position = Vector2(-6, -2)
+	arrow.color = Color(1.0, 1.0, 1.0, 0.5)
+	platform.add_child(arrow)
+
+	# Store movement data as metadata
+	var move_data: Dictionary = {
+		"start": start_pos,
+		"end": end_pos,
+		"speed": speed,
+		"progress": 0.0,
+		"dir": 1.0,
+	}
+	platform.set_meta("move_data", move_data)
+	_moving_platforms.append(platform)
+
+	platforms_container.add_child(platform)
+
+
+# -- Task 5: Crumbling Platforms -----------------------------------------------
+
+func _create_crumble_platform(pos: Vector2) -> void:
+	var scene := load(CRUMBLE_FLOOR_SCENE)
+	if scene:
+		var crumble: Node2D = scene.instantiate()
+		crumble.position = pos
+		platforms_container.add_child(crumble)
+	else:
+		# Fallback: just create a normal platform that looks fragile
+		_create_platform(pos, 90.0, Color(0.6, 0.4, 0.3, 0.7))
+
+
+# -- Task 6: Conveyor Belt Platforms -------------------------------------------
+
+func _create_conveyor_platform(pos: Vector2, width: float, direction: float, speed: float) -> void:
+	# Use StaticBody2D with constant_linear_velocity for conveyor effect
+	var platform := StaticBody2D.new()
+	platform.position = pos
+	platform.constant_linear_velocity = Vector2(direction * speed, 0.0)
+
+	var col_shape := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(width, 16)
+	col_shape.shape = shape
+	platform.add_child(col_shape)
+
+	# Visual: yellow-ish tinted platform
+	var rect := ColorRect.new()
+	rect.size = Vector2(width, 16)
+	rect.position = Vector2(-width / 2.0, -8)
+	rect.color = Color(0.85, 0.75, 0.2)
+	platform.add_child(rect)
+
+	# Arrow indicators showing conveyor direction
+	var arrow_count: int = int(width / 30.0)
+	for a in range(arrow_count):
+		var arrow := ColorRect.new()
+		arrow.size = Vector2(8, 4)
+		var arrow_x: float = -width / 2.0 + 15.0 + a * 30.0
+		arrow.position = Vector2(arrow_x, -2)
+		if direction > 0:
+			arrow.color = Color(1.0, 0.9, 0.4, 0.8)
+		else:
+			arrow.color = Color(0.9, 0.8, 0.2, 0.8)
+		platform.add_child(arrow)
+
+	# Direction label arrow: > or <
+	var dir_label := Label.new()
+	dir_label.text = ">>>" if direction > 0 else "<<<"
+	dir_label.position = Vector2(-12, -14)
+	dir_label.add_theme_font_size_override("font_size", 10)
+	dir_label.add_theme_color_override("font_color", Color(0.3, 0.2, 0.0))
+	platform.add_child(dir_label)
+
+	platforms_container.add_child(platform)
+
+
+# -- Task 7: Vertical Shaft Section -------------------------------------------
+
+func _create_vertical_shaft(center_pos: Vector2, v_spacing: float) -> void:
+	var shaft_x: float = center_pos.x
+	var shaft_top: float = center_pos.y - VERTICAL_SHAFT_HEIGHT / 2.0
+	var shaft_bottom: float = center_pos.y + VERTICAL_SHAFT_HEIGHT / 2.0
+	var half_shaft_w: float = VERTICAL_SHAFT_WIDTH / 2.0
+	var wall_thickness: float = 12.0
+	var wall_color: Color = _get_wall_color().lightened(0.1)
+
+	# Left shaft wall
+	var left_wall := StaticBody2D.new()
+	left_wall.position = Vector2(shaft_x - half_shaft_w - wall_thickness / 2.0, center_pos.y)
+	var left_col := CollisionShape2D.new()
+	var left_shape := RectangleShape2D.new()
+	left_shape.size = Vector2(wall_thickness, VERTICAL_SHAFT_HEIGHT)
+	left_col.shape = left_shape
+	left_wall.add_child(left_col)
+
+	var left_rect := ColorRect.new()
+	left_rect.size = Vector2(wall_thickness, VERTICAL_SHAFT_HEIGHT)
+	left_rect.position = Vector2(-wall_thickness / 2.0, -VERTICAL_SHAFT_HEIGHT / 2.0)
+	left_rect.color = wall_color
+	left_wall.add_child(left_rect)
+	platforms_container.add_child(left_wall)
+
+	# Right shaft wall
+	var right_wall := StaticBody2D.new()
+	right_wall.position = Vector2(shaft_x + half_shaft_w + wall_thickness / 2.0, center_pos.y)
+	var right_col := CollisionShape2D.new()
+	var right_shape := RectangleShape2D.new()
+	right_shape.size = Vector2(wall_thickness, VERTICAL_SHAFT_HEIGHT)
+	right_col.shape = right_shape
+	right_wall.add_child(right_col)
+
+	var right_rect := ColorRect.new()
+	right_rect.size = Vector2(wall_thickness, VERTICAL_SHAFT_HEIGHT)
+	right_rect.position = Vector2(-wall_thickness / 2.0, -VERTICAL_SHAFT_HEIGHT / 2.0)
+	right_rect.color = wall_color
+	right_wall.add_child(right_rect)
+	platforms_container.add_child(right_wall)
+
+	# Entry platform at bottom of shaft
+	_create_platform(Vector2(shaft_x, shaft_bottom + 10.0), VERTICAL_SHAFT_WIDTH + 40.0)
+
+	# Exit platform at top of shaft
+	_create_platform(Vector2(shaft_x, shaft_top - 10.0), VERTICAL_SHAFT_WIDTH + 40.0)
+
+	# Muffins along the shaft to reward wall-jumping
+	var muffin_steps: int = 5
+	var muffin_v_spacing: float = VERTICAL_SHAFT_HEIGHT / (muffin_steps + 1)
+	for m in range(muffin_steps):
+		var muffin_y: float = shaft_bottom - (m + 1) * muffin_v_spacing
+		# Alternate muffins left and right inside the shaft
+		var muffin_x: float = shaft_x
+		if m % 2 == 0:
+			muffin_x = shaft_x - half_shaft_w * 0.4
+		else:
+			muffin_x = shaft_x + half_shaft_w * 0.4
+		_spawn_muffin(Vector2(muffin_x, muffin_y))
+
+
+# -- Muffin / Enemy / Trap Spawning -------------------------------------------
 
 func _spawn_muffin(pos: Vector2) -> void:
 	_muffins_total += 1

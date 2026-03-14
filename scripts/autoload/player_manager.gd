@@ -59,6 +59,12 @@ const CLASS_STATS := {
 ## Active players keyed by player_index (0-3).
 var players: Dictionary = {}
 
+## Demolitionist bomb upgrade state (persists between scenes)
+var demo_aspect: String = "none"
+var demo_power_tier: int = 0
+var demo_size_tier: int = 0
+var demo_napalm: bool = false
+
 ## Set of device IDs that have already joined.
 var _joined_devices: Dictionary = {}
 

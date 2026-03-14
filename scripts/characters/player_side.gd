@@ -105,6 +105,12 @@ var _block_start_time: float = 0.0
 var _block_shield_vfx: ColorRect = null
 const PARRY_WINDOW := 0.2  # seconds after block starts where parry is active
 
+# Demolitionist bomb upgrades
+var _demo_power_tier: int = 0  # 0-3, +25% damage per tier
+var _demo_size_tier: int = 0   # 0-3, +20% radius per tier
+var _demo_napalm: bool = false  # Leaves burning ground
+var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
+
 # Controller state tracking
 var _controller_actions: Dictionary = {}
 var _controller_just_pressed: Dictionary = {}
@@ -126,6 +132,11 @@ func _ready() -> void:
 	player_label.text = "P" + str(player_index + 1)
 	_setup_health_bar()
 	_setup_mana_bar()
+	# Load demolitionist upgrades from persistent state
+	_demo_aspect = PlayerManager.demo_aspect
+	_demo_power_tier = PlayerManager.demo_power_tier
+	_demo_size_tier = PlayerManager.demo_size_tier
+	_demo_napalm = PlayerManager.demo_napalm
 
 
 func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass) -> void:
@@ -1447,6 +1458,7 @@ func _apply_stagger() -> void:
 	_is_charging = false
 	_charge_time = 0.0
 	_healer_channel_stop_vfx()
+	AudioManager.play("player_hurt", 0.0, 0.5)
 	modulate = Color(1.0, 1.0, 0.5)
 	# Spawn star VFX above head
 	var stars := Label.new()
@@ -1910,7 +1922,7 @@ func _attack_demolitionist() -> void:
 	var bomb_max_time := 1.5
 	var bomb_bounced := false
 
-	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
 		var dt: float = get_process_delta_time()
 		bomb_time += dt
 		bomb_vel.y += bomb_gravity * dt
@@ -1939,14 +1951,34 @@ func _attack_demolitionist() -> void:
 	if is_instance_valid(bomb):
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
-		_demolitionist_explode(explode_pos, 25, 60.0)
+		var base_dmg: int = int(25 * (1.0 + _demo_power_tier * 0.25))
+		var base_rad: float = 60.0 * (1.0 + _demo_size_tier * 0.20)
+		_demolitionist_explode(explode_pos, base_dmg, base_rad)
 
 
 func _demolitionist_explode(pos: Vector2, damage: int, radius: float) -> void:
 	AudioManager.play("explosion")
-	# Orange VFX burst
+
+	# Impact aspect: knockback doubled, damage -30%
+	var actual_damage: int = damage
+	var knockback_mult: float = 1.0
+	if _demo_aspect == "impact":
+		actual_damage = int(damage * 0.7)
+		knockback_mult = 2.0
+
+	# VFX burst - aspect-tinted
+	var burst_color: Color = Color(0.9, 0.6, 0.1, 0.8)
+	if _demo_aspect == "electric":
+		burst_color = Color(0.3, 0.5, 1.0, 0.8)
+	elif _demo_aspect == "fire":
+		burst_color = Color(1.0, 0.4, 0.0, 0.8)
+	elif _demo_aspect == "impact":
+		burst_color = Color(1.0, 1.0, 1.0, 0.9)
+	elif _demo_aspect == "ice":
+		burst_color = Color(0.5, 0.8, 1.0, 0.8)
+
 	var vfx := ColorRect.new()
-	vfx.color = Color(0.9, 0.6, 0.1, 0.8)
+	vfx.color = burst_color
 	vfx.size = Vector2(radius * 2, radius * 2)
 	vfx.position = pos - Vector2(radius, radius)
 	get_parent().add_child(vfx)
@@ -1956,16 +1988,235 @@ func _demolitionist_explode(pos: Vector2, damage: int, radius: float) -> void:
 	tween.tween_property(vfx, "modulate:a", 0.0, 0.3)
 	tween.chain().tween_callback(vfx.queue_free)
 
+	# Impact aspect: big white shockwave VFX
+	if _demo_aspect == "impact":
+		var shockwave := ColorRect.new()
+		shockwave.color = Color(1.0, 1.0, 1.0, 0.5)
+		shockwave.size = Vector2(radius * 3, radius * 3)
+		shockwave.position = pos - Vector2(radius * 1.5, radius * 1.5)
+		get_parent().add_child(shockwave)
+		var sw_tween := shockwave.create_tween()
+		sw_tween.set_parallel(true)
+		sw_tween.tween_property(shockwave, "scale", Vector2(2.0, 2.0), 0.4)
+		sw_tween.tween_property(shockwave, "modulate:a", 0.0, 0.4)
+		sw_tween.chain().tween_callback(shockwave.queue_free)
+
+	# Collect enemies hit for aspect effects
+	var enemies_hit: Array[Node2D] = []
+
 	# Damage enemies in radius
 	for body in get_tree().get_nodes_in_group("enemies"):
 		if not body is Node2D:
 			continue
 		var dist: float = pos.distance_to(body.global_position)
 		if dist < radius and body.has_method("take_damage"):
-			body.take_damage(damage, player_index)
+			body.take_damage(actual_damage, player_index)
+			enemies_hit.append(body)
 			if body.has_method("apply_knockback"):
 				var kb: Vector2 = (body.global_position - pos).normalized()
-				body.apply_knockback(kb * 200.0)
+				body.apply_knockback(kb * 200.0 * knockback_mult)
+
+	# Fire aspect: enemies catch fire - 5 damage/sec for 3s
+	if _demo_aspect == "fire":
+		for enemy in enemies_hit:
+			_demo_apply_fire(enemy)
+
+	# Ice aspect: enemies slowed to 30% speed for 3s
+	if _demo_aspect == "ice":
+		for enemy in enemies_hit:
+			_demo_apply_ice(enemy)
+
+	# Electric aspect: chain lightning to nearby enemies
+	if _demo_aspect == "electric":
+		_demo_chain_lightning(pos, enemies_hit)
+
+	# Napalm: leave burning ground zone
+	if _demo_napalm:
+		_demo_spawn_napalm(pos)
+
+
+func _demo_apply_fire(enemy: Node2D) -> void:
+	if not is_instance_valid(enemy):
+		return
+	# Orange particle VFX on burning enemy
+	var fire_vfx := ColorRect.new()
+	fire_vfx.color = Color(1.0, 0.5, 0.0, 0.7)
+	fire_vfx.size = Vector2(6, 8)
+	fire_vfx.z_index = 10
+	enemy.add_child(fire_vfx)
+	fire_vfx.position = Vector2(-3, -20)
+
+	var ticks: int = 6  # 3s at 0.5s intervals = 6 ticks of 5 damage (= 5 dps * 3s overall via ticks)
+	var tick_interval: float = 0.5
+	var dmg_per_tick: int = 3  # ~5 damage per second (3 per 0.5s ≈ 6/s, close enough; or use 2.5 rounded)
+	# Actually 5 damage/sec for 3s = 15 total. 6 ticks * 2.5 = 15. Use 3,2,3,2,3,2 = 15.
+	# Simpler: deal 5 damage every 1s for 3 ticks.
+	var fire_ticks: int = 3
+	var fire_interval: float = 1.0
+	while fire_ticks > 0 and is_instance_valid(enemy) and is_inside_tree():
+		await get_tree().create_timer(fire_interval).timeout
+		if not is_instance_valid(enemy):
+			break
+		if enemy.has_method("take_damage"):
+			enemy.take_damage(5, player_index)
+		fire_ticks -= 1
+		# Flicker fire VFX
+		if is_instance_valid(fire_vfx):
+			fire_vfx.modulate.a = 0.5 if fire_ticks % 2 == 0 else 0.9
+
+	if is_instance_valid(fire_vfx):
+		fire_vfx.queue_free()
+
+
+func _demo_apply_ice(enemy: Node2D) -> void:
+	if not is_instance_valid(enemy):
+		return
+	# Blue/white frost VFX
+	var ice_vfx := ColorRect.new()
+	ice_vfx.color = Color(0.5, 0.8, 1.0, 0.6)
+	ice_vfx.size = Vector2(10, 10)
+	ice_vfx.z_index = 10
+	enemy.add_child(ice_vfx)
+	ice_vfx.position = Vector2(-5, -16)
+
+	# Slow enemy to 30% speed for 3s
+	if enemy.has_method("apply_slow"):
+		enemy.apply_slow(0.3, 3.0)
+	else:
+		# Fallback: tint blue for 3s to indicate slow
+		var original_mod: Color = enemy.modulate
+		enemy.modulate = Color(0.5, 0.7, 1.0)
+		if is_inside_tree():
+			await get_tree().create_timer(3.0).timeout
+		if is_instance_valid(enemy):
+			enemy.modulate = original_mod
+
+	if is_instance_valid(ice_vfx):
+		ice_vfx.queue_free()
+
+
+func _demo_chain_lightning(pos: Vector2, already_hit: Array[Node2D]) -> void:
+	# Chain lightning to up to 2 nearby enemies within 60px of any hit enemy
+	var chain_targets: Array[Node2D] = []
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D or body in already_hit or body in chain_targets:
+			continue
+		for hit_enemy in already_hit:
+			if not is_instance_valid(hit_enemy):
+				continue
+			var dist: float = hit_enemy.global_position.distance_to(body.global_position)
+			if dist < 60.0:
+				chain_targets.append(body)
+				break
+		if chain_targets.size() >= 2:
+			break
+
+	for target in chain_targets:
+		if not is_instance_valid(target):
+			continue
+		if target.has_method("take_damage"):
+			target.take_damage(5, player_index)
+		if target.has_method("apply_stun"):
+			target.apply_stun(0.5)
+
+		# Blue VFX line between nearest hit enemy and chain target
+		var nearest_hit: Node2D = null
+		var nearest_dist: float = 9999.0
+		for hit_enemy in already_hit:
+			if not is_instance_valid(hit_enemy):
+				continue
+			var d: float = hit_enemy.global_position.distance_to(target.global_position)
+			if d < nearest_dist:
+				nearest_dist = d
+				nearest_hit = hit_enemy
+
+		if nearest_hit != null:
+			_demo_draw_lightning_line(nearest_hit.global_position, target.global_position)
+
+
+func _demo_draw_lightning_line(from_pos: Vector2, to_pos: Vector2) -> void:
+	var line := Line2D.new()
+	line.width = 2.0
+	line.default_color = Color(0.3, 0.5, 1.0, 0.9)
+	line.z_index = 15
+	line.add_point(from_pos)
+	# Add a jagged midpoint for lightning effect
+	var mid: Vector2 = (from_pos + to_pos) / 2.0 + Vector2(randf_range(-8, 8), randf_range(-8, 8))
+	line.add_point(mid)
+	line.add_point(to_pos)
+	get_parent().add_child(line)
+	var tween := line.create_tween()
+	tween.tween_property(line, "modulate:a", 0.0, 0.3)
+	tween.tween_callback(line.queue_free)
+
+
+func _demo_spawn_napalm(pos: Vector2) -> void:
+	# Burning ground zone: Area2D, 30px radius, lasts 3s, deals 8 damage per 0.5s
+	var napalm_area := Area2D.new()
+	napalm_area.name = "NapalmZone"
+	var shape := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = 30.0
+	shape.shape = circle
+	napalm_area.add_child(shape)
+	napalm_area.global_position = pos
+	napalm_area.collision_layer = 0
+	napalm_area.collision_mask = 2  # enemy layer
+	get_parent().add_child(napalm_area)
+
+	# Orange/red VFX with flame particles rising
+	var ground_vfx := ColorRect.new()
+	ground_vfx.color = Color(1.0, 0.3, 0.0, 0.6)
+	ground_vfx.size = Vector2(60, 16)
+	ground_vfx.position = Vector2(-30, -8)
+	ground_vfx.z_index = 4
+	napalm_area.add_child(ground_vfx)
+
+	var napalm_time: float = 0.0
+	var napalm_duration: float = 3.0
+	var tick_timer: float = 0.0
+	var particle_timer: float = 0.0
+	var p_idx: int = player_index
+
+	while napalm_time < napalm_duration and is_instance_valid(napalm_area) and is_inside_tree():
+		var dt: float = get_process_delta_time()
+		napalm_time += dt
+		tick_timer += dt
+		particle_timer += dt
+
+		# Damage enemies in zone every 0.5s
+		if tick_timer >= 0.5:
+			tick_timer -= 0.5
+			for body in get_tree().get_nodes_in_group("enemies"):
+				if not body is Node2D:
+					continue
+				var dist: float = napalm_area.global_position.distance_to(body.global_position)
+				if dist < 30.0 and body.has_method("take_damage"):
+					body.take_damage(8, p_idx)
+
+		# Spawn rising flame particles every 0.2s
+		if particle_timer >= 0.2 and is_instance_valid(napalm_area):
+			particle_timer -= 0.2
+			var flame := ColorRect.new()
+			flame.color = Color(1.0, randf_range(0.2, 0.6), 0.0, 0.8)
+			flame.size = Vector2(4, 4)
+			flame.z_index = 5
+			flame.position = Vector2(randf_range(-25, 25), -8)
+			napalm_area.add_child(flame)
+			var flame_tween := flame.create_tween()
+			flame_tween.set_parallel(true)
+			flame_tween.tween_property(flame, "position:y", flame.position.y - 20.0, 0.4)
+			flame_tween.tween_property(flame, "modulate:a", 0.0, 0.4)
+			flame_tween.chain().tween_callback(flame.queue_free)
+
+		# Fade out ground VFX near end
+		if napalm_time > napalm_duration - 0.5 and is_instance_valid(ground_vfx):
+			ground_vfx.modulate.a = lerpf(0.6, 0.0, (napalm_time - (napalm_duration - 0.5)) / 0.5)
+
+		await get_tree().process_frame
+
+	if is_instance_valid(napalm_area):
+		napalm_area.queue_free()
 
 
 func _special_big_bomb() -> void:
@@ -1989,7 +2240,7 @@ func _special_big_bomb() -> void:
 	var bomb_max_time := 1.5
 	var bomb_bounced := false
 
-	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
 		var dt: float = get_process_delta_time()
 		bomb_time += dt
 		bomb_vel.y += bomb_gravity * dt
@@ -2015,7 +2266,9 @@ func _special_big_bomb() -> void:
 	if is_instance_valid(bomb):
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
-		_demolitionist_explode(explode_pos, 50, 90.0)
+		var big_dmg: int = int(50 * (1.0 + _demo_power_tier * 0.25))
+		var big_rad: float = 90.0 * (1.0 + _demo_size_tier * 0.20)
+		_demolitionist_explode(explode_pos, big_dmg, big_rad)
 
 
 # -- Healer -------------------------------------------------------------------
