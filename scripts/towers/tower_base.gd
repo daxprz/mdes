@@ -17,12 +17,38 @@ const FAIRY_CAKE_BAT_SCENE_PATH := "res://scenes/enemies/fairy_cake_bat.tscn"
 const COOKIE_ARCHER_SCENE_PATH := "res://scenes/enemies/cookie_archer.tscn"
 const CANDY_GOLEM_SCENE_PATH := "res://scenes/enemies/candy_golem.tscn"
 const SPRINKLE_SWARM_SCENE_PATH := "res://scenes/enemies/sprinkle_swarm.tscn"
+const CUPCAKE_BOMBER_SCENE_PATH := "res://scenes/enemies/cupcake_bomber.tscn"
+const LICORICE_WHIP_SCENE_PATH := "res://scenes/enemies/licorice_whip.tscn"
+const GUMMY_BEAR_SCENE_PATH := "res://scenes/enemies/gummy_bear.tscn"
+const WAFER_SHIELD_SCENE_PATH := "res://scenes/enemies/wafer_shield.tscn"
+const CANDY_CORN_SCENE_PATH := "res://scenes/enemies/candy_corn.tscn"
+const MARSHMALLOW_BLOB_SCENE_PATH := "res://scenes/enemies/marshmallow_blob.tscn"
+const PEPPERMINT_ROLLER_SCENE_PATH := "res://scenes/enemies/peppermint_roller.tscn"
+const JELLYBEAN_SNIPER_SCENE_PATH := "res://scenes/enemies/jellybean_sniper.tscn"
 const SPIKES_SCENE := "res://scenes/traps/spikes.tscn"
 const PENDULUM_SCENE := "res://scenes/traps/pendulum.tscn"
 const ARROW_TRAP_SCENE := "res://scenes/traps/arrow_trap.tscn"
 const LAVA_POOL_SCENE := "res://scenes/traps/lava_pool.tscn"
 const WIND_GUST_SCENE := "res://scenes/traps/wind_gust.tscn"
 const FALLING_ROCKS_SCENE := "res://scenes/traps/falling_rocks.tscn"
+const SAW_BLADE_SCENE := "res://scenes/traps/saw_blade.tscn"
+const ICING_WATERFALL_SCENE := "res://scenes/traps/icing_waterfall.tscn"
+const BOUNCE_PAD_SCENE := "res://scenes/traps/bounce_pad.tscn"
+const RISING_LAVA_SCENE := "res://scenes/traps/rising_lava.tscn"
+const CRYSTAL_BARRIER_SCENE := "res://scenes/traps/crystal_barrier.tscn"
+const FROSTING_SLIDE_SCENE := "res://scenes/traps/frosting_slide.tscn"
+const CRUMBLE_FLOOR_SCENE := "res://scenes/traps/crumble_floor.tscn"
+const CARAMEL_ZONE_SCENE := "res://scenes/traps/caramel_zone.tscn"
+const POPCORN_GEYSER_SCENE := "res://scenes/traps/popcorn_geyser.tscn"
+const SPRINKLE_MINE_SCENE := "res://scenes/traps/sprinkle_mine.tscn"
+
+const MINIBOSS_SCENES: Dictionary = {
+	1: "res://scenes/enemies/cookie_cutter_miniboss.tscn",
+	2: "res://scenes/enemies/frosting_fountain_miniboss.tscn",
+	3: "res://scenes/enemies/sprinkle_tornado_miniboss.tscn",
+	4: "res://scenes/enemies/batter_elemental_miniboss.tscn",
+}
+const MINIBOSS_MUFFIN_REWARD := 10
 
 @export var tower_id: int = 1
 
@@ -30,6 +56,9 @@ var _muffins_collected := 0
 var _muffins_total := 0
 var _enemies_killed := 0
 var _exiting := false
+var _miniboss_active := false
+var _miniboss_barrier: StaticBody2D = null
+var _miniboss_trigger: Area2D = null
 
 @onready var camera: Camera2D = $Camera2D
 @onready var platforms_container: Node2D = $Platforms
@@ -89,6 +118,9 @@ func _build_tower() -> void:
 
 	# Place traps throughout the tower (more in harder towers)
 	_place_traps(platform_count, vertical_spacing)
+
+	# Set up mini-boss trigger at the midpoint of the tower.
+	_setup_miniboss_trigger()
 
 	# Set up exit door at the top.
 	if exit_door:
@@ -169,30 +201,98 @@ func _place_traps(platform_count: int, vertical_spacing: float) -> void:
 		if roll > trap_chance:
 			continue
 
-		# Pick a trap type based on position and tower
-		var trap_roll: float = randf()
+		# Build weighted trap table based on tower_id
+		var trap_table: Array[Dictionary] = []
 
-		if trap_roll < 0.25:
-			# Spikes on platform surface
-			_spawn_trap(SPIKES_SCENE, Vector2(x_offset, y_pos - 16))
-		elif trap_roll < 0.45:
-			# Arrow trap on a wall
-			var wall_x: float = 15.0 if randf() > 0.5 else TOWER_WIDTH - 15.0
-			var facing_right: bool = wall_x < TOWER_WIDTH / 2.0
-			_spawn_arrow_trap(Vector2(wall_x, y_pos - 30), facing_right)
-		elif trap_roll < 0.6:
-			# Pendulum between platforms
-			_spawn_trap(PENDULUM_SCENE, Vector2(x_offset, y_pos - vertical_spacing * 0.5))
-		elif trap_roll < 0.75:
-			# Lava pool on floor of a section
-			_spawn_trap(LAVA_POOL_SCENE, Vector2(x_offset, y_pos + 8))
-		elif trap_roll < 0.85:
-			# Wind gust pushing sideways
-			var wind_dir: float = 1.0 if randf() > 0.5 else -1.0
-			_spawn_wind_gust(Vector2(x_offset, y_pos - 40), wind_dir)
-		else:
-			# Falling rocks triggered by proximity
-			_spawn_trap(FALLING_ROCKS_SCENE, Vector2(x_offset, y_pos - vertical_spacing * 0.7))
+		# Original traps - all towers
+		trap_table.append({"scene": SPIKES_SCENE, "weight": 12, "type": "spikes"})
+		trap_table.append({"scene": ARROW_TRAP_SCENE, "weight": 10, "type": "arrow"})
+		trap_table.append({"scene": PENDULUM_SCENE, "weight": 8, "type": "pendulum"})
+		trap_table.append({"scene": LAVA_POOL_SCENE, "weight": 8, "type": "lava_pool"})
+		trap_table.append({"scene": WIND_GUST_SCENE, "weight": 6, "type": "wind"})
+		trap_table.append({"scene": FALLING_ROCKS_SCENE, "weight": 6, "type": "rocks"})
+
+		# New traps - all towers
+		trap_table.append({"scene": BOUNCE_PAD_SCENE, "weight": 10, "type": "bounce"})
+		trap_table.append({"scene": CRYSTAL_BARRIER_SCENE, "weight": 6, "type": "barrier"})
+		trap_table.append({"scene": CRUMBLE_FLOOR_SCENE, "weight": 8, "type": "crumble"})
+		trap_table.append({"scene": POPCORN_GEYSER_SCENE, "weight": 7, "type": "geyser"})
+
+		# Tower 2+ traps
+		if tower_id >= 2:
+			trap_table.append({"scene": SAW_BLADE_SCENE, "weight": 7, "type": "saw"})
+			trap_table.append({"scene": ICING_WATERFALL_SCENE, "weight": 6, "type": "waterfall"})
+			trap_table.append({"scene": FROSTING_SLIDE_SCENE, "weight": 6, "type": "slide"})
+			trap_table.append({"scene": CARAMEL_ZONE_SCENE, "weight": 5, "type": "caramel"})
+
+		# Tower 3+ traps
+		if tower_id >= 3:
+			trap_table.append({"scene": SPRINKLE_MINE_SCENE, "weight": 5, "type": "mine"})
+
+		# Calculate total weight
+		var total_weight: int = 0
+		for entry: Dictionary in trap_table:
+			total_weight += entry["weight"] as int
+
+		# Roll weighted random
+		var weight_roll: int = randi_range(0, total_weight - 1)
+		var accumulated: int = 0
+		var chosen_type: String = "spikes"
+		var chosen_scene: String = SPIKES_SCENE
+		for entry: Dictionary in trap_table:
+			accumulated += entry["weight"] as int
+			if weight_roll < accumulated:
+				chosen_type = entry["type"] as String
+				chosen_scene = entry["scene"] as String
+				break
+
+		# Spawn the chosen trap with appropriate positioning
+		match chosen_type:
+			"spikes":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - 16))
+			"arrow":
+				var wall_x: float = 15.0 if randf() > 0.5 else TOWER_WIDTH - 15.0
+				var facing_right: bool = wall_x < TOWER_WIDTH / 2.0
+				_spawn_arrow_trap(Vector2(wall_x, y_pos - 30), facing_right)
+			"pendulum":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - vertical_spacing * 0.5))
+			"lava_pool":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos + 8))
+			"wind":
+				var wind_dir: float = 1.0 if randf() > 0.5 else -1.0
+				_spawn_wind_gust(Vector2(x_offset, y_pos - 40), wind_dir)
+			"rocks":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - vertical_spacing * 0.7))
+			"bounce":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - 12))
+			"barrier":
+				_spawn_trap(chosen_scene, Vector2(x_offset + 40.0, y_pos - 48))
+			"crumble":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos))
+			"geyser":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos))
+			"saw":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - vertical_spacing * 0.4))
+			"waterfall":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos - 60))
+			"slide":
+				_spawn_trap(chosen_scene, Vector2(x_offset - 30.0, y_pos))
+			"caramel":
+				_spawn_trap(chosen_scene, Vector2(x_offset, y_pos + 4))
+			"mine":
+				_spawn_trap(chosen_scene, Vector2(x_offset + randf_range(-20.0, 20.0), y_pos - 8))
+
+	# Tower 3+ gets rising chocolate lava at the bottom
+	if tower_id >= 3:
+		var lava_scene := load(RISING_LAVA_SCENE)
+		if lava_scene:
+			var lava: Node2D = lava_scene.instantiate()
+			lava.position = Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 10)
+			if "tower_height" in lava:
+				lava.tower_height = TOWER_HEIGHT
+			if "lava_width" in lava:
+				lava.lava_width = TOWER_WIDTH
+			traps_container.add_child(lava)
 
 	# Tower 3+ gets a dark zone in the middle section
 	if tower_id >= 3:
@@ -247,54 +347,108 @@ func _spawn_random_enemy(pos: Vector2, patrol_dist: float) -> void:
 
 	match tower_id:
 		1:
-			# Tower 1: mostly skeletons + some fairy cake bats
-			if roll < 0.70:
-				scene_path = SKELETON_SCENE_PATH
-			else:
-				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
-				muffin_drop_count = 2
-		2:
-			# Tower 2: skeletons + bats + cookie archers
+			# Tower 1: skeleton, bat, peppermint roller
 			if roll < 0.45:
 				scene_path = SKELETON_SCENE_PATH
-			elif roll < 0.70:
+			elif roll < 0.75:
 				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
 				muffin_drop_count = 2
 			else:
-				scene_path = COOKIE_ARCHER_SCENE_PATH
+				scene_path = PEPPERMINT_ROLLER_SCENE_PATH
 				muffin_drop_count = 2
-		3:
-			# Tower 3: all types including golems and swarms
-			if roll < 0.25:
+		2:
+			# Tower 2: + archer, cupcake bomber, marshmallow blob
+			if roll < 0.20:
 				scene_path = SKELETON_SCENE_PATH
-			elif roll < 0.45:
+			elif roll < 0.35:
 				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
 				muffin_drop_count = 2
-			elif roll < 0.60:
+			elif roll < 0.50:
+				scene_path = PEPPERMINT_ROLLER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.65:
 				scene_path = COOKIE_ARCHER_SCENE_PATH
 				muffin_drop_count = 2
 			elif roll < 0.80:
-				scene_path = CANDY_GOLEM_SCENE_PATH
-				muffin_drop_count = 5
+				scene_path = CUPCAKE_BOMBER_SCENE_PATH
+				muffin_drop_count = 3
 			else:
-				scene_path = SPRINKLE_SWARM_SCENE_PATH
-				muffin_drop_count = 1
-		_:
-			# Tower 4+: heavy mix of everything, more golems
-			if roll < 0.15:
+				scene_path = MARSHMALLOW_BLOB_SCENE_PATH
+				muffin_drop_count = 3
+		3:
+			# Tower 3: + golem, candy corn, wafer shield, gummy bear, licorice whip
+			if roll < 0.10:
 				scene_path = SKELETON_SCENE_PATH
-			elif roll < 0.30:
+			elif roll < 0.18:
 				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
 				muffin_drop_count = 2
-			elif roll < 0.45:
+			elif roll < 0.26:
+				scene_path = PEPPERMINT_ROLLER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.34:
 				scene_path = COOKIE_ARCHER_SCENE_PATH
 				muffin_drop_count = 2
-			elif roll < 0.70:
+			elif roll < 0.42:
+				scene_path = CUPCAKE_BOMBER_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.50:
+				scene_path = MARSHMALLOW_BLOB_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.60:
 				scene_path = CANDY_GOLEM_SCENE_PATH
 				muffin_drop_count = 5
+			elif roll < 0.70:
+				scene_path = CANDY_CORN_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.80:
+				scene_path = WAFER_SHIELD_SCENE_PATH
+				muffin_drop_count = 4
+			elif roll < 0.90:
+				scene_path = GUMMY_BEAR_SCENE_PATH
+				muffin_drop_count = 5
 			else:
+				scene_path = LICORICE_WHIP_SCENE_PATH
+				muffin_drop_count = 4
+		_:
+			# Tower 4+: everything including jellybean sniper
+			if roll < 0.06:
+				scene_path = SKELETON_SCENE_PATH
+			elif roll < 0.12:
+				scene_path = FAIRY_CAKE_BAT_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.18:
+				scene_path = PEPPERMINT_ROLLER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.24:
+				scene_path = COOKIE_ARCHER_SCENE_PATH
+				muffin_drop_count = 2
+			elif roll < 0.30:
+				scene_path = CUPCAKE_BOMBER_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.36:
+				scene_path = MARSHMALLOW_BLOB_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.44:
+				scene_path = CANDY_GOLEM_SCENE_PATH
+				muffin_drop_count = 5
+			elif roll < 0.52:
+				scene_path = CANDY_CORN_SCENE_PATH
+				muffin_drop_count = 3
+			elif roll < 0.60:
+				scene_path = WAFER_SHIELD_SCENE_PATH
+				muffin_drop_count = 4
+			elif roll < 0.68:
+				scene_path = GUMMY_BEAR_SCENE_PATH
+				muffin_drop_count = 5
+			elif roll < 0.76:
+				scene_path = LICORICE_WHIP_SCENE_PATH
+				muffin_drop_count = 4
+			elif roll < 0.84:
 				scene_path = SPRINKLE_SWARM_SCENE_PATH
 				muffin_drop_count = 1
+			else:
+				scene_path = JELLYBEAN_SNIPER_SCENE_PATH
+				muffin_drop_count = 2
 
 	# Handle sprinkle swarm spawning (4-6 individuals)
 	if scene_path == SPRINKLE_SWARM_SCENE_PATH:
@@ -382,3 +536,94 @@ func _on_exit_door_entered(body: Node2D) -> void:
 func _update_muffin_counter() -> void:
 	if muffin_counter_label:
 		muffin_counter_label.text = "Muffins: %d / %d" % [_muffins_collected, _muffins_total]
+
+
+# -- Mini-boss System ----------------------------------------------------------
+
+func _setup_miniboss_trigger() -> void:
+	var mid_y: float = TOWER_HEIGHT * 0.5
+	_miniboss_trigger = Area2D.new()
+	_miniboss_trigger.position = Vector2(TOWER_WIDTH / 2.0, mid_y)
+	_miniboss_trigger.collision_layer = 0
+	_miniboss_trigger.collision_mask = 2  # Detect players
+
+	var trigger_shape := CollisionShape2D.new()
+	var trigger_rect := RectangleShape2D.new()
+	trigger_rect.size = Vector2(TOWER_WIDTH, 40)
+	trigger_shape.shape = trigger_rect
+	_miniboss_trigger.add_child(trigger_shape)
+
+	_miniboss_trigger.body_entered.connect(_on_miniboss_trigger_entered)
+	add_child(_miniboss_trigger)
+
+
+func _on_miniboss_trigger_entered(body: Node2D) -> void:
+	if _miniboss_active:
+		return
+	if not ("player_index" in body or body.has_meta("player_index")):
+		return
+
+	_miniboss_active = true
+	# Disable trigger so it only fires once
+	_miniboss_trigger.set_deferred("monitoring", false)
+
+	_spawn_mini_boss(tower_id)
+
+
+func _spawn_mini_boss(tid: int) -> void:
+	var scene_id: int = clampi(tid, 1, 4)
+	var scene_path: String = MINIBOSS_SCENES.get(scene_id, "") as String
+	if scene_path.is_empty():
+		return
+
+	var boss_scene := load(scene_path)
+	if not boss_scene:
+		return
+
+	var mid_y: float = TOWER_HEIGHT * 0.5
+
+	# Create barrier to block the exit until mini-boss is defeated
+	_miniboss_barrier = StaticBody2D.new()
+	_miniboss_barrier.position = Vector2(TOWER_WIDTH / 2.0, mid_y - 80.0)
+	_miniboss_barrier.collision_layer = 1  # World layer
+
+	var barrier_col := CollisionShape2D.new()
+	var barrier_shape := RectangleShape2D.new()
+	barrier_shape.size = Vector2(TOWER_WIDTH, 16)
+	barrier_col.shape = barrier_shape
+	_miniboss_barrier.add_child(barrier_col)
+
+	# Barrier visual
+	var barrier_rect := ColorRect.new()
+	barrier_rect.size = Vector2(TOWER_WIDTH, 16)
+	barrier_rect.position = Vector2(-TOWER_WIDTH / 2.0, -8)
+	barrier_rect.color = Color(0.8, 0.2, 0.1, 0.7)
+	_miniboss_barrier.add_child(barrier_rect)
+
+	add_child(_miniboss_barrier)
+
+	# Spawn the mini-boss
+	var boss: CharacterBody2D = boss_scene.instantiate()
+	boss.position = Vector2(TOWER_WIDTH / 2.0, mid_y - 40.0)
+	boss.died.connect(_on_miniboss_died)
+	enemies_container.add_child(boss)
+
+	AudioManager.play("boss_roar")
+
+
+func _on_miniboss_died(death_pos: Vector2) -> void:
+	_miniboss_active = false
+
+	# Remove barrier
+	if _miniboss_barrier and is_instance_valid(_miniboss_barrier):
+		var barrier_tween := _miniboss_barrier.create_tween()
+		barrier_tween.tween_property(_miniboss_barrier, "modulate:a", 0.0, 0.4)
+		barrier_tween.tween_callback(_miniboss_barrier.queue_free)
+
+	# Drop bonus muffins
+	for i in range(MINIBOSS_MUFFIN_REWARD):
+		var offset := Vector2(randf_range(-30, 30), randf_range(-20, 10))
+		_spawn_muffin(death_pos + offset)
+
+	# Fanfare
+	AudioManager.play("boss_defeat")

@@ -871,7 +871,7 @@ func _exit_delegate_mode() -> void:
 	_spawn_aether_rift(global_position)
 
 	# Screen rumble
-	_screen_shake()
+	_screen_shake(4.0, 0.2)
 
 	# Summoner "digs into the aether" - shrink + purple flash
 	modulate = Color(0.6, 0.2, 1.0)
@@ -888,7 +888,7 @@ func _exit_delegate_mode() -> void:
 	# --- Aether Dig-Out at new position ---
 	AudioManager.play("summon", 0.0, 0.7)
 	_spawn_aether_rift(global_position)
-	_screen_shake()
+	_screen_shake(4.0, 0.2)
 
 	# Summoner "digs out" - grow back + flash
 	var dig_out := create_tween()
@@ -988,6 +988,8 @@ func _spawn_aether_particle_delayed(rift: Node2D, pos: Vector2, delay: float) ->
 		vel *= (1.0 - 0.5 * dt)  # Drag
 		# Fade
 		dot.modulate.a = lerpf(0.8, 0.0, age / lifetime)
+		if not is_inside_tree():
+			break
 		await get_tree().process_frame
 
 	if is_instance_valid(particle):
