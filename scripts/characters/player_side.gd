@@ -129,7 +129,7 @@ var _mana_bar: Node2D = null
 func _ready() -> void:
 	add_to_group("players")
 	_apply_class_sprite()
-	player_label.text = "P" + str(player_index + 1)
+	_update_player_label()
 	_setup_health_bar()
 	_setup_mana_bar()
 	# Load demolitionist upgrades from persistent state
@@ -137,6 +137,9 @@ func _ready() -> void:
 	_demo_power_tier = PlayerManager.demo_power_tier
 	_demo_size_tier = PlayerManager.demo_size_tier
 	_demo_napalm = PlayerManager.demo_napalm
+	# Connect level-up signal for VFX and apply existing level bonuses
+	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
+	PlayerManager.apply_level_bonuses(player_index)
 
 
 func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass) -> void:
@@ -145,7 +148,7 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 	character_class = p_class
 	if is_inside_tree():
 		_apply_class_sprite()
-		player_label.text = "P" + str(player_index + 1)
+		_update_player_label()
 
 
 func _apply_class_sprite() -> void:
@@ -154,6 +157,52 @@ func _apply_class_sprite() -> void:
 	sprite.hframes = 6
 	sprite.vframes = 1
 	sprite.frame = AnimFrame.IDLE
+
+
+func _update_player_label() -> void:
+	var overall_lv: int = PlayerManager.get_overall_level(player_index)
+	var profile: Dictionary = ProfileManager.get_active_profile(player_index)
+	if not profile.is_empty():
+		var pname: String = profile.get("name", "")
+		var class_key: String = str(int(character_class))
+		var profile_lv: int = ProfileManager.get_overall_level(profile, class_key)
+		# Use the higher of PlayerManager level and profile level
+		var display_lv: int = maxi(overall_lv, profile_lv)
+		if display_lv > 0:
+			player_label.text = pname + " Lv." + str(display_lv)
+		else:
+			player_label.text = pname
+	else:
+		if overall_lv > 0:
+			player_label.text = "P" + str(player_index + 1) + " Lv." + str(overall_lv)
+		else:
+			player_label.text = "P" + str(player_index + 1)
+
+
+func _on_skill_leveled_up(p_index: int, skill: String, new_level: int) -> void:
+	if p_index != player_index:
+		return
+	_update_player_label()
+	# Gold flash
+	modulate = Color(1.0, 0.85, 0.0)
+	var flash_tween := create_tween()
+	flash_tween.tween_property(self, "modulate", Color.WHITE, 0.5)
+	# Floating "LEVEL UP!" text
+	var level_label := Label.new()
+	level_label.text = skill.to_upper() + " Lv." + str(new_level) + "!"
+	level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	level_label.add_theme_font_size_override("font_size", 12)
+	level_label.modulate = Color(1.0, 0.85, 0.0)
+	level_label.position = Vector2(-30, -45)
+	level_label.z_index = 15
+	add_child(level_label)
+	var label_tween := level_label.create_tween()
+	label_tween.set_parallel(true)
+	label_tween.tween_property(level_label, "position:y", level_label.position.y - 30.0, 1.2)
+	label_tween.tween_property(level_label, "modulate:a", 0.0, 1.2)
+	label_tween.chain().tween_callback(level_label.queue_free)
+	# Fanfare sound
+	AudioManager.play("menu_confirm", 2.0, 0.8)
 
 
 # -- Input helpers -------------------------------------------------------------
@@ -413,9 +462,12 @@ func _attack_melee() -> void:
 		return
 
 	# Now check for hits
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
 	for body in attack_area.get_overlapping_bodies():
 		if body.has_method("take_damage"):
-			body.take_damage(damage, player_index)
+			var scaled_damage: int = int(damage * attack_bonus)
+			body.take_damage(scaled_damage, player_index)
+			PlayerManager.add_skill_xp(player_index, "attack", 2)
 			# Blood particles on hit!
 			_spawn_blood_particles(body.global_position)
 		if combo_idx == COMBO_DAMAGES.size() - 1 and body.has_method("apply_knockback"):
@@ -578,14 +630,18 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 
 func _attack_ranged() -> void:
 	AudioManager.play("crossbow_shoot")
-	_spawn_projectile(15, 350.0, "crossbow_bolt")
+	var scaled_dmg: int = int(15 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_spawn_projectile(scaled_dmg, 350.0, "crossbow_bolt")
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 
 func _attack_mage() -> void:
 	if not PlayerManager.use_mana(player_index, 10):
 		return
 	AudioManager.play("magic_bolt")
-	_spawn_projectile(20, 300.0, "magic_bolt")
+	var scaled_dmg: int = int(20 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_spawn_projectile(scaled_dmg, 300.0, "magic_bolt")
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 
 func _attack_summoner() -> void:
@@ -593,9 +649,11 @@ func _attack_summoner() -> void:
 	var offset := Vector2(16.0 if _facing_right else -16.0, 0.0)
 	attack_area.position = offset
 	attack_area.monitoring = true
+	var scaled_dmg: int = int(8 * PlayerManager.get_skill_bonus(player_index, "attack"))
 	for body in attack_area.get_overlapping_bodies():
 		if body.has_method("take_damage"):
-			body.take_damage(8, player_index)
+			body.take_damage(scaled_dmg, player_index)
+			PlayerManager.add_skill_xp(player_index, "attack", 2)
 	await get_tree().create_timer(0.15).timeout
 	if is_inside_tree():
 		attack_area.monitoring = false
@@ -607,13 +665,15 @@ func _attack_rogue() -> void:
 	_attack_cooldown = 2.0  # Override the default cooldown
 	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
 	var angles := [-0.2, 0.0, 0.2]  # Fan spread in radians
+	var scaled_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 	for angle in angles:
 		var dir: Vector2 = base_dir.rotated(angle)
 		var knife_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
 		if not knife_scene:
 			continue
 		var knife := knife_scene.instantiate()
-		knife.damage = 12
+		knife.damage = scaled_dmg
 		knife.speed = 400.0
 		knife.direction = dir
 		knife.projectile_type = "knife"
@@ -674,12 +734,13 @@ func _check_ground_slam_landing() -> void:
 	_screen_shake(charge_ratio * 8.0 + 2.0, 0.2)
 
 	# Damage all nearby enemies on the ground
+	var slam_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
 	for body in get_tree().get_nodes_in_group("enemies"):
 		if not body is Node2D:
 			continue
 		var dist: float = global_position.distance_to(body.global_position)
 		if dist < blast_radius and body.has_method("take_damage"):
-			body.take_damage(slam_damage, player_index)
+			body.take_damage(int(slam_damage * slam_bonus), player_index)
 			if body.has_method("apply_knockback"):
 				var kb: Vector2 = (body.global_position - global_position).normalized()
 				body.apply_knockback(kb * 250.0)
@@ -695,7 +756,10 @@ func _handle_special() -> void:
 	if not _is_device_action_just_pressed("special"):
 		return
 
-	_special_cooldown = SPECIAL_COOLDOWN_TIME
+	# Apply special cooldown reduction from skill level
+	var cooldown_reduction: float = PlayerManager.get_skill_level_for(player_index, "special") * 0.02
+	_special_cooldown = SPECIAL_COOLDOWN_TIME * (1.0 - cooldown_reduction)
+	PlayerManager.add_skill_xp(player_index, "special", 7)
 	_perform_special()
 
 
@@ -745,7 +809,8 @@ func _special_shield_charge() -> void:
 			if body in hit_bodies:
 				continue
 			if body.has_method("take_damage"):
-				body.take_damage(35, player_index)
+				var shield_dmg: int = int(35 * PlayerManager.get_skill_bonus(player_index, "attack"))
+				body.take_damage(shield_dmg, player_index)
 				hit_bodies.append(body)
 			if body.has_method("apply_knockback"):
 				var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.4).normalized()
@@ -1146,13 +1211,16 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 			modulate = Color(1.0, 1.0, 0.8)
 			var parry_tween := create_tween()
 			parry_tween.tween_property(self, "modulate", Color.WHITE, 0.15)
+			PlayerManager.add_skill_xp(player_index, "block", 15)
 			# Stun the attacker if we can find them
 			if source_index >= 0:
 				_stun_source(source_index)
 			return
 		else:
-			# Regular block - 50% damage reduction
-			amount = int(amount * 0.5)
+			# Regular block - damage reduction scales with block level
+			var block_reduction: float = 0.5 + PlayerManager.get_skill_level_for(player_index, "block") * 0.01
+			amount = int(amount * (1.0 - block_reduction))
+			PlayerManager.add_skill_xp(player_index, "block", 3)
 
 	# Healer takes 25% more damage while channeling
 	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
@@ -1505,8 +1573,9 @@ func _handle_charge(delta: float) -> void:
 				_healer_channel_start_vfx()
 
 	if pressing_attack and _is_charging:
-		# Button held - charging
-		_charge_time = minf(_charge_time + delta, CHARGE_MAX)
+		# Button held - charging (charge speed scales with charge skill)
+		var charge_speed_bonus: float = PlayerManager.get_skill_bonus(player_index, "charge")
+		_charge_time = minf(_charge_time + delta * charge_speed_bonus, CHARGE_MAX)
 		var charge_ratio: float = clampf(_charge_time / CHARGE_MAX, 0.0, 1.0)
 
 		# Healer: constant healing aura while channeling
@@ -1562,6 +1631,7 @@ func _handle_charge(delta: float) -> void:
 			_attack_cooldown = ATTACK_COOLDOWN_TIME
 			_is_attacking = true
 			_attack_timer = ATTACK_DURATION
+			PlayerManager.add_skill_xp(player_index, "charge", 5)
 			_perform_charged_attack()
 		_charge_time = 0.0
 
@@ -1589,6 +1659,7 @@ func _perform_charged_attack() -> void:
 
 
 func _charged_melee_slam(charge_ratio: float) -> void:
+	var atk_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
 	if not is_on_floor():
 		# Already hovering, slam down
 		_ground_slam_active = true
@@ -1598,7 +1669,7 @@ func _charged_melee_slam(charge_ratio: float) -> void:
 	else:
 		# On ground: AoE stomp
 		var blast_radius: float = lerpf(40.0, 120.0, charge_ratio)
-		var damage: int = int(lerpf(30.0, 80.0, charge_ratio))
+		var damage: int = int(lerpf(30.0, 80.0, charge_ratio) * atk_bonus)
 		AudioManager.play("explosion", -2.0, 1.2)
 		_spawn_vfx(Color(1.0, 0.5, 0.1, 0.7), Vector2(blast_radius * 2.0, 16))
 		_screen_shake(charge_ratio * 8.0 + 2.0, 0.2)
@@ -1951,8 +2022,9 @@ func _attack_demolitionist() -> void:
 	if is_instance_valid(bomb):
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
-		var base_dmg: int = int(25 * (1.0 + _demo_power_tier * 0.25))
+		var base_dmg: int = int(25 * (1.0 + _demo_power_tier * 0.25) * PlayerManager.get_skill_bonus(player_index, "attack"))
 		var base_rad: float = 60.0 * (1.0 + _demo_size_tier * 0.20)
+		PlayerManager.add_skill_xp(player_index, "attack", 2)
 		_demolitionist_explode(explode_pos, base_dmg, base_rad)
 
 
@@ -2266,7 +2338,7 @@ func _special_big_bomb() -> void:
 	if is_instance_valid(bomb):
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
-		var big_dmg: int = int(50 * (1.0 + _demo_power_tier * 0.25))
+		var big_dmg: int = int(50 * (1.0 + _demo_power_tier * 0.25) * PlayerManager.get_skill_bonus(player_index, "attack"))
 		var big_rad: float = 90.0 * (1.0 + _demo_size_tier * 0.20)
 		_demolitionist_explode(explode_pos, big_dmg, big_rad)
 
@@ -2296,6 +2368,7 @@ func _attack_healer() -> void:
 				break
 
 	# Spawn the potion projectile
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 	_spawn_healing_potion(target_pos)
 
 

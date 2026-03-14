@@ -1064,6 +1064,9 @@ func _on_exit_door_entered(body: Node2D) -> void:
 	_exiting = true
 	tower_cleared.emit(tower_id)
 
+	# Auto-save profiles on tower clear
+	ProfileManager.auto_save()
+
 	# Go to boss fight!
 	GameManager.go_to_boss(tower_id)
 

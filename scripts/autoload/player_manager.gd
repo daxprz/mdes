@@ -6,10 +6,20 @@ extends Node
 signal player_joined(player_index: int)
 signal player_left(player_index: int)
 signal all_players_dead
+signal skill_leveled_up(player_index: int, skill: String, new_level: int)
 
 enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER }
 
 const MAX_PLAYERS := 4
+const MAX_SKILL_LEVEL := 20
+const MAX_OVERALL_LEVEL := 50
+
+const SKILL_BONUS_PER_LEVEL := {
+	"attack": 0.02,
+	"special": 0.02,
+	"charge": 0.03,
+	"block": 0.01,
+}
 
 const CLASS_STATS := {
 	CharacterClass.MELEE: {
@@ -122,6 +132,15 @@ func _try_join(device_id: int) -> void:
 		"muffin_count": 0,
 		"artifacts": [],
 		"is_alive": true,
+		"skill_xp": {
+			"attack": 0,
+			"special": 0,
+			"charge": 0,
+			"block": 0,
+		},
+		"total_kills": 0,
+		"session_kills": 0,
+		"session_damage_dealt": 0,
 	}
 
 	players[player_index] = player_data
@@ -234,6 +253,78 @@ func use_mana(player_index: int, amount: int) -> bool:
 		return false
 	players[player_index]["mana"] -= amount
 	return true
+
+
+# -- Leveling System -----------------------------------------------------------
+
+func xp_for_level(level: int) -> int:
+	return 100 * level * (level + 1) / 2
+
+
+func get_skill_level(xp: int) -> int:
+	var level: int = 0
+	while level < MAX_SKILL_LEVEL and xp >= xp_for_level(level + 1):
+		level += 1
+	return level
+
+
+func add_skill_xp(player_index: int, skill: String, amount: int) -> void:
+	if not players.has(player_index):
+		return
+	var p: Dictionary = players[player_index]
+	if not p["skill_xp"].has(skill):
+		return
+	var old_level: int = get_skill_level(p["skill_xp"][skill])
+	p["skill_xp"][skill] += amount
+	var new_level: int = get_skill_level(p["skill_xp"][skill])
+	if new_level > old_level:
+		skill_leveled_up.emit(player_index, skill, new_level)
+		apply_level_bonuses(player_index)
+
+
+func get_skill_level_for(player_index: int, skill: String) -> int:
+	if not players.has(player_index):
+		return 0
+	var p: Dictionary = players[player_index]
+	if not p["skill_xp"].has(skill):
+		return 0
+	return get_skill_level(p["skill_xp"][skill])
+
+
+func get_overall_level(player_index: int) -> int:
+	if not players.has(player_index):
+		return 0
+	var p: Dictionary = players[player_index]
+	var total: int = 0
+	var count: int = 0
+	for skill in p["skill_xp"]:
+		total += get_skill_level(p["skill_xp"][skill])
+		count += 1
+	if count == 0:
+		return 0
+	var avg: int = total / count
+	return mini(avg, MAX_OVERALL_LEVEL)
+
+
+func get_skill_bonus(player_index: int, skill: String) -> float:
+	var level: int = get_skill_level_for(player_index, skill)
+	var bonus_per: float = SKILL_BONUS_PER_LEVEL.get(skill, 0.0)
+	return 1.0 + level * bonus_per
+
+
+func apply_level_bonuses(player_index: int) -> void:
+	if not players.has(player_index):
+		return
+	var p: Dictionary = players[player_index]
+	var overall: int = get_overall_level(player_index)
+	var base_stats: Dictionary = CLASS_STATS[p["character_class"]]
+	p["max_health"] = base_stats["max_health"] + overall * 5
+	p["max_mana"] = base_stats["max_mana"] + overall * 3
+	# Ensure current health/mana don't exceed new max but don't reduce them
+	if p["health"] > p["max_health"]:
+		p["health"] = p["max_health"]
+	if p["mana"] > p["max_mana"]:
+		p["mana"] = p["max_mana"]
 
 
 func _process(delta: float) -> void:

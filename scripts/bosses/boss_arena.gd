@@ -326,6 +326,12 @@ func _show_victory() -> void:
 	var tower_key := "tower_%d" % tower_id if tower_id != 4 else "tower_final"
 	GameManager.mark_tower_completed(tower_key)
 
+	# Track boss kills and tower completions in profiles, then auto-save
+	for pi: int in PlayerManager.players:
+		ProfileManager.add_boss_kill(pi)
+		ProfileManager.add_tower_complete(pi)
+	ProfileManager.auto_save()
+
 	# Victory overlay
 	var canvas := CanvasLayer.new()
 	canvas.layer = 20
