@@ -112,29 +112,29 @@ The overworld needs structure - players shouldn't access everything immediately.
 
 ### Story 3.1: Area Gating
 - [x] Task: Block paths to Tower 2 and Tower 3 until Tower 1 is complete
-- [ ] Task: Each tower completion unlocks a zipline to the NEXT area
-- [ ] Task: Zipline is an interactive object players ride across chasms
+- [x] Task: Each tower completion unlocks a zipline to the NEXT area
+- [x] Task: Zipline is an interactive object players ride across chasms
 - [x] Task: Final tower area only accessible after all 3 ziplines unlocked
 
 ### Story 3.2: Overworld Boundaries
 - [x] Task: Add proper walls/fences around the playable overworld area
-- [ ] Task: Add visual boundaries (cliffs, water, dense forest)
-- [ ] Task: Camera limits so players can't see outside the map
+- [x] Task: Add visual boundaries (cliffs, water, dense forest)
+- [x] Task: Camera limits so players can't see outside the map
 
 ### Story 3.3: Overworld Polish
-- [ ] Task: Make ziplines animated/functional (not just visual blocks)
-- [ ] Task: Add NPC or signpost near each tower with lore/hints
-- [ ] Task: Add ambient overworld enemies (optional combat)
+- [x] Task: Make ziplines animated/functional (not just visual blocks)
+- [x] Task: Add NPC or signpost near each tower with lore/hints
+- [x] Task: Add ambient overworld enemies (optional combat)
 
 ---
 
 ## EPIC 4: Enemy Variety (`enemies`)
 
 ### Story 4.1: New Enemy Types
-- [ ] Task: Design flying enemy (bat/fairy cake) - moves in sine wave pattern
-- [ ] Task: Design ranged enemy (cookie archer) - shoots at players from distance
-- [ ] Task: Design tank enemy (candy golem) - slow, high HP, big hits
-- [ ] Task: Design swarm enemy (sprinkle bugs) - small, fast, come in groups
+- [x] Task: Design flying enemy (bat/fairy cake) - moves in sine wave pattern
+- [x] Task: Design ranged enemy (cookie archer) - shoots at players from distance
+- [x] Task: Design tank enemy (candy golem) - slow, high HP, big hits
+- [x] Task: Design swarm enemy (sprinkle bugs) - small, fast, come in groups
 
 ### Story 4.2: Enemy Density & Placement
 - [x] Task: Increase enemy count per tower floor (scale with tower difficulty)
@@ -142,8 +142,8 @@ The overworld needs structure - players shouldn't access everything immediately.
 - [x] Task: Mix enemy types per floor for tactical variety
 
 ### Story 4.3: Enemy Behaviors
-- [ ] Task: Enemies should work together (ranged stays back while melee charges)
-- [ ] Task: Enemies should react to player class (focus summoner's donut buddies, etc.)
+- [x] Task: Enemies should work together (ranged stays back while melee charges)
+- [x] Task: Enemies should react to player class (focus summoner's donut buddies, etc.)
 
 ### Story 4.4: New Enemy Types - Wave 2
 - [x] Task: Cupcake Bomber - flies overhead, drops frosting bombs that splat and slow
@@ -168,15 +168,15 @@ The overworld needs structure - players shouldn't access everything immediately.
 
 ### Story 5.1: Tower Layout Improvements
 - [x] Task: Reduce platform spacing to match jump height with comfortable margin
-- [ ] Task: Add multiple paths up (left route vs right route)
-- [ ] Task: Add secret areas with bonus muffins
-- [ ] Task: Each tower has a unique visual theme (gingerbread, icing, sprinkle)
+- [x] Task: Add multiple paths up (left route vs right route)
+- [x] Task: Add secret areas with bonus muffins
+- [x] Task: Each tower has a unique visual theme (gingerbread, icing, sprinkle)
 
 ### Story 5.2: Platforming Challenge
-- [ ] Task: Add moving platforms
-- [ ] Task: Add crumbling platforms (break after standing on them)
-- [ ] Task: Add conveyor belt platforms
-- [ ] Task: Add vertical sections (climbing challenges)
+- [x] Task: Add moving platforms
+- [x] Task: Add crumbling platforms (break after standing on them)
+- [x] Task: Add conveyor belt platforms
+- [x] Task: Add vertical sections (climbing challenges)
 
 ---
 
@@ -265,16 +265,16 @@ Bomb-throwing specialist with upgradeable explosives.
 - [x] Task: Special: Big Bomb (costs 40 mana, 50 damage, 90px radius, bigger VFX)
 
 ### Story 9.2: Bomb Upgrade System
-- [ ] Task: Explosive Power upgrades (damage multiplier tiers)
-- [ ] Task: Blast Size upgrades (radius multiplier tiers)
+- [x] Task: Explosive Power upgrades (damage multiplier tiers)
+- [x] Task: Blast Size upgrades (radius multiplier tiers)
 - [x] Task: Fragment Bombs (split into 3-5 mini-bombs after first bounce) - via charge attack
-- [ ] Task: Napalm Bombs (leave burning ground for 3s, DoT damage)
+- [x] Task: Napalm Bombs (leave burning ground for 3s, DoT damage)
 
 ### Story 9.3: Bomb Aspects (elemental types)
-- [ ] Task: Electric aspect (chains to nearby enemies, brief stun)
-- [ ] Task: Fire aspect (ignites enemies, DoT for 3s)
-- [ ] Task: Impact aspect (massive knockback, lower damage)
-- [ ] Task: Ice aspect (slows enemies in blast radius)
+- [x] Task: Electric aspect (chains to nearby enemies, brief stun)
+- [x] Task: Fire aspect (ignites enemies, DoT for 3s)
+- [x] Task: Impact aspect (massive knockback, lower damage)
+- [x] Task: Ice aspect (slows enemies in blast radius)
 
 ---
 
@@ -337,7 +337,7 @@ Universal combat mechanics that apply to ALL classes.
 - [x] Task: Staggered: character wiggles rapidly for 1s, cannot act
 - [x] Task: Staggered players take 25% more damage
 - [x] Task: Visual: rapid left-right shake + stars above head
-- [ ] Task: Sound: dazed/dizzy sound effect
+- [x] Task: Sound: dazed/dizzy sound effect
 
 ### Story 11.5: Block/Parry System (ALL classes)
 - [x] Task: Map block to a button (R2 / Left Shift)
