@@ -82,6 +82,12 @@ Improve all pixel art from placeholder quality to polished retro style.
   - FIX: boss_base.gd _ready() now sets collision_layer=8 and adds to both
     "enemies" and "bosses" groups. All 4 bosses fixed.
 
+### Story 2.8: Soft-Lock When All Players Die
+- [x] Task: BUG: Game soft-locks when all players die (no revive possible)
+  - FIX: PlayerManager emits all_players_dead signal. GameManager shows
+    "ALL PLAYERS DOWN!" overlay for 2s, then restarts current scene with
+    all players revived at full health/mana.
+
 ### Story 2.7: Melee Ground Attack Not Hitting
 - [x] Task: BUG: Melee attack on ground doesn't hit enemies
   - ROOT CAUSE: attack_area.monitoring enabled and get_overlapping_bodies()

@@ -5,6 +5,7 @@ extends Node
 
 signal player_joined(player_index: int)
 signal player_left(player_index: int)
+signal all_players_dead
 
 enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER }
 
@@ -208,6 +209,9 @@ func damage_player(player_index: int, amount: int) -> void:
 	players[player_index]["health"] = max(0, players[player_index]["health"] - amount)
 	if players[player_index]["health"] <= 0:
 		players[player_index]["is_alive"] = false
+		# Check if ALL players are now dead
+		if players.size() > 0 and get_alive_players().is_empty():
+			all_players_dead.emit()
 
 
 func heal_player(player_index: int, amount: int) -> void:

@@ -23,6 +23,16 @@ var _transitioning := false
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	PlayerManager.all_players_dead.connect(_on_all_players_dead)
+
+
+func _on_all_players_dead() -> void:
+	# Don't restart from title screen
+	if current_state == GameState.TITLE:
+		return
+
+	# Show "ALL PLAYERS DOWN" message, then restart the current scene
+	_show_wipe_screen()
 
 
 # -- State Management ----------------------------------------------------------
@@ -128,3 +138,85 @@ func reset_game() -> void:
 	completed_towers.clear()
 	collected_artifacts.clear()
 	mini_muffin_counts.clear()
+
+
+func _show_wipe_screen() -> void:
+	# Dark overlay + "ALL PLAYERS DOWN" text, then restart
+	var canvas := CanvasLayer.new()
+	canvas.layer = 50
+	canvas.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(canvas)
+
+	var overlay := ColorRect.new()
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	overlay.anchor_right = 1.0
+	overlay.anchor_bottom = 1.0
+	overlay.color = Color(0, 0, 0, 0)
+	canvas.add_child(overlay)
+
+	var label := Label.new()
+	label.text = "ALL PLAYERS DOWN!"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.anchors_preset = Control.PRESET_CENTER
+	label.anchor_left = 0.5
+	label.anchor_right = 0.5
+	label.anchor_top = 0.5
+	label.anchor_bottom = 0.5
+	label.offset_left = -200
+	label.offset_right = 200
+	label.offset_top = -30
+	label.offset_bottom = 30
+	label.add_theme_font_size_override("font_size", 36)
+	label.modulate = Color(1.0, 0.3, 0.3)
+	label.modulate.a = 0.0
+	canvas.add_child(label)
+
+	var sub_label := Label.new()
+	sub_label.text = "Restarting..."
+	sub_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub_label.anchors_preset = Control.PRESET_CENTER
+	sub_label.anchor_left = 0.5
+	sub_label.anchor_right = 0.5
+	sub_label.anchor_top = 0.5
+	sub_label.anchor_bottom = 0.5
+	sub_label.offset_left = -100
+	sub_label.offset_right = 100
+	sub_label.offset_top = 20
+	sub_label.offset_bottom = 50
+	sub_label.add_theme_font_size_override("font_size", 18)
+	sub_label.modulate.a = 0.0
+	canvas.add_child(sub_label)
+
+	AudioManager.play("player_die", 2.0, 0.6)
+
+	var tween := create_tween()
+	tween.tween_property(overlay, "color:a", 0.8, 0.5)
+	tween.tween_property(label, "modulate:a", 1.0, 0.3)
+	tween.tween_property(sub_label, "modulate:a", 1.0, 0.3)
+	tween.tween_interval(2.0)
+	tween.tween_callback(func() -> void:
+		canvas.queue_free()
+		_restart_current_scene()
+	)
+
+
+func _restart_current_scene() -> void:
+	# Revive all players with full health
+	for pi in PlayerManager.players:
+		var p: Dictionary = PlayerManager.players[pi]
+		p["health"] = p["max_health"]
+		p["mana"] = p["max_mana"]
+		p["is_alive"] = true
+
+	# Reload the current scene
+	_transitioning = false  # Force allow transition
+	match current_state:
+		GameState.TOWER:
+			transition_to_scene("res://scenes/towers/tower_base.tscn")
+		GameState.BOSS:
+			transition_to_scene("res://scenes/bosses/boss_arena.tscn")
+		GameState.OVERWORLD:
+			transition_to_scene("res://scenes/overworld/valley.tscn")
+		_:
+			transition_to_scene("res://scenes/overworld/valley.tscn")
