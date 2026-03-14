@@ -195,10 +195,10 @@ func _draw() -> void:
 		base_color = base_color.lerp(Color(0.9, 0.2, 0.2), _glow_intensity)
 
 	# Oval body
-	draw_ellipse(Rect2(-10, -12, 20, 24), base_color)
+	_draw_ellipse_shape(Rect2(-10, -12, 20, 24), base_color)
 
 	# Highlight
-	draw_ellipse(Rect2(-6, -10, 8, 8), Color(0.7, 0.5, 0.9, 0.5))
+	_draw_ellipse_shape(Rect2(-6, -10, 8, 8), Color(0.7, 0.5, 0.9, 0.5))
 
 	# Eyes
 	draw_circle(Vector2(-3, -3), 2, Color.BLACK)
@@ -210,8 +210,8 @@ func _draw() -> void:
 		draw_line(Vector2.ZERO, line_end, Color(1.0, 0.1, 0.1, _glow_intensity * 0.6), 1.5)
 
 
-# Helper since Godot doesn't have draw_ellipse built-in with Rect2
-func draw_ellipse(rect: Rect2, color: Color) -> void:
+# Helper since Godot doesn't have _draw_ellipse_shape built-in with Rect2
+func _draw_ellipse_shape(rect: Rect2, color: Color) -> void:
 	var center := Vector2(rect.position.x + rect.size.x / 2.0, rect.position.y + rect.size.y / 2.0)
 	var radius_x: float = rect.size.x / 2.0
 	var radius_y: float = rect.size.y / 2.0
