@@ -17,6 +17,7 @@ var _players_inside: Array[Node2D] = []
 var _line_offsets: Array[float] = []
 
 func _ready() -> void:
+	add_to_group("wind_gusts")
 	collision_layer = 0
 	collision_mask = 2
 
