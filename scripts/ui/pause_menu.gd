@@ -3,7 +3,7 @@ extends CanvasLayer
 ## Pause menu - the player who pressed START controls it.
 ## Only that player's device can navigate/confirm. Others are locked out.
 
-var _selected := 0  # 0 = Resume, 1 = Quit
+var _selected := 0  # 0 = Resume, 1 = Quit to Menu, 2 = Quit Game
 var _active := false
 var _owner_device: int = -99  # Device that opened the menu (-1 = keyboard)
 var _nav_cooldown: float = 0.0
@@ -11,7 +11,8 @@ const NAV_COOLDOWN_TIME := 0.25  # Prevent too-fast scrolling
 
 var _panel: PanelContainer
 var _resume_label: Label
-var _quit_label: Label
+var _quit_menu_label: Label
+var _quit_game_label: Label
 
 
 func _ready() -> void:
@@ -71,11 +72,17 @@ func _build_ui() -> void:
 	_resume_label.add_theme_font_size_override("font_size", 24)
 	vbox.add_child(_resume_label)
 
-	_quit_label = Label.new()
-	_quit_label.text = "  QUIT"
-	_quit_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quit_label.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(_quit_label)
+	_quit_menu_label = Label.new()
+	_quit_menu_label.text = "  QUIT TO MENU"
+	_quit_menu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quit_menu_label.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(_quit_menu_label)
+
+	_quit_game_label = Label.new()
+	_quit_game_label.text = "  QUIT GAME"
+	_quit_game_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quit_game_label.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(_quit_game_label)
 
 
 func _process(delta: float) -> void:
@@ -117,15 +124,15 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event.is_action_pressed("move_up") or event.is_action_pressed("move_left"):
-		if _selected != 0:
-			_selected = 0
+		if _selected > 0:
+			_selected -= 1
 			_nav_cooldown = NAV_COOLDOWN_TIME
 			AudioManager.play("menu_select")
 			_update_selection()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
-		if _selected != 1:
-			_selected = 1
+		if _selected < 2:
+			_selected += 1
 			_nav_cooldown = NAV_COOLDOWN_TIME
 			AudioManager.play("menu_select")
 			_update_selection()
@@ -159,20 +166,25 @@ func _confirm() -> void:
 	if _selected == 0:
 		_unpause()
 	elif _selected == 1:
+		# Quit to title screen
 		_unpause()
 		GameManager.reset_game()
 		PlayerManager.reset_all_players()
 		get_tree().change_scene_to_file("res://scenes/ui/title_screen.tscn")
+	elif _selected == 2:
+		# Quit the entire game
+		get_tree().quit()
 
 
 func _update_selection() -> void:
-	if _selected == 0:
-		_resume_label.text = "> RESUME"
-		_quit_label.text = "  QUIT"
-		_resume_label.modulate = Color.WHITE
-		_quit_label.modulate = Color(0.5, 0.5, 0.5)
-	else:
-		_resume_label.text = "  RESUME"
-		_quit_label.text = "> QUIT"
-		_resume_label.modulate = Color(0.5, 0.5, 0.5)
-		_quit_label.modulate = Color.WHITE
+	var labels := [_resume_label, _quit_menu_label, _quit_game_label]
+	var texts := [" RESUME", " QUIT TO MENU", " QUIT GAME"]
+	for i in range(labels.size()):
+		if labels[i] == null:
+			continue
+		if i == _selected:
+			labels[i].text = "> " + texts[i].strip_edges()
+			labels[i].modulate = Color.WHITE
+		else:
+			labels[i].text = "  " + texts[i].strip_edges()
+			labels[i].modulate = Color(0.5, 0.5, 0.5)

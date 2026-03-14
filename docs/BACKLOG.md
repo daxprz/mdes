@@ -63,6 +63,12 @@ Improve all pixel art from placeholder quality to polished retro style.
 ### Story 2.3: Pause Menu
 - [x] Task: Only the player who pressed START controls the menu
 - [x] Task: Add navigation cooldown to prevent too-fast scrolling
+- [x] Task: Quit goes to title screen first, separate "Quit Game" exits entirely
+
+### Story 2.4: Boss Damage Bug
+- [ ] Task: BUG: Players cannot damage the final boss (Giant Muffin) - attacks don't register
+- [ ] Task: Investigate boss collision layers vs player attack area masks
+- [ ] Task: Verify boss is in "enemies" or "bosses" group and take_damage is callable
 
 ---
 

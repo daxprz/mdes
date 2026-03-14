@@ -420,16 +420,24 @@ func _attack_summoner() -> void:
 
 
 func _attack_rogue() -> void:
+	# Throw 3 knives in a fan spread, 2s cooldown
 	AudioManager.play("dagger_stab")
-	var offset := Vector2(18.0 if _facing_right else -18.0, 0.0)
-	attack_area.position = offset
-	attack_area.monitoring = true
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("take_damage"):
-			body.take_damage(22, player_index)
-	await get_tree().create_timer(0.1).timeout
-	if is_inside_tree():
-		attack_area.monitoring = false
+	_attack_cooldown = 2.0  # Override the default cooldown
+	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	var angles := [-0.2, 0.0, 0.2]  # Fan spread in radians
+	for angle in angles:
+		var dir: Vector2 = base_dir.rotated(angle)
+		var knife_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
+		if not knife_scene:
+			continue
+		var knife := knife_scene.instantiate()
+		knife.damage = 12
+		knife.speed = 400.0
+		knife.direction = dir
+		knife.projectile_type = "knife"
+		knife.owner_index = player_index
+		knife.global_position = global_position + base_dir * 12.0
+		get_parent().add_child(knife)
 
 
 func _spawn_projectile(damage: int, speed: float, type: String) -> void:
@@ -1510,21 +1518,12 @@ func _special_big_bomb() -> void:
 # -- Healer -------------------------------------------------------------------
 
 func _attack_healer() -> void:
-	# Staff swing: 10 damage to enemies (like summoner bonk)
-	AudioManager.play("staff_bonk")
-	var offset := Vector2(16.0 if _facing_right else -16.0, 0.0)
-	attack_area.position = offset
-	attack_area.monitoring = true
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("take_damage"):
-			body.take_damage(10, player_index)
-	await get_tree().create_timer(0.15).timeout
-	if is_inside_tree():
-		attack_area.monitoring = false
+	# Throw a healing potion that creates a lingering heal zone
+	AudioManager.play("summon", -3.0, 1.2)
+	var throw_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
 
-	# Heal nearest injured ally within 120px
-	var nearest_ally: Node2D = null
-	var nearest_dist: float = 120.0
+	# Find nearest injured ally to aim toward
+	var target_pos: Vector2 = global_position + throw_dir * 80.0
 	for p in get_tree().get_nodes_in_group("players"):
 		if p == self or not (p is CharacterBody2D):
 			continue
@@ -1534,28 +1533,109 @@ func _attack_healer() -> void:
 		var p_data: Dictionary = PlayerManager.get_player(p_idx)
 		if p_data.is_empty():
 			continue
-		if p_data["health"] >= p_data["max_health"]:
-			continue
-		var dist: float = global_position.distance_to(p.global_position)
-		if dist < nearest_dist:
-			nearest_dist = dist
-			nearest_ally = p
+		if p_data["health"] < p_data["max_health"]:
+			var dist: float = global_position.distance_to(p.global_position)
+			if dist < 150.0:
+				target_pos = p.global_position
+				break
 
-	if nearest_ally != null:
-		var ally_idx: int = nearest_ally.get("player_index")
-		PlayerManager.heal_player(ally_idx, 8)
-		# Green line VFX from healer to ally
-		var line_vfx := ColorRect.new()
-		line_vfx.color = Color(0.3, 0.9, 0.4, 0.7)
-		var dir_to_ally: Vector2 = nearest_ally.global_position - global_position
-		var line_len: float = dir_to_ally.length()
-		line_vfx.size = Vector2(line_len, 3)
-		line_vfx.position = global_position
-		line_vfx.rotation = dir_to_ally.angle()
-		get_parent().add_child(line_vfx)
-		var heal_tween := line_vfx.create_tween()
-		heal_tween.tween_property(line_vfx, "modulate:a", 0.0, 0.4)
-		heal_tween.tween_callback(line_vfx.queue_free)
+	# Spawn the potion projectile
+	_spawn_healing_potion(target_pos)
+
+
+func _spawn_healing_potion(target_pos: Vector2) -> void:
+	var potion := ColorRect.new()
+	potion.color = Color(0.2, 0.9, 0.3, 0.9)
+	potion.size = Vector2(8, 10)
+	potion.z_index = 5
+	get_parent().add_child(potion)
+	potion.global_position = global_position + Vector2(0, -8)
+
+	# Arc the potion toward target
+	var travel_time := 0.4
+	var start_pos: Vector2 = potion.global_position
+	var elapsed := 0.0
+	while elapsed < travel_time and is_instance_valid(potion):
+		var dt: float = get_process_delta_time()
+		elapsed += dt
+		var t: float = clampf(elapsed / travel_time, 0.0, 1.0)
+		var mid: Vector2 = (start_pos + target_pos) / 2.0 + Vector2(0, -40)  # Arc height
+		# Quadratic bezier
+		var a: Vector2 = start_pos.lerp(mid, t)
+		var b: Vector2 = mid.lerp(target_pos, t)
+		potion.global_position = a.lerp(b, t)
+		await get_tree().process_frame
+
+	if not is_instance_valid(potion):
+		return
+	var land_pos: Vector2 = potion.global_position
+	potion.queue_free()
+
+	# Create lingering healing zone
+	_spawn_healing_zone(land_pos)
+
+
+func _spawn_healing_zone(pos: Vector2) -> void:
+	AudioManager.play("player_revive", -6.0, 1.4)
+	var zone := Area2D.new()
+	zone.global_position = pos
+	zone.collision_layer = 0
+	zone.collision_mask = 2  # Detect players
+
+	var shape := CollisionShape2D.new()
+	var circle := CircleShape2D.new()
+	circle.radius = 40.0
+	shape.shape = circle
+	zone.add_child(shape)
+
+	# Visual: green glowing circle
+	var visual := ColorRect.new()
+	visual.color = Color(0.2, 0.85, 0.3, 0.25)
+	visual.size = Vector2(80, 80)
+	visual.position = Vector2(-40, -40)
+	zone.add_child(visual)
+
+	get_parent().add_child(zone)
+
+	# Heal players in zone every 0.5s for 4 seconds, with bubble particles
+	var heal_ticks := 8
+	for tick in range(heal_ticks):
+		if not is_instance_valid(zone):
+			break
+		# Bubble particle VFX
+		for b in range(3):
+			var bubble := ColorRect.new()
+			bubble.color = Color(0.3, 1.0, 0.4, 0.6)
+			bubble.size = Vector2(4, 4)
+			bubble.position = pos + Vector2(randf_range(-30, 30), randf_range(-10, 10))
+			bubble.z_index = 6
+			get_parent().add_child(bubble)
+			var btween := bubble.create_tween()
+			btween.tween_property(bubble, "position:y", bubble.position.y - randf_range(20, 50), 0.6)
+			btween.parallel().tween_property(bubble, "modulate:a", 0.0, 0.6)
+			btween.tween_callback(bubble.queue_free)
+
+		# Heal overlapping players
+		for body in zone.get_overlapping_bodies():
+			if "player_index" in body:
+				var p_idx: int = body.get("player_index")
+				PlayerManager.heal_player(p_idx, 5)
+				if body.has_method("_update_health_bar"):
+					body._update_health_bar()
+
+		# Pulse the visual
+		if is_instance_valid(visual):
+			visual.modulate.a = 0.35
+			var ptween := visual.create_tween()
+			ptween.tween_property(visual, "modulate:a", 0.15, 0.4)
+
+		await get_tree().create_timer(0.5).timeout
+
+	# Fade out and remove
+	if is_instance_valid(zone):
+		var fade := zone.create_tween()
+		fade.tween_property(visual, "modulate:a", 0.0, 0.5)
+		fade.tween_callback(zone.queue_free)
 
 
 func _special_healing_burst() -> void:
