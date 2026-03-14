@@ -1,0 +1,33 @@
+# Godot
+.godot/
+*.import
+export_presets.cfg
+*.translation
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Generated scripts (can regenerate from source)
+generate_sprites.py
+generate_sounds.py
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Build exports
+build/
+export/

@@ -1,0 +1,152 @@
+extends CanvasLayer
+
+## Pause menu - any player can press START to pause.
+## Shows RESUME and QUIT options, navigable with controller or keyboard.
+
+var _selected := 0  # 0 = Resume, 1 = Quit
+var _active := false
+
+var _panel: PanelContainer
+var _resume_label: Label
+var _quit_label: Label
+
+
+func _ready() -> void:
+	layer = 100
+	process_mode = Node.PROCESS_MODE_ALWAYS
+	_build_ui()
+	visible = false
+
+
+func _build_ui() -> void:
+	# Dark overlay
+	var overlay := ColorRect.new()
+	overlay.name = "Overlay"
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	overlay.anchor_right = 1.0
+	overlay.anchor_bottom = 1.0
+	overlay.color = Color(0, 0, 0, 0.6)
+	add_child(overlay)
+
+	# Center panel
+	_panel = PanelContainer.new()
+	_panel.anchors_preset = Control.PRESET_CENTER
+	_panel.anchor_left = 0.5
+	_panel.anchor_right = 0.5
+	_panel.anchor_top = 0.5
+	_panel.anchor_bottom = 0.5
+	_panel.offset_left = -140
+	_panel.offset_right = 140
+	_panel.offset_top = -100
+	_panel.offset_bottom = 100
+
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.12, 0.08, 0.18, 0.95)
+	style.border_color = Color(0.8, 0.6, 0.2)
+	style.set_border_width_all(3)
+	style.set_corner_radius_all(8)
+	style.set_content_margin_all(20)
+	_panel.add_theme_stylebox_override("panel", style)
+	add_child(_panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 12)
+	_panel.add_child(vbox)
+
+	# Title
+	var title := Label.new()
+	title.text = "PAUSED"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 32)
+	vbox.add_child(title)
+
+	# Spacer
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0, 10)
+	vbox.add_child(spacer)
+
+	# Resume button
+	_resume_label = Label.new()
+	_resume_label.text = "> RESUME"
+	_resume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_resume_label.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(_resume_label)
+
+	# Quit button
+	_quit_label = Label.new()
+	_quit_label.text = "  QUIT"
+	_quit_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_quit_label.add_theme_font_size_override("font_size", 24)
+	vbox.add_child(_quit_label)
+
+
+func _input(event: InputEvent) -> void:
+	# START/Options button or Escape to toggle pause
+	if event.is_action_pressed("pause") or event.is_action_pressed("ps_button"):
+		if _active:
+			_unpause()
+			get_viewport().set_input_as_handled()
+		elif GameManager.current_state != GameManager.GameState.TITLE:
+			_pause()
+			get_viewport().set_input_as_handled()
+		return
+
+	if not _active:
+		return
+
+	# Navigate menu
+	if event.is_action_pressed("move_up") or event.is_action_pressed("move_left"):
+		_selected = 0
+		AudioManager.play("menu_select")
+		_update_selection()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
+		_selected = 1
+		AudioManager.play("menu_select")
+		_update_selection()
+		get_viewport().set_input_as_handled()
+	elif event.is_action_pressed("attack") or event.is_action_pressed("jump"):
+		AudioManager.play("menu_confirm")
+		_confirm()
+		get_viewport().set_input_as_handled()
+
+
+func _pause() -> void:
+	if GameManager.current_state == GameManager.GameState.TITLE:
+		return
+	AudioManager.play("pause")
+	_active = true
+	_selected = 0
+	_update_selection()
+	visible = true
+	get_tree().paused = true
+
+
+func _unpause() -> void:
+	_active = false
+	visible = false
+	get_tree().paused = false
+
+
+func _confirm() -> void:
+	if _selected == 0:
+		_unpause()
+	elif _selected == 1:
+		_unpause()
+		GameManager.reset_game()
+		PlayerManager.reset_all_players()
+		get_tree().change_scene_to_file("res://scenes/ui/title_screen.tscn")
+
+
+func _update_selection() -> void:
+	if _selected == 0:
+		_resume_label.text = "> RESUME"
+		_quit_label.text = "  QUIT"
+		_resume_label.modulate = Color.WHITE
+		_quit_label.modulate = Color(0.5, 0.5, 0.5)
+	else:
+		_resume_label.text = "  RESUME"
+		_quit_label.text = "> QUIT"
+		_resume_label.modulate = Color(0.5, 0.5, 0.5)
+		_quit_label.modulate = Color.WHITE

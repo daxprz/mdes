@@ -1,0 +1,96 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://scripts/towers/tower_base.gd" id="1"]
+
+[sub_resource type="RectangleShape2D" id="exit_shape"]
+size = Vector2(60, 40)
+
+[node name="TowerBase" type="Node2D"]
+script = ExtResource("1")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(200, 1200)
+zoom = Vector2(1.5, 1.5)
+limit_left = 0
+limit_top = 0
+limit_right = 400
+limit_bottom = 2400
+
+[node name="TowerBackground" type="ColorRect" parent="."]
+offset_right = 400.0
+offset_bottom = 2400.0
+color = Color(0.12, 0.1, 0.15, 1)
+
+[node name="WallLeft" type="ColorRect" parent="."]
+offset_right = 10.0
+offset_bottom = 2400.0
+color = Color(0.3, 0.25, 0.2, 1)
+
+[node name="WallRight" type="ColorRect" parent="."]
+offset_left = 390.0
+offset_right = 400.0
+offset_bottom = 2400.0
+color = Color(0.3, 0.25, 0.2, 1)
+
+[node name="WallLeftBody" type="StaticBody2D" parent="."]
+position = Vector2(5, 1200)
+
+[node name="WallLeftShape" type="CollisionShape2D" parent="WallLeftBody"]
+shape = SubResource("exit_shape")
+scale = Vector2(0.17, 80)
+
+[node name="WallRightBody" type="StaticBody2D" parent="."]
+position = Vector2(395, 1200)
+
+[node name="WallRightShape" type="CollisionShape2D" parent="WallRightBody"]
+shape = SubResource("exit_shape")
+scale = Vector2(0.17, 80)
+
+[node name="Platforms" type="Node2D" parent="."]
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="Muffins" type="Node2D" parent="."]
+
+[node name="ExitDoor" type="Area2D" parent="."]
+position = Vector2(200, 40)
+collision_layer = 4
+collision_mask = 2
+
+[node name="ExitDoorShape" type="CollisionShape2D" parent="ExitDoor"]
+shape = SubResource("exit_shape")
+
+[node name="ExitDoorVisual" type="ColorRect" parent="ExitDoor"]
+offset_left = -30.0
+offset_top = -20.0
+offset_right = 30.0
+offset_bottom = 20.0
+color = Color(0.9, 0.7, 0.1, 1)
+
+[node name="ExitLabel" type="Label" parent="ExitDoor"]
+offset_left = -20.0
+offset_top = -35.0
+offset_right = 20.0
+offset_bottom = -20.0
+horizontal_alignment = 1
+text = "EXIT"
+theme_override_font_sizes/font_size = 12
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="MuffinCounter" type="Label" parent="UI"]
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 200.0
+offset_bottom = 35.0
+text = "Muffins: 0 / 0"
+theme_override_font_sizes/font_size = 16
+
+[node name="TowerTitle" type="Label" parent="UI"]
+offset_left = 500.0
+offset_top = 10.0
+offset_right = 780.0
+offset_bottom = 35.0
+horizontal_alignment = 2
+text = "Tower"
+theme_override_font_sizes/font_size = 18

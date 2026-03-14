@@ -1,0 +1,244 @@
+[gd_scene load_steps=5 format=3]
+
+[ext_resource type="Script" path="res://scripts/overworld/valley.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/overworld/tower_entrance.gd" id="2"]
+
+[sub_resource type="RectangleShape2D" id="chasm_shape"]
+size = Vector2(200, 30)
+
+[sub_resource type="RectangleShape2D" id="entrance_shape"]
+size = Vector2(80, 80)
+
+[node name="Valley" type="Node2D"]
+script = ExtResource("1")
+
+[node name="PlayerSpawnPoint" type="Marker2D" parent="."]
+position = Vector2(640, 400)
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+zoom = Vector2(1, 1)
+
+[node name="Background" type="ColorRect" parent="."]
+offset_right = 1280.0
+offset_bottom = 720.0
+color = Color(0.25, 0.55, 0.2, 1)
+
+[node name="PathCenter" type="ColorRect" parent="."]
+offset_left = 300.0
+offset_top = 310.0
+offset_right = 980.0
+offset_bottom = 440.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="PathToTower1" type="ColorRect" parent="."]
+offset_left = 600.0
+offset_top = 60.0
+offset_right = 680.0
+offset_bottom = 310.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="PathToTower2" type="ColorRect" parent="."]
+offset_left = 100.0
+offset_top = 340.0
+offset_right = 300.0
+offset_bottom = 410.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="PathToTower3" type="ColorRect" parent="."]
+offset_left = 980.0
+offset_top = 340.0
+offset_right = 1180.0
+offset_bottom = 410.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="PathToChasm" type="ColorRect" parent="."]
+offset_left = 600.0
+offset_top = 440.0
+offset_right = 680.0
+offset_bottom = 560.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="PathToFinalTower" type="ColorRect" parent="."]
+offset_left = 600.0
+offset_top = 590.0
+offset_right = 680.0
+offset_bottom = 700.0
+color = Color(0.6, 0.5, 0.3, 1)
+
+[node name="ChasmVisual" type="ColorRect" parent="."]
+offset_left = 500.0
+offset_top = 555.0
+offset_right = 780.0
+offset_bottom = 595.0
+color = Color(0.1, 0.05, 0.05, 1)
+
+[node name="ChasmBlocker" type="StaticBody2D" parent="."]
+position = Vector2(640, 575)
+
+[node name="ChasmBlockerShape" type="CollisionShape2D" parent="ChasmBlocker"]
+shape = SubResource("chasm_shape")
+
+[node name="Tower1Visual" type="ColorRect" parent="."]
+offset_left = 590.0
+offset_top = 20.0
+offset_right = 690.0
+offset_bottom = 80.0
+color = Color(0.5, 0.35, 0.2, 1)
+
+[node name="Tower1Label" type="Label" parent="Tower1Visual"]
+layout_mode = 0
+offset_left = 5.0
+offset_top = 5.0
+offset_right = 95.0
+offset_bottom = 25.0
+horizontal_alignment = 1
+text = "Tower 1"
+theme_override_font_sizes/font_size = 14
+
+[node name="Tower2Visual" type="ColorRect" parent="."]
+offset_left = 40.0
+offset_top = 330.0
+offset_right = 120.0
+offset_bottom = 420.0
+color = Color(0.5, 0.35, 0.2, 1)
+
+[node name="Tower2Label" type="Label" parent="Tower2Visual"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 5.0
+offset_right = 80.0
+offset_bottom = 25.0
+horizontal_alignment = 1
+text = "Tower 2"
+theme_override_font_sizes/font_size = 14
+
+[node name="Tower3Visual" type="ColorRect" parent="."]
+offset_left = 1160.0
+offset_top = 330.0
+offset_right = 1240.0
+offset_bottom = 420.0
+color = Color(0.5, 0.35, 0.2, 1)
+
+[node name="Tower3Label" type="Label" parent="Tower3Visual"]
+layout_mode = 0
+offset_left = 0.0
+offset_top = 5.0
+offset_right = 80.0
+offset_bottom = 25.0
+horizontal_alignment = 1
+text = "Tower 3"
+theme_override_font_sizes/font_size = 14
+
+[node name="FinalTowerVisual" type="ColorRect" parent="."]
+offset_left = 600.0
+offset_top = 640.0
+offset_right = 680.0
+offset_bottom = 710.0
+color = Color(0.6, 0.1, 0.1, 1)
+
+[node name="FinalTowerLabel" type="Label" parent="FinalTowerVisual"]
+layout_mode = 0
+offset_left = -10.0
+offset_top = 5.0
+offset_right = 90.0
+offset_bottom = 25.0
+horizontal_alignment = 1
+text = "Final Tower"
+theme_override_font_sizes/font_size = 12
+
+[node name="TowerEntrance1" type="Area2D" parent="."]
+position = Vector2(640, 75)
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("2")
+tower_id = 1
+
+[node name="Shape1" type="CollisionShape2D" parent="TowerEntrance1"]
+shape = SubResource("entrance_shape")
+
+[node name="TowerEntrance2" type="Area2D" parent="."]
+position = Vector2(80, 375)
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("2")
+tower_id = 2
+
+[node name="Shape2" type="CollisionShape2D" parent="TowerEntrance2"]
+shape = SubResource("entrance_shape")
+
+[node name="TowerEntrance3" type="Area2D" parent="."]
+position = Vector2(1200, 375)
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("2")
+tower_id = 3
+
+[node name="Shape3" type="CollisionShape2D" parent="TowerEntrance3"]
+shape = SubResource("entrance_shape")
+
+[node name="TowerEntranceFinal" type="Area2D" parent="."]
+position = Vector2(640, 675)
+collision_layer = 4
+collision_mask = 2
+script = ExtResource("2")
+tower_id = 4
+
+[node name="ShapeFinal" type="CollisionShape2D" parent="TowerEntranceFinal"]
+shape = SubResource("entrance_shape")
+
+[node name="ZiplineVisual1" type="ColorRect" parent="."]
+visible = false
+offset_left = 530.0
+offset_top = 560.0
+offset_right = 570.0
+offset_bottom = 590.0
+color = Color(0.8, 0.8, 0.2, 1)
+
+[node name="ZiplineVisual2" type="ColorRect" parent="."]
+visible = false
+offset_left = 620.0
+offset_top = 560.0
+offset_right = 660.0
+offset_bottom = 590.0
+color = Color(0.8, 0.8, 0.2, 1)
+
+[node name="ZiplineVisual3" type="ColorRect" parent="."]
+visible = false
+offset_left = 710.0
+offset_top = 560.0
+offset_right = 750.0
+offset_bottom = 590.0
+color = Color(0.8, 0.8, 0.2, 1)
+
+[node name="WallTop" type="StaticBody2D" parent="."]
+position = Vector2(640, -5)
+
+[node name="WallTopShape" type="CollisionShape2D" parent="WallTop"]
+shape = SubResource("chasm_shape")
+
+[node name="WallBottom" type="StaticBody2D" parent="."]
+position = Vector2(640, 725)
+
+[node name="WallBottomShape" type="CollisionShape2D" parent="WallBottom"]
+shape = SubResource("chasm_shape")
+
+[node name="SpawnLabel" type="Label" parent="."]
+offset_left = 570.0
+offset_top = 360.0
+offset_right = 710.0
+offset_bottom = 380.0
+horizontal_alignment = 1
+text = "Valley Spawn"
+theme_override_font_sizes/font_size = 14
+modulate = Color(1, 1, 1, 0.5)
+
+[node name="ChasmLabel" type="Label" parent="."]
+offset_left = 555.0
+offset_top = 530.0
+offset_right = 725.0
+offset_bottom = 555.0
+horizontal_alignment = 1
+text = "-- CHASM --"
+theme_override_font_sizes/font_size = 16
+modulate = Color(1, 0.3, 0.3, 1)
