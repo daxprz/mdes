@@ -19,6 +19,11 @@ var _attack_timer: float = 0.0
 var _anim_timer: float = 0.0
 var _anim_frame: int = 0
 var _target: Node2D = null
+var follow_target: Node2D = null  # Override for delegate mode
+
+
+func set_follow_target(target: Node2D) -> void:
+	follow_target = target
 
 const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
 
@@ -76,7 +81,8 @@ func _move_toward(target_pos: Vector2, _delta: float) -> void:
 
 
 func _follow_owner(_delta: float) -> void:
-	var owner_node := _find_owner()
+	# Use delegate target if set, otherwise find owner
+	var owner_node: Node2D = follow_target if is_instance_valid(follow_target) else _find_owner()
 	if not owner_node:
 		# Wander if owner not found
 		velocity = velocity.lerp(Vector2.ZERO, 0.1)

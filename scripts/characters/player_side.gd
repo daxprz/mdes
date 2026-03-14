@@ -84,6 +84,13 @@ const HEALER_BURST_MIN_RADIUS := 60.0
 const HEALER_BURST_MAX_RADIUS := 150.0
 
 # Stagger mechanic
+# Summoner delegate mode
+var _delegate_active: bool = false
+var _delegate_node: CharacterBody2D = null
+const DELEGATE_SPEED_MULT := 1.5
+const DELEGATE_JUMP_MULT := 1.5
+const DELEGATE_DMG_MULT := 1.5  # Summoner takes 50% more damage in delegate mode
+
 var _is_staggered: bool = false
 var _stagger_timer: float = 0.0
 const STAGGER_DURATION := 1.0
@@ -157,7 +164,7 @@ func _input(event: InputEvent) -> void:
 	if event.device != device_id:
 		return
 
-	for action in ["move_left", "move_right", "jump", "attack", "special", "block"]:
+	for action in ["move_left", "move_right", "jump", "attack", "special", "block", "interact"]:
 		if event.is_action_pressed(action):
 			_controller_actions[action] = true
 			_controller_just_pressed[action] = true
@@ -194,7 +201,17 @@ func _physics_process(delta: float) -> void:
 
 	_update_cooldowns(delta)
 	_update_combo_timer(delta)
+	_handle_delegate_toggle()
 	_handle_block()
+	if _delegate_active:
+		# Summoner is frozen in delegate mode - skip normal input
+		velocity.x = 0.0
+		_update_delegate(delta)
+		_update_health_bar()
+		_update_animation(delta)
+		move_and_slide()
+		_controller_just_pressed.clear()
+		return
 	_handle_movement()
 	_handle_jump()
 	_handle_wall_slide(delta)
@@ -625,9 +642,154 @@ func _special_summon_donut() -> void:
 	_donut_buddy_count += 1
 
 
+# -- Summoner Delegate Mode ----------------------------------------------------
+
+func _handle_delegate_toggle() -> void:
+	if character_class != PlayerManager.CharacterClass.SUMMONER:
+		return
+	if not _is_device_action_just_pressed("interact"):
+		return
+
+	if _delegate_active:
+		_exit_delegate_mode()
+	else:
+		_enter_delegate_mode()
+
+
+func _enter_delegate_mode() -> void:
+	_delegate_active = true
+	AudioManager.play("summon", -3.0, 1.5)
+	# Summoner goes into trance - semi-transparent, can't move
+	modulate = Color(0.6, 0.5, 0.8, 0.5)
+
+	# Spawn ghost delegate at summoner's position
+	_delegate_node = CharacterBody2D.new()
+	_delegate_node.collision_layer = 0  # Ghost - no physical collisions
+	_delegate_node.collision_mask = 1   # But stands on platforms
+	_delegate_node.global_position = global_position
+
+	# Ghost visual - small translucent version of summoner
+	var ghost_sprite := ColorRect.new()
+	ghost_sprite.name = "GhostSprite"
+	ghost_sprite.color = Color(0.8, 0.5, 1.0, 0.4)
+	ghost_sprite.size = Vector2(12, 20)
+	ghost_sprite.position = Vector2(-6, -14)
+	_delegate_node.add_child(ghost_sprite)
+
+	# Pulsing glow
+	var glow := ColorRect.new()
+	glow.name = "Glow"
+	glow.color = Color(0.7, 0.4, 1.0, 0.15)
+	glow.size = Vector2(20, 24)
+	glow.position = Vector2(-10, -16)
+	_delegate_node.add_child(glow)
+
+	# Label
+	var label := Label.new()
+	label.text = "DELEGATE"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 6)
+	label.position = Vector2(-20, -22)
+	label.modulate = Color(0.8, 0.6, 1.0)
+	_delegate_node.add_child(label)
+
+	# Collision shape for platform detection
+	var col := CollisionShape2D.new()
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(10, 18)
+	col.shape = shape
+	_delegate_node.add_child(col)
+
+	get_parent().add_child(_delegate_node)
+
+	# Tell all donut buddies to follow the delegate
+	_update_buddy_target()
+
+
+func _exit_delegate_mode() -> void:
+	_delegate_active = false
+	modulate = Color.WHITE
+	AudioManager.play("summon", -3.0, 0.8)
+
+	if is_instance_valid(_delegate_node):
+		# Tell buddies to return to summoner
+		_delegate_node.queue_free()
+		_delegate_node = null
+	_update_buddy_target()
+
+
+func _update_delegate(delta: float) -> void:
+	if not is_instance_valid(_delegate_node):
+		_exit_delegate_mode()
+		return
+
+	var speed: float = PlayerManager.get_player(player_index).get("speed", 95) * DELEGATE_SPEED_MULT
+
+	# Gravity
+	if not _delegate_node.is_on_floor():
+		_delegate_node.velocity.y += GRAVITY * delta
+		_delegate_node.velocity.y = minf(_delegate_node.velocity.y, 600.0)
+	else:
+		_delegate_node.velocity.y = 0.0
+
+	# Movement
+	var h_input := 0.0
+	if _is_device_action_pressed("move_left"):
+		h_input -= 1.0
+	if _is_device_action_pressed("move_right"):
+		h_input += 1.0
+	_delegate_node.velocity.x = h_input * speed
+
+	# Flip ghost visual
+	var ghost_sprite := _delegate_node.get_node_or_null("GhostSprite")
+	if ghost_sprite and h_input != 0.0:
+		ghost_sprite.position.x = -6.0 if h_input > 0 else -6.0
+
+	# Jump (1.5x height)
+	if _is_device_action_just_pressed("jump") and _delegate_node.is_on_floor():
+		_delegate_node.velocity.y = JUMP_VELOCITY * DELEGATE_JUMP_MULT
+		AudioManager.play("jump", -8.0, 1.5)
+
+	# Dash (special button)
+	if _is_device_action_just_pressed("special"):
+		var dash_dir := 1.0 if h_input >= 0 else -1.0
+		_delegate_node.global_position.x += dash_dir * 80.0
+		_spawn_vfx(Color(0.7, 0.4, 1.0, 0.3), Vector2(10, 18))
+		AudioManager.play("shadow_dash", -6.0, 1.3)
+
+	_delegate_node.move_and_slide()
+
+	# Pulsing glow effect
+	var glow := _delegate_node.get_node_or_null("Glow")
+	if glow:
+		glow.modulate.a = 0.1 + sin(Time.get_ticks_msec() * 0.005) * 0.08
+
+	# Continuously update buddy targets to follow delegate
+	_update_buddy_target()
+
+
+func _update_buddy_target() -> void:
+	# Point all donut buddies toward the delegate (or back to summoner)
+	var target_node: Node2D = _delegate_node if _delegate_active and is_instance_valid(_delegate_node) else self
+	for buddy in get_tree().get_nodes_in_group("donut_buddies"):
+		if buddy.get("owner_index") == player_index:
+			# Override the buddy's follow target
+			if buddy.has_method("set_follow_target"):
+				buddy.set_follow_target(target_node)
+			elif "follow_target" in buddy:
+				buddy.follow_target = target_node
+
+
 func take_damage(amount: int, source_index: int = -1) -> void:
 	if _shadow_dash_active or _is_dead:
 		return
+
+	# Delegate mode: summoner takes extra damage
+	if _delegate_active:
+		amount = int(amount * DELEGATE_DMG_MULT)
+		# Getting hit hard while delegating cancels it
+		if amount >= 15:
+			_exit_delegate_mode()
 
 	# Stagger: extra damage while staggered
 	if _is_staggered:
