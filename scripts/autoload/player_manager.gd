@@ -6,7 +6,7 @@ extends Node
 signal player_joined(player_index: int)
 signal player_left(player_index: int)
 
-enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE }
+enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER }
 
 const MAX_PLAYERS := 4
 
@@ -40,6 +40,18 @@ const CLASS_STATS := {
 		"max_mana": 60,
 		"speed": 150,
 		"mana_regen": 1.5,
+	},
+	CharacterClass.DEMOLITIONIST: {
+		"max_health": 100,
+		"max_mana": 100,
+		"speed": 105,
+		"mana_regen": 1.5,
+	},
+	CharacterClass.HEALER: {
+		"max_health": 90,
+		"max_mana": 130,
+		"speed": 95,
+		"mana_regen": 2.5,
 	},
 }
 
@@ -143,6 +155,8 @@ func _pick_random_class() -> CharacterClass:
 		CharacterClass.MAGE,
 		CharacterClass.SUMMONER,
 		CharacterClass.ROGUE,
+		CharacterClass.DEMOLITIONIST,
+		CharacterClass.HEALER,
 	]
 
 	# Prefer classes not yet taken.

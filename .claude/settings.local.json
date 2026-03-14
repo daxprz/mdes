@@ -20,7 +20,8 @@
       "Bash(git init:*)",
       "Bash(git lfs:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_new_classes.py)"
     ]
   }
 }

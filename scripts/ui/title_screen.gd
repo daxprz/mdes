@@ -11,6 +11,8 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.MAGE,
 	PlayerManager.CharacterClass.SUMMONER,
 	PlayerManager.CharacterClass.ROGUE,
+	PlayerManager.CharacterClass.DEMOLITIONIST,
+	PlayerManager.CharacterClass.HEALER,
 ]
 
 const CLASS_NAMES := {
@@ -19,6 +21,8 @@ const CLASS_NAMES := {
 	PlayerManager.CharacterClass.MAGE: "Mage",
 	PlayerManager.CharacterClass.SUMMONER: "Summoner",
 	PlayerManager.CharacterClass.ROGUE: "Rogue",
+	PlayerManager.CharacterClass.DEMOLITIONIST: "Demolitionist",
+	PlayerManager.CharacterClass.HEALER: "Healer",
 }
 
 const CLASS_COLORS := {
@@ -27,6 +31,8 @@ const CLASS_COLORS := {
 	PlayerManager.CharacterClass.MAGE: Color(0.3, 0.4, 0.95),
 	PlayerManager.CharacterClass.SUMMONER: Color(0.8, 0.5, 0.9),
 	PlayerManager.CharacterClass.ROGUE: Color(0.95, 0.85, 0.2),
+	PlayerManager.CharacterClass.DEMOLITIONIST: Color(0.9, 0.6, 0.1),
+	PlayerManager.CharacterClass.HEALER: Color(0.3, 0.9, 0.4),
 }
 
 const EMPTY_SLOT_COLOR := Color(0.3, 0.3, 0.3, 1.0)

@@ -10,6 +10,8 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.MAGE: "res://assets/sprites/characters/mage_side.png",
 	PlayerManager.CharacterClass.SUMMONER: "res://assets/sprites/characters/summoner_side.png",
 	PlayerManager.CharacterClass.ROGUE: "res://assets/sprites/characters/rogue_side.png",
+	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_side.png",
+	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -46,7 +48,13 @@ var _combo_count: int = 0
 var _combo_timer: float = 0.0
 const COMBO_WINDOW := 0.6  # Seconds to chain next hit
 const COMBO_DAMAGES := [30, 40, 55]
-const COMBO_RANGES := [20.0, 22.0, 28.0]  # Final hit has wider reach
+const COMBO_RANGES := [28.0, 31.0, 39.0]  # Buffed ~40% from [20, 22, 28]
+const COMBO_SWING_COLORS: Array[Color] = [
+	Color(1.0, 1.0, 1.0, 0.6),  # hit1 = white
+	Color(1.0, 1.0, 0.3, 0.6),  # hit2 = yellow
+	Color(1.0, 0.6, 0.1, 0.6),  # hit3 = orange
+]
+const COMBO_PITCHES: Array[float] = [1.0, 0.9, 0.7]
 
 # Melee ground slam
 var _ground_slam_active: bool = false
@@ -54,6 +62,27 @@ var _ground_slam_damage := 45
 var _revive_progress: float = 0.0
 const REVIVE_TIME := 3.0
 const REVIVE_RANGE := 60.0
+
+# Charge attack system
+var _charge_time: float = 0.0
+var _is_charging: bool = false
+var _was_pressing_attack: bool = false
+var _charge_smoke_timer: float = 0.0
+var _charge_hover_time: float = 0.0
+const CHARGE_MIN := 0.5
+const CHARGE_MAX := 3.0
+
+# Stagger mechanic
+var _is_staggered: bool = false
+var _stagger_timer: float = 0.0
+const STAGGER_DURATION := 1.0
+const STAGGER_DAMAGE_MULT := 1.25
+
+# Block / Parry system
+var _is_blocking: bool = false
+var _block_start_time: float = 0.0
+var _block_shield_vfx: ColorRect = null
+const PARRY_WINDOW := 0.2  # seconds after block starts where parry is active
 
 # Controller state tracking
 var _controller_actions: Dictionary = {}
@@ -117,7 +146,7 @@ func _input(event: InputEvent) -> void:
 	if event.device != device_id:
 		return
 
-	for action in ["move_left", "move_right", "jump", "attack", "special"]:
+	for action in ["move_left", "move_right", "jump", "attack", "special", "block"]:
 		if event.is_action_pressed(action):
 			_controller_actions[action] = true
 			_controller_just_pressed[action] = true
@@ -134,11 +163,31 @@ func _physics_process(delta: float) -> void:
 		_controller_just_pressed.clear()
 		return
 
+	# Stagger update - skip all input while staggered
+	if _is_staggered:
+		_stagger_timer -= delta
+		# Rapid shake while staggered
+		var shake_offset: float = sin(Time.get_ticks_msec() * 0.04) * 3.0
+		position.x += shake_offset
+		if _stagger_timer <= 0.0:
+			_is_staggered = false
+			# Remove stagger stars VFX
+			var stars := get_node_or_null("StaggerStars")
+			if stars:
+				stars.queue_free()
+		_update_health_bar()
+		_update_animation(delta)
+		move_and_slide()
+		_controller_just_pressed.clear()
+		return
+
 	_update_cooldowns(delta)
 	_update_combo_timer(delta)
+	_handle_block()
 	_handle_movement()
 	_handle_jump()
 	_handle_wall_slide(delta)
+	_handle_charge(delta)
 	_check_ground_slam_landing()
 	_update_health_bar()
 	_handle_attack(delta)
@@ -173,6 +222,8 @@ func _handle_movement() -> void:
 		h_input += 1.0
 
 	var speed: float = PlayerManager.get_player(player_index).get("speed", 100)
+	if _is_blocking:
+		speed *= 0.5
 	velocity.x = h_input * speed
 
 	if h_input != 0.0:
@@ -254,8 +305,8 @@ func _update_animation(delta: float) -> void:
 
 # -- Attack --------------------------------------------------------------------
 
-func _handle_attack(delta: float) -> void:
-	if _attack_cooldown > 0.0:
+func _handle_attack(_delta: float) -> void:
+	if _attack_cooldown > 0.0 or _is_charging:
 		return
 	if not _is_device_action_just_pressed("attack"):
 		return
@@ -278,6 +329,10 @@ func _perform_attack() -> void:
 			_attack_summoner()
 		PlayerManager.CharacterClass.ROGUE:
 			_attack_rogue()
+		PlayerManager.CharacterClass.DEMOLITIONIST:
+			_attack_demolitionist()
+		PlayerManager.CharacterClass.HEALER:
+			_attack_healer()
 
 
 func _attack_melee() -> void:
@@ -293,12 +348,14 @@ func _attack_melee() -> void:
 	var damage: int = COMBO_DAMAGES[combo_idx]
 	var reach: float = COMBO_RANGES[combo_idx]
 
-	# Final combo hit plays a heavier sound
-	if combo_idx == COMBO_DAMAGES.size() - 1:
-		AudioManager.play("sword_slash", 2.0, 0.75)
-		_spawn_vfx(Color(1.0, 0.8, 0.2, 0.6), Vector2(reach * 2, 24))
-	else:
-		AudioManager.play("sword_slash")
+	# Per-combo sound with distinct pitch
+	var pitch: float = COMBO_PITCHES[combo_idx]
+	var volume: float = 0.0 if combo_idx < COMBO_DAMAGES.size() - 1 else 2.0
+	AudioManager.play("sword_slash", volume, pitch)
+
+	# Spawn swing arc VFX with per-combo color
+	var arc_color: Color = COMBO_SWING_COLORS[combo_idx]
+	_spawn_swing_arc(reach, arc_color)
 
 	var offset := Vector2(reach if _facing_right else -reach, 0.0)
 	attack_area.position = offset
@@ -398,19 +455,30 @@ func _check_ground_slam_landing() -> void:
 	_ground_slam_active = false
 	modulate = Color.WHITE
 	AudioManager.play("explosion", -4.0, 1.4)
-	# Big AoE shockwave VFX
-	_spawn_vfx(Color(1.0, 0.5, 0.1, 0.7), Vector2(80, 16))
+
+	# Charge ratio determines blast radius and damage (0.0 if no charge)
+	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0) if _charge_time >= CHARGE_MIN else 0.0
+	var blast_radius: float = lerpf(40.0, 120.0, charge_ratio) if charge_ratio > 0.0 else 80.0
+	var slam_damage: int = int(lerpf(30.0, 80.0, charge_ratio)) if charge_ratio > 0.0 else _ground_slam_damage
+
+	# Big AoE shockwave VFX - size scales with charge
+	_spawn_vfx(Color(1.0, 0.5, 0.1, 0.7), Vector2(blast_radius * 2.0, 16))
+
+	# Screen shake - briefly offset camera
+	_screen_shake(charge_ratio * 8.0 + 2.0, 0.2)
 
 	# Damage all nearby enemies on the ground
 	for body in get_tree().get_nodes_in_group("enemies"):
 		if not body is Node2D:
 			continue
 		var dist: float = global_position.distance_to(body.global_position)
-		if dist < 80.0 and body.has_method("take_damage"):
-			body.take_damage(_ground_slam_damage, player_index)
+		if dist < blast_radius and body.has_method("take_damage"):
+			body.take_damage(slam_damage, player_index)
 			if body.has_method("apply_knockback"):
 				var kb: Vector2 = (body.global_position - global_position).normalized()
 				body.apply_knockback(kb * 250.0)
+
+	_charge_time = 0.0
 
 
 # -- Special Abilities ---------------------------------------------------------
@@ -437,11 +505,16 @@ func _perform_special() -> void:
 			_special_summon_donut()
 		PlayerManager.CharacterClass.ROGUE:
 			_special_shadow_dash()
+		PlayerManager.CharacterClass.DEMOLITIONIST:
+			_special_big_bomb()
+		PlayerManager.CharacterClass.HEALER:
+			_special_healing_burst()
 
 
 func _special_shield_charge() -> void:
 	AudioManager.play("shield_charge", 2.0, 0.9)
 	var dash_speed := 600.0
+	var charge_dir := Vector2(1.0 if _facing_right else -1.0, 0.0)
 	velocity.x = dash_speed if _facing_right else -dash_speed
 	velocity.y = -120.0  # Slight lift
 
@@ -449,6 +522,9 @@ func _special_shield_charge() -> void:
 	collision_layer = 0
 	modulate = Color(0.4, 0.7, 1.0)  # Bright blue
 	_spawn_vfx(Color(0.3, 0.6, 1.0, 0.8), Vector2(48, 24))
+
+	# Dash wave - perpendicular to charge direction
+	_spawn_dash_wave(global_position, charge_dir, 5)
 
 	# Hit everything in path across multiple frames
 	attack_area.monitoring = true
@@ -525,9 +601,36 @@ func _special_summon_donut() -> void:
 	_donut_buddy_count += 1
 
 
-func take_damage(amount: int, _source_index: int = -1) -> void:
+func take_damage(amount: int, source_index: int = -1) -> void:
 	if _shadow_dash_active or _is_dead:
 		return
+
+	# Stagger: extra damage while staggered
+	if _is_staggered:
+		amount = int(amount * STAGGER_DAMAGE_MULT)
+
+	# Block/Parry check
+	if _is_blocking:
+		var time_since_block: float = Time.get_ticks_msec() / 1000.0 - _block_start_time
+		if time_since_block < PARRY_WINDOW:
+			# PERFECT PARRY - no damage, stun attacker, bright flash
+			AudioManager.play("sword_slash", 4.0, 1.5)
+			_spawn_vfx(Color(1.0, 1.0, 1.0, 0.9), Vector2(48, 48))
+			modulate = Color(1.0, 1.0, 0.8)
+			var parry_tween := create_tween()
+			parry_tween.tween_property(self, "modulate", Color.WHITE, 0.15)
+			# Stun the attacker if we can find them
+			if source_index >= 0:
+				_stun_source(source_index)
+			return
+		else:
+			# Regular block - 50% damage reduction
+			amount = int(amount * 0.5)
+
+	# Interrupt charge → apply stagger
+	if _is_charging:
+		_apply_stagger()
+
 	PlayerManager.damage_player(player_index, amount)
 	_update_health_bar()
 
@@ -692,12 +795,17 @@ func _special_shadow_dash() -> void:
 
 	AudioManager.play("shadow_dash")
 	_spawn_vfx(Color(0.8, 0.2, 0.2, 0.5), Vector2(14, 28))
+	var dash_start: Vector2 = global_position
 	global_position = target_pos
 	# Arrive flash
 	_spawn_vfx(Color(0.8, 0.2, 0.2, 0.5), Vector2(14, 28))
 	modulate = Color(1.0, 1.0, 1.0, 0.4)
 	collision_layer = 0
 	_shadow_dash_active = true
+
+	# Dash wave - perpendicular to dash direction, rogue deals 10 damage
+	_spawn_dash_wave(dash_start, direction, 10)
+
 	await get_tree().create_timer(0.3).timeout
 	if is_inside_tree():
 		collision_layer = 2
@@ -718,6 +826,645 @@ func _spawn_vfx(color: Color, size: Vector2) -> void:
 	tween.tween_property(vfx, "scale", Vector2(2.0, 2.0), 0.3)
 	tween.tween_property(vfx, "modulate:a", 0.0, 0.3)
 	tween.chain().tween_callback(vfx.queue_free)
+
+
+func _spawn_swing_arc(reach: float, color: Color) -> void:
+	# Wide thin arc VFX at attack position
+	var arc := ColorRect.new()
+	arc.color = color
+	arc.size = Vector2(reach * 2.5, 6)
+	var arc_offset_x: float = reach * 0.8 if _facing_right else -reach * 0.8 - reach * 2.5
+	arc.position = global_position + Vector2(arc_offset_x, -3.0)
+	arc.pivot_offset = Vector2(0.0 if _facing_right else reach * 2.5, 3.0)
+	get_parent().add_child(arc)
+	var tween := arc.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(arc, "scale:y", 2.5, 0.15)
+	tween.tween_property(arc, "modulate:a", 0.0, 0.15)
+	tween.chain().tween_callback(arc.queue_free)
+
+
+func _spawn_expanding_ring(center: Vector2, max_radius: float, color: Color, duration: float) -> void:
+	var ring := ColorRect.new()
+	ring.color = color
+	ring.size = Vector2(max_radius * 2.0, max_radius * 2.0)
+	ring.position = center - Vector2(max_radius, max_radius)
+	ring.scale = Vector2(0.1, 0.1)
+	ring.pivot_offset = Vector2(max_radius, max_radius)
+	get_parent().add_child(ring)
+	var tween := ring.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ring, "scale", Vector2(1.0, 1.0), duration)
+	tween.tween_property(ring, "modulate:a", 0.0, duration)
+	tween.chain().tween_callback(ring.queue_free)
+
+
+func _screen_shake(intensity: float, duration: float) -> void:
+	var camera := get_viewport().get_camera_2d()
+	if not camera:
+		return
+	var original_offset: Vector2 = camera.offset
+	var shake_tween := create_tween()
+	var steps: int = int(duration / 0.03)
+	for i in range(steps):
+		var shake_x: float = randf_range(-intensity, intensity)
+		var shake_y: float = randf_range(-intensity, intensity)
+		shake_tween.tween_property(camera, "offset", original_offset + Vector2(shake_x, shake_y), 0.03)
+	shake_tween.tween_property(camera, "offset", original_offset, 0.03)
+
+
+# -- Block / Parry -------------------------------------------------------------
+
+func _handle_block() -> void:
+	var pressing_block: bool = _is_device_action_pressed("block")
+	if pressing_block and not _is_blocking:
+		# Start blocking
+		_is_blocking = true
+		_block_start_time = Time.get_ticks_msec() / 1000.0
+		# Spawn shield VFX in front of character
+		if _block_shield_vfx == null or not is_instance_valid(_block_shield_vfx):
+			_block_shield_vfx = ColorRect.new()
+			_block_shield_vfx.color = Color(0.4, 0.7, 1.0, 0.4)
+			_block_shield_vfx.size = Vector2(8, 28)
+			add_child(_block_shield_vfx)
+		_block_shield_vfx.visible = true
+		_block_shield_vfx.position = Vector2(14.0 if _facing_right else -22.0, -14.0)
+	elif pressing_block and _is_blocking:
+		# Update shield position while blocking
+		if _block_shield_vfx and is_instance_valid(_block_shield_vfx):
+			_block_shield_vfx.position = Vector2(14.0 if _facing_right else -22.0, -14.0)
+	elif not pressing_block and _is_blocking:
+		# Stop blocking
+		_is_blocking = false
+		if _block_shield_vfx and is_instance_valid(_block_shield_vfx):
+			_block_shield_vfx.visible = false
+
+
+func _stun_source(source_idx: int) -> void:
+	# Find the attacker (player or enemy) by source_index and stagger/stun them
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body.has_method("apply_stun"):
+			if body is Node2D:
+				var dist: float = global_position.distance_to(body.global_position)
+				if dist < 60.0:
+					body.apply_stun(1.0)
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == self:
+			continue
+		if p.has_method("_apply_stagger") and p.get("player_index") == source_idx:
+			p._apply_stagger()
+
+
+# -- Stagger -------------------------------------------------------------------
+
+func _apply_stagger() -> void:
+	_is_staggered = true
+	_stagger_timer = STAGGER_DURATION
+	_is_charging = false
+	_charge_time = 0.0
+	modulate = Color(1.0, 1.0, 0.5)
+	# Spawn star VFX above head
+	var stars := Label.new()
+	stars.name = "StaggerStars"
+	stars.text = "***"
+	stars.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stars.add_theme_font_size_override("font_size", 10)
+	stars.position = Vector2(-12, -34)
+	stars.modulate = Color.YELLOW
+	add_child(stars)
+
+
+# -- Charge Attack System ------------------------------------------------------
+
+func _handle_charge(delta: float) -> void:
+	var pressing_attack: bool = _is_device_action_pressed("attack")
+
+	if pressing_attack and not _was_pressing_attack:
+		# Button just pressed - start potential charge (normal attack fires via _handle_attack)
+		pass
+	elif pressing_attack and _was_pressing_attack:
+		# Button held - charging
+		if not _is_charging and _attack_cooldown <= 0.0:
+			_is_charging = true
+			_charge_time = 0.0
+			_charge_smoke_timer = 0.0
+			_charge_hover_time = 0.0
+		if _is_charging:
+			_charge_time = minf(_charge_time + delta, CHARGE_MAX)
+			var charge_ratio: float = clampf(_charge_time / CHARGE_MAX, 0.0, 1.0)
+			# Glow toward yellow while charging
+			var glow_color := Color(1.0, 1.0, 1.0 - charge_ratio * 0.7, 1.0)
+			modulate = glow_color
+			# Spawn small charge particles periodically
+			_charge_smoke_timer += delta
+			if _charge_smoke_timer >= 0.1:
+				_charge_smoke_timer -= 0.1
+				var particle_color := Color(1.0, 0.9, 0.3, 0.4 * charge_ratio)
+				_spawn_vfx(particle_color, Vector2(6, 6))
+			# If airborne + melee, hover and oscillate
+			if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
+				velocity.y = 0.0
+				_charge_hover_time += delta
+				position.x += sin(_charge_hover_time * 20.0) * 2.0 * delta * 20.0
+	elif not pressing_attack and _was_pressing_attack and _is_charging:
+		# Button released while charging
+		_is_charging = false
+		modulate = Color.WHITE
+		if _charge_time >= CHARGE_MIN:
+			# Fire charged attack
+			_attack_cooldown = ATTACK_COOLDOWN_TIME
+			_is_attacking = true
+			_attack_timer = ATTACK_DURATION
+			_perform_charged_attack()
+		_charge_time = 0.0
+
+	_was_pressing_attack = pressing_attack
+
+
+func _perform_charged_attack() -> void:
+	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0)
+
+	match character_class:
+		PlayerManager.CharacterClass.MELEE:
+			_charged_melee_slam(charge_ratio)
+		PlayerManager.CharacterClass.RANGED:
+			_charged_ranged_shot(charge_ratio)
+		PlayerManager.CharacterClass.MAGE:
+			_charged_mage_bolt(charge_ratio)
+		PlayerManager.CharacterClass.SUMMONER:
+			_charged_summoner_donut(charge_ratio)
+		PlayerManager.CharacterClass.ROGUE:
+			_charged_rogue_backstab(charge_ratio)
+		PlayerManager.CharacterClass.DEMOLITIONIST:
+			_charged_demo_mega_bomb(charge_ratio)
+		PlayerManager.CharacterClass.HEALER:
+			_charged_healer_wave(charge_ratio)
+
+
+func _charged_melee_slam(charge_ratio: float) -> void:
+	if not is_on_floor():
+		# Already hovering, slam down
+		_ground_slam_active = true
+		velocity.y = 600.0 + charge_ratio * 200.0
+		AudioManager.play("sword_slash", 2.0, 0.5)
+		modulate = Color(1.0, 0.4, 0.1)
+	else:
+		# On ground: AoE stomp
+		var blast_radius: float = lerpf(40.0, 120.0, charge_ratio)
+		var damage: int = int(lerpf(30.0, 80.0, charge_ratio))
+		AudioManager.play("explosion", -2.0, 1.2)
+		_spawn_vfx(Color(1.0, 0.5, 0.1, 0.7), Vector2(blast_radius * 2.0, 16))
+		_screen_shake(charge_ratio * 8.0 + 2.0, 0.2)
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < blast_radius and body.has_method("take_damage"):
+				body.take_damage(damage, player_index)
+				if body.has_method("apply_knockback"):
+					var kb: Vector2 = (body.global_position - global_position).normalized()
+					body.apply_knockback(kb * (200.0 + charge_ratio * 150.0))
+
+
+func _charged_ranged_shot(charge_ratio: float) -> void:
+	var damage: int = int(lerpf(20.0, 50.0, charge_ratio))
+	AudioManager.play("crossbow_shoot", 2.0, 0.7)
+	_spawn_vfx(Color(0.8, 0.8, 0.2, 0.6), Vector2(20, 12))
+	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
+	if not projectile_scene:
+		return
+	var proj := projectile_scene.instantiate()
+	proj.damage = damage
+	proj.speed = 450.0
+	proj.direction = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	proj.projectile_type = "crossbow_bolt"
+	proj.owner_index = player_index
+	if proj.has_method("set_piercing"):
+		proj.set_piercing(true)
+	proj.global_position = global_position + Vector2(16.0 if _facing_right else -16.0, 0.0)
+	proj.scale = Vector2(1.5 + charge_ratio, 1.5 + charge_ratio)
+	get_parent().add_child(proj)
+
+
+func _charged_mage_bolt(charge_ratio: float) -> void:
+	var damage: int = int(lerpf(25.0, 60.0, charge_ratio))
+	var aoe_radius: float = lerpf(30.0, 80.0, charge_ratio)
+	if not PlayerManager.use_mana(player_index, 25):
+		_spawn_fail_flash()
+		return
+	AudioManager.play("magic_bolt", 2.0, 0.6)
+	_spawn_vfx(Color(0.6, 0.3, 1.0, 0.7), Vector2(16, 16))
+	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
+	if not projectile_scene:
+		return
+	var proj := projectile_scene.instantiate()
+	proj.damage = damage
+	proj.speed = 280.0
+	proj.direction = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	proj.projectile_type = "magic_bolt"
+	proj.owner_index = player_index
+	if proj.has_method("set_explosion_radius"):
+		proj.set_explosion_radius(aoe_radius)
+	proj.global_position = global_position + Vector2(16.0 if _facing_right else -16.0, 0.0)
+	proj.scale = Vector2(1.0 + charge_ratio * 0.8, 1.0 + charge_ratio * 0.8)
+	get_parent().add_child(proj)
+
+
+func _charged_summoner_donut(charge_ratio: float) -> void:
+	if _donut_buddy_count >= 3:
+		_spawn_fail_flash()
+		return
+	if not PlayerManager.use_mana(player_index, 40):
+		_spawn_fail_flash()
+		return
+
+	var buddy_scale: float = lerpf(1.5, 2.5, charge_ratio)
+	var buddy_hp: int = int(lerpf(30.0, 80.0, charge_ratio))
+	var buddy_dmg: int = int(lerpf(8.0, 20.0, charge_ratio))
+
+	AudioManager.play("summon", 2.0, 0.8)
+	_spawn_vfx(Color(1.0, 0.8, 0.2, 0.8), Vector2(40, 40))
+	var buddy_scene := load("res://scenes/characters/donut_buddy.tscn") as PackedScene
+	if not buddy_scene:
+		return
+	var buddy := buddy_scene.instantiate()
+	buddy.owner_index = player_index
+	if buddy.has_method("set_empowered"):
+		buddy.set_empowered(buddy_hp, buddy_dmg)
+	buddy.scale = Vector2(buddy_scale, buddy_scale)
+	buddy.global_position = global_position + Vector2(24.0 if _facing_right else -24.0, 0.0)
+	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
+	get_parent().add_child(buddy)
+	_donut_buddy_count += 1
+
+
+func _charged_rogue_backstab(charge_ratio: float) -> void:
+	var damage: int = int(lerpf(30.0, 70.0, charge_ratio))
+	var nearest_enemy: Node2D = null
+	var nearest_dist: float = 150.0
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest_enemy = body as Node2D
+
+	if nearest_enemy:
+		var behind_offset: float = -20.0 if nearest_enemy.global_position.x > global_position.x else 20.0
+		var teleport_pos := Vector2(nearest_enemy.global_position.x + behind_offset, nearest_enemy.global_position.y)
+		_spawn_vfx(Color(0.5, 0.0, 0.5, 0.6), Vector2(14, 28))
+		global_position = teleport_pos
+		_facing_right = nearest_enemy.global_position.x > global_position.x
+		sprite.flip_h = not _facing_right
+		_spawn_vfx(Color(0.5, 0.0, 0.5, 0.6), Vector2(14, 28))
+		AudioManager.play("dagger_stab", 3.0, 0.7)
+		if nearest_enemy.has_method("take_damage"):
+			nearest_enemy.take_damage(damage, player_index)
+	else:
+		AudioManager.play("dagger_stab", 1.0, 0.8)
+		var offset := Vector2(18.0 if _facing_right else -18.0, 0.0)
+		attack_area.position = offset
+		attack_area.monitoring = true
+		for body in attack_area.get_overlapping_bodies():
+			if body.has_method("take_damage"):
+				body.take_damage(damage, player_index)
+		await get_tree().create_timer(0.1).timeout
+		if is_inside_tree():
+			attack_area.monitoring = false
+
+
+func _charged_demo_mega_bomb(charge_ratio: float) -> void:
+	var blast_radius: float = lerpf(60.0, 140.0, charge_ratio)
+	var damage: int = int(lerpf(30.0, 70.0, charge_ratio))
+	var fragment_count: int = int(lerpf(0.0, 5.0, charge_ratio))
+
+	AudioManager.play("explosion", 2.0, 0.7)
+	_spawn_vfx(Color(1.0, 0.4, 0.1, 0.8), Vector2(blast_radius * 2.0, blast_radius * 2.0))
+	_screen_shake(charge_ratio * 6.0 + 2.0, 0.25)
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < blast_radius and body.has_method("take_damage"):
+			body.take_damage(damage, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - global_position).normalized()
+				body.apply_knockback(kb * 300.0)
+
+	# Spawn fragment mini-bombs
+	for i in range(fragment_count):
+		var angle: float = randf() * TAU
+		var frag_offset := Vector2(cos(angle), sin(angle)) * (blast_radius * 0.5)
+		var frag_pos: Vector2 = global_position + frag_offset
+		_spawn_fragment_bomb(frag_pos, int(damage * 0.3))
+
+
+func _spawn_fragment_bomb(pos: Vector2, damage: int) -> void:
+	var frag_vfx := ColorRect.new()
+	frag_vfx.color = Color(1.0, 0.6, 0.1, 0.7)
+	frag_vfx.size = Vector2(8, 8)
+	frag_vfx.position = pos - Vector2(4, 4)
+	get_parent().add_child(frag_vfx)
+
+	await get_tree().create_timer(0.3).timeout
+	if not is_inside_tree():
+		return
+	AudioManager.play("explosion", -6.0, 1.6)
+	frag_vfx.color = Color(1.0, 0.3, 0.0, 0.9)
+	frag_vfx.size = Vector2(24, 24)
+	frag_vfx.position = pos - Vector2(12, 12)
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = pos.distance_to(body.global_position)
+		if dist < 30.0 and body.has_method("take_damage"):
+			body.take_damage(damage, player_index)
+	var tween := frag_vfx.create_tween()
+	tween.tween_property(frag_vfx, "modulate:a", 0.0, 0.2)
+	tween.tween_callback(frag_vfx.queue_free)
+
+
+func _charged_healer_wave(charge_ratio: float) -> void:
+	var wave_radius: float = lerpf(60.0, 200.0, charge_ratio)
+	var heal_amount: int = int(lerpf(15.0, 50.0, charge_ratio))
+
+	if not PlayerManager.use_mana(player_index, 35):
+		_spawn_fail_flash()
+		return
+
+	AudioManager.play("summon", 0.0, 1.3)
+	_spawn_expanding_ring(global_position, wave_radius, Color(0.3, 1.0, 0.4, 0.6), 0.5)
+
+	# Heal all allies within radius
+	for p in get_tree().get_nodes_in_group("players"):
+		if not p is Node2D:
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < wave_radius and p.has_method("receive_heal"):
+			p.receive_heal(heal_amount)
+	# Self heal
+	receive_heal(heal_amount)
+
+	# Stun nearby enemies
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < wave_radius and body.has_method("apply_stun"):
+			body.apply_stun(1.5)
+
+
+func receive_heal(amount: int) -> void:
+	var p_data := PlayerManager.get_player(player_index)
+	if p_data.is_empty():
+		return
+	p_data["health"] = mini(p_data["health"] + amount, p_data["max_health"])
+	_update_health_bar()
+	modulate = Color(0.4, 1.0, 0.4)
+	var tween := create_tween()
+	tween.tween_property(self, "modulate", Color.WHITE, 0.2)
+
+
+# -- Dash Wave -----------------------------------------------------------------
+
+func _spawn_dash_wave(start_pos: Vector2, dash_dir: Vector2, damage: int) -> void:
+	var perp_dir := Vector2(-dash_dir.y, dash_dir.x)
+
+	var wave := ColorRect.new()
+	wave.color = Color(0.6, 0.8, 1.0, 0.5)
+	wave.size = Vector2(4, 40)
+	var mid_pos: Vector2 = (start_pos + global_position) * 0.5
+	wave.position = mid_pos - Vector2(2, 20)
+	wave.rotation = atan2(perp_dir.y, perp_dir.x)
+	get_parent().add_child(wave)
+
+	var wave_tween := wave.create_tween()
+	wave_tween.set_parallel(true)
+	wave_tween.tween_property(wave, "scale", Vector2(3.0, 2.5), 0.3)
+	wave_tween.tween_property(wave, "modulate:a", 0.0, 0.3)
+	wave_tween.chain().tween_callback(wave.queue_free)
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = mid_pos.distance_to(body.global_position)
+		if dist < 50.0 and body.has_method("take_damage"):
+			body.take_damage(damage, player_index)
+			if body.has_method("apply_knockback"):
+				var push_dir: Vector2 = (body.global_position - mid_pos).normalized()
+				body.apply_knockback(push_dir * 120.0)
+
+
+# -- Demolitionist -------------------------------------------------------------
+
+func _attack_demolitionist() -> void:
+	AudioManager.play("explosion", -6.0, 1.3)
+	# Spawn a bomb projectile that arcs with gravity
+	var bomb := ColorRect.new()
+	bomb.color = Color(0.9, 0.6, 0.1)
+	bomb.size = Vector2(8, 8)
+	bomb.z_index = 5
+	get_parent().add_child(bomb)
+	bomb.global_position = global_position + Vector2(12.0 if _facing_right else -12.0, -4.0)
+
+	var bomb_vel := Vector2(180.0 if _facing_right else -180.0, -200.0)
+	var bomb_gravity := 500.0
+	var bomb_time := 0.0
+	var bomb_max_time := 1.5
+	var bomb_bounced := false
+
+	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+		var dt: float = get_process_delta_time()
+		bomb_time += dt
+		bomb_vel.y += bomb_gravity * dt
+		bomb.global_position += bomb_vel * dt
+
+		# Bounce once off floor
+		if bomb.global_position.y > global_position.y + 8.0 and not bomb_bounced:
+			bomb_bounced = true
+			bomb_vel.y = -120.0
+			bomb_vel.x *= 0.5
+
+		# Check enemy hit
+		var hit_enemy := false
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = bomb.global_position.distance_to(body.global_position)
+			if dist < 20.0:
+				hit_enemy = true
+				break
+		if hit_enemy:
+			break
+		await get_tree().process_frame
+
+	# Explode
+	if is_instance_valid(bomb):
+		var explode_pos: Vector2 = bomb.global_position
+		bomb.queue_free()
+		_demolitionist_explode(explode_pos, 25, 60.0)
+
+
+func _demolitionist_explode(pos: Vector2, damage: int, radius: float) -> void:
+	AudioManager.play("explosion")
+	# Orange VFX burst
+	var vfx := ColorRect.new()
+	vfx.color = Color(0.9, 0.6, 0.1, 0.8)
+	vfx.size = Vector2(radius * 2, radius * 2)
+	vfx.position = pos - Vector2(radius, radius)
+	get_parent().add_child(vfx)
+	var tween := vfx.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(vfx, "scale", Vector2(1.5, 1.5), 0.3)
+	tween.tween_property(vfx, "modulate:a", 0.0, 0.3)
+	tween.chain().tween_callback(vfx.queue_free)
+
+	# Damage enemies in radius
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = pos.distance_to(body.global_position)
+		if dist < radius and body.has_method("take_damage"):
+			body.take_damage(damage, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - pos).normalized()
+				body.apply_knockback(kb * 200.0)
+
+
+func _special_big_bomb() -> void:
+	if not PlayerManager.use_mana(player_index, 40):
+		_special_cooldown = 0.0
+		_spawn_fail_flash()
+		return
+
+	AudioManager.play("explosion", -3.0, 0.8)
+	# Spawn a bigger bomb projectile
+	var bomb := ColorRect.new()
+	bomb.color = Color(1.0, 0.4, 0.0)
+	bomb.size = Vector2(12, 12)
+	bomb.z_index = 5
+	get_parent().add_child(bomb)
+	bomb.global_position = global_position + Vector2(12.0 if _facing_right else -12.0, -4.0)
+
+	var bomb_vel := Vector2(160.0 if _facing_right else -160.0, -220.0)
+	var bomb_gravity := 450.0
+	var bomb_time := 0.0
+	var bomb_max_time := 1.5
+	var bomb_bounced := false
+
+	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+		var dt: float = get_process_delta_time()
+		bomb_time += dt
+		bomb_vel.y += bomb_gravity * dt
+		bomb.global_position += bomb_vel * dt
+
+		if bomb.global_position.y > global_position.y + 8.0 and not bomb_bounced:
+			bomb_bounced = true
+			bomb_vel.y = -100.0
+			bomb_vel.x *= 0.4
+
+		var hit_enemy := false
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = bomb.global_position.distance_to(body.global_position)
+			if dist < 24.0:
+				hit_enemy = true
+				break
+		if hit_enemy:
+			break
+		await get_tree().process_frame
+
+	if is_instance_valid(bomb):
+		var explode_pos: Vector2 = bomb.global_position
+		bomb.queue_free()
+		_demolitionist_explode(explode_pos, 50, 90.0)
+
+
+# -- Healer -------------------------------------------------------------------
+
+func _attack_healer() -> void:
+	# Staff swing: 10 damage to enemies (like summoner bonk)
+	AudioManager.play("staff_bonk")
+	var offset := Vector2(16.0 if _facing_right else -16.0, 0.0)
+	attack_area.position = offset
+	attack_area.monitoring = true
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(10, player_index)
+	await get_tree().create_timer(0.15).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+	# Heal nearest injured ally within 120px
+	var nearest_ally: Node2D = null
+	var nearest_dist: float = 120.0
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == self or not (p is CharacterBody2D):
+			continue
+		if p.get("_is_dead"):
+			continue
+		var p_idx: int = p.get("player_index")
+		var p_data: Dictionary = PlayerManager.get_player(p_idx)
+		if p_data.is_empty():
+			continue
+		if p_data["health"] >= p_data["max_health"]:
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest_ally = p
+
+	if nearest_ally != null:
+		var ally_idx: int = nearest_ally.get("player_index")
+		PlayerManager.heal_player(ally_idx, 8)
+		# Green line VFX from healer to ally
+		var line_vfx := ColorRect.new()
+		line_vfx.color = Color(0.3, 0.9, 0.4, 0.7)
+		var dir_to_ally: Vector2 = nearest_ally.global_position - global_position
+		var line_len: float = dir_to_ally.length()
+		line_vfx.size = Vector2(line_len, 3)
+		line_vfx.position = global_position
+		line_vfx.rotation = dir_to_ally.angle()
+		get_parent().add_child(line_vfx)
+		var heal_tween := line_vfx.create_tween()
+		heal_tween.tween_property(line_vfx, "modulate:a", 0.0, 0.4)
+		heal_tween.tween_callback(line_vfx.queue_free)
+
+
+func _special_healing_burst() -> void:
+	if not PlayerManager.use_mana(player_index, 50):
+		_special_cooldown = 0.0
+		_spawn_fail_flash()
+		return
+
+	AudioManager.play("player_revive")
+	# Green pulse VFX expanding outward
+	var pulse := ColorRect.new()
+	pulse.color = Color(0.3, 0.9, 0.4, 0.5)
+	pulse.size = Vector2(20, 20)
+	pulse.position = global_position - Vector2(10, 10)
+	pulse.pivot_offset = Vector2(10, 10)
+	get_parent().add_child(pulse)
+	var pulse_tween := pulse.create_tween()
+	pulse_tween.set_parallel(true)
+	pulse_tween.tween_property(pulse, "scale", Vector2(8.0, 8.0), 0.4)
+	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.4)
+	pulse_tween.chain().tween_callback(pulse.queue_free)
+
+	# Heal all allies within 80px for 30 HP
+	for p in get_tree().get_nodes_in_group("players"):
+		if not (p is CharacterBody2D):
+			continue
+		if p.get("_is_dead"):
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < 80.0:
+			var p_idx: int = p.get("player_index")
+			PlayerManager.heal_player(p_idx, 30)
 
 
 func _spawn_fail_flash() -> void:

@@ -9,6 +9,8 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.MAGE: "res://assets/sprites/characters/mage_topdown.png",
 	PlayerManager.CharacterClass.SUMMONER: "res://assets/sprites/characters/summoner_topdown.png",
 	PlayerManager.CharacterClass.ROGUE: "res://assets/sprites/characters/rogue_topdown.png",
+	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_topdown.png",
+	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -206,6 +208,16 @@ func _perform_attack() -> void:
 		_perform_melee_combo()
 		return
 
+	# Demolitionist throws a bomb
+	if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
+		_attack_demolitionist()
+		return
+
+	# Healer swings staff + heals ally
+	if character_class == PlayerManager.CharacterClass.HEALER:
+		_attack_healer()
+		return
+
 	# Position the attack area based on facing direction
 	var offset := Vector2.ZERO
 	match _direction:
@@ -266,6 +278,8 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.MAGE: return 20
 		PlayerManager.CharacterClass.SUMMONER: return 10
 		PlayerManager.CharacterClass.ROGUE: return 18
+		PlayerManager.CharacterClass.DEMOLITIONIST: return 25
+		PlayerManager.CharacterClass.HEALER: return 10
 	return 10
 
 
@@ -293,6 +307,10 @@ func _perform_special() -> void:
 			_special_summoner()
 		PlayerManager.CharacterClass.ROGUE:
 			_special_rogue()
+		PlayerManager.CharacterClass.DEMOLITIONIST:
+			_special_demolitionist()
+		PlayerManager.CharacterClass.HEALER:
+			_special_healer()
 
 
 func _special_melee() -> void:
@@ -348,6 +366,185 @@ func _special_rogue() -> void:
 	# Shadow dash: teleport short distance
 	var dash_offset := _facing_vector() * 80.0
 	global_position += dash_offset
+
+
+# -- Demolitionist (overworld) -------------------------------------------------
+
+func _attack_demolitionist() -> void:
+	AudioManager.play("explosion", -6.0, 1.3)
+	var facing := _facing_vector()
+	# Spawn bomb that travels in facing direction
+	var bomb := ColorRect.new()
+	bomb.color = Color(0.9, 0.6, 0.1)
+	bomb.size = Vector2(8, 8)
+	bomb.z_index = 5
+	get_parent().add_child(bomb)
+	bomb.global_position = global_position + facing * 12.0
+
+	var bomb_vel: Vector2 = facing * 180.0
+	var bomb_time := 0.0
+	var bomb_max_time := 1.5
+
+	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+		var dt: float = get_process_delta_time()
+		bomb_time += dt
+		bomb.global_position += bomb_vel * dt
+		bomb_vel *= 0.98  # Slow down over time
+
+		var hit_enemy := false
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = bomb.global_position.distance_to(body.global_position)
+			if dist < 20.0:
+				hit_enemy = true
+				break
+		if hit_enemy:
+			break
+		await get_tree().process_frame
+
+	if is_instance_valid(bomb):
+		var explode_pos: Vector2 = bomb.global_position
+		bomb.queue_free()
+		_demolitionist_explode_topdown(explode_pos, 25, 60.0)
+
+
+func _demolitionist_explode_topdown(pos: Vector2, damage: int, radius: float) -> void:
+	AudioManager.play("explosion")
+	var vfx := ColorRect.new()
+	vfx.color = Color(0.9, 0.6, 0.1, 0.8)
+	vfx.size = Vector2(radius * 2, radius * 2)
+	vfx.position = pos - Vector2(radius, radius)
+	get_parent().add_child(vfx)
+	var tween := vfx.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(vfx, "scale", Vector2(1.5, 1.5), 0.3)
+	tween.tween_property(vfx, "modulate:a", 0.0, 0.3)
+	tween.chain().tween_callback(vfx.queue_free)
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = pos.distance_to(body.global_position)
+		if dist < radius and body.has_method("take_damage"):
+			body.take_damage(damage, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - pos).normalized()
+				body.apply_knockback(kb * 200.0)
+
+
+func _special_demolitionist() -> void:
+	if not PlayerManager.use_mana(player_index, 40):
+		_special_cooldown = 0.0
+		return
+	AudioManager.play("explosion", -3.0, 0.8)
+	var facing := _facing_vector()
+	var bomb := ColorRect.new()
+	bomb.color = Color(1.0, 0.4, 0.0)
+	bomb.size = Vector2(12, 12)
+	bomb.z_index = 5
+	get_parent().add_child(bomb)
+	bomb.global_position = global_position + facing * 12.0
+
+	var bomb_vel: Vector2 = facing * 160.0
+	var bomb_time := 0.0
+	var bomb_max_time := 1.5
+
+	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+		var dt: float = get_process_delta_time()
+		bomb_time += dt
+		bomb.global_position += bomb_vel * dt
+		bomb_vel *= 0.97
+
+		var hit_enemy := false
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = bomb.global_position.distance_to(body.global_position)
+			if dist < 24.0:
+				hit_enemy = true
+				break
+		if hit_enemy:
+			break
+		await get_tree().process_frame
+
+	if is_instance_valid(bomb):
+		var explode_pos: Vector2 = bomb.global_position
+		bomb.queue_free()
+		_demolitionist_explode_topdown(explode_pos, 50, 90.0)
+
+
+# -- Healer (overworld) -------------------------------------------------------
+
+func _attack_healer() -> void:
+	AudioManager.play("staff_bonk")
+	var offset := _facing_vector() * 16.0
+	attack_area.position = offset
+	attack_area.monitoring = true
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(10, player_index)
+	await get_tree().create_timer(0.15).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+	# Heal nearest injured ally within 120px
+	var nearest_ally: Node2D = null
+	var nearest_dist: float = 120.0
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == self or not (p is CharacterBody2D):
+			continue
+		var p_idx: int = p.get("player_index")
+		var p_data: Dictionary = PlayerManager.get_player(p_idx)
+		if p_data.is_empty():
+			continue
+		if p_data["health"] >= p_data["max_health"]:
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < nearest_dist:
+			nearest_dist = dist
+			nearest_ally = p
+
+	if nearest_ally != null:
+		var ally_idx: int = nearest_ally.get("player_index")
+		PlayerManager.heal_player(ally_idx, 8)
+		var line_vfx := ColorRect.new()
+		line_vfx.color = Color(0.3, 0.9, 0.4, 0.7)
+		var dir_to_ally: Vector2 = nearest_ally.global_position - global_position
+		var line_len: float = dir_to_ally.length()
+		line_vfx.size = Vector2(line_len, 3)
+		line_vfx.position = global_position
+		line_vfx.rotation = dir_to_ally.angle()
+		get_parent().add_child(line_vfx)
+		var heal_tween := line_vfx.create_tween()
+		heal_tween.tween_property(line_vfx, "modulate:a", 0.0, 0.4)
+		heal_tween.tween_callback(line_vfx.queue_free)
+
+
+func _special_healer() -> void:
+	if not PlayerManager.use_mana(player_index, 50):
+		_special_cooldown = 0.0
+		return
+	AudioManager.play("player_revive")
+	var pulse := ColorRect.new()
+	pulse.color = Color(0.3, 0.9, 0.4, 0.5)
+	pulse.size = Vector2(20, 20)
+	pulse.position = global_position - Vector2(10, 10)
+	pulse.pivot_offset = Vector2(10, 10)
+	get_parent().add_child(pulse)
+	var pulse_tween := pulse.create_tween()
+	pulse_tween.set_parallel(true)
+	pulse_tween.tween_property(pulse, "scale", Vector2(8.0, 8.0), 0.4)
+	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.4)
+	pulse_tween.chain().tween_callback(pulse.queue_free)
+
+	for p in get_tree().get_nodes_in_group("players"):
+		if not (p is CharacterBody2D):
+			continue
+		var dist: float = global_position.distance_to(p.global_position)
+		if dist < 80.0:
+			var p_idx: int = p.get("player_index")
+			PlayerManager.heal_player(p_idx, 30)
 
 
 func take_damage(amount: int, _source_index: int = -1) -> void:
