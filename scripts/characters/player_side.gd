@@ -87,9 +87,12 @@ const HEALER_BURST_MAX_RADIUS := 150.0
 # Summoner delegate mode
 var _delegate_active: bool = false
 var _delegate_node: CharacterBody2D = null
+var _delegate_timer: float = 0.0
+var _delegate_countdown_label: Label = null
 const DELEGATE_SPEED_MULT := 1.5
 const DELEGATE_JUMP_MULT := 1.5
-const DELEGATE_DMG_MULT := 1.5  # Summoner takes 50% more damage in delegate mode
+const DELEGATE_DMG_MULT := 1.5
+const DELEGATE_DURATION := 10.0
 
 var _is_staggered: bool = false
 var _stagger_timer: float = 0.0
@@ -658,17 +661,27 @@ func _handle_delegate_toggle() -> void:
 
 func _enter_delegate_mode() -> void:
 	_delegate_active = true
+	_delegate_timer = DELEGATE_DURATION
 	AudioManager.play("summon", -3.0, 1.5)
-	# Summoner goes into trance - semi-transparent, can't move
+	# Summoner goes into trance
 	modulate = Color(0.6, 0.5, 0.8, 0.5)
 
-	# Spawn ghost delegate at summoner's position
+	# Countdown label on the summoner
+	_delegate_countdown_label = Label.new()
+	_delegate_countdown_label.name = "DelegateCountdown"
+	_delegate_countdown_label.text = "10"
+	_delegate_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_delegate_countdown_label.add_theme_font_size_override("font_size", 14)
+	_delegate_countdown_label.position = Vector2(-8, -40)
+	_delegate_countdown_label.modulate = Color(0.8, 0.5, 1.0)
+	add_child(_delegate_countdown_label)
+
+	# Spawn ghost delegate
 	_delegate_node = CharacterBody2D.new()
-	_delegate_node.collision_layer = 0  # Ghost - no physical collisions
-	_delegate_node.collision_mask = 1   # But stands on platforms
+	_delegate_node.collision_layer = 0
+	_delegate_node.collision_mask = 1
 	_delegate_node.global_position = global_position
 
-	# Ghost visual - small translucent version of summoner
 	var ghost_sprite := ColorRect.new()
 	ghost_sprite.name = "GhostSprite"
 	ghost_sprite.color = Color(0.8, 0.5, 1.0, 0.4)
@@ -676,7 +689,6 @@ func _enter_delegate_mode() -> void:
 	ghost_sprite.position = Vector2(-6, -14)
 	_delegate_node.add_child(ghost_sprite)
 
-	# Pulsing glow
 	var glow := ColorRect.new()
 	glow.name = "Glow"
 	glow.color = Color(0.7, 0.4, 1.0, 0.15)
@@ -684,16 +696,6 @@ func _enter_delegate_mode() -> void:
 	glow.position = Vector2(-10, -16)
 	_delegate_node.add_child(glow)
 
-	# Label
-	var label := Label.new()
-	label.text = "DELEGATE"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 6)
-	label.position = Vector2(-20, -22)
-	label.modulate = Color(0.8, 0.6, 1.0)
-	_delegate_node.add_child(label)
-
-	# Collision shape for platform detection
 	var col := CollisionShape2D.new()
 	var shape := RectangleShape2D.new()
 	shape.size = Vector2(10, 18)
@@ -701,27 +703,209 @@ func _enter_delegate_mode() -> void:
 	_delegate_node.add_child(col)
 
 	get_parent().add_child(_delegate_node)
-
-	# Tell all donut buddies to follow the delegate
 	_update_buddy_target()
 
 
 func _exit_delegate_mode() -> void:
+	if not _delegate_active:
+		return
 	_delegate_active = false
-	modulate = Color.WHITE
-	AudioManager.play("summon", -3.0, 0.8)
 
+	var teleport_target: Vector2 = global_position
 	if is_instance_valid(_delegate_node):
-		# Tell buddies to return to summoner
+		teleport_target = _delegate_node.global_position
+
+	# --- Aether Dig-In at old position ---
+	AudioManager.play("explosion", -2.0, 0.5)
+	_spawn_aether_rift(global_position)
+
+	# Screen rumble
+	_screen_shake()
+
+	# Summoner "digs into the aether" - shrink + purple flash
+	modulate = Color(0.6, 0.2, 1.0)
+	var dig_in := create_tween()
+	dig_in.tween_property(self, "scale", Vector2(0.1, 0.1), 0.3).set_ease(Tween.EASE_IN)
+	await dig_in.finished
+
+	# --- Teleport ---
+	global_position = teleport_target
+	if is_instance_valid(_delegate_node):
 		_delegate_node.queue_free()
 		_delegate_node = null
+
+	# --- Aether Dig-Out at new position ---
+	AudioManager.play("summon", 0.0, 0.7)
+	_spawn_aether_rift(global_position)
+	_screen_shake()
+
+	# Summoner "digs out" - grow back + flash
+	var dig_out := create_tween()
+	dig_out.tween_property(self, "scale", Vector2(1.0, 1.0), 0.3).set_ease(Tween.EASE_OUT)
+	await dig_out.finished
+
+	modulate = Color.WHITE
+
+	# Clean up countdown label
+	if is_instance_valid(_delegate_countdown_label):
+		_delegate_countdown_label.queue_free()
+		_delegate_countdown_label = null
+
 	_update_buddy_target()
+
+
+func _spawn_aether_rift(pos: Vector2) -> void:
+	# Purple tear in space that emits particles
+	var rift := Node2D.new()
+	rift.global_position = pos
+	rift.z_index = 10
+	get_parent().add_child(rift)
+
+	# The rift visual - a jagged purple tear
+	var tear := ColorRect.new()
+	tear.color = Color(0.5, 0.1, 0.9, 0.8)
+	tear.size = Vector2(6, 40)
+	tear.position = Vector2(-3, -20)
+	rift.add_child(tear)
+
+	# Inner glow
+	var inner := ColorRect.new()
+	inner.color = Color(0.8, 0.3, 1.0, 0.5)
+	inner.size = Vector2(2, 36)
+	inner.position = Vector2(-1, -18)
+	rift.add_child(inner)
+
+	# Emit purple particles for 4 seconds
+	var particle_count := 40
+	for i in range(particle_count):
+		# Stagger particle spawns
+		_spawn_aether_particle_delayed(rift, pos, float(i) * 0.1)
+
+	# Rift fades out after 4 seconds
+	var rift_tween := rift.create_tween()
+	rift_tween.tween_interval(4.0)
+	rift_tween.tween_property(tear, "modulate:a", 0.0, 1.0)
+	rift_tween.parallel().tween_property(inner, "modulate:a", 0.0, 1.0)
+	rift_tween.tween_callback(rift.queue_free)
+
+
+func _spawn_aether_particle_delayed(rift: Node2D, pos: Vector2, delay: float) -> void:
+	if not is_inside_tree():
+		return
+	await get_tree().create_timer(delay).timeout
+	if not is_instance_valid(rift) or not is_inside_tree():
+		return
+
+	var particle := Area2D.new()
+	particle.collision_layer = 0
+	particle.collision_mask = 8  # Detect enemies
+	particle.global_position = pos + Vector2(randf_range(-4, 4), randf_range(-15, 15))
+
+	var pcol := CollisionShape2D.new()
+	var pshape := CircleShape2D.new()
+	pshape.radius = 5.0
+	pcol.shape = pshape
+	particle.add_child(pcol)
+
+	# Purple glowing dot
+	var dot := ColorRect.new()
+	dot.color = Color(0.7, 0.2, 1.0, 0.8)
+	dot.size = Vector2(6, 6)
+	dot.position = Vector2(-3, -3)
+	particle.add_child(dot)
+
+	get_parent().add_child(particle)
+
+	# Float outward in random direction
+	var vel: Vector2 = Vector2(randf_range(-40, 40), randf_range(-60, 10))
+	var lifetime := 2.0
+	var age := 0.0
+
+	# Check for enemy contact
+	particle.body_entered.connect(func(body: Node2D) -> void:
+		if body.is_in_group("enemies") and body.has_method("_apply_aether_growth"):
+			body._apply_aether_growth()
+		elif body.is_in_group("enemies"):
+			_apply_aether_growth_to(body)
+	)
+
+	while age < lifetime and is_instance_valid(particle):
+		var dt: float = get_process_delta_time()
+		age += dt
+		particle.global_position += vel * dt
+		vel.y += 20.0 * dt  # Slight gravity
+		vel *= (1.0 - 0.5 * dt)  # Drag
+		# Fade
+		dot.modulate.a = lerpf(0.8, 0.0, age / lifetime)
+		await get_tree().process_frame
+
+	if is_instance_valid(particle):
+		particle.queue_free()
+
+
+func _apply_aether_growth_to(enemy: Node2D) -> void:
+	# Enemy grows 300% in size and power!
+	if enemy.has_meta("aether_grown"):
+		return  # Don't stack
+	enemy.set_meta("aether_grown", true)
+
+	AudioManager.play("boss_roar", -4.0, 1.5)
+
+	# Visual: purple flash then grow
+	enemy.modulate = Color(0.7, 0.3, 1.0)
+	var grow_tween := enemy.create_tween()
+	grow_tween.tween_property(enemy, "scale", enemy.scale * 3.0, 0.5).set_ease(Tween.EASE_OUT)
+	grow_tween.parallel().tween_property(enemy, "modulate", Color(0.9, 0.6, 1.0), 0.5)
+
+	# Buff stats if possible
+	if "health" in enemy:
+		enemy.health *= 3
+	if "MAX_HEALTH" in enemy:
+		pass  # Can't change const, but health is tripled
+	# Update health bar if it has one
+	if "_health_bar" in enemy and enemy._health_bar != null:
+		enemy._health_bar.set_health(enemy.health, enemy.health)
+
+	# Purple particle aura on the grown enemy
+	_spawn_aether_aura(enemy)
+
+
+func _spawn_aether_aura(enemy: Node2D) -> void:
+	# Continuous purple particles around the empowered enemy
+	for i in range(20):
+		if not is_instance_valid(enemy):
+			break
+		var p := ColorRect.new()
+		p.color = Color(0.6, 0.2, 1.0, 0.5)
+		p.size = Vector2(4, 4)
+		p.position = enemy.global_position + Vector2(randf_range(-20, 20), randf_range(-20, 20))
+		p.z_index = 5
+		get_parent().add_child(p)
+		var pt := p.create_tween()
+		pt.tween_property(p, "position:y", p.position.y - randf_range(15, 40), 0.8)
+		pt.parallel().tween_property(p, "modulate:a", 0.0, 0.8)
+		pt.tween_callback(p.queue_free)
+		await get_tree().create_timer(0.3).timeout
 
 
 func _update_delegate(delta: float) -> void:
 	if not is_instance_valid(_delegate_node):
 		_exit_delegate_mode()
 		return
+
+	# Countdown timer
+	_delegate_timer -= delta
+	if _delegate_timer <= 0.0:
+		_exit_delegate_mode()
+		return
+
+	# Update countdown display
+	if is_instance_valid(_delegate_countdown_label):
+		var secs: int = int(ceil(_delegate_timer))
+		_delegate_countdown_label.text = str(secs)
+		# Flash red when low
+		if _delegate_timer <= 3.0:
+			_delegate_countdown_label.modulate = Color(1.0, 0.3, 0.3) if fmod(_delegate_timer, 0.5) < 0.25 else Color(0.8, 0.5, 1.0)
 
 	var speed: float = PlayerManager.get_player(player_index).get("speed", 95) * DELEGATE_SPEED_MULT
 
@@ -740,11 +924,6 @@ func _update_delegate(delta: float) -> void:
 		h_input += 1.0
 	_delegate_node.velocity.x = h_input * speed
 
-	# Flip ghost visual
-	var ghost_sprite := _delegate_node.get_node_or_null("GhostSprite")
-	if ghost_sprite and h_input != 0.0:
-		ghost_sprite.position.x = -6.0 if h_input > 0 else -6.0
-
 	# Jump (1.5x height)
 	if _is_device_action_just_pressed("jump") and _delegate_node.is_on_floor():
 		_delegate_node.velocity.y = JUMP_VELOCITY * DELEGATE_JUMP_MULT
@@ -754,17 +933,15 @@ func _update_delegate(delta: float) -> void:
 	if _is_device_action_just_pressed("special"):
 		var dash_dir := 1.0 if h_input >= 0 else -1.0
 		_delegate_node.global_position.x += dash_dir * 80.0
-		_spawn_vfx(Color(0.7, 0.4, 1.0, 0.3), Vector2(10, 18))
 		AudioManager.play("shadow_dash", -6.0, 1.3)
 
 	_delegate_node.move_and_slide()
 
-	# Pulsing glow effect
+	# Pulsing glow
 	var glow := _delegate_node.get_node_or_null("Glow")
 	if glow:
 		glow.modulate.a = 0.1 + sin(Time.get_ticks_msec() * 0.005) * 0.08
 
-	# Continuously update buddy targets to follow delegate
 	_update_buddy_target()
 
 
