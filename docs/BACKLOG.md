@@ -82,6 +82,14 @@ Improve all pixel art from placeholder quality to polished retro style.
   - FIX: boss_base.gd _ready() now sets collision_layer=8 and adds to both
     "enemies" and "bosses" groups. All 4 bosses fixed.
 
+### Story 2.7: Melee Ground Attack Not Hitting
+- [x] Task: BUG: Melee attack on ground doesn't hit enemies
+  - ROOT CAUSE: attack_area.monitoring enabled and get_overlapping_bodies()
+    called on same frame — Godot needs one physics frame to detect overlaps.
+  - FIX: Wait one physics_frame after enabling monitoring before checking hits.
+- [x] Task: Replace melee swing VFX with large arcing slash + silver/grey/yellow/white particles
+- [x] Task: Blood particles on enemy hit (3 squirts, arc upward, land on surfaces, drip down)
+
 ### Story 2.6: Boss Falls Through Floor
 - [x] Task: BUG: Giant Muffin falls through arena floor during fight
   - ROOT CAUSE: Summoned mini-muffin enemies had default collision_layer=1 (world).

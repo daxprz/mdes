@@ -389,29 +389,180 @@ func _attack_melee() -> void:
 	var volume: float = 0.0 if combo_idx < COMBO_DAMAGES.size() - 1 else 2.0
 	AudioManager.play("sword_slash", volume, pitch)
 
-	# Spawn swing arc VFX with per-combo color
-	var arc_color: Color = COMBO_SWING_COLORS[combo_idx]
-	_spawn_swing_arc(reach, arc_color)
+	# Spawn large arcing slash VFX with particles
+	_spawn_melee_arc(reach, combo_idx)
 
+	# Enable attack area and wait a physics frame so overlaps register
 	var offset := Vector2(reach if _facing_right else -reach, 0.0)
 	attack_area.position = offset
 	attack_area.monitoring = true
+	# Wait one physics frame for Godot to detect overlaps
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+
+	# Now check for hits
 	for body in attack_area.get_overlapping_bodies():
 		if body.has_method("take_damage"):
 			body.take_damage(damage, player_index)
-		# Final hit knocks back
+			# Blood particles on hit!
+			_spawn_blood_particles(body.global_position)
 		if combo_idx == COMBO_DAMAGES.size() - 1 and body.has_method("apply_knockback"):
 			var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.3).normalized()
 			body.apply_knockback(kb_dir * 200.0)
-	await get_tree().create_timer(0.15).timeout
+
+	await get_tree().create_timer(0.1).timeout
 	if is_inside_tree():
 		attack_area.monitoring = false
 
 	_combo_count += 1
 	_combo_timer = COMBO_WINDOW
-	# Reset combo after full chain
 	if _combo_count >= COMBO_DAMAGES.size():
 		_combo_count = 0
+
+
+func _spawn_melee_arc(reach: float, combo_idx: int) -> void:
+	# Large sweeping arc made of particles
+	var arc_center: Vector2 = global_position + Vector2(reach * 0.5 if _facing_right else -reach * 0.5, 0)
+	var arc_dir: float = 1.0 if _facing_right else -1.0
+	var colors: Array[Color] = [
+		Color(0.85, 0.85, 0.9, 0.8),   # Silver
+		Color(0.6, 0.6, 0.65, 0.7),    # Grey
+		Color(1.0, 0.95, 0.5, 0.7),    # Yellow
+		Color(1.0, 1.0, 1.0, 0.9),     # White
+	]
+
+	# Spawn arc particles along a curved path
+	var particle_count: int = 12 + combo_idx * 4  # More particles for later combos
+	for i in range(particle_count):
+		var t: float = float(i) / float(particle_count)
+		# Arc angle from -60 to +60 degrees
+		var angle: float = lerpf(-1.0, 1.0, t) * arc_dir
+		var arc_pos: Vector2 = global_position + Vector2(
+			cos(angle) * reach * arc_dir,
+			sin(angle) * reach * 0.6
+		)
+
+		var p := ColorRect.new()
+		var color_idx: int = i % colors.size()
+		p.color = colors[color_idx]
+		var psize: float = randf_range(3.0, 6.0 + combo_idx * 2.0)
+		p.size = Vector2(psize, psize)
+		p.position = arc_pos - Vector2(psize / 2.0, psize / 2.0)
+		p.z_index = 8
+		get_parent().add_child(p)
+
+		# Particles fly outward slightly then fade
+		var fly_dir: Vector2 = (arc_pos - global_position).normalized()
+		var tween := p.create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(p, "position", p.position + fly_dir * randf_range(8.0, 20.0), 0.25)
+		tween.tween_property(p, "modulate:a", 0.0, 0.3)
+		tween.tween_property(p, "scale", Vector2(0.3, 0.3), 0.3)
+		tween.chain().tween_callback(p.queue_free)
+
+	# Big central arc sweep visual
+	var arc_visual := ColorRect.new()
+	arc_visual.color = Color(0.9, 0.9, 1.0, 0.5)
+	var arc_width: float = reach * 2.0
+	var arc_height: float = reach * 0.8
+	arc_visual.size = Vector2(arc_width, arc_height)
+	arc_visual.position = global_position + Vector2(
+		-reach if not _facing_right else 0,
+		-arc_height / 2.0
+	)
+	arc_visual.z_index = 7
+	get_parent().add_child(arc_visual)
+
+	var arc_tween := arc_visual.create_tween()
+	arc_tween.set_parallel(true)
+	arc_tween.tween_property(arc_visual, "modulate:a", 0.0, 0.2)
+	arc_tween.tween_property(arc_visual, "scale:x", 1.3, 0.2)
+	arc_tween.chain().tween_callback(arc_visual.queue_free)
+
+
+func _spawn_blood_particles(hit_pos: Vector2) -> void:
+	# 3 blood squirts in random upward directions
+	for i in range(3):
+		var angle: float = randf_range(-2.2, -0.9)  # Upward arc range
+		var speed: float = randf_range(120.0, 220.0)
+		var vel: Vector2 = Vector2(cos(angle), sin(angle)) * speed
+		# Add some horizontal randomness
+		vel.x += randf_range(-40.0, 40.0)
+
+		var blood := ColorRect.new()
+		blood.color = Color(0.8, 0.05, 0.05, 0.9)
+		blood.size = Vector2(4, 4)
+		blood.position = hit_pos
+		blood.z_index = 9
+		get_parent().add_child(blood)
+
+		# Animate the blood arc with physics
+		_animate_blood_drop(blood, vel)
+
+
+func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
+	var gravity: float = 400.0
+	var age: float = 0.0
+	var max_age: float = 3.0
+	var landed := false
+	var drip_speed: float = 15.0
+
+	while age < max_age and is_instance_valid(blood):
+		var dt: float = get_process_delta_time()
+		age += dt
+
+		if not landed:
+			# Flying through air
+			vel.y += gravity * dt
+			blood.position += vel * dt
+
+			# Check if hit a surface (simple: check if any StaticBody2D nearby)
+			# Use a rough check: if velocity was going down and now we'd go below a platform
+			var space := get_world_2d().direct_space_state
+			var query := PhysicsRayQueryParameters2D.create(
+				blood.position,
+				blood.position + vel.normalized() * 8.0,
+				1  # World layer
+			)
+			var result: Dictionary = space.intersect_ray(query)
+			if not result.is_empty():
+				# Hit a surface! Stick and drip
+				landed = true
+				blood.position = result["position"]
+				# Determine drip direction (blood drips down along surface)
+				var normal: Vector2 = result["normal"]
+				if absf(normal.x) > absf(normal.y):
+					# Hit a wall - drip downward
+					drip_speed = randf_range(10.0, 25.0)
+				else:
+					# Hit floor/ceiling - slow spread
+					drip_speed = randf_range(2.0, 8.0)
+
+				# Splat effect - spawn extra tiny drops
+				for s in range(2):
+					var splat := ColorRect.new()
+					splat.color = Color(0.7, 0.02, 0.02, 0.7)
+					splat.size = Vector2(2, 2)
+					splat.position = blood.position + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+					splat.z_index = 9
+					get_parent().add_child(splat)
+					var st := splat.create_tween()
+					st.tween_property(splat, "modulate:a", 0.0, randf_range(3.0, 8.0))
+					st.tween_callback(splat.queue_free)
+		else:
+			# Dripping down the surface
+			blood.position.y += drip_speed * dt
+			# Slowly fade
+			blood.modulate.a = lerpf(0.9, 0.0, (age - 1.0) / (max_age - 1.0)) if age > 1.0 else 0.9
+			# Blood stretches as it drips
+			blood.size.y = minf(blood.size.y + dt * 3.0, 12.0)
+			blood.size.x = maxf(blood.size.x - dt * 0.5, 2.0)
+
+		await get_tree().process_frame
+
+	if is_instance_valid(blood):
+		blood.queue_free()
 
 
 func _attack_ranged() -> void:
