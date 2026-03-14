@@ -130,16 +130,16 @@ The overworld needs structure - players shouldn't access everything immediately.
 ## EPIC 7: Traps & Obstacles (`mechanics`, `design`)
 
 ### Story 7.1: Trap Types
-- [ ] Task: Spike floors (deal damage on contact)
-- [ ] Task: Swinging pendulum blades (timed obstacle)
-- [ ] Task: Arrow traps (shoot from walls on a timer)
-- [ ] Task: Lava/acid pools (instant kill or heavy damage)
-- [ ] Task: Pressure plates that trigger traps
+- [x] Task: Spike floors (deal damage on contact) - 15 dmg, 0.5s cooldown
+- [x] Task: Swinging pendulum blades (timed obstacle) - 20 dmg, sin() swing
+- [x] Task: Arrow traps (shoot from walls on a timer) - 10 dmg, 2.5s interval
+- [x] Task: Lava/acid pools (instant kill or heavy damage) - 30 dmg/0.3s + knockback
+- [x] Task: Pressure plates that trigger traps - signal-based, links to other traps
 
 ### Story 7.2: Environmental Hazards
-- [ ] Task: Falling rocks/debris in certain sections
-- [ ] Task: Wind gusts that push players sideways
-- [ ] Task: Dark rooms where only nearby area is visible
+- [x] Task: Falling rocks/debris in certain sections - 20 dmg, 3-5 rocks, proximity trigger
+- [x] Task: Wind gusts that push players sideways - 200px/s push, intermittent on/off
+- [x] Task: Dark rooms where only nearby area is visible - Tower 3+ mid-section
 
 ---
 

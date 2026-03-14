@@ -52,6 +52,8 @@ scale = Vector2(0.17, 80)
 
 [node name="Muffins" type="Node2D" parent="."]
 
+[node name="Traps" type="Node2D" parent="."]
+
 [node name="ExitDoor" type="Area2D" parent="."]
 position = Vector2(200, 40)
 collision_layer = 4

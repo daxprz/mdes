@@ -12,6 +12,12 @@ const PLATFORM_COUNT_BASE := 8
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 const MUFFIN_SCENE_PATH := "res://scenes/items/mini_muffin.tscn"
 const SKELETON_SCENE_PATH := "res://scenes/enemies/skeleton.tscn"
+const SPIKES_SCENE := "res://scenes/traps/spikes.tscn"
+const PENDULUM_SCENE := "res://scenes/traps/pendulum.tscn"
+const ARROW_TRAP_SCENE := "res://scenes/traps/arrow_trap.tscn"
+const LAVA_POOL_SCENE := "res://scenes/traps/lava_pool.tscn"
+const WIND_GUST_SCENE := "res://scenes/traps/wind_gust.tscn"
+const FALLING_ROCKS_SCENE := "res://scenes/traps/falling_rocks.tscn"
 
 @export var tower_id: int = 1
 
@@ -26,6 +32,7 @@ var _exiting := false
 @onready var muffins_container: Node2D = $Muffins
 @onready var exit_door: Area2D = $ExitDoor
 @onready var muffin_counter_label: Label = $UI/MuffinCounter
+@onready var traps_container: Node2D = $Traps
 
 
 func _ready() -> void:
@@ -70,6 +77,9 @@ func _build_tower() -> void:
 
 	# Floor platform at the bottom.
 	_create_platform(Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 10), TOWER_WIDTH)
+
+	# Place traps throughout the tower (more in harder towers)
+	_place_traps(platform_count, vertical_spacing)
 
 	# Set up exit door at the top.
 	if exit_door:
@@ -132,6 +142,89 @@ func _spawn_muffin(pos: Vector2) -> void:
 		muffin.add_child(rect)
 
 		muffins_container.add_child(muffin)
+
+
+func _place_traps(platform_count: int, vertical_spacing: float) -> void:
+	# Trap density scales with tower difficulty
+	var trap_chance: float = 0.15 + tower_id * 0.1  # Tower 1: 25%, Tower 4: 55%
+
+	for i in range(platform_count):
+		var y_pos: float = TOWER_HEIGHT - (i + 1) * vertical_spacing
+		var x_offset: float = _get_platform_x(i, tower_id)
+
+		# Skip first 2 platforms (safe zone at start)
+		if i < 2:
+			continue
+
+		var roll: float = randf()
+		if roll > trap_chance:
+			continue
+
+		# Pick a trap type based on position and tower
+		var trap_roll: float = randf()
+
+		if trap_roll < 0.25:
+			# Spikes on platform surface
+			_spawn_trap(SPIKES_SCENE, Vector2(x_offset, y_pos - 16))
+		elif trap_roll < 0.45:
+			# Arrow trap on a wall
+			var wall_x: float = 15.0 if randf() > 0.5 else TOWER_WIDTH - 15.0
+			var facing_right: bool = wall_x < TOWER_WIDTH / 2.0
+			_spawn_arrow_trap(Vector2(wall_x, y_pos - 30), facing_right)
+		elif trap_roll < 0.6:
+			# Pendulum between platforms
+			_spawn_trap(PENDULUM_SCENE, Vector2(x_offset, y_pos - vertical_spacing * 0.5))
+		elif trap_roll < 0.75:
+			# Lava pool on floor of a section
+			_spawn_trap(LAVA_POOL_SCENE, Vector2(x_offset, y_pos + 8))
+		elif trap_roll < 0.85:
+			# Wind gust pushing sideways
+			var wind_dir: float = 1.0 if randf() > 0.5 else -1.0
+			_spawn_wind_gust(Vector2(x_offset, y_pos - 40), wind_dir)
+		else:
+			# Falling rocks triggered by proximity
+			_spawn_trap(FALLING_ROCKS_SCENE, Vector2(x_offset, y_pos - vertical_spacing * 0.7))
+
+	# Tower 3+ gets a dark zone in the middle section
+	if tower_id >= 3:
+		var dark_scene := load("res://scenes/traps/dark_zone.tscn")
+		if dark_scene:
+			var dark: Node = dark_scene.instantiate()
+			dark.position = Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT * 0.5)
+			if dark.has_method("set") and "zone_height" in dark:
+				dark.zone_height = 400.0
+			traps_container.add_child(dark)
+
+
+func _spawn_trap(scene_path: String, pos: Vector2) -> void:
+	var scene := load(scene_path)
+	if not scene:
+		return
+	var trap: Node2D = scene.instantiate()
+	trap.position = pos
+	traps_container.add_child(trap)
+
+
+func _spawn_arrow_trap(pos: Vector2, facing_right: bool) -> void:
+	var scene := load(ARROW_TRAP_SCENE)
+	if not scene:
+		return
+	var trap: Node2D = scene.instantiate()
+	trap.position = pos
+	if "fire_direction" in trap:
+		trap.fire_direction = Vector2.RIGHT if facing_right else Vector2.LEFT
+	traps_container.add_child(trap)
+
+
+func _spawn_wind_gust(pos: Vector2, dir: float) -> void:
+	var scene := load(WIND_GUST_SCENE)
+	if not scene:
+		return
+	var trap: Node2D = scene.instantiate()
+	trap.position = pos
+	if "push_direction" in trap:
+		trap.push_direction = Vector2(dir, 0)
+	traps_container.add_child(trap)
 
 
 func _spawn_enemy(pos: Vector2, patrol_dist: float) -> void:
