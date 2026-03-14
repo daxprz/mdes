@@ -373,7 +373,6 @@ func _special_rogue() -> void:
 func _attack_demolitionist() -> void:
 	AudioManager.play("explosion", -6.0, 1.3)
 	var facing := _facing_vector()
-	# Spawn bomb that travels in facing direction
 	var bomb := ColorRect.new()
 	bomb.color = Color(0.9, 0.6, 0.1)
 	bomb.size = Vector2(8, 8)
@@ -385,11 +384,11 @@ func _attack_demolitionist() -> void:
 	var bomb_time := 0.0
 	var bomb_max_time := 1.5
 
-	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
 		var dt: float = get_process_delta_time()
 		bomb_time += dt
 		bomb.global_position += bomb_vel * dt
-		bomb_vel *= 0.98  # Slow down over time
+		bomb_vel *= 0.98
 
 		var hit_enemy := false
 		for body in get_tree().get_nodes_in_group("enemies"):
@@ -403,7 +402,7 @@ func _attack_demolitionist() -> void:
 			break
 		await get_tree().process_frame
 
-	if is_instance_valid(bomb):
+	if is_instance_valid(bomb) and is_inside_tree():
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
 		_demolitionist_explode_topdown(explode_pos, 25, 60.0)
@@ -450,7 +449,7 @@ func _special_demolitionist() -> void:
 	var bomb_time := 0.0
 	var bomb_max_time := 1.5
 
-	while bomb_time < bomb_max_time and is_instance_valid(bomb):
+	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
 		var dt: float = get_process_delta_time()
 		bomb_time += dt
 		bomb.global_position += bomb_vel * dt
@@ -468,7 +467,7 @@ func _special_demolitionist() -> void:
 			break
 		await get_tree().process_frame
 
-	if is_instance_valid(bomb):
+	if is_instance_valid(bomb) and is_inside_tree():
 		var explode_pos: Vector2 = bomb.global_position
 		bomb.queue_free()
 		_demolitionist_explode_topdown(explode_pos, 50, 90.0)
