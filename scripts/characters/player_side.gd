@@ -89,7 +89,9 @@ var _delegate_active: bool = false
 var _delegate_node: CharacterBody2D = null
 var _delegate_timer: float = 0.0
 var _delegate_countdown_label: Label = null
+var _delegate_cooldown: float = 0.0
 const DELEGATE_SPEED_MULT := 1.5
+const DELEGATE_COOLDOWN := 30.0
 const DELEGATE_JUMP_MULT := 1.5
 const DELEGATE_DMG_MULT := 1.5
 const DELEGATE_DURATION := 10.0
@@ -1780,13 +1782,17 @@ func _handle_mage_airwalk(delta: float) -> void:
 func _handle_delegate_toggle() -> void:
 	if character_class != PlayerManager.CharacterClass.SUMMONER:
 		return
+	if _delegate_cooldown > 0.0:
+		_delegate_cooldown -= get_process_delta_time()
 	if not _is_device_action_just_pressed("interact"):
 		return
 
 	if _delegate_active:
 		_exit_delegate_mode()
-	else:
+	elif _delegate_cooldown <= 0.0:
 		_enter_delegate_mode()
+	else:
+		_spawn_fail_flash()
 
 
 func _enter_delegate_mode() -> void:
@@ -1840,6 +1846,7 @@ func _exit_delegate_mode() -> void:
 	if not _delegate_active:
 		return
 	_delegate_active = false
+	_delegate_cooldown = DELEGATE_COOLDOWN
 
 	var teleport_target: Vector2 = global_position
 	if is_instance_valid(_delegate_node):
