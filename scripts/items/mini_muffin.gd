@@ -4,29 +4,41 @@ extends Area2D
 
 signal collected(player_index: int)
 
-@onready var sprite: AnimatedSprite2D = $AnimatedSprite2D
+@onready var sprite: Sprite2D = $Sprite2D
 @onready var collision: CollisionShape2D = $CollisionShape2D
 
 var _collected := false
+var _anim_timer: float = 0.0
+const ANIM_FPS := 6.0
 
 
 func _ready() -> void:
 	body_entered.connect(_on_body_entered)
-	if sprite and sprite.sprite_frames and sprite.sprite_frames.has_animation("sparkle"):
-		sprite.play("sparkle")
+	# Randomize starting frame so not all muffins sparkle in sync
+	if sprite:
+		sprite.frame = randi() % 4
+
+
+func _process(delta: float) -> void:
+	if _collected:
+		return
+	# Animate sparkle: cycle through 4 frames
+	_anim_timer += delta
+	if _anim_timer >= 1.0 / ANIM_FPS:
+		_anim_timer -= 1.0 / ANIM_FPS
+		if sprite:
+			sprite.frame = (sprite.frame + 1) % 4
 
 
 func _on_body_entered(body: Node2D) -> void:
 	if _collected:
 		return
-	# Check if the body is a player (has player_index property).
 	if not body.has_meta("player_index") and not "player_index" in body:
 		return
 
 	_collected = true
 	var player_index: int = body.get("player_index") if "player_index" in body else body.get_meta("player_index")
 
-	# Add muffin via managers.
 	GameManager.add_mini_muffins(player_index, 1)
 	if PlayerManager.players.has(player_index):
 		PlayerManager.players[player_index]["muffin_count"] += 1
@@ -37,10 +49,8 @@ func _on_body_entered(body: Node2D) -> void:
 
 
 func _play_collect_effect() -> void:
-	# Disable collision immediately so no double-collect.
 	collision.set_deferred("disabled", true)
 
-	# Scale-up + fade-out tween as collect animation.
 	var tween := create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(self, "scale", Vector2(1.5, 1.5), 0.25)
