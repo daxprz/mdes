@@ -22,6 +22,7 @@ var _dead := false
 var _hurt_timer := 0.0
 var _anim_timer := 0.0
 var _roll_angle := 0.0
+var _bounce_cooldown := 0.0
 
 const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
 
@@ -57,6 +58,7 @@ func _physics_process(delta: float) -> void:
 		velocity.y = 0.0
 
 	_hurt_timer -= delta
+	_bounce_cooldown -= delta
 
 	if _hurt_timer > 0.0:
 		velocity.x = move_toward(velocity.x, 0.0, 200.0 * delta)
@@ -67,11 +69,14 @@ func _physics_process(delta: float) -> void:
 	# Roll continuously
 	velocity.x = _current_speed * patrol_direction
 
-	# Bounce off walls - speed up
-	if is_on_wall():
+	# Bounce off walls - speed up (with cooldown to prevent stuck toggling)
+	if is_on_wall() and _bounce_cooldown <= 0.0:
 		patrol_direction *= -1.0
 		_current_speed = minf(_current_speed + SPEED_INCREASE_PER_BOUNCE, MAX_SPEED)
-		AudioManager.play("enemy_hit", -8.0)
+		_bounce_cooldown = 0.15  # Minimum time between bounces
+		# Push away from wall to prevent getting stuck
+		global_position.x += patrol_direction * 4.0
+		AudioManager.play("enemy_hit", -8.0, 1.3)
 
 	# Rotation based on speed
 	_roll_angle += _current_speed * patrol_direction * delta * 0.1
