@@ -2100,9 +2100,9 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 		if amount >= 15:
 			_exit_delegate_mode()
 
-	# Rogue stealth: ignore 25% of damage
+	# Rogue stealth: ignore 50% of damage
 	if _rogue_stealth:
-		amount = int(amount * 0.75)
+		amount = int(amount * 0.5)
 
 	# Stagger: extra damage while staggered
 	if _is_staggered:
