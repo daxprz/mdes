@@ -179,7 +179,7 @@ func _build_tower() -> void:
 	var platform_count: int = PLATFORM_COUNT_BASE + tower_id * 2
 	# Tower 2 bonus: extra platforms for the bigger space
 	if tower_id == 2:
-		platform_count += 25
+		platform_count += 50
 	var vertical_spacing: float = TOWER_HEIGHT / (platform_count + 1)
 	# If spacing exceeds max jump height, add more platforms instead
 	if vertical_spacing > MAX_PLATFORM_SPACING:
