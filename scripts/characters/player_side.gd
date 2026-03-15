@@ -305,6 +305,7 @@ func _physics_process(delta: float) -> void:
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
 	_handle_demo_refuel()
+	_handle_healer_wind_gust()
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
 	_handle_rogue_stealth_toggle()
@@ -1690,6 +1691,91 @@ func _handle_demo_refuel() -> void:
 		var tt := fuel_text.create_tween()
 		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
 		tt.tween_callback(fuel_text.queue_free)
+
+
+# -- Healer Wind Gust (Circle) -------------------------------------------------
+
+var _healer_gust_cooldown: float = 0.0
+const HEALER_GUST_COOLDOWN := 8.0
+const HEALER_GUST_RADIUS := 100.0
+const HEALER_GUST_FORCE := 400.0
+
+func _handle_healer_wind_gust() -> void:
+	if character_class != PlayerManager.CharacterClass.HEALER:
+		return
+	if _healer_gust_cooldown > 0.0:
+		_healer_gust_cooldown -= get_process_delta_time()
+	if not _is_device_action_just_pressed("interact"):
+		return
+	if _healer_gust_cooldown > 0.0:
+		_spawn_fail_flash()
+		return
+
+	_healer_gust_cooldown = HEALER_GUST_COOLDOWN
+	AudioManager.play("shield_charge", 0.0, 1.8)
+	AudioManager.play("jump", 2.0, 0.5)
+
+	# Expanding wind ring VFX
+	for ring_i in range(3):
+		var ring := ColorRect.new()
+		ring.color = Color(0.8, 0.9, 1.0, 0.4 - ring_i * 0.1)
+		var ring_size: float = 16.0 + ring_i * 8.0
+		ring.size = Vector2(ring_size, ring_size)
+		ring.position = global_position - Vector2(ring_size / 2.0, ring_size / 2.0)
+		ring.pivot_offset = Vector2(ring_size / 2.0, ring_size / 2.0)
+		ring.z_index = 8
+		get_parent().add_child(ring)
+		var scale_target: float = HEALER_GUST_RADIUS * 2.0 / ring_size
+		var rt := ring.create_tween()
+		rt.set_parallel(true)
+		rt.tween_property(ring, "scale", Vector2(scale_target, scale_target), 0.3 + ring_i * 0.1)
+		rt.tween_property(ring, "modulate:a", 0.0, 0.35 + ring_i * 0.1)
+		rt.chain().tween_callback(ring.queue_free)
+
+	# Wind line particles shooting outward
+	for i in range(16):
+		var angle: float = float(i) * TAU / 16.0
+		var dir: Vector2 = Vector2(cos(angle), sin(angle))
+		var wind_p := ColorRect.new()
+		wind_p.color = Color(0.85, 0.9, 1.0, 0.6)
+		wind_p.size = Vector2(6, 2)
+		wind_p.rotation = angle
+		wind_p.position = global_position + dir * 8.0
+		wind_p.z_index = 9
+		get_parent().add_child(wind_p)
+		var wt := wind_p.create_tween()
+		wt.tween_property(wind_p, "position", wind_p.position + dir * HEALER_GUST_RADIUS, 0.25)
+		wt.parallel().tween_property(wind_p, "modulate:a", 0.0, 0.3)
+		wt.tween_callback(wind_p.queue_free)
+
+	# Push ALL enemies away
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < HEALER_GUST_RADIUS and dist > 1.0:
+			var push_dir: Vector2 = (body.global_position - global_position).normalized()
+			var push_strength: float = HEALER_GUST_FORCE * (1.0 - dist / HEALER_GUST_RADIUS)
+			if body.has_method("apply_knockback"):
+				body.apply_knockback(push_dir * push_strength)
+			elif "velocity" in body:
+				body.velocity += push_dir * push_strength
+			# Small damage from the gust
+			if body.has_method("take_damage"):
+				body.take_damage(5, player_index)
+
+	# Push other players away too (friendly push, no damage)
+	for body in get_tree().get_nodes_in_group("players"):
+		if body == self or not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < HEALER_GUST_RADIUS and dist > 1.0:
+			var push_dir: Vector2 = (body.global_position - global_position).normalized()
+			var push_strength: float = HEALER_GUST_FORCE * 0.6 * (1.0 - dist / HEALER_GUST_RADIUS)
+			if "velocity" in body:
+				body.velocity += push_dir * push_strength
+
+	_screen_shake(3.0, 0.15)
 
 
 # -- Ranger Fire Crossbow (Triangle) -------------------------------------------
