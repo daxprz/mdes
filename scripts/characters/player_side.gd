@@ -1603,6 +1603,19 @@ func _handle_mage_airwalk(delta: float) -> void:
 
 	_mage_airwalk_timer -= delta
 
+	# Drain mana while air-walking (10 mana/sec)
+	if not PlayerManager.use_mana(player_index, 0):
+		pass  # Just checking
+	var p_data: Dictionary = PlayerManager.get_player(player_index)
+	if not p_data.is_empty():
+		p_data["mana"] = maxf(0.0, p_data["mana"] - 10.0 * delta)
+		if p_data["mana"] <= 0.0:
+			# Out of mana - cancel air-walk
+			_mage_airwalk = false
+			modulate = Color.WHITE
+			AudioManager.play("player_hurt", -6.0, 1.5)
+			return
+
 	# Cancel gravity - mage walks on air
 	if not is_on_floor():
 		velocity.y = 0.0
