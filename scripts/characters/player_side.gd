@@ -422,19 +422,19 @@ func _handle_rocket(delta: float) -> void:
 		# Cancel gravity while thrusting
 		velocity.y -= GRAVITY * delta * 0.85
 
-		# --- Big flame exhaust shooting in exhaust direction ---
+		# --- Tight rocket flame jet ---
 		_rocket_flame_timer += delta
-		if _rocket_flame_timer >= 0.02:  # 50 flames/sec for dense exhaust
-			_rocket_flame_timer -= 0.02
+		if _rocket_flame_timer >= 0.015:  # ~67 flames/sec
+			_rocket_flame_timer -= 0.015
 			_spawn_rocket_flame(exhaust_dir)
-			# Extra big flame every few ticks
-			if randi() % 3 == 0:
+			_spawn_rocket_flame(exhaust_dir)  # Double up for density
+			if randi() % 2 == 0:
 				_spawn_rocket_flame_big(exhaust_dir)
 
 		# --- Smoke trail ---
 		_rocket_smoke_timer += delta
-		if _rocket_smoke_timer >= 0.05:
-			_rocket_smoke_timer -= 0.05
+		if _rocket_smoke_timer >= 0.035:  # More frequent smoke
+			_rocket_smoke_timer -= 0.035
 			_spawn_rocket_smoke()
 
 		# Screen shake scales with speed
@@ -448,68 +448,73 @@ func _handle_rocket(delta: float) -> void:
 
 func _spawn_rocket_flame(flame_dir: Vector2) -> void:
 	var flame := ColorRect.new()
-	# Random flame color: orange, yellow, red, white-hot
 	var flame_colors: Array[Color] = [
-		Color(1.0, 0.5, 0.0, 0.9),   # Orange
-		Color(1.0, 0.8, 0.1, 0.8),   # Yellow
-		Color(1.0, 0.2, 0.0, 0.9),   # Red
-		Color(1.0, 0.9, 0.6, 0.7),   # White-hot
+		Color(1.0, 0.9, 0.5, 0.95),  # White-hot core
+		Color(1.0, 0.7, 0.1, 0.9),   # Bright yellow
+		Color(1.0, 0.45, 0.0, 0.85), # Orange
+		Color(1.0, 0.2, 0.0, 0.8),   # Red tip
 	]
 	flame.color = flame_colors[randi() % flame_colors.size()]
-	var size: float = randf_range(3.0, 7.0)
+	var size: float = randf_range(2.0, 5.0)
 	flame.size = Vector2(size, size)
 	flame.z_index = -1
-	flame.position = global_position + flame_dir * 8.0 + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+	# Tight spawn: very close to player, minimal perpendicular spread
+	var perp: Vector2 = Vector2(-flame_dir.y, flame_dir.x)
+	flame.position = global_position + flame_dir * 6.0 + perp * randf_range(-2, 2)
 	get_parent().add_child(flame)
 
-	# Flame shoots backward with some spread
-	var spread: Vector2 = Vector2(randf_range(-20, 20), randf_range(-20, 20))
-	var target_pos: Vector2 = flame.position + flame_dir * randf_range(15, 35) + spread
+	# Tight cone: flames travel mostly along exhaust_dir with very little spread
+	var spread: Vector2 = perp * randf_range(-4, 4)
+	var target_pos: Vector2 = flame.position + flame_dir * randf_range(20, 45) + spread
 
 	var tween := flame.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(flame, "position", target_pos, randf_range(0.1, 0.25))
-	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.15, 0.3))
-	tween.tween_property(flame, "scale", Vector2(0.2, 0.2), 0.25)
+	tween.tween_property(flame, "position", target_pos, randf_range(0.08, 0.18))
+	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.1, 0.2))
+	tween.tween_property(flame, "scale", Vector2(0.15, 0.15), 0.18)
 	tween.chain().tween_callback(flame.queue_free)
 
 
 func _spawn_rocket_flame_big(exhaust_dir: Vector2) -> void:
 	var flame := ColorRect.new()
-	flame.color = Color(1.0, 0.6, 0.0, 0.9)
-	var size: float = randf_range(6.0, 12.0)
+	flame.color = Color(1.0, 0.95, 0.7, 0.95)  # White-hot
+	var size: float = randf_range(5.0, 10.0)
 	flame.size = Vector2(size, size)
 	flame.z_index = -1
-	flame.position = global_position + exhaust_dir * 6.0
+	flame.position = global_position + exhaust_dir * 4.0
 	get_parent().add_child(flame)
 
-	var target_pos: Vector2 = flame.position + exhaust_dir * randf_range(25, 50) + Vector2(randf_range(-10, 10), randf_range(-10, 10))
+	var perp: Vector2 = Vector2(-exhaust_dir.y, exhaust_dir.x)
+	var target_pos: Vector2 = flame.position + exhaust_dir * randf_range(30, 55) + perp * randf_range(-5, 5)
 	var tween := flame.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(flame, "position", target_pos, randf_range(0.15, 0.35))
-	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.2, 0.4))
-	tween.tween_property(flame, "scale", Vector2(0.1, 0.1), 0.35)
-	# Color shift from white-hot to red
-	tween.tween_property(flame, "color", Color(0.8, 0.1, 0.0, 0.0), 0.35)
+	tween.tween_property(flame, "position", target_pos, randf_range(0.12, 0.25))
+	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.15, 0.3))
+	tween.tween_property(flame, "scale", Vector2(0.05, 0.05), 0.25)
+	tween.tween_property(flame, "color", Color(0.9, 0.15, 0.0, 0.0), 0.25)
 	tween.chain().tween_callback(flame.queue_free)
 
 
 func _spawn_rocket_smoke() -> void:
 	var smoke := ColorRect.new()
-	smoke.color = Color(0.5, 0.5, 0.5, 0.4)
-	var size: float = randf_range(4.0, 8.0)
+	var smoke_colors: Array[Color] = [
+		Color(0.45, 0.45, 0.45, 0.35),
+		Color(0.55, 0.50, 0.45, 0.3),
+		Color(0.35, 0.35, 0.35, 0.4),
+	]
+	smoke.color = smoke_colors[randi() % smoke_colors.size()]
+	var size: float = randf_range(3.0, 7.0)
 	smoke.size = Vector2(size, size)
 	smoke.z_index = -2
-	smoke.position = global_position + Vector2(randf_range(-4, 4), randf_range(-2, 4))
+	smoke.position = global_position + Vector2(randf_range(-3, 3), randf_range(-2, 3))
 	get_parent().add_child(smoke)
 
-	# Smoke drifts upward slowly and expands
 	var tween := smoke.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(smoke, "position:y", smoke.position.y - randf_range(10, 30), 0.8)
-	tween.tween_property(smoke, "position:x", smoke.position.x + randf_range(-8, 8), 0.8)
-	tween.tween_property(smoke, "modulate:a", 0.0, 1.0)
-	tween.tween_property(smoke, "scale", Vector2(2.0, 2.0), 1.0)
+	tween.tween_property(smoke, "position:y", smoke.position.y - randf_range(8, 25), 0.7)
+	tween.tween_property(smoke, "position:x", smoke.position.x + randf_range(-12, 12), 0.7)
+	tween.tween_property(smoke, "modulate:a", 0.0, 0.9)
+	tween.tween_property(smoke, "scale", Vector2(2.5, 2.5), 0.9)
 	tween.chain().tween_callback(smoke.queue_free)
 
 
