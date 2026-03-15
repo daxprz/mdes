@@ -303,6 +303,7 @@ func _physics_process(delta: float) -> void:
 	_update_cooldowns(delta)
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
+	_handle_ranger_grapple()
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
 	_handle_rogue_stealth_toggle()
@@ -1050,11 +1051,6 @@ func _attack_ranged() -> void:
 	_spawn_projectile(scaled_dmg, 400.0, "crossbow_bolt")
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
-	# Auto-start reload when not full
-	if not _ranger_reloading:
-		_ranger_reloading = true
-		_ranger_reload_timer = RANGER_RELOAD_TIME
-
 
 func _attack_mage() -> void:
 	# Mage: fast, weak magic bolts
@@ -1310,6 +1306,9 @@ func _check_ground_slam_landing() -> void:
 # -- Special Abilities ---------------------------------------------------------
 
 func _handle_special() -> void:
+	# Ranger uses Triangle for reload, not special ability
+	if character_class == PlayerManager.CharacterClass.RANGED:
+		return
 	if _special_cooldown > 0.0:
 		return
 	if not _is_device_action_just_pressed("special"):
@@ -1644,16 +1643,34 @@ func _special_summon_donut() -> void:
 	_donut_buddy_count += 1
 
 
+# -- Ranger Grapple (Circle) ---------------------------------------------------
+
+func _handle_ranger_grapple() -> void:
+	if character_class != PlayerManager.CharacterClass.RANGED:
+		return
+	if not _is_device_action_just_pressed("interact"):
+		return
+	_special_grappling_hook()
+
+
 # -- Ranger Reload -------------------------------------------------------------
 
 func _handle_ranger_reload(delta: float) -> void:
 	if character_class != PlayerManager.CharacterClass.RANGED:
 		return
-	if not _ranger_reloading:
-		# Start reloading if not full
-		if _ranger_arrows < RANGER_MAX_ARROWS:
+
+	# Press Triangle (special) to start/continue reloading
+	if _is_device_action_pressed("special") and _ranger_arrows < RANGER_MAX_ARROWS:
+		if not _ranger_reloading:
 			_ranger_reloading = true
 			_ranger_reload_timer = RANGER_RELOAD_TIME
+	elif not _is_device_action_pressed("special"):
+		# Released Triangle - stop reloading
+		_ranger_reloading = false
+		_ranger_reload_timer = RANGER_RELOAD_TIME
+		return
+
+	if not _ranger_reloading:
 		return
 
 	_ranger_reload_timer -= delta
