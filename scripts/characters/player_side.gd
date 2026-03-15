@@ -496,13 +496,14 @@ func _spawn_melee_arc(reach: float, combo_idx: int) -> void:
 	]
 
 	# Spawn arc particles along a curved path
-	var particle_count: int = 12 + combo_idx * 4  # More particles for later combos
+	var particle_count: int = 12 + combo_idx * 4
 	for i in range(particle_count):
 		var t: float = float(i) / float(particle_count)
-		# Arc angle from -60 to +60 degrees
-		var angle: float = lerpf(-1.0, 1.0, t) * arc_dir
+		# Arc angle from -60 to +60 degrees (vertical sweep)
+		var angle: float = lerpf(-1.0, 1.0, t)
+		# Position particles in an arc in front of the player
 		var arc_pos: Vector2 = global_position + Vector2(
-			cos(angle) * reach * arc_dir,
+			cos(angle) * reach * 0.8 * arc_dir,
 			sin(angle) * reach * 0.6
 		)
 
@@ -527,13 +528,11 @@ func _spawn_melee_arc(reach: float, combo_idx: int) -> void:
 	# Big central arc sweep visual
 	var arc_visual := ColorRect.new()
 	arc_visual.color = Color(0.9, 0.9, 1.0, 0.5)
-	var arc_width: float = reach * 2.0
+	var arc_width: float = reach * 1.5
 	var arc_height: float = reach * 0.8
 	arc_visual.size = Vector2(arc_width, arc_height)
-	arc_visual.position = global_position + Vector2(
-		-reach if not _facing_right else 0,
-		-arc_height / 2.0
-	)
+	var arc_x: float = 0.0 if _facing_right else -arc_width
+	arc_visual.position = global_position + Vector2(arc_x, -arc_height / 2.0)
 	arc_visual.z_index = 7
 	get_parent().add_child(arc_visual)
 
