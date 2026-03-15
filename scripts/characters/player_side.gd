@@ -112,6 +112,11 @@ var _demo_napalm: bool = false  # Leaves burning ground
 var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
 
 # Demolitionist rocket jetpack
+# Mage air-walk
+var _mage_airwalk: bool = false
+var _mage_airwalk_timer: float = 0.0
+const MAGE_AIRWALK_DURATION := 5.0
+
 var _rocket_active: bool = false
 var _rocket_fuel: float = 4.0  # seconds of burn time
 const ROCKET_FUEL_MAX := 4.0
@@ -279,6 +284,8 @@ func _physics_process(delta: float) -> void:
 	_update_cooldowns(delta)
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
+	_handle_mage_airwalk_toggle()
+	_handle_mage_airwalk(delta)
 	_handle_block()
 	if _delegate_active:
 		# Summoner is frozen in delegate mode - skip normal input
@@ -315,9 +322,11 @@ func _update_cooldowns(delta: float) -> void:
 # -- Physics -------------------------------------------------------------------
 
 func _apply_gravity(delta: float) -> void:
+	if _mage_airwalk:
+		return  # No gravity while air-walking
 	if not is_on_floor():
 		velocity.y += GRAVITY * delta
-		velocity.y = min(velocity.y, 600.0)  # Terminal velocity
+		velocity.y = min(velocity.y, 600.0)
 
 
 func _handle_movement() -> void:
@@ -1569,6 +1578,69 @@ func _special_summon_donut() -> void:
 	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
 	get_parent().add_child(buddy)
 	_donut_buddy_count += 1
+
+
+# -- Mage Air-Walk -------------------------------------------------------------
+
+func _handle_mage_airwalk_toggle() -> void:
+	if character_class != PlayerManager.CharacterClass.MAGE:
+		return
+	if not _is_device_action_just_pressed("interact"):
+		return
+	if _mage_airwalk:
+		return  # Already active, can't re-trigger
+
+	# Activate air-walk
+	_mage_airwalk = true
+	_mage_airwalk_timer = MAGE_AIRWALK_DURATION
+	AudioManager.play("magic_bolt", 0.0, 0.6)
+	modulate = Color(0.7, 0.7, 1.0, 0.9)
+
+
+func _handle_mage_airwalk(delta: float) -> void:
+	if not _mage_airwalk:
+		return
+
+	_mage_airwalk_timer -= delta
+
+	# Cancel gravity - mage walks on air
+	if not is_on_floor():
+		velocity.y = 0.0
+
+	# Can walk left/right normally (handled by _handle_movement)
+	# Can also move up/down with the stick
+	if _is_device_action_pressed("move_up"):
+		velocity.y = -PlayerManager.get_player(player_index).get("speed", 90)
+	elif _is_device_action_pressed("move_down"):
+		velocity.y = PlayerManager.get_player(player_index).get("speed", 90)
+	elif not is_on_floor():
+		velocity.y = 0.0
+
+	# Sparkle trail under feet
+	if randi() % 4 == 0:
+		var sparkle := ColorRect.new()
+		sparkle.color = [Color(0.6, 0.5, 1.0, 0.5), Color(0.8, 0.7, 1.0, 0.4), Color(1.0, 1.0, 1.0, 0.3)][randi() % 3]
+		sparkle.size = Vector2(3, 3)
+		sparkle.position = global_position + Vector2(randf_range(-6, 6), randf_range(8, 14))
+		sparkle.z_index = -1
+		get_parent().add_child(sparkle)
+		var st := sparkle.create_tween()
+		st.tween_property(sparkle, "position:y", sparkle.position.y + randf_range(5, 15), 0.4)
+		st.parallel().tween_property(sparkle, "modulate:a", 0.0, 0.4)
+		st.tween_callback(sparkle.queue_free)
+
+	# Timer warning: flash when almost out
+	if _mage_airwalk_timer <= 1.5:
+		if fmod(_mage_airwalk_timer, 0.3) < 0.15:
+			modulate = Color(1.0, 0.5, 0.5, 0.85)
+		else:
+			modulate = Color(0.7, 0.7, 1.0, 0.9)
+
+	# Time's up
+	if _mage_airwalk_timer <= 0.0:
+		_mage_airwalk = false
+		modulate = Color.WHITE
+		AudioManager.play("player_hurt", -6.0, 1.5)
 
 
 # -- Summoner Delegate Mode ----------------------------------------------------
