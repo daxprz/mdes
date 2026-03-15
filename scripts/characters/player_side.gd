@@ -310,6 +310,9 @@ func _handle_movement() -> void:
 	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
 		velocity.x = 0.0
 		return
+	# Shield charge overrides movement
+	if _shield_charging:
+		return
 
 	var h_input := 0.0
 	if _is_device_action_pressed("move_left"):
@@ -780,28 +783,38 @@ func _perform_special() -> void:
 			_special_healing_burst()
 
 
+var _shield_charging: bool = false
+
 func _special_shield_charge() -> void:
 	AudioManager.play("shield_charge", 2.0, 0.9)
-	var dash_speed := 600.0
-	var charge_dir := Vector2(1.0 if _facing_right else -1.0, 0.0)
-	velocity.x = dash_speed if _facing_right else -dash_speed
-	velocity.y = -120.0  # Slight lift
+	var dash_speed: float = 600.0
+	var charge_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
+
+	# Flag to block normal movement during charge
+	_shield_charging = true
 
 	# Invincible during charge
 	collision_layer = 0
-	modulate = Color(0.4, 0.7, 1.0)  # Bright blue
+	modulate = Color(0.4, 0.7, 1.0)
 	_spawn_vfx(Color(0.3, 0.6, 1.0, 0.8), Vector2(48, 24))
 
-	# Dash wave - perpendicular to charge direction
+	# Dash wave
 	_spawn_dash_wave(global_position, charge_dir, 5)
 
-	# Hit everything in path across multiple frames
+	# Charge across multiple frames - force velocity each frame
 	attack_area.monitoring = true
 	var hit_bodies: Array = []
-	for i in range(4):
-		await get_tree().create_timer(0.05).timeout
+	var charge_frames: int = 12  # ~0.2s at 60fps = substantial distance
+	for i in range(charge_frames):
 		if not is_inside_tree():
+			_shield_charging = false
 			return
+		# Force dash velocity every frame (override movement)
+		velocity.x = dash_speed * charge_dir.x
+		velocity.y = -30.0  # Slight float
+		move_and_slide()
+
+		# Check for hits
 		var offset := Vector2(24.0 if _facing_right else -24.0, 0.0)
 		attack_area.position = offset
 		for body in attack_area.get_overlapping_bodies():
@@ -810,16 +823,25 @@ func _special_shield_charge() -> void:
 			if body.has_method("take_damage"):
 				var shield_dmg: int = int(35 * PlayerManager.get_skill_bonus(player_index, "attack"))
 				body.take_damage(shield_dmg, player_index)
+				PlayerManager.add_skill_xp(player_index, "special", 7)
 				hit_bodies.append(body)
 			if body.has_method("apply_knockback"):
 				var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.4).normalized()
 				body.apply_knockback(kb_dir * 400.0)
-		_spawn_vfx(Color(0.3, 0.6, 1.0, 0.4), Vector2(20, 28))
 
+		# Trail VFX every few frames
+		if i % 3 == 0:
+			_spawn_vfx(Color(0.3, 0.6, 1.0, 0.4), Vector2(20, 28))
+
+		await get_tree().process_frame
+
+	# End charge
+	_shield_charging = false
 	if is_inside_tree():
 		attack_area.monitoring = false
 		collision_layer = 2
 		modulate = Color.WHITE
+		velocity.x = 0.0
 
 
 func _special_explosive_muffin() -> void:
