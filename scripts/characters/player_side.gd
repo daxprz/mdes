@@ -111,6 +111,16 @@ var _demo_size_tier: int = 0   # 0-3, +20% radius per tier
 var _demo_napalm: bool = false  # Leaves burning ground
 var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
 
+# Demolitionist rocket jetpack
+var _rocket_active: bool = false
+var _rocket_fuel: float = 2.0  # seconds of burn time
+const ROCKET_FUEL_MAX := 2.0
+const ROCKET_THRUST := 450.0  # acceleration per second
+const ROCKET_MAX_SPEED := 350.0
+var _rocket_can_activate: bool = false  # true after first jump, false on ground
+var _rocket_smoke_timer: float = 0.0
+var _rocket_flame_timer: float = 0.0
+
 # Controller state tracking
 var _controller_actions: Dictionary = {}
 var _controller_just_pressed: Dictionary = {}
@@ -277,6 +287,7 @@ func _physics_process(delta: float) -> void:
 		return
 	_handle_movement()
 	_handle_jump()
+	_handle_rocket(delta)
 	_handle_wall_slide(delta)
 	_handle_charge(delta)
 	_check_ground_slam_landing()
@@ -331,9 +342,13 @@ func _handle_movement() -> void:
 
 
 func _handle_jump() -> void:
-	# Reset wall jump stamina when on the floor
+	# Reset wall jump stamina and rocket when on the floor
 	if is_on_floor():
 		_wall_jump_stamina = WALL_JUMP_STAMINA_MAX
+		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
+			_rocket_can_activate = false
+			_rocket_active = false
+			_rocket_fuel = ROCKET_FUEL_MAX
 
 	if not _is_device_action_just_pressed("jump"):
 		return
@@ -341,9 +356,14 @@ func _handle_jump() -> void:
 	if is_on_floor():
 		velocity.y = JUMP_VELOCITY
 		AudioManager.play("jump", -5.0)
+		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
+			_rocket_can_activate = true  # Next jump press activates rocket
+	elif character_class == PlayerManager.CharacterClass.DEMOLITIONIST and _rocket_can_activate and not _rocket_active and _rocket_fuel > 0.0:
+		# Double-jump in air activates the rocket!
+		_rocket_active = true
+		AudioManager.play("explosion", -6.0, 2.0)
 	elif _is_wall_sliding:
 		if _wall_jump_stamina <= 0:
-			# Out of wall jump stamina - flash red to indicate
 			_flash_wall_jump_exhausted()
 			return
 		_wall_jump_stamina -= 1
@@ -351,6 +371,115 @@ func _handle_jump() -> void:
 		AudioManager.play("jump", -5.0, 1.2)
 		if _wall_jump_stamina <= 0:
 			_flash_wall_jump_exhausted()
+
+
+func _handle_rocket(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.DEMOLITIONIST:
+		return
+	if not _rocket_active:
+		return
+
+	# Rocket deactivates when fuel runs out or player lands
+	if _rocket_fuel <= 0.0 or is_on_floor():
+		_rocket_active = false
+		return
+
+	# While jump is HELD, rocket fires
+	if _is_device_action_pressed("jump"):
+		_rocket_fuel -= delta
+
+		# Determine thrust direction based on input
+		var thrust_dir := Vector2.ZERO
+		if _is_device_action_pressed("move_left"):
+			thrust_dir.x -= 1.0
+		if _is_device_action_pressed("move_right"):
+			thrust_dir.x += 1.0
+		if _is_device_action_pressed("move_up"):
+			thrust_dir.y -= 1.0
+
+		# Default: thrust upward if no direction pressed
+		if thrust_dir == Vector2.ZERO:
+			thrust_dir = Vector2(0, -1)
+		else:
+			thrust_dir = thrust_dir.normalized()
+
+		# Apply thrust (accelerate in aimed direction)
+		velocity += thrust_dir * ROCKET_THRUST * delta
+
+		# Cap speed
+		if velocity.length() > ROCKET_MAX_SPEED:
+			velocity = velocity.normalized() * ROCKET_MAX_SPEED
+
+		# Reduce gravity effect while rocketing
+		velocity.y -= GRAVITY * delta * 0.7  # Cancel most of gravity
+
+		# --- Flame particles shooting BACKWARDS ---
+		_rocket_flame_timer += delta
+		if _rocket_flame_timer >= 0.03:  # ~30 flames per second
+			_rocket_flame_timer -= 0.03
+			var flame_dir: Vector2 = -thrust_dir  # Opposite of thrust
+			_spawn_rocket_flame(flame_dir)
+
+		# --- Smoke trail ---
+		_rocket_smoke_timer += delta
+		if _rocket_smoke_timer >= 0.06:
+			_rocket_smoke_timer -= 0.06
+			_spawn_rocket_smoke()
+
+		# Slight screen shake at high speed
+		if velocity.length() > 250.0:
+			position.x += randf_range(-0.5, 0.5)
+	else:
+		# Jump released - rocket goes idle (still active but not thrusting)
+		# Player can re-press jump to thrust again while fuel remains
+		pass
+
+
+func _spawn_rocket_flame(flame_dir: Vector2) -> void:
+	var flame := ColorRect.new()
+	# Random flame color: orange, yellow, red, white-hot
+	var flame_colors: Array[Color] = [
+		Color(1.0, 0.5, 0.0, 0.9),   # Orange
+		Color(1.0, 0.8, 0.1, 0.8),   # Yellow
+		Color(1.0, 0.2, 0.0, 0.9),   # Red
+		Color(1.0, 0.9, 0.6, 0.7),   # White-hot
+	]
+	flame.color = flame_colors[randi() % flame_colors.size()]
+	var size: float = randf_range(3.0, 7.0)
+	flame.size = Vector2(size, size)
+	flame.z_index = -1
+	flame.position = global_position + flame_dir * 8.0 + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+	get_parent().add_child(flame)
+
+	# Flame shoots backward with some spread
+	var spread: Vector2 = Vector2(randf_range(-20, 20), randf_range(-20, 20))
+	var target_pos: Vector2 = flame.position + flame_dir * randf_range(15, 35) + spread
+
+	var tween := flame.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(flame, "position", target_pos, randf_range(0.1, 0.25))
+	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.15, 0.3))
+	tween.tween_property(flame, "scale", Vector2(0.2, 0.2), 0.25)
+	tween.chain().tween_callback(flame.queue_free)
+
+
+func _spawn_rocket_smoke() -> void:
+	var smoke := ColorRect.new()
+	smoke.color = Color(0.5, 0.5, 0.5, 0.4)
+	var size: float = randf_range(4.0, 8.0)
+	smoke.size = Vector2(size, size)
+	smoke.z_index = -2
+	smoke.position = global_position + Vector2(randf_range(-4, 4), randf_range(-2, 4))
+	get_parent().add_child(smoke)
+
+	# Smoke drifts upward slowly and expands
+	var tween := smoke.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(smoke, "position:y", smoke.position.y - randf_range(10, 30), 0.8)
+	tween.tween_property(smoke, "position:x", smoke.position.x + randf_range(-8, 8), 0.8)
+	tween.tween_property(smoke, "modulate:a", 0.0, 1.0)
+	tween.tween_property(smoke, "scale", Vector2(2.0, 2.0), 1.0)
+	tween.chain().tween_callback(smoke.queue_free)
 
 
 func _handle_wall_slide(_delta: float) -> void:
