@@ -925,22 +925,25 @@ func _special_shield_charge() -> void:
 	# Invincible during charge
 	collision_layer = 0
 	modulate = Color(0.4, 0.7, 1.0)
-	_spawn_vfx(Color(0.3, 0.6, 1.0, 0.8), Vector2(48, 24))
+
+	# Initial burst VFX - big flash
+	_spawn_vfx(Color(0.3, 0.6, 1.0, 0.9), Vector2(48, 32))
+	_spawn_vfx(Color(1.0, 1.0, 1.0, 0.6), Vector2(24, 24))
 
 	# Dash wave
 	_spawn_dash_wave(global_position, charge_dir, 5)
 
-	# Charge across multiple frames - force velocity each frame
+	# Charge across multiple frames
 	attack_area.monitoring = true
 	var hit_bodies: Array = []
-	var charge_frames: int = 12  # ~0.2s at 60fps = substantial distance
+	var charge_frames: int = 14
 	for i in range(charge_frames):
 		if not is_inside_tree():
 			_shield_charging = false
 			return
-		# Force dash velocity every frame (override movement)
+
 		velocity.x = dash_speed * charge_dir.x
-		velocity.y = -30.0  # Slight float
+		velocity.y = -30.0
 		move_and_slide()
 
 		# Check for hits
@@ -954,22 +957,72 @@ func _special_shield_charge() -> void:
 				body.take_damage(shield_dmg, player_index)
 				PlayerManager.add_skill_xp(player_index, "special", 7)
 				hit_bodies.append(body)
+				# Impact spark burst on hit
+				for s in range(6):
+					var spark := ColorRect.new()
+					spark.color = [Color(1.0, 0.9, 0.3, 0.9), Color(0.5, 0.8, 1.0, 0.9), Color(1.0, 1.0, 1.0, 0.8)][s % 3]
+					spark.size = Vector2(randf_range(2, 5), randf_range(2, 5))
+					spark.position = body.global_position + Vector2(randf_range(-8, 8), randf_range(-8, 8))
+					spark.z_index = 10
+					get_parent().add_child(spark)
+					var spark_vel: Vector2 = Vector2(randf_range(-80, 80), randf_range(-100, -20))
+					var st := spark.create_tween()
+					st.tween_property(spark, "position", spark.position + spark_vel * 0.2, 0.2)
+					st.parallel().tween_property(spark, "modulate:a", 0.0, 0.2)
+					st.tween_callback(spark.queue_free)
 			if body.has_method("apply_knockback"):
 				var kb_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, -0.4).normalized()
 				body.apply_knockback(kb_dir * 400.0)
 
-		# Trail VFX every few frames
-		if i % 3 == 0:
-			_spawn_vfx(Color(0.3, 0.6, 1.0, 0.4), Vector2(20, 28))
+		# Rich trail particles every frame
+		# Blue energy streaks
+		for p in range(3):
+			var trail := ColorRect.new()
+			var trail_colors: Array[Color] = [
+				Color(0.3, 0.5, 1.0, 0.7),
+				Color(0.5, 0.7, 1.0, 0.5),
+				Color(0.8, 0.9, 1.0, 0.4),
+			]
+			trail.color = trail_colors[p]
+			trail.size = Vector2(randf_range(4, 10), randf_range(2, 5))
+			trail.position = global_position + Vector2(
+				-charge_dir.x * randf_range(4, 16),
+				randf_range(-10, 10)
+			)
+			trail.z_index = 7
+			get_parent().add_child(trail)
+			var drift: Vector2 = Vector2(-charge_dir.x * randf_range(10, 30), randf_range(-15, 15))
+			var tt := trail.create_tween()
+			tt.set_parallel(true)
+			tt.tween_property(trail, "position", trail.position + drift, randf_range(0.15, 0.3))
+			tt.tween_property(trail, "modulate:a", 0.0, randf_range(0.2, 0.35))
+			tt.tween_property(trail, "scale", Vector2(0.3, 0.3), 0.3)
+			tt.chain().tween_callback(trail.queue_free)
+
+		# Ground sparks (if on floor)
+		if is_on_floor() and i % 2 == 0:
+			var ground_spark := ColorRect.new()
+			ground_spark.color = Color(1.0, 0.8, 0.3, 0.6)
+			ground_spark.size = Vector2(3, 3)
+			ground_spark.position = global_position + Vector2(randf_range(-6, 6), 12)
+			ground_spark.z_index = 6
+			get_parent().add_child(ground_spark)
+			var gs_tween := ground_spark.create_tween()
+			gs_tween.tween_property(ground_spark, "position:y", ground_spark.position.y - randf_range(8, 20), 0.2)
+			gs_tween.parallel().tween_property(ground_spark, "modulate:a", 0.0, 0.2)
+			gs_tween.tween_callback(ground_spark.queue_free)
 
 		await get_tree().process_frame
 
-	# End charge
+	# End charge - final burst
 	_shield_charging = false
 	if is_inside_tree():
 		attack_area.monitoring = false
 		collision_layer = 2
-		modulate = Color.WHITE
+		# Deceleration flash
+		_spawn_vfx(Color(0.4, 0.6, 1.0, 0.5), Vector2(30, 30))
+		var brake_tween := create_tween()
+		brake_tween.tween_property(self, "modulate", Color.WHITE, 0.15)
 		velocity.x = 0.0
 
 
