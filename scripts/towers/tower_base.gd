@@ -283,9 +283,11 @@ func _build_tower() -> void:
 	# Floor platform at the bottom.
 	_create_platform(Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 10), TOWER_WIDTH)
 
-	# Task 3: Tower walls with themed color
-	# Walls are in the .tscn scene - just apply theme colors
+	# Tower walls with themed color
 	_apply_wall_theme()
+
+	# Interior walls - small obstacles inside the tower
+	_place_interior_walls(platform_count, vertical_spacing)
 
 	# Place traps throughout the tower (more in harder towers)
 	_place_traps(platform_count, vertical_spacing)
@@ -346,6 +348,49 @@ func _get_wall_color() -> Color:
 	var theme_id: int = clampi(tower_id, 1, 4)
 	var theme: Dictionary = TOWER_THEMES.get(theme_id, TOWER_THEMES[1]) as Dictionary
 	return theme["wall"] as Color
+
+
+func _place_interior_walls(platform_count: int, vertical_spacing: float) -> void:
+	# Place small wall segments inside the tower for variety
+	var wall_count: int = 4 + tower_id * 2  # 6 for T1, 12 for T4
+	var wall_color: Color = _get_wall_color().darkened(0.2)
+
+	for w in range(wall_count):
+		# Pick a random height (skip bottom safe zone and top exit area)
+		var min_y: float = TOWER_HEIGHT * 0.1
+		var max_y: float = TOWER_HEIGHT * 0.85
+		var wall_y: float = randf_range(min_y, max_y)
+
+		# Random side: left wall stub or right wall stub
+		var from_left: bool = randf() > 0.5
+		var wall_width: float = randf_range(40.0, 120.0)
+		var wall_height: float = randf_range(12.0, 24.0)
+
+		# Don't extend more than 60% across the tower
+		wall_width = minf(wall_width, TOWER_WIDTH * 0.6)
+
+		var wall_x: float
+		if from_left:
+			wall_x = wall_width / 2.0
+		else:
+			wall_x = TOWER_WIDTH - wall_width / 2.0
+
+		var wall := StaticBody2D.new()
+		wall.position = Vector2(wall_x, wall_y)
+
+		var col := CollisionShape2D.new()
+		var shape := RectangleShape2D.new()
+		shape.size = Vector2(wall_width, wall_height)
+		col.shape = shape
+		wall.add_child(col)
+
+		var rect := ColorRect.new()
+		rect.size = Vector2(wall_width, wall_height)
+		rect.position = Vector2(-wall_width / 2.0, -wall_height / 2.0)
+		rect.color = wall_color
+		wall.add_child(rect)
+
+		platforms_container.add_child(wall)
 
 
 func _apply_wall_theme() -> void:
