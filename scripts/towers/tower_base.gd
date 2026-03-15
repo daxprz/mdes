@@ -6,8 +6,16 @@ extends Node2D
 signal tower_cleared(tower_id: int)
 
 const GRAVITY := 800.0
-const TOWER_WIDTH := 400.0
-const TOWER_HEIGHT := 2400.0
+const BASE_TOWER_WIDTH := 600.0
+const BASE_TOWER_HEIGHT := 3200.0
+
+# Per-tower size overrides
+const TOWER_SIZES: Dictionary = {
+	2: {"width": 900.0, "height": 4800.0},
+}
+
+var TOWER_WIDTH := BASE_TOWER_WIDTH
+var TOWER_HEIGHT := BASE_TOWER_HEIGHT
 const PLATFORM_COUNT_BASE := 12
 const MAX_PLATFORM_SPACING := 140.0  # Must be below max jump height (v²/2g = 168px)
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
@@ -157,6 +165,14 @@ func _on_player_joined_midgame(player_index: int) -> void:
 
 
 func _build_tower() -> void:
+	# Apply per-tower size overrides
+	if TOWER_SIZES.has(tower_id):
+		TOWER_WIDTH = TOWER_SIZES[tower_id]["width"]
+		TOWER_HEIGHT = TOWER_SIZES[tower_id]["height"]
+	else:
+		TOWER_WIDTH = BASE_TOWER_WIDTH
+		TOWER_HEIGHT = BASE_TOWER_HEIGHT
+
 	# Task 3: Apply tower background color
 	_apply_tower_theme()
 
@@ -251,15 +267,15 @@ func _build_tower() -> void:
 			continue
 
 		# --- Normal platform ---
-		var platform_width: float = randf_range(80.0, 160.0)
+		var platform_width: float = randf_range(120.0, 220.0)
 		_create_platform(Vector2(x_offset, y_pos), platform_width)
 
 		# Place muffin on some platforms.
 		if i % 2 == 0:
 			_spawn_muffin(Vector2(x_offset, y_pos - 20))
 
-		# Place enemy on some platforms.
-		if i % 3 == 1 and i > 0:
+		# Place enemy on some platforms (spaced out).
+		if i % 5 == 1 and i > 0:
 			_spawn_enemy(Vector2(x_offset, y_pos - 24), platform_width * 0.4)
 
 		i += 1
