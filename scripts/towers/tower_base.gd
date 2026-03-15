@@ -284,7 +284,8 @@ func _build_tower() -> void:
 	_create_platform(Vector2(TOWER_WIDTH / 2.0, TOWER_HEIGHT - 10), TOWER_WIDTH)
 
 	# Task 3: Tower walls with themed color
-	_create_tower_walls()
+	# Walls are in the .tscn scene - just apply theme colors
+	_apply_wall_theme()
 
 	# Place traps throughout the tower (more in harder towers)
 	_place_traps(platform_count, vertical_spacing)
@@ -347,50 +348,15 @@ func _get_wall_color() -> Color:
 	return theme["wall"] as Color
 
 
-func _create_tower_walls() -> void:
+func _apply_wall_theme() -> void:
+	# Recolor the walls from the .tscn to match the tower theme
 	var wall_color: Color = _get_wall_color()
-	var wall_thickness: float = 16.0
-
-	# Left wall
-	var left_wall := StaticBody2D.new()
-	left_wall.position = Vector2(-wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
-	var left_col := CollisionShape2D.new()
-	var left_shape := RectangleShape2D.new()
-	left_shape.size = Vector2(wall_thickness, TOWER_HEIGHT)
-	left_col.shape = left_shape
-	left_wall.add_child(left_col)
-
-	var left_rect := ColorRect.new()
-	left_rect.size = Vector2(wall_thickness, TOWER_HEIGHT)
-	left_rect.position = Vector2(-wall_thickness / 2.0, -TOWER_HEIGHT / 2.0)
-	left_rect.color = wall_color
-	left_wall.add_child(left_rect)
-
-	# Task 3: Rainbow streaks on Tower 3 walls
-	if tower_id == 3:
-		_add_rainbow_streaks(left_wall, wall_thickness)
-
-	platforms_container.add_child(left_wall)
-
-	# Right wall
-	var right_wall := StaticBody2D.new()
-	right_wall.position = Vector2(TOWER_WIDTH + wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
-	var right_col := CollisionShape2D.new()
-	var right_shape := RectangleShape2D.new()
-	right_shape.size = Vector2(wall_thickness, TOWER_HEIGHT)
-	right_col.shape = right_shape
-	right_wall.add_child(right_col)
-
-	var right_rect := ColorRect.new()
-	right_rect.size = Vector2(wall_thickness, TOWER_HEIGHT)
-	right_rect.position = Vector2(-wall_thickness / 2.0, -TOWER_HEIGHT / 2.0)
-	right_rect.color = wall_color
-	right_wall.add_child(right_rect)
-
-	if tower_id == 3:
-		_add_rainbow_streaks(right_wall, wall_thickness)
-
-	platforms_container.add_child(right_wall)
+	var left_wall: ColorRect = get_node_or_null("WallLeft")
+	var right_wall: ColorRect = get_node_or_null("WallRight")
+	if left_wall:
+		left_wall.color = wall_color
+	if right_wall:
+		right_wall.color = wall_color
 
 
 func _add_rainbow_streaks(wall_node: Node2D, wall_w: float) -> void:
