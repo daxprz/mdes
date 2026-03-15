@@ -1401,22 +1401,64 @@ func _special_grappling_hook() -> void:
 
 
 func _special_frosting_freeze() -> void:
-	# Area slow effect - big icy burst
-	if not PlayerManager.use_mana(player_index, 40):
-		_special_cooldown = 0.0
-		_spawn_fail_flash()
+	# Mana Potion - restore a big chunk of mana
+	var p_data: Dictionary = PlayerManager.get_player(player_index)
+	if p_data.is_empty():
 		return
-	AudioManager.play("freeze")
-	_spawn_vfx(Color(0.5, 0.8, 1.0, 0.5), Vector2(120, 120))
-	modulate = Color(0.6, 0.9, 1.0)
-	attack_area.monitoring = true
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("apply_slow"):
-			body.apply_slow(3.0)
-	await get_tree().create_timer(0.3).timeout
-	if is_inside_tree():
-		attack_area.monitoring = false
-		modulate = Color.WHITE
+	var current_mana: float = p_data["mana"]
+	var max_mana: float = p_data["max_mana"]
+	if current_mana >= max_mana:
+		_spawn_fail_flash()
+		_special_cooldown = 0.0
+		return
+
+	# Restore 60% of max mana
+	var restore_amount: float = max_mana * 0.6
+	p_data["mana"] = minf(current_mana + restore_amount, max_mana)
+
+	AudioManager.play("player_revive", -2.0, 1.3)
+	AudioManager.play("muffin_collect", -4.0, 0.8)
+
+	# Drink animation - brief pause + purple glow
+	modulate = Color(0.6, 0.4, 1.0)
+
+	# Blue/purple mana particles spiral upward
+	for i in range(12):
+		var mana_p := ColorRect.new()
+		mana_p.color = [Color(0.4, 0.3, 1.0, 0.8), Color(0.6, 0.5, 1.0, 0.7), Color(0.8, 0.7, 1.0, 0.6)][i % 3]
+		mana_p.size = Vector2(4, 4)
+		var angle: float = float(i) * TAU / 12.0
+		mana_p.position = global_position + Vector2(cos(angle) * 12.0, sin(angle) * 12.0)
+		mana_p.z_index = 8
+		get_parent().add_child(mana_p)
+		var pt := mana_p.create_tween()
+		pt.set_parallel(true)
+		pt.tween_property(mana_p, "position:y", mana_p.position.y - randf_range(20, 40), 0.5)
+		pt.tween_property(mana_p, "position:x", mana_p.position.x + randf_range(-8, 8), 0.5)
+		pt.tween_property(mana_p, "modulate:a", 0.0, 0.5)
+		pt.tween_property(mana_p, "scale", Vector2(0.2, 0.2), 0.5)
+		pt.chain().tween_callback(mana_p.queue_free)
+
+	# "MANA+" text floats up
+	var mana_text := Label.new()
+	mana_text.text = "+%d MANA" % int(restore_amount)
+	mana_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	mana_text.add_theme_font_size_override("font_size", 10)
+	mana_text.modulate = Color(0.5, 0.4, 1.0)
+	mana_text.position = global_position + Vector2(-20, -30)
+	mana_text.z_index = 12
+	get_parent().add_child(mana_text)
+	var text_tw := mana_text.create_tween()
+	text_tw.tween_property(mana_text, "position:y", mana_text.position.y - 25, 0.8)
+	text_tw.parallel().tween_property(mana_text, "modulate:a", 0.0, 0.8)
+	text_tw.tween_callback(mana_text.queue_free)
+
+	# Fade back
+	var mod_tw := create_tween()
+	mod_tw.tween_property(self, "modulate", Color.WHITE, 0.3)
+
+	_update_health_bar()
+	PlayerManager.add_skill_xp(player_index, "special", 7)
 
 
 func _special_summon_donut() -> void:
