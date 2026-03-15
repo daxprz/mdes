@@ -1,8 +1,8 @@
 # Enemies & Bosses
 
-## Regular Enemies
+## Regular Enemies (13 types)
 
-### Skeleton
+### 1. Skeleton
 The basic enemy found in all towers.
 
 | Stat | Value |
@@ -24,7 +24,59 @@ The basic enemy found in all towers.
 - **HURT** - brief 0.25s stun when hit. Gets knocked back 150px in opposite direction.
 - **DEAD** - shrinks and fades, drops 3 mini-muffins.
 
-Skeletons are in the `"enemies"` group so donut buddies can target them.
+Skeletons are in the `"enemies"` group so donut buddies can target them. Also appears as overworld patrol variant.
+
+### 2. Fairy Cake Bat
+Flying enemy that moves in a sine wave pattern. Swoops toward players.
+
+### 3. Cookie Archer
+Ranged enemy that shoots at players from distance. Stays back while melee enemies charge.
+
+### 4. Candy Golem
+Tank enemy - slow, high HP, big hits. Takes significant damage to bring down.
+
+### 5. Sprinkle Swarm
+Small, fast swarm enemies that come in groups. Individually weak but dangerous together.
+
+### 6. Cupcake Bomber
+Flies overhead, drops frosting bombs that splat and slow players on contact.
+
+### 7. Licorice Whip
+Long-range tentacle enemy. Grabs and pulls players toward it.
+
+### 8. Gummy Bear Brute
+Huge, charges in a line, bounces off walls, gets dizzy after charge (vulnerable window).
+
+### 9. Wafer Shield Bearer
+Has a frontal shield. Must be hit from behind or with charge attacks to deal damage.
+
+### 10. Candy Corn Spinner
+Spins rapidly dealing AoE damage. Vulnerable when dizzy after spinning stops.
+
+### 11. Marshmallow Blob
+Splits into 2 smaller blobs when killed. Those split into 2 more (4 total from one).
+
+### 12. Peppermint Roller
+Rolls left/right along platforms, bounces off walls. Speeds up over time.
+
+### 13. Jellybean Sniper
+Hides in background, fires precise shots at players. Must be flushed out with AoE attacks.
+
+---
+
+## Mini-Bosses (4 total, one per tower mid-point)
+
+### Tower 1 Mini-Boss: Giant Cookie Cutter
+Slices platforms apart. Players must dodge the cutting pattern while dealing damage.
+
+### Tower 2 Mini-Boss: Frosting Fountain
+Sprays icing in a rotating pattern. Players dodge the rotating streams and attack between cycles.
+
+### Tower 3 Mini-Boss: Sprinkle Tornado
+Pulls players toward its center while throwing sprinkles outward. Must resist the pull and find openings.
+
+### Tower 4 Mini-Boss: Batter Elemental
+Shapeshifting blob that mimics player attacks. Adapts to the party's composition.
 
 ---
 

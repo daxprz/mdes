@@ -2,12 +2,12 @@
 
 ## Class Comparison
 
-| Stat | Melee | Ranged | Mage | Summoner | Rogue |
-|------|-------|--------|------|----------|-------|
-| **Health** | 175 | 100 | 80 | 90 | 90 |
-| **Mana** | 50 | 80 | 150 | 120 | 60 |
-| **Speed** | 110 | 120 | 90 | 95 | 150 |
-| **Mana Regen** | 1.0/s | 1.5/s | 3.0/s | 2.0/s | 1.5/s |
+| Stat | Melee | Ranged | Mage | Summoner | Rogue | Demolitionist | Healer | Tank |
+|------|-------|--------|------|----------|-------|---------------|--------|------|
+| **Health** | 175 | 100 | 80 | 90 | 90 | 100 | 90 | 250 |
+| **Mana** | 50 | 80 | 150 | 120 | 60 | 100 | 130 | 30 |
+| **Speed** | 110 | 120 | 90 | 95 | 150 | 105 | 95 | 70 |
+| **Mana Regen** | 1.0/s | 1.5/s | 3.0/s | 2.0/s | 1.5/s | 1.5/s | 2.5/s | 0.5/s |
 
 ---
 
@@ -20,20 +20,31 @@
 - Hit 3: 50 damage, 28px range + knockback
 - Combo window: 0.6 seconds between hits
 - Final hit plays a heavier sound and spawns VFX
+- Arc color matches combo stage (white > yellow > orange)
 
 **Air Attack - Ground Slam** (tower only)
-- Attack while airborne → slams downward at 600px/s
+- Attack while airborne: slams downward at 600px/s
 - 45 damage in 80px radius on landing
 - Explosion VFX + knockback on all nearby enemies
 
 **Special - Shield Charge**
-- Dashes forward at 250px/s (overworld) / 600px/s (tower)
-- 40 damage (overworld) / 35 damage to all in path (tower)
-- Brief invincibility during dash (tower)
-- Knockback on hit targets
-- Blue flash visual
+- Dashes forward at 600px/s with invincibility
+- 35 damage to all in path
+- Knockback on hit targets, blue flash visual
 
-**Identity:** Tanky frontliner. Highest HP, strong melee combos, great for crowd control.
+**Charge Attack - Ground Pound**
+- Hover in place while charging (wiggle animation + smoke particles)
+- On release: slam with blast radius 40px (min) to 120px (max)
+- Damage scales 30 to 80 based on charge time
+- Screen shake on impact scales with charge
+
+**Circle Ability - Enrage** (10s duration, 45s cooldown)
+- 1.5x speed multiplier
+- 1.8x damage multiplier
+- Red tint VFX, "ENRAGE!" floating text
+- Sound: enrage_roar.wav
+
+**Identity:** Tanky frontliner. Highest HP among original classes, strong melee combos, great for crowd control. Enrage turns him into a damage machine.
 
 ---
 
@@ -41,48 +52,72 @@
 **Color scheme:** Forest green / Leather brown
 
 **Basic Attack - Crossbow Bolt**
-- 15 damage projectile at 350px/s
-- Long range, can hit from safety
+- 60 damage projectile at 400px/s
+- Ammo system: limited arrows, must reload
+- Fires in aimed direction (right stick / movement)
 
-**Special - Explosive Muffin Grenade**
-- 35 damage AoE projectile at 250px/s
-- Green VFX flash on launch
-- No mana cost
+**Special - Grappling Hook**
+- Fires in aimed direction, 250px range
+- Hits wall/platform: pulls player to that point
+- Hits enemy: pulls player TO enemy + 20 damage
+- Raycasts for collision, rope visual connects player to hook
+- Sound: grapple_launch.wav (fire), grapple_hit.wav (impact)
 
-**Identity:** Safe damage dealer. Stays back, shoots from range. Grenade for burst AoE.
+**Charge Attack - Piercing Shot**
+- Charged bolt that pierces enemies, bigger projectile
+- Damage and size scale with charge time
+
+**Circle Ability - Reload**
+- Hold Circle to reload arrows (1.5s reload time)
+- reload_click.wav on completion
+
+**Identity:** High single-target damage dealer. Ammo management adds tactical depth. Grappling hook provides mobility and engage/escape options.
 
 ---
 
 ## Mage (Wizard)
 **Color scheme:** Royal purple / Deep gold
 
-**Basic Attack - Magic Bolt**
-- 20 damage projectile at 300px/s
-- Costs 10 mana per shot
-- Won't fire if insufficient mana
+**Basic Attack - Rapid Fire Magic Bolts**
+- 6 damage per bolt at 450px/s
+- Costs mana per shot
+- Fast fire rate, aimed direction
 
-**Special - Frosting Freeze**
-- Costs 40 mana
-- 120px radius AoE slow effect
-- Slows all enemies in range for 3 seconds
-- Icy blue VFX burst
-- Red flash if not enough mana
+**Special - Mana Potion**
+- Restores 60% of max mana
+- Drink animation with purple glow
+- Blue/purple mana particles spiral upward
+- Sound: mana_drink.wav
 
-**Identity:** High damage caster with crowd control. Glass cannon - lowest HP but fastest mana regen (3.0/s). Can lock down enemies for teammates.
+**Charge Attack - Beam of Light**
+- Raycast beam in aimed direction
+- Range: 200px (min charge) to 500px (max charge)
+- Width: 8px to 24px scaled by charge
+- Damage: 40-120 total, applied as multi-hit burns (3-8 hits)
+- Three-layer glow visual (outer, middle, white-hot core) + sparkle particles
+- Knocks enemies back along beam direction
+- Sound: beam_fire.wav
+
+**Circle Ability - Air-Walk** (5s duration, 10s cooldown)
+- No gravity while active - walk on air
+- Sound: airwalk_activate.wav
+
+**Identity:** High sustained damage caster. Glass cannon - lowest HP but fastest mana regen (3.0/s). Mana potion ensures uptime. Beam of Light is devastating fully charged. Air-walk grants unique positioning.
 
 ---
 
 ## Summoner
 **Color scheme:** Warm orange / Sunny yellow
 
-**Basic Attack - Staff Bonk**
-- 8 damage melee hit (weak)
-- Short range (16px)
+**Basic Attack - Homing Mark**
+- Fires a slow homing orb that seeks nearest enemy (250px detection)
+- On hit: marks target for 6 seconds (orange glow)
+- Marked enemies take bonus damage from donut buddies
+- Sound: mark_target.wav on hit
 
 **Special - Summon Donut Buddy**
 - Costs 30 mana (tower) / 25 mana (overworld)
-- Spawns an Adventure Time-style animated donut companion
-- Maximum 3 buddies active at once
+- Spawns an animated donut companion (max 3 active)
 - Orange VFX flash on summon
 
 ### Donut Buddy Stats
@@ -96,22 +131,31 @@
 | Detection Range | 120px |
 | Follow Distance | 40px |
 
-Buddies automatically:
-- Follow the summoner when no enemies nearby
-- Detect and chase nearest enemy within 120px
-- Attack enemies in range every 1 second
-- Die when health reaches 0 (frees up a summon slot)
+Buddies automatically follow summoner, chase enemies within 120px, and attack every 1s.
 
-**Identity:** Army builder. Weak alone but powerful with 3 donut buddies dealing 24 DPS combined. The buddies fight for you!
+**Charge Attack - Empowered Donut Buddy**
+- Summon a bigger, stronger buddy that scales with charge time
+- Costs 40 mana
+
+**Circle Ability - Delegate Mode** (10s duration, 30s cooldown)
+- Summoner freezes in trance (purple tint, 0.5 alpha)
+- Spawns a ghost delegate that the player controls instead
+- Ghost: 1.5x speed, 1.5x jump height, can dash with special button
+- All donut buddies follow the ghost instead of the summoner
+- Countdown timer displayed above summoner
+- Summoner takes 1.5x damage while delegating; hit >= 15 cancels it
+- On exit: aether rift teleport VFX, summoner teleports to ghost position
+
+**Identity:** Army builder. Weak alone but powerful with 3 donut buddies + homing marks amplifying damage. Delegate mode enables aggressive buddy positioning.
 
 ---
 
 ## Rogue
 **Color scheme:** Dark crimson / Charcoal black
 
-**Basic Attack - Dagger Stab**
+**Basic Attack - Knife Fan**
 - 22 damage (tower) / 18 damage (overworld)
-- Fast attack (0.1s active window vs 0.15s for others)
+- Fast attack (0.1s active window)
 - Medium range (18px)
 
 **Special - Shadow Dash**
@@ -121,4 +165,119 @@ Buddies automatically:
 - Ghost trail VFX at start and end positions
 - No mana cost
 
-**Identity:** Fastest class (150 speed). Hit-and-run assassin. Shadow dash through danger, stab, dash out. Great for dodging boss attacks.
+**Charge Attack - Charged Backstab**
+- Teleport behind nearest enemy, massive damage
+- Damage scales with charge time
+
+**Circle Ability - Stealth** (5s duration, 20s cooldown)
+- Semi-transparent, enemies ignore the rogue
+- Take 50% less damage while stealthed
+- Attacks from stealth deal 3.75x damage (backstab)
+- Sound: stealth_activate.wav
+
+**Identity:** Fastest class (150 speed). Hit-and-run assassin. Stealth + backstab delivers massive burst damage. Shadow dash through danger for repositioning.
+
+---
+
+## Demolitionist
+**Color scheme:** Orange-red / Gunmetal grey
+
+**Basic Attack - Throw Bomb**
+- Arcs with gravity, bounces once, explodes after 1.5s or on enemy contact
+- 25 damage, 60px radius, knockback + screen shake
+- Upgradeable: power tiers, blast size tiers, fragment bombs, napalm bombs
+
+**Special - Big Bomb**
+- Costs 40 mana
+- 50 damage, 90px radius, bigger VFX
+- Scales with upgrade tiers
+
+**Charge Attack - Mega Bomb**
+- Huge radius + fragments, scales with charge
+
+**Bomb Aspects:**
+- Electric (chains to nearby enemies, brief stun)
+- Fire (ignites enemies, DoT 3s)
+- Impact (massive knockback, lower damage)
+- Ice (slows enemies in blast radius)
+
+**Circle Ability - Refuel**
+- Hold Circle while grounded to refill rocket fuel
+- No auto-refuel on landing - manual refuel only
+- Sound: refuel_gurgle.wav
+
+**Rocket Jetpack:**
+- Activated by pressing jump a second time after first jump
+- 4 seconds of fuel, 800 thrust acceleration, 550 max speed
+- Aim direction controls thrust vector
+- Drift/spin increases over time (chaos mechanic)
+- Out of fuel = crash explosion (damage to self + nearby enemies)
+- Sounds: rocket_ignite.wav, rocket_thrust.wav, rocket_crash.wav
+
+**Identity:** Explosive specialist with unique vertical mobility. Rocket jetpack is powerful but dangerous. Bomb upgrades provide build variety.
+
+---
+
+## Healer
+**Color scheme:** Soft green / Warm white
+
+**Basic Attack - Healing Potion Throw**
+- Throws an arcing potion projectile in aimed direction
+- Auto-targets nearest injured ally within 150px (if in aimed direction)
+- Potion arcs with bezier curve, creates healing zone on landing
+- Healing zone: 40px radius, heals players standing in it over time
+
+**Special - Healing Burst**
+- Costs 50 mana
+- Heals all allies in 80px radius for 30 HP
+- Green pulse VFX expanding outward
+
+**Charge Attack - Channel Heal / Healing Wave**
+- Hold attack to channel: continuous 5 HP/s healing aura to nearby allies (80px radius)
+- Healer cannot move while channeling, green glow with pulsing ring VFX
+- Takes 25% more damage while channeling
+- Interrupted by hit: fires burst heal proportional to charge time
+- On release (if charged enough): healing blast wave expanding outward
+- Wave radius + healing scales with charge duration
+- Allies get healed + temporary buff (10% speed + 10% damage for 5s)
+- Enemies hit by wave get stunned for 1.5s
+
+**Dash Wave:**
+- Dash creates perpendicular wave pulse
+- Heals allies and pushes enemies aside
+
+**Circle Ability - Wind Gust** (8s cooldown)
+- 100px radius knockback blast (400 force)
+- Pushes all enemies away from healer
+- Sound: wind_gust.wav
+
+**Identity:** Support class. Healing potion throw + channel heal keep allies alive. Wind gust provides emergency crowd control. Healing burst for clutch saves.
+
+---
+
+## Tank
+**Color scheme:** Bronze / Dark iron
+
+**Basic Attack - Heavy Mace Slam**
+- 45 damage, very slow (1.2s cooldown)
+- Wide attack area in aimed direction
+- Damage reduced by 50% while fortified (tradeoff)
+
+**Special - Ground Pound AoE Stun**
+- AoE stun around the tank
+- Explosion + shield charge sound
+- Stuns nearby enemies
+
+**Charge Attack - Massive Shockwave**
+- Ground shockwave expanding outward
+- Radius: 60px (min) to 160px (max) scaled by charge
+- Damage: 20 to 70 scaled by charge
+- Bigger than special, longer stun
+
+**Circle Ability - Fortify** (8s duration, 25s cooldown)
+- Ignore 60% of incoming damage
+- Attack damage reduced by 50% (tradeoff)
+- Bronze glow VFX with pulsing, warning flash at 2s remaining
+- "FORTIFIED!" floating text on activation
+
+**Identity:** Ultimate tank. Highest HP in the game (250). Slowest movement (70) but nearly unkillable when fortified. Ground pound + shockwave provide crowd control. Best for absorbing boss damage.

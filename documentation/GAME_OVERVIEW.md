@@ -4,9 +4,11 @@
 
 The Ultimate Muffin is a **4-player local co-op PVE action game** built in Godot 4. Players work together to conquer bakery-themed towers, defeat sweet-themed bosses, and claim the Ultimate Muffin.
 
+Players choose from **8 unique classes** (Melee, Ranged, Mage, Summoner, Rogue, Demolitionist, Healer, Tank), each with distinct attacks, specials, charge attacks, and Circle-button abilities. Persistent player profiles track levels, XP, and stats across sessions.
+
 The game has three modes of play:
 1. **Top-down overworld** (Zelda-style) - explore a valley, choose which tower to enter
-2. **Side-scrolling tower platforming** - ascend towers, fight enemies, collect muffins
+2. **Side-scrolling tower platforming** - ascend towers, fight enemies, collect muffins (includes standard towers and dungeon maze towers)
 3. **Boss arena fights** - defeat a unique boss at the top of each tower
 
 ---
@@ -15,8 +17,9 @@ The game has three modes of play:
 
 ```
 TITLE SCREEN (playable lobby arena)
-  - Press START (Options) to join with a random class
-  - Use L1/R1 to pick your class (no duplicates)
+  - Press START (Options) to select/create a profile
+  - Profile chosen → join with your preferred class
+  - Use L1/R1 to pick your class (8 classes, no duplicates)
   - Jump around and test your moves
   - Press START again to begin
         |
@@ -56,23 +59,25 @@ FINAL TOWER + GIANT MUFFIN BOSS
 ### PS5 Controller
 | Button | Action |
 |--------|--------|
-| Left Stick | Move |
-| X (Cross) | Jump |
-| Square | Attack |
+| Left Stick | Move / Aim |
+| X (Cross) | Jump (Demolitionist: 2nd press = rocket jetpack) |
+| Square | Attack (hold to charge) |
 | Triangle | Special ability |
-| Circle | Interact |
-| Options (Start) | Join game / Pause |
+| Circle | Class ability (Enrage / Reload / Air-Walk / Delegate / Stealth / Refuel / Wind Gust / Fortify) |
+| R2 / L Shift | Block (perfect parry within 0.2s) |
+| Options (Start) | Profile select / Join game / Pause |
 | L1 | Previous class (title screen) |
 | R1 | Next class (title screen) |
 
 ### Keyboard
 | Key | Action |
 |-----|--------|
-| WASD | Move |
+| WASD | Move / Aim |
 | Space | Jump |
-| J | Attack |
+| J | Attack (hold to charge) |
 | K | Special |
-| F | Interact |
+| F | Class ability (Circle equivalent) |
+| Left Shift | Block |
 | Enter | Join game |
 | Escape | Pause |
 | Q / E | Cycle class (title screen) |

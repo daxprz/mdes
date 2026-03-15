@@ -138,7 +138,7 @@ The overworld needs structure - players shouldn't access everything immediately.
 
 ### Story 4.2: Enemy Density & Placement
 - [x] Task: Increase enemy count per tower floor (scale with tower difficulty)
-- [ ] Task: Add enemy spawn points that trigger when players reach certain heights
+- [x] Task: Add enemy spawn points that trigger when players reach certain heights
 - [x] Task: Mix enemy types per floor for tactical variety
 
 ### Story 4.3: Enemy Behaviors
@@ -415,7 +415,7 @@ Player profiles that survive game crashes and sessions.
   - Direct keyboard typing support
   - Name validation (no empty, no duplicates)
 - [x] Task: Create new profile step 2: Stack-rank class preferences (drag/reorder list)
-  - Shows all 7 classes in a list
+  - Shows all 8 classes in a list
   - D-pad up/down to select, X to grab, move up/down, X to drop
   - Top preference = default class when joining
 - [x] Task: Create new profile step 3: Optionally name each sub-character per class
@@ -445,6 +445,123 @@ Player profiles that survive game crashes and sessions.
 - [x] Task: Delete profile option (with confirmation)
 - [x] Task: Profile selection remembers last-used profile per controller
 - [x] Task: Guest mode: play without a profile (no progress saved, labeled "Guest")
+
+---
+
+## EPIC 14: New Class - Tank (`classes`)
+Armored frontliner with crowd control and damage absorption.
+
+### Story 14.1: Base Tank Class
+- [x] Task: Add TANK to CharacterClass enum + stats (250 HP, 30 mana, 70 speed, 0.5 mana regen)
+- [x] Task: Create tank topdown + side spritesheets
+- [x] Task: Basic attack: heavy mace slam (45 damage, 1.2s cooldown, wide area)
+- [x] Task: Special: ground pound AoE stun around the tank
+- [x] Task: Charge attack: massive ground shockwave (60-160px radius, 20-70 damage scaled by charge)
+
+### Story 14.2: Fortify Ability
+- [x] Task: Fortify ability on Circle (interact) - 8s duration, 25s cooldown
+- [x] Task: Fortified: ignore 60% of incoming damage
+- [x] Task: Fortified: attack damage reduced by 50% (tradeoff)
+- [x] Task: Bronze glow VFX with pulsing, warning flash at 2s remaining
+- [x] Task: "FORTIFIED!" floating text on activation
+
+---
+
+## EPIC 15: Class Ability Expansion (`classes`, `mechanics`)
+New abilities added to all existing classes.
+
+### Story 15.1: Melee - Enrage
+- [x] Task: Enrage ability on Circle (interact) - 10s duration, 45s cooldown
+- [x] Task: Enraged: 1.5x speed multiplier, 1.8x damage multiplier
+- [x] Task: Red tint VFX, "ENRAGE!" floating text
+
+### Story 15.2: Ranged - Ammo/Reload + Grappling Hook
+- [x] Task: Ammo system with limited arrows (reload on Circle, 1.5s reload time)
+- [x] Task: Crossbow bolt damage increased to 60
+- [x] Task: Special changed to Grappling Hook (fires aimed, pulls to walls or enemies, 20 damage on enemy hit)
+- [x] Task: All ranged attacks use aim direction system
+
+### Story 15.3: Mage - Beam of Light + Mana Potion + Air-Walk
+- [x] Task: Rapid-fire magic bolts (6 damage each, 450px/s, costs mana)
+- [x] Task: Special changed to Mana Potion (restores 60% max mana)
+- [x] Task: Charge attack: Beam of Light (raycast, 40-120 damage, multi-hit, scales with charge)
+- [x] Task: Air-Walk ability on Circle (5s duration, 10s cooldown, no gravity while active)
+
+### Story 15.4: Summoner - Homing Mark + Delegate Mode
+- [x] Task: Basic attack changed to Homing Mark (slow homing orb, marks target for +damage from buddies, 6s duration)
+- [x] Task: Delegate Mode on Circle (30s cooldown, 10s duration) - summoner freezes, ghost moves freely
+- [x] Task: Ghost: 1.5x speed, 1.5x jump, can dash. Buddies follow ghost
+- [x] Task: Summoner takes 1.5x damage while delegating; hit >= 15 cancels it
+- [x] Task: Aether rift teleport VFX on enter/exit delegate mode
+
+### Story 15.5: Rogue - Stealth + Backstab
+- [x] Task: Knife fan basic attack pattern
+- [x] Task: Stealth ability on Circle (5s duration, 20s cooldown)
+- [x] Task: Stealthed: semi-transparent, enemies ignore, take 50% less damage
+- [x] Task: Backstab from stealth: 3.75x damage multiplier
+
+### Story 15.6: Demolitionist - Rocket Jetpack + Crash + Refuel
+- [x] Task: Rocket jetpack activated by second jump press (4s fuel)
+- [x] Task: Thrust with aim direction, drift increases over time (chaos/spin)
+- [x] Task: Fuel depletion = crash explosion (damage to self + nearby)
+- [x] Task: Refuel on Circle while grounded (hold to refill, no auto-refuel on landing)
+
+### Story 15.7: Healer - Wind Gust + Healing Potion Throw
+- [x] Task: Basic attack changed to Healing Potion Throw (arcing projectile, creates healing zone on land)
+- [x] Task: Wind Gust ability on Circle (8s cooldown, 100px radius, 400 force knockback)
+- [x] Task: Channel heal: hold attack to channel continuous healing aura (5 HP/s to nearby allies)
+- [x] Task: Interrupted channel fires proportional burst heal
+
+### Story 15.8: All Classes Aim Weapons
+- [x] Task: All projectiles and attacks use right-stick/movement aim direction
+- [x] Task: Grappling hook, bolts, bombs, marks, potions all aim-able
+
+---
+
+## EPIC 16: Top-Down Ability Port (`mechanics`)
+All side-scrolling abilities ported to work in top-down overworld.
+
+### Story 16.1: Overworld Abilities
+- [x] Task: All class abilities functional in top-down mode
+- [x] Task: Aim direction works in 8-directional top-down movement
+
+---
+
+## EPIC 17: Tower 2 Dungeon Maze (`design`)
+
+### Story 17.1: Dungeon Tower Scene
+- [x] Task: Create dungeon_tower.tscn - maze-style tower variant
+- [x] Task: Dungeon tower script (dungeon_tower.gd)
+
+---
+
+## EPIC 18: Audio Expansion (`audio`)
+
+### Story 18.1: New Sound Effects
+- [x] Task: airwalk_activate.wav - Mage air-walk activation
+- [x] Task: backstab_hit.wav - Rogue backstab strike
+- [x] Task: beam_fire.wav - Mage beam of light
+- [x] Task: enrage_roar.wav - Melee enrage activation
+- [x] Task: grapple_hit.wav - Grappling hook impact
+- [x] Task: grapple_launch.wav - Grappling hook fire
+- [x] Task: mana_drink.wav - Mage mana potion
+- [x] Task: mark_target.wav - Summoner homing mark hit
+- [x] Task: refuel_gurgle.wav - Demolitionist refueling
+- [x] Task: reload_click.wav - Ranger reload
+- [x] Task: rocket_crash.wav - Demolitionist crash landing
+- [x] Task: rocket_ignite.wav - Demolitionist jetpack ignition
+- [x] Task: rocket_thrust.wav - Demolitionist jetpack loop
+- [x] Task: stealth_activate.wav - Rogue stealth activation
+- [x] Task: wind_gust.wav - Healer wind gust
+
+---
+
+## EPIC 19: Bug Fixes - Wave 2 (`bugs`)
+
+### Story 19.1: Profile & Join Fixes
+- [x] Task: Profile selection required before joining game
+- [x] Task: Profile persistence across sessions (JSON in user://)
+- [x] Task: ProfileManager autoload handles device-profile mapping
 
 ---
 
