@@ -1607,12 +1607,15 @@ func _handle_mage_airwalk(delta: float) -> void:
 	if not is_on_floor():
 		velocity.y = 0.0
 
-	# Can walk left/right normally (handled by _handle_movement)
+	# Move at half speed while air-walking
+	var air_speed: float = PlayerManager.get_player(player_index).get("speed", 90) * 0.5
+	velocity.x *= 0.5  # Halve the horizontal speed set by _handle_movement
+
 	# Can also move up/down with the stick
 	if _is_device_action_pressed("move_up"):
-		velocity.y = -PlayerManager.get_player(player_index).get("speed", 90)
+		velocity.y = -air_speed
 	elif _is_device_action_pressed("move_down"):
-		velocity.y = PlayerManager.get_player(player_index).get("speed", 90)
+		velocity.y = air_speed
 	elif not is_on_floor():
 		velocity.y = 0.0
 
