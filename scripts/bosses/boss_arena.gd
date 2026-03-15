@@ -307,6 +307,20 @@ func _on_boss_defeated() -> void:
 		return
 	_victory_shown = true
 
+	# Stop all player and enemy processing to prevent coroutine crashes
+	for node in get_tree().get_nodes_in_group("players"):
+		if node is Node:
+			node.set_physics_process(false)
+			node.set_process(false)
+	for node in get_tree().get_nodes_in_group("enemies"):
+		if node is Node:
+			node.set_physics_process(false)
+			node.set_process(false)
+	for node in get_tree().get_nodes_in_group("donut_buddies"):
+		if node is Node:
+			node.set_physics_process(false)
+			node.set_process(false)
+
 	_award_artifacts()
 	_show_victory()
 
@@ -327,7 +341,7 @@ func _show_victory() -> void:
 	GameManager.mark_tower_completed(tower_key)
 
 	# Track boss kills and tower completions in profiles, then auto-save
-	for pi: int in PlayerManager.players:
+	for pi: int in PlayerManager.players.keys():
 		ProfileManager.add_boss_kill(pi)
 		ProfileManager.add_tower_complete(pi)
 	ProfileManager.auto_save()
@@ -388,4 +402,4 @@ func _show_victory() -> void:
 
 func _return_to_overworld() -> void:
 	if is_inside_tree():
-		GameManager.go_to_overworld()
+		GameManager.call_deferred("go_to_overworld")
