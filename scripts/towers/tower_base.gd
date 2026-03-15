@@ -210,7 +210,7 @@ func _build_tower() -> void:
 	var conveyor_interval: int = maxi(platform_count / (conveyor_budget + 1), 4)
 
 	# Task 4: Moving platform tracking
-	var moving_budget: int = 1 + (tower_id - 1)  # T1: 1, T4: 4
+	var moving_budget: int = 4 + tower_id * 2  # T1: 6, T2: 8, T3: 10, T4: 12
 	var moving_placed: int = 0
 	var moving_interval: int = maxi(platform_count / (moving_budget + 1), 4)
 
