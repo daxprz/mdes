@@ -394,14 +394,62 @@ func _place_interior_walls(platform_count: int, vertical_spacing: float) -> void
 
 
 func _apply_wall_theme() -> void:
-	# Recolor the walls from the .tscn to match the tower theme
 	var wall_color: Color = _get_wall_color()
+	var wall_color_inner: Color = wall_color.darkened(0.15)
+	var wall_thickness: float = 50.0
+
+	# Resize and reposition all wall elements to match current TOWER_WIDTH/HEIGHT
+	var bg: ColorRect = get_node_or_null("TowerBackground")
+	if bg:
+		bg.offset_right = TOWER_WIDTH
+		bg.offset_bottom = TOWER_HEIGHT
+
 	var left_wall: ColorRect = get_node_or_null("WallLeft")
-	var right_wall: ColorRect = get_node_or_null("WallRight")
 	if left_wall:
+		left_wall.offset_left = -wall_thickness
+		left_wall.offset_right = 0.0
+		left_wall.offset_bottom = TOWER_HEIGHT
 		left_wall.color = wall_color
+
+	var left_inner: ColorRect = get_node_or_null("WallLeftInner")
+	if left_inner:
+		left_inner.offset_left = -wall_thickness + 5
+		left_inner.offset_right = -5.0
+		left_inner.offset_bottom = TOWER_HEIGHT
+		left_inner.color = wall_color_inner
+
+	var right_wall: ColorRect = get_node_or_null("WallRight")
 	if right_wall:
+		right_wall.offset_left = TOWER_WIDTH
+		right_wall.offset_right = TOWER_WIDTH + wall_thickness
+		right_wall.offset_bottom = TOWER_HEIGHT
 		right_wall.color = wall_color
+
+	var right_inner: ColorRect = get_node_or_null("WallRightInner")
+	if right_inner:
+		right_inner.offset_left = TOWER_WIDTH + 5
+		right_inner.offset_right = TOWER_WIDTH + wall_thickness - 5
+		right_inner.offset_bottom = TOWER_HEIGHT
+		right_inner.color = wall_color_inner
+
+	# Reposition collision bodies
+	var left_body: StaticBody2D = get_node_or_null("WallLeftBody")
+	if left_body:
+		left_body.position = Vector2(-wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
+		var left_shape: CollisionShape2D = left_body.get_node_or_null("WallLeftShape")
+		if left_shape and left_shape.shape is RectangleShape2D:
+			(left_shape.shape as RectangleShape2D).size = Vector2(wall_thickness, TOWER_HEIGHT)
+
+	var right_body: StaticBody2D = get_node_or_null("WallRightBody")
+	if right_body:
+		right_body.position = Vector2(TOWER_WIDTH + wall_thickness / 2.0, TOWER_HEIGHT / 2.0)
+		var right_shape: CollisionShape2D = right_body.get_node_or_null("WallRightShape")
+		if right_shape and right_shape.shape is RectangleShape2D:
+			(right_shape.shape as RectangleShape2D).size = Vector2(wall_thickness, TOWER_HEIGHT)
+
+	# Reposition exit door
+	if exit_door:
+		exit_door.position = Vector2(TOWER_WIDTH / 2.0, 40)
 
 
 func _add_rainbow_streaks(wall_node: Node2D, wall_w: float) -> void:
@@ -1061,8 +1109,8 @@ func _spawn_players() -> void:
 	new_cam.min_zoom = 0.5
 	new_cam.max_zoom = 1.8
 	new_cam.zoom_margin = Vector2(100, 80)
-	new_cam.limit_left = 0
-	new_cam.limit_right = int(TOWER_WIDTH)
+	new_cam.limit_left = -50
+	new_cam.limit_right = int(TOWER_WIDTH) + 50
 	new_cam.limit_top = 0
 	new_cam.limit_bottom = int(TOWER_HEIGHT)
 	new_cam.position = spawn_pos
