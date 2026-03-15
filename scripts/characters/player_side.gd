@@ -822,11 +822,14 @@ func _attack_melee() -> void:
 	var volume: float = 0.0 if combo_idx < COMBO_DAMAGES.size() - 1 else 2.0
 	AudioManager.play("sword_slash", volume, pitch)
 
+	# Aim direction determines swing position
+	var aim: Vector2 = _get_aim_direction()
+
 	# Spawn large arcing slash VFX with particles
 	_spawn_melee_arc(reach, combo_idx)
 
-	# Enable attack area and wait a physics frame so overlaps register
-	var offset := Vector2(reach if _facing_right else -reach, 0.0)
+	# Enable attack area in aimed direction
+	var offset: Vector2 = aim * reach
 	attack_area.position = offset
 	attack_area.monitoring = true
 	# Wait one physics frame for Godot to detect overlaps
@@ -858,9 +861,10 @@ func _attack_melee() -> void:
 
 
 func _spawn_melee_arc(reach: float, combo_idx: int) -> void:
-	# Large sweeping arc made of particles
-	var arc_center: Vector2 = global_position + Vector2(reach * 0.5 if _facing_right else -reach * 0.5, 0)
-	var arc_dir: float = 1.0 if _facing_right else -1.0
+	# Large sweeping arc in the aimed direction
+	var aim: Vector2 = _get_aim_direction()
+	var arc_center: Vector2 = global_position + aim * reach * 0.5
+	var arc_dir: float = 1.0 if aim.x >= 0.0 else -1.0
 	var colors: Array[Color] = [
 		Color(0.85, 0.85, 0.9, 0.8),   # Silver
 		Color(0.6, 0.6, 0.65, 0.7),    # Grey
@@ -1018,8 +1022,8 @@ func _attack_mage() -> void:
 
 func _attack_summoner() -> void:
 	AudioManager.play("staff_bonk")
-	var offset := Vector2(16.0 if _facing_right else -16.0, 0.0)
-	attack_area.position = offset
+	var aim: Vector2 = _get_aim_direction()
+	attack_area.position = aim * 16.0
 	attack_area.monitoring = true
 	var scaled_dmg: int = int(8 * PlayerManager.get_skill_bonus(player_index, "attack"))
 	for body in attack_area.get_overlapping_bodies():
@@ -1035,7 +1039,7 @@ func _attack_rogue() -> void:
 	# Throw 3 knives in a fan spread, 0.5s cooldown
 	AudioManager.play("dagger_stab")
 	_attack_cooldown = 0.5
-	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	var base_dir: Vector2 = _get_aim_direction()
 	var angles := [-0.2, 0.0, 0.2]  # Fan spread in radians
 	var scaled_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
@@ -1054,17 +1058,41 @@ func _attack_rogue() -> void:
 		get_parent().add_child(knife)
 
 
+func _get_aim_direction() -> Vector2:
+	## Returns the direction the player is aiming with D-pad/stick.
+	## Falls back to facing direction if no directional input.
+	var aim := Vector2.ZERO
+	if _is_device_action_pressed("move_left"):
+		aim.x -= 1.0
+	if _is_device_action_pressed("move_right"):
+		aim.x += 1.0
+	if _is_device_action_pressed("move_up"):
+		aim.y -= 1.0
+	if _is_device_action_pressed("move_down"):
+		aim.y += 1.0
+	if aim == Vector2.ZERO:
+		aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	else:
+		aim = aim.normalized()
+		# Update facing based on aim
+		if aim.x != 0.0:
+			_facing_right = aim.x > 0.0
+			sprite.flip_h = not _facing_right
+	return aim
+
+
 func _spawn_projectile(damage: int, speed: float, type: String) -> void:
 	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
 	if not projectile_scene:
 		return
+	var aim: Vector2 = _get_aim_direction()
 	var proj := projectile_scene.instantiate()
 	proj.damage = damage
 	proj.speed = speed
-	proj.direction = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	proj.direction = aim
 	proj.projectile_type = type
 	proj.owner_index = player_index
-	proj.global_position = global_position + Vector2(16.0 if _facing_right else -16.0, 0.0)
+	proj.global_position = global_position + aim * 16.0
 	get_parent().add_child(proj)
 
 
@@ -2454,15 +2482,16 @@ func _spawn_dash_wave(start_pos: Vector2, dash_dir: Vector2, damage: int) -> voi
 
 func _attack_demolitionist() -> void:
 	AudioManager.play("explosion", -6.0, 1.3)
+	var aim: Vector2 = _get_aim_direction()
 	# Spawn a bomb projectile that arcs with gravity
 	var bomb := ColorRect.new()
 	bomb.color = Color(0.9, 0.6, 0.1)
 	bomb.size = Vector2(8, 8)
 	bomb.z_index = 5
 	get_parent().add_child(bomb)
-	bomb.global_position = global_position + Vector2(12.0 if _facing_right else -12.0, -4.0)
+	bomb.global_position = global_position + aim * 12.0
 
-	var bomb_vel := Vector2(180.0 if _facing_right else -180.0, -200.0)
+	var bomb_vel: Vector2 = aim * 180.0 + Vector2(0, -200.0)
 	var bomb_gravity := 500.0
 	var bomb_time := 0.0
 	var bomb_max_time := 1.5
@@ -2821,11 +2850,11 @@ func _special_big_bomb() -> void:
 # -- Healer -------------------------------------------------------------------
 
 func _attack_healer() -> void:
-	# Throw a healing potion that creates a lingering heal zone
+	# Throw a healing potion in aimed direction
 	AudioManager.play("summon", -3.0, 1.2)
-	var throw_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
+	var throw_dir: Vector2 = _get_aim_direction()
 
-	# Find nearest injured ally to aim toward
+	# Default target: aimed direction. Override if injured ally nearby in that direction.
 	var target_pos: Vector2 = global_position + throw_dir * 80.0
 	for p in get_tree().get_nodes_in_group("players"):
 		if p == self or not (p is CharacterBody2D):
