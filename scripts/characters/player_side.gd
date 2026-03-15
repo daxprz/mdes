@@ -118,7 +118,7 @@ var _rogue_stealth_timer: float = 0.0
 var _rogue_stealth_cooldown: float = 0.0
 const ROGUE_STEALTH_DURATION := 5.0
 const ROGUE_STEALTH_COOLDOWN := 20.0
-const ROGUE_STEALTH_DAMAGE_MULT := 2.5  # 2.5x damage from stealth
+const ROGUE_STEALTH_DAMAGE_MULT := 3.75  # 3.75x damage from stealth (was 2.5)
 
 # Mage air-walk
 var _mage_airwalk: bool = false
