@@ -1025,18 +1025,100 @@ func _attack_mage() -> void:
 
 
 func _attack_summoner() -> void:
-	AudioManager.play("staff_bonk")
-	var aim: Vector2 = _get_aim_direction()
-	attack_area.position = aim * 16.0
-	attack_area.monitoring = true
-	var scaled_dmg: int = int(8 * PlayerManager.get_skill_bonus(player_index, "attack"))
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("take_damage"):
-			body.take_damage(scaled_dmg, player_index)
-			PlayerManager.add_skill_xp(player_index, "attack", 2)
-	await get_tree().create_timer(0.15).timeout
-	if is_inside_tree():
-		attack_area.monitoring = false
+	# Homing mark spell - slow projectile that seeks nearest enemy
+	# When it hits, marks the target so donut buddies deal +20-40% damage
+	AudioManager.play("summon", -4.0, 1.6)
+	_attack_cooldown = 0.8
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	# Find nearest enemy to home toward
+	var nearest_enemy: Node2D = null
+	var nearest_dist: float = 200.0
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < nearest_dist:
+				nearest_dist = dist
+				nearest_enemy = body
+
+	# Spawn homing orb
+	var orb := ColorRect.new()
+	orb.color = Color(1.0, 0.6, 0.2, 0.9)
+	orb.size = Vector2(6, 6)
+	orb.position = global_position
+	orb.z_index = 6
+	get_parent().add_child(orb)
+
+	# Homing flight
+	var orb_speed: float = 120.0
+	var orb_age: float = 0.0
+	var orb_max_age: float = 3.0
+	var hit := false
+
+	while orb_age < orb_max_age and is_instance_valid(orb) and is_inside_tree():
+		var dt: float = get_process_delta_time()
+		orb_age += dt
+
+		# Re-acquire nearest enemy each frame for true homing
+		var current_target: Node2D = null
+		var best_dist: float = 250.0
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if body is Node2D:
+				var d: float = orb.position.distance_to(body.global_position)
+				if d < best_dist:
+					best_dist = d
+					current_target = body
+
+		if current_target:
+			var to_target: Vector2 = (current_target.global_position - orb.position).normalized()
+			orb.position += to_target * orb_speed * dt
+
+			# Trail particle
+			if randi() % 3 == 0:
+				var trail := ColorRect.new()
+				trail.color = Color(1.0, 0.7, 0.3, 0.5)
+				trail.size = Vector2(3, 3)
+				trail.position = orb.position + Vector2(randf_range(-2, 2), randf_range(-2, 2))
+				trail.z_index = 5
+				get_parent().add_child(trail)
+				var tt := trail.create_tween()
+				tt.tween_property(trail, "modulate:a", 0.0, 0.3)
+				tt.tween_callback(trail.queue_free)
+
+			# Check if hit
+			if orb.position.distance_to(current_target.global_position) < 12.0:
+				# HIT - deal small damage and MARK the enemy
+				var scaled_dmg: int = int(5 * PlayerManager.get_skill_bonus(player_index, "attack"))
+				if current_target.has_method("take_damage"):
+					current_target.take_damage(scaled_dmg, player_index)
+				# Mark the enemy for bonus donut buddy damage
+				current_target.set_meta("summoner_marked", true)
+				current_target.set_meta("summoner_mark_owner", player_index)
+				# Visual mark - orange glow
+				current_target.modulate = Color(1.2, 0.9, 0.6)
+				# Mark expires after 6 seconds
+				_expire_mark_after(current_target, 6.0)
+				AudioManager.play("muffin_collect", -4.0, 0.6)
+				_spawn_vfx(Color(1.0, 0.6, 0.2, 0.6), Vector2(20, 20))
+				hit = true
+				break
+		else:
+			# No target - drift in aimed direction
+			var aim: Vector2 = _get_aim_direction()
+			orb.position += aim * orb_speed * dt
+
+		await get_tree().process_frame
+
+	if is_instance_valid(orb):
+		orb.queue_free()
+
+
+func _expire_mark_after(enemy: Node2D, duration: float) -> void:
+	await get_tree().create_timer(duration).timeout
+	if is_instance_valid(enemy):
+		enemy.remove_meta("summoner_marked")
+		enemy.remove_meta("summoner_mark_owner")
+		enemy.modulate = Color.WHITE
 
 
 func _attack_rogue() -> void:

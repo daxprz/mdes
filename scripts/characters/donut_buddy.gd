@@ -64,6 +64,21 @@ func _physics_process(delta: float) -> void:
 
 func _find_target() -> void:
 	_target = null
+	# Prioritize summoner-marked enemies first
+	var marked_target: Node2D = null
+	var marked_dist: float = DETECTION_RANGE * 2.0  # Extended range for marked
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if enemy is Node2D and enemy.has_meta("summoner_marked"):
+			var mark_owner: int = enemy.get_meta("summoner_mark_owner") if enemy.has_meta("summoner_mark_owner") else -1
+			if mark_owner == owner_index:
+				var d: float = global_position.distance_to(enemy.global_position)
+				if d < marked_dist:
+					marked_dist = d
+					marked_target = enemy
+	if marked_target:
+		_target = marked_target
+		return
+
 	var closest_dist := DETECTION_RANGE
 	for enemy in get_tree().get_nodes_in_group("enemies"):
 		if enemy is Node2D:
@@ -117,10 +132,25 @@ func _attack() -> void:
 	_attack_timer = ATTACK_COOLDOWN
 
 	if _target and _target.has_method("take_damage"):
-		_target.take_damage(ATTACK_DAMAGE, owner_index)
+		var dmg: int = ATTACK_DAMAGE
+		# Bonus damage to summoner-marked enemies (+20-40% random)
+		if _target.has_meta("summoner_marked"):
+			var bonus: float = randf_range(1.2, 1.4)
+			dmg = int(float(dmg) * bonus)
+			# Orange hit spark on marked target
+			var spark := ColorRect.new()
+			spark.color = Color(1.0, 0.7, 0.2, 0.8)
+			spark.size = Vector2(6, 6)
+			spark.position = _target.global_position + Vector2(randf_range(-5, 5), randf_range(-8, 0))
+			spark.z_index = 8
+			get_parent().add_child(spark)
+			var st := spark.create_tween()
+			st.tween_property(spark, "position:y", spark.position.y - 12, 0.2)
+			st.parallel().tween_property(spark, "modulate:a", 0.0, 0.2)
+			st.tween_callback(spark.queue_free)
+		_target.take_damage(dmg, owner_index)
 
-	# Play attack animation frames
-	sprite.frame = 4  # attack frame
+	sprite.frame = 4
 
 
 func _update_animation(delta: float) -> void:
