@@ -8,9 +8,11 @@ const MAX_PROFILES := 8
 
 signal profile_loaded(profile_id: String)
 signal profile_saved
+signal device_needs_profile(device_id: int)  # Emitted when a new controller needs a profile
 
 var profiles: Array[Dictionary] = []
 var active_profiles: Dictionary = {}  # player_index -> profile dict
+var device_profiles: Dictionary = {}  # device_id -> profile dict (persists across joins)
 
 
 # -- XP / Leveling Constants --------------------------------------------------
@@ -204,6 +206,31 @@ func unassign_profile(player_index: int) -> void:
 
 func unassign_all() -> void:
 	active_profiles.clear()
+
+
+# -- Device-Profile Binding ----------------------------------------------------
+
+func bind_device_to_profile(device_id: int, profile: Dictionary) -> void:
+	device_profiles[device_id] = profile
+
+
+func get_device_profile(device_id: int) -> Dictionary:
+	if device_profiles.has(device_id):
+		return device_profiles[device_id]
+	return {}
+
+
+func has_device_profile(device_id: int) -> bool:
+	return device_profiles.has(device_id)
+
+
+func unbind_device(device_id: int) -> void:
+	device_profiles.erase(device_id)
+
+
+func request_profile_for_device(device_id: int) -> void:
+	# Called when a device tries to join but has no profile
+	device_needs_profile.emit(device_id)
 
 
 # -- Session Sync --------------------------------------------------------------

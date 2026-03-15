@@ -109,6 +109,11 @@ func _get_device_from_event(event: InputEvent) -> int:
 func _try_join(device_id: int) -> void:
 	if _joined_devices.has(device_id):
 		return
+
+	# Check if this device has a profile - if not, request one
+	if not ProfileManager.has_device_profile(device_id):
+		ProfileManager.request_profile_for_device(device_id)
+		return
 	if players.size() >= MAX_PLAYERS:
 		return
 
@@ -145,6 +150,11 @@ func _try_join(device_id: int) -> void:
 
 	players[player_index] = player_data
 	_joined_devices[device_id] = player_index
+
+	# Auto-assign the device's profile to this player
+	var device_profile: Dictionary = ProfileManager.get_device_profile(device_id)
+	if not device_profile.is_empty():
+		ProfileManager.assign_profile_to_player(player_index, device_profile)
 
 	_spawn_join_effect(player_index)
 	player_joined.emit(player_index)

@@ -90,13 +90,24 @@ func _populate_list() -> void:
 	_labels.clear()
 	_entries.clear()
 
-	# Add existing profiles
+	# Add existing profiles (skip those already bound to another device)
+	var bound_ids: Array[String] = []
+	for did: Variant in ProfileManager.device_profiles:
+		var bound_prof: Dictionary = ProfileManager.device_profiles[did]
+		bound_ids.append(bound_prof.get("id", ""))
+
 	for profile: Dictionary in ProfileManager.profiles:
+		var pid: String = profile.get("id", "")
+		var is_bound: bool = pid in bound_ids
 		_entries.append(profile)
 		var lbl := Label.new()
 		var pname: String = profile.get("name", "???")
 		var last_played: String = profile.get("last_played", "")
-		lbl.text = "  " + pname + "  (" + last_played + ")"
+		if is_bound:
+			lbl.text = "  " + pname + "  (IN USE)"
+			lbl.modulate = Color(0.4, 0.4, 0.4)
+		else:
+			lbl.text = "  " + pname + "  (" + last_played + ")"
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		lbl.add_theme_font_size_override("font_size", 18)
 		_vbox.add_child(lbl)
@@ -194,4 +205,17 @@ func _confirm_selection() -> void:
 		# Create new
 		create_new_requested.emit(_player_index)
 	else:
+		# Check if this profile is already bound to another device
+		var pid: String = entry.get("id", "")
+		for did: Variant in ProfileManager.device_profiles:
+			var bound_prof: Dictionary = ProfileManager.device_profiles[did]
+			if bound_prof.get("id", "") == pid:
+				# Already in use - flash red and reject
+				if _selected < _labels.size() and is_instance_valid(_labels[_selected]):
+					_labels[_selected].modulate = Color.RED
+					var tween := create_tween()
+					tween.tween_property(_labels[_selected], "modulate", Color(0.4, 0.4, 0.4), 0.3)
+				_active = true
+				visible = true
+				return
 		profile_selected.emit(_player_index, entry)

@@ -52,18 +52,20 @@ var _cycle_cooldowns: Dictionary = {}  # device_id -> float
 # Profile selection UI
 var _profile_select: Node = null
 var _name_entry: Node = null
-var _pending_profile_player: int = -1  # player_index waiting for profile flow
+var _pending_device_id: int = -99  # Device waiting for profile creation
+var _name_entry: Node = null
 
 
 func _ready() -> void:
 	PlayerManager.player_joined.connect(_on_player_joined)
 	PlayerManager.player_left.connect(_on_player_left)
+	ProfileManager.device_needs_profile.connect(_on_device_needs_profile)
 	PlayerManager.reset_all_players()
 	ProfileManager.unassign_all()
 	_refresh_all_slots()
 	_update_start_visibility()
 	_setup_camera()
-	_setup_profile_overlays()
+	_setup_name_entry()
 
 
 func _setup_camera() -> void:
@@ -75,6 +77,42 @@ func _setup_camera() -> void:
 	cam.zoom_margin = Vector2(200, 150)
 	cam.position = Vector2(640, 450)
 	add_child(cam)
+
+
+func _setup_name_entry() -> void:
+	var name_script := load("res://scripts/ui/name_entry_overlay.gd")
+	_name_entry = CanvasLayer.new()
+	_name_entry.set_script(name_script)
+	add_child(_name_entry)
+	_name_entry.name_confirmed.connect(_on_name_confirmed)
+	_name_entry.cancelled.connect(_on_name_cancelled)
+
+
+func _on_device_needs_profile(device_id: int) -> void:
+	# Show name entry for this device
+	_pending_device_id = device_id
+	if _name_entry and _name_entry.has_method("setup"):
+		_name_entry.setup(device_id)
+
+
+func _on_name_confirmed(player_name: String) -> void:
+	# Create profile and bind to the pending device
+	var profile: Dictionary = ProfileManager.create_profile(player_name)
+	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
+	# Now re-trigger the join for this device
+	PlayerManager._try_join(_pending_device_id)
+	_pending_device_id = -99
+
+
+func _on_name_cancelled() -> void:
+	# Create a guest profile automatically
+	var guest_name: String = "Guest"
+	if _pending_device_id >= 0:
+		guest_name = "Player %d" % (_pending_device_id + 1)
+	var profile: Dictionary = ProfileManager.create_profile(guest_name)
+	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
+	PlayerManager._try_join(_pending_device_id)
+	_pending_device_id = -99
 
 
 func _process(delta: float) -> void:
