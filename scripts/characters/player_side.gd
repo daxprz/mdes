@@ -423,9 +423,15 @@ func _handle_rocket(delta: float) -> void:
 	if not _rocket_active:
 		return
 
-	# Rocket deactivates when fuel runs out or player lands
-	if _rocket_fuel <= 0.0 or is_on_floor():
+	# Landing safely deactivates rocket
+	if is_on_floor():
 		_rocket_active = false
+		return
+
+	# Out of fuel mid-air = EXPLOSION!
+	if _rocket_fuel <= 0.0:
+		sprite.rotation = 0.0
+		_rocket_crash_explode()
 		return
 
 	# Once out of control, player CANNOT stop - careens until crash
