@@ -224,33 +224,23 @@ func bind_device_to_profile(device_id: int, profile: Dictionary) -> void:
 
 
 func get_device_profile(device_id: int) -> Dictionary:
-	# First check session binding
 	if device_profiles.has(device_id):
 		return device_profiles[device_id]
-	# Then check persistent binding by controller name
-	var controller_name: String = _get_controller_name(device_id)
-	if _controller_bindings.has(controller_name):
-		var pid: String = _controller_bindings[controller_name]
-		var profile: Dictionary = get_profile(pid)
-		if not profile.is_empty():
-			# Restore the session binding
-			device_profiles[device_id] = profile
-			return profile
 	return {}
 
 
 func has_device_profile(device_id: int) -> bool:
-	if device_profiles.has(device_id):
-		return true
-	# Check persistent binding
+	return device_profiles.has(device_id)
+
+
+func get_last_profile_for_device(device_id: int) -> Dictionary:
+	## Returns the profile this controller used last session (from disk).
+	## Used to highlight/suggest in the selection list, NOT to auto-bind.
 	var controller_name: String = _get_controller_name(device_id)
 	if _controller_bindings.has(controller_name):
 		var pid: String = _controller_bindings[controller_name]
-		var profile: Dictionary = get_profile(pid)
-		if not profile.is_empty():
-			device_profiles[device_id] = profile
-			return true
-	return false
+		return get_profile(pid)
+	return {}
 
 
 func unbind_device(device_id: int) -> void:
