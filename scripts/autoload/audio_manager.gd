@@ -30,6 +30,21 @@ const SOUND_FILES := {
 	"menu_select": "menu_select.wav",
 	"menu_confirm": "menu_confirm.wav",
 	"pause": "pause.wav",
+	"grapple_launch": "grapple_launch.wav",
+	"grapple_hit": "grapple_hit.wav",
+	"rocket_ignite": "rocket_ignite.wav",
+	"rocket_thrust": "rocket_thrust.wav",
+	"rocket_crash": "rocket_crash.wav",
+	"stealth_activate": "stealth_activate.wav",
+	"backstab_hit": "backstab_hit.wav",
+	"mana_drink": "mana_drink.wav",
+	"beam_fire": "beam_fire.wav",
+	"airwalk_activate": "airwalk_activate.wav",
+	"wind_gust": "wind_gust.wav",
+	"enrage_roar": "enrage_roar.wav",
+	"reload_click": "reload_click.wav",
+	"refuel_gurgle": "refuel_gurgle.wav",
+	"mark_target": "mark_target.wav",
 }
 
 # How many simultaneous instances of each sound

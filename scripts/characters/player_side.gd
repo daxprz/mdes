@@ -418,7 +418,7 @@ func _handle_jump() -> void:
 		_rocket_out_of_control = false
 		# Random spin direction: clockwise or counter-clockwise
 		_rocket_spin_direction = 1.0 if randf() > 0.5 else -1.0
-		AudioManager.play("explosion", -6.0, 2.0)
+		AudioManager.play("rocket_ignite")
 	elif _is_wall_sliding:
 		if _wall_jump_stamina <= 0:
 			_flash_wall_jump_exhausted()
@@ -1065,7 +1065,7 @@ func _attack_ranged() -> void:
 	# Square: fire crossbow
 	if _ranger_arrows <= 0:
 		_spawn_fail_flash()
-		AudioManager.play("menu_select", -6.0, 0.5)
+		AudioManager.play("reload_click", -4.0)
 		return
 	_ranger_arrows -= 1
 	AudioManager.play("crossbow_shoot", 0.0, 0.8)
@@ -1160,7 +1160,7 @@ func _attack_summoner() -> void:
 				current_target.modulate = Color(1.2, 0.9, 0.6)
 				# Mark expires after 6 seconds
 				_expire_mark_after(current_target, 6.0)
-				AudioManager.play("muffin_collect", -4.0, 0.6)
+				AudioManager.play("mark_target")
 				_spawn_vfx(Color(1.0, 0.6, 0.2, 0.6), Vector2(20, 20))
 				hit = true
 				break
@@ -1211,7 +1211,7 @@ func _attack_rogue() -> void:
 				hit_something = true
 		# Only show BACK STAB text + sound if we actually hit an enemy
 		if hit_something:
-			AudioManager.play("sword_slash", 3.0, 0.6)
+			AudioManager.play("backstab_hit")
 			_stealth_backstab_vfx(global_position + base_dir * 16.0)
 		await get_tree().create_timer(0.1).timeout
 		if is_inside_tree():
@@ -1480,7 +1480,7 @@ func _special_grappling_hook() -> void:
 	var aim: Vector2 = _get_aim_direction()
 	var hook_range: float = 250.0
 
-	AudioManager.play("crossbow_shoot", 0.0, 0.7)
+	AudioManager.play("grapple_launch")
 
 	# Raycast to find what the hook hits
 	var space := get_world_2d().direct_space_state
@@ -1534,7 +1534,7 @@ func _special_grappling_hook() -> void:
 		return
 
 	# --- Pull player to the hook point ---
-	AudioManager.play("shield_charge", -3.0, 1.4)
+	AudioManager.play("grapple_hit")
 
 	# Disable physics during pull
 	set_physics_process(false)
@@ -1594,7 +1594,7 @@ func _special_frosting_freeze() -> void:
 	var restore_amount: float = max_mana * 0.6
 	p_data["mana"] = minf(current_mana + restore_amount, max_mana)
 
-	AudioManager.play("player_revive", -2.0, 1.3)
+	AudioManager.play("mana_drink")
 	AudioManager.play("muffin_collect", -4.0, 0.8)
 
 	# Drink animation - brief pause + purple glow
@@ -1725,7 +1725,7 @@ func _handle_melee_enrage(delta: float) -> void:
 		# ENRAGE!
 		_melee_enraged = true
 		_melee_enrage_timer = MELEE_ENRAGE_DURATION
-		AudioManager.play("boss_roar", 0.0, 1.5)
+		AudioManager.play("enrage_roar")
 		AudioManager.play("shield_charge", 2.0, 0.5)
 		modulate = Color(1.3, 0.3, 0.2)
 		# Burst VFX
@@ -1797,7 +1797,7 @@ func _handle_healer_wind_gust() -> void:
 		return
 
 	_healer_gust_cooldown = HEALER_GUST_COOLDOWN
-	AudioManager.play("shield_charge", 0.0, 1.8)
+	AudioManager.play("wind_gust")
 	AudioManager.play("jump", 2.0, 0.5)
 
 	# Expanding wind ring VFX
@@ -1868,7 +1868,7 @@ func _handle_healer_wind_gust() -> void:
 func _ranger_fire_crossbow() -> void:
 	if _ranger_arrows <= 0:
 		_spawn_fail_flash()
-		AudioManager.play("menu_select", -6.0, 0.5)
+		AudioManager.play("reload_click", -4.0)
 		return
 
 	_ranger_arrows -= 1
@@ -1909,7 +1909,7 @@ func _handle_ranger_reload(delta: float) -> void:
 	if _ranger_reload_timer <= 0.0:
 		# Reload one arrow
 		_ranger_arrows = mini(_ranger_arrows + 1, RANGER_MAX_ARROWS)
-		AudioManager.play("menu_confirm", -8.0, 1.5)
+		AudioManager.play("reload_click")
 
 		# Small arrow VFX
 		var arrow_text := Label.new()
@@ -1946,7 +1946,7 @@ func _handle_rogue_stealth_toggle() -> void:
 
 	_rogue_stealth = true
 	_rogue_stealth_timer = ROGUE_STEALTH_DURATION
-	AudioManager.play("shadow_dash", -3.0, 0.6)
+	AudioManager.play("stealth_activate")
 	# Go nearly invisible
 	modulate = Color(1.0, 1.0, 1.0, 0.15)
 
@@ -1975,7 +1975,7 @@ func _exit_stealth() -> void:
 	_rogue_stealth = false
 	_rogue_stealth_cooldown = ROGUE_STEALTH_COOLDOWN
 	modulate = Color.WHITE
-	AudioManager.play("shadow_dash", -6.0, 1.2)
+	AudioManager.play("stealth_activate", -4.0, 1.3)
 
 
 func _stealth_backstab_vfx(hit_pos: Vector2) -> void:
@@ -2015,7 +2015,7 @@ func _handle_mage_airwalk_toggle() -> void:
 
 	_mage_airwalk = true
 	_mage_airwalk_timer = MAGE_AIRWALK_DURATION
-	AudioManager.play("magic_bolt", 0.0, 0.6)
+	AudioManager.play("airwalk_activate")
 	modulate = Color(0.7, 0.7, 1.0, 0.9)
 
 
@@ -2938,7 +2938,7 @@ func _charged_mage_bolt(charge_ratio: float) -> void:
 	var beam_damage: int = int(lerpf(40.0, 120.0, charge_ratio))
 	var beam_hits: int = int(lerpf(3.0, 8.0, charge_ratio))  # Hits per enemy
 
-	AudioManager.play("magic_bolt", 4.0, 0.4)
+	AudioManager.play("beam_fire")
 	AudioManager.play("shield_charge", 2.0, 1.5)
 	PlayerManager.add_skill_xp(player_index, "charge", 5)
 
