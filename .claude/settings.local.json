@@ -26,7 +26,9 @@
       "Bash(for f:*)",
       "Bash(do echo:*)",
       "Read(//Users/jeremy/dev/dax/test123/**)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(sed:*)",
+      "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_character_sprites.py)"
     ]
   }
 }
