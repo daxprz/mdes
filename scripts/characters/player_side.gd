@@ -113,10 +113,10 @@ var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
 
 # Demolitionist rocket jetpack
 var _rocket_active: bool = false
-var _rocket_fuel: float = 2.0  # seconds of burn time
-const ROCKET_FUEL_MAX := 2.0
-const ROCKET_THRUST := 450.0  # acceleration per second
-const ROCKET_MAX_SPEED := 350.0
+var _rocket_fuel: float = 4.0  # seconds of burn time
+const ROCKET_FUEL_MAX := 4.0
+const ROCKET_THRUST := 800.0  # acceleration per second
+const ROCKET_MAX_SPEED := 550.0
 var _rocket_can_activate: bool = false  # true after first jump, false on ground
 var _rocket_smoke_timer: float = 0.0
 var _rocket_flame_timer: float = 0.0
