@@ -121,7 +121,9 @@ const ROGUE_STEALTH_DAMAGE_MULT := 2.5  # 2.5x damage from stealth
 # Mage air-walk
 var _mage_airwalk: bool = false
 var _mage_airwalk_timer: float = 0.0
+var _mage_airwalk_cooldown: float = 0.0
 const MAGE_AIRWALK_DURATION := 5.0
+const MAGE_AIRWALK_COOLDOWN := 10.0
 
 var _rocket_active: bool = false
 var _rocket_fuel: float = 4.0  # seconds of burn time
@@ -1669,9 +1671,11 @@ func _handle_mage_airwalk_toggle() -> void:
 	if not _is_device_action_just_pressed("interact"):
 		return
 	if _mage_airwalk:
-		return  # Already active, can't re-trigger
+		return
+	if _mage_airwalk_cooldown > 0.0:
+		_spawn_fail_flash()
+		return
 
-	# Activate air-walk
 	_mage_airwalk = true
 	_mage_airwalk_timer = MAGE_AIRWALK_DURATION
 	AudioManager.play("magic_bolt", 0.0, 0.6)
@@ -1679,6 +1683,8 @@ func _handle_mage_airwalk_toggle() -> void:
 
 
 func _handle_mage_airwalk(delta: float) -> void:
+	if _mage_airwalk_cooldown > 0.0:
+		_mage_airwalk_cooldown -= delta
 	if not _mage_airwalk:
 		return
 
@@ -1691,8 +1697,8 @@ func _handle_mage_airwalk(delta: float) -> void:
 	if not p_data.is_empty():
 		p_data["mana"] = maxf(0.0, p_data["mana"] - 10.0 * delta)
 		if p_data["mana"] <= 0.0:
-			# Out of mana - cancel air-walk
 			_mage_airwalk = false
+			_mage_airwalk_cooldown = MAGE_AIRWALK_COOLDOWN
 			modulate = Color.WHITE
 			AudioManager.play("player_hurt", -6.0, 1.5)
 			return
@@ -1736,6 +1742,7 @@ func _handle_mage_airwalk(delta: float) -> void:
 	# Time's up
 	if _mage_airwalk_timer <= 0.0:
 		_mage_airwalk = false
+		_mage_airwalk_cooldown = MAGE_AIRWALK_COOLDOWN
 		modulate = Color.WHITE
 		AudioManager.play("player_hurt", -6.0, 1.5)
 
