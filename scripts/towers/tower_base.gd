@@ -352,7 +352,7 @@ func _get_wall_color() -> Color:
 
 func _place_interior_walls(platform_count: int, vertical_spacing: float) -> void:
 	# Place small wall segments inside the tower for variety
-	var wall_count: int = 4 + tower_id * 2  # 6 for T1, 12 for T4
+	var wall_count: int = 12 + tower_id * 4  # 16 for T1, 28 for T4
 	var wall_color: Color = _get_wall_color().darkened(0.2)
 
 	for w in range(wall_count):
