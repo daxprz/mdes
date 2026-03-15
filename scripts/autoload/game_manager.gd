@@ -121,7 +121,10 @@ func go_to_overworld() -> void:
 func go_to_tower(tower_id: int) -> void:
 	current_tower_id = tower_id
 	change_state(GameState.TOWER)
-	transition_to_scene("res://scenes/towers/tower_base.tscn")
+	if tower_id == 2:
+		transition_to_scene("res://scenes/towers/dungeon_tower.tscn")
+	else:
+		transition_to_scene("res://scenes/towers/tower_base.tscn")
 
 
 func go_to_boss(tower_id: int = -1) -> void:
@@ -213,7 +216,10 @@ func _restart_current_scene() -> void:
 	_transitioning = false  # Force allow transition
 	match current_state:
 		GameState.TOWER:
-			transition_to_scene("res://scenes/towers/tower_base.tscn")
+			if current_tower_id == 2:
+				transition_to_scene("res://scenes/towers/dungeon_tower.tscn")
+			else:
+				transition_to_scene("res://scenes/towers/tower_base.tscn")
 		GameState.BOSS:
 			transition_to_scene("res://scenes/bosses/boss_arena.tscn")
 		GameState.OVERWORLD:
