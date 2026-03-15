@@ -660,9 +660,9 @@ func _attack_summoner() -> void:
 
 
 func _attack_rogue() -> void:
-	# Throw 3 knives in a fan spread, 2s cooldown
+	# Throw 3 knives in a fan spread, 0.5s cooldown
 	AudioManager.play("dagger_stab")
-	_attack_cooldown = 2.0  # Override the default cooldown
+	_attack_cooldown = 0.5
 	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
 	var angles := [-0.2, 0.0, 0.2]  # Fan spread in radians
 	var scaled_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
@@ -1757,40 +1757,71 @@ func _charged_summoner_donut(charge_ratio: float) -> void:
 
 
 func _charged_rogue_backstab(charge_ratio: float) -> void:
-	var damage: int = int(lerpf(30.0, 70.0, charge_ratio))
-	var nearest_enemy: Node2D = null
-	var nearest_dist: float = 150.0
+	# Charged knife fan: more charge = more knives, wider spread, bigger hitbox, more damage
+	var knife_count: int = int(lerpf(3.0, 9.0, charge_ratio))
+	var spread_angle: float = lerpf(0.3, 1.2, charge_ratio)  # radians total spread
+	var damage_per_knife: int = int(lerpf(10.0, 25.0, charge_ratio))
+	var knife_speed: float = lerpf(350.0, 500.0, charge_ratio)
+	var knife_size: float = lerpf(1.0, 2.0, charge_ratio)  # scale multiplier
 
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
+	AudioManager.play("dagger_stab", 2.0, lerpf(1.0, 0.6, charge_ratio))
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
+
+	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
+
+	# Spawn VFX sweep arc
+	var arc_width: float = lerpf(30.0, 80.0, charge_ratio)
+	var arc_height: float = lerpf(20.0, 50.0, charge_ratio)
+	var arc_vfx := ColorRect.new()
+	arc_vfx.color = Color(0.8, 0.15, 0.15, 0.5)
+	arc_vfx.size = Vector2(arc_width, arc_height)
+	arc_vfx.position = global_position + Vector2(
+		-arc_width / 2.0 if not _facing_right else 0,
+		-arc_height / 2.0
+	)
+	arc_vfx.z_index = 7
+	get_parent().add_child(arc_vfx)
+	var arc_tween := arc_vfx.create_tween()
+	arc_tween.set_parallel(true)
+	arc_tween.tween_property(arc_vfx, "modulate:a", 0.0, 0.25)
+	arc_tween.tween_property(arc_vfx, "scale:x", 1.5, 0.25)
+	arc_tween.chain().tween_callback(arc_vfx.queue_free)
+
+	# Spawn knives in a fan
+	for i in range(knife_count):
+		var t: float = 0.0
+		if knife_count > 1:
+			t = float(i) / float(knife_count - 1)
+		var angle: float = lerpf(-spread_angle / 2.0, spread_angle / 2.0, t)
+		var dir: Vector2 = base_dir.rotated(angle)
+
+		var knife_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
+		if not knife_scene:
 			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < nearest_dist:
-			nearest_dist = dist
-			nearest_enemy = body as Node2D
+		var knife := knife_scene.instantiate()
+		knife.damage = damage_per_knife
+		knife.speed = knife_speed
+		knife.direction = dir
+		knife.projectile_type = "knife"
+		knife.owner_index = player_index
+		knife.global_position = global_position + base_dir * 12.0
+		if knife_size > 1.1:
+			knife.scale = Vector2(knife_size, knife_size)
+		get_parent().add_child(knife)
 
-	if nearest_enemy:
-		var behind_offset: float = -20.0 if nearest_enemy.global_position.x > global_position.x else 20.0
-		var teleport_pos := Vector2(nearest_enemy.global_position.x + behind_offset, nearest_enemy.global_position.y)
-		_spawn_vfx(Color(0.5, 0.0, 0.5, 0.6), Vector2(14, 28))
-		global_position = teleport_pos
-		_facing_right = nearest_enemy.global_position.x > global_position.x
-		sprite.flip_h = not _facing_right
-		_spawn_vfx(Color(0.5, 0.0, 0.5, 0.6), Vector2(14, 28))
-		AudioManager.play("dagger_stab", 3.0, 0.7)
-		if nearest_enemy.has_method("take_damage"):
-			nearest_enemy.take_damage(damage, player_index)
-	else:
-		AudioManager.play("dagger_stab", 1.0, 0.8)
-		var offset := Vector2(18.0 if _facing_right else -18.0, 0.0)
-		attack_area.position = offset
-		attack_area.monitoring = true
-		for body in attack_area.get_overlapping_bodies():
-			if body.has_method("take_damage"):
-				body.take_damage(damage, player_index)
-		await get_tree().create_timer(0.1).timeout
-		if is_inside_tree():
-			attack_area.monitoring = false
+	# Red/crimson particle burst
+	for p_i in range(int(lerpf(4.0, 12.0, charge_ratio))):
+		var particle := ColorRect.new()
+		particle.color = Color(0.8, 0.1, 0.1, 0.7)
+		particle.size = Vector2(3 + charge_ratio * 3, 3 + charge_ratio * 3)
+		particle.position = global_position + Vector2(randf_range(-10, 10), randf_range(-10, 10))
+		particle.z_index = 8
+		get_parent().add_child(particle)
+		var p_dir: Vector2 = base_dir.rotated(randf_range(-spread_angle, spread_angle))
+		var pt := particle.create_tween()
+		pt.tween_property(particle, "position", particle.position + p_dir * randf_range(20, 50), 0.3)
+		pt.parallel().tween_property(particle, "modulate:a", 0.0, 0.3)
+		pt.tween_callback(particle.queue_free)
 
 
 func _charged_demo_mega_bomb(charge_ratio: float) -> void:
