@@ -60,6 +60,8 @@ func _ready() -> void:
 	ProfileManager.device_needs_profile.connect(_on_device_needs_profile)
 	PlayerManager.reset_all_players()
 	ProfileManager.unassign_all()
+	# Clear session device bindings so players must select their profile
+	ProfileManager.device_profiles.clear()
 	_refresh_all_slots()
 	_update_start_visibility()
 	_setup_camera()
@@ -99,11 +101,12 @@ func _setup_name_entry() -> void:
 
 func _on_device_needs_profile(device_id: int) -> void:
 	_pending_device_id = device_id
-	# If profiles exist, let the player choose or create new
+	# Always show selection/creation on the title screen
 	if not ProfileManager.profiles.is_empty() and _profile_select and _profile_select.has_method("setup"):
-		_profile_select.setup(-1, device_id)  # -1 since player isn't joined yet
+		# Show profile list - player picks which profile to use
+		_profile_select.setup(-1, device_id)
 	else:
-		# No profiles exist - go straight to name entry
+		# No profiles exist yet - go straight to name entry
 		if _name_entry and _name_entry.has_method("setup"):
 			_name_entry.setup(device_id)
 
