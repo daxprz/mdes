@@ -237,7 +237,7 @@ func _input(event: InputEvent) -> void:
 	if event.device != device_id:
 		return
 
-	for action in ["move_left", "move_right", "jump", "attack", "special", "block", "interact"]:
+	for action in ["move_left", "move_right", "move_up", "move_down", "jump", "attack", "special", "block", "interact"]:
 		if event.is_action_pressed(action):
 			_controller_actions[action] = true
 			_controller_just_pressed[action] = true
@@ -388,50 +388,61 @@ func _handle_rocket(delta: float) -> void:
 	if _is_device_action_pressed("jump"):
 		_rocket_fuel -= delta
 
-		# Determine thrust direction based on input
-		var thrust_dir := Vector2.ZERO
+		# Full 8-direction aiming with D-pad/stick
+		var aim_dir := Vector2.ZERO
 		if _is_device_action_pressed("move_left"):
-			thrust_dir.x -= 1.0
+			aim_dir.x -= 1.0
 		if _is_device_action_pressed("move_right"):
-			thrust_dir.x += 1.0
+			aim_dir.x += 1.0
 		if _is_device_action_pressed("move_up"):
-			thrust_dir.y -= 1.0
+			aim_dir.y -= 1.0
+		if _is_device_action_pressed("move_down"):
+			aim_dir.y += 1.0
 
-		# Default: thrust upward if no direction pressed
-		if thrust_dir == Vector2.ZERO:
+		# The ROCKET fires OPPOSITE the aim direction
+		# Point stick DOWN → rocket blasts DOWN → you fly UP
+		# Point stick LEFT → rocket blasts LEFT → you fly RIGHT
+		var thrust_dir: Vector2
+		if aim_dir == Vector2.ZERO:
+			# No direction = rocket fires downward (fly up)
 			thrust_dir = Vector2(0, -1)
 		else:
-			thrust_dir = thrust_dir.normalized()
+			thrust_dir = (-aim_dir).normalized()  # Fly OPPOSITE to where you point
 
-		# Apply thrust (accelerate in aimed direction)
+		# Exhaust direction = where the rocket flames shoot (opposite of flight)
+		var exhaust_dir: Vector2 = -thrust_dir
+
+		# Apply thrust
 		velocity += thrust_dir * ROCKET_THRUST * delta
 
 		# Cap speed
 		if velocity.length() > ROCKET_MAX_SPEED:
 			velocity = velocity.normalized() * ROCKET_MAX_SPEED
 
-		# Reduce gravity effect while rocketing
-		velocity.y -= GRAVITY * delta * 0.7  # Cancel most of gravity
+		# Cancel gravity while thrusting
+		velocity.y -= GRAVITY * delta * 0.85
 
-		# --- Flame particles shooting BACKWARDS ---
+		# --- Big flame exhaust shooting in exhaust direction ---
 		_rocket_flame_timer += delta
-		if _rocket_flame_timer >= 0.03:  # ~30 flames per second
-			_rocket_flame_timer -= 0.03
-			var flame_dir: Vector2 = -thrust_dir  # Opposite of thrust
-			_spawn_rocket_flame(flame_dir)
+		if _rocket_flame_timer >= 0.02:  # 50 flames/sec for dense exhaust
+			_rocket_flame_timer -= 0.02
+			_spawn_rocket_flame(exhaust_dir)
+			# Extra big flame every few ticks
+			if randi() % 3 == 0:
+				_spawn_rocket_flame_big(exhaust_dir)
 
 		# --- Smoke trail ---
 		_rocket_smoke_timer += delta
-		if _rocket_smoke_timer >= 0.06:
-			_rocket_smoke_timer -= 0.06
+		if _rocket_smoke_timer >= 0.05:
+			_rocket_smoke_timer -= 0.05
 			_spawn_rocket_smoke()
 
-		# Slight screen shake at high speed
-		if velocity.length() > 250.0:
-			position.x += randf_range(-0.5, 0.5)
+		# Screen shake scales with speed
+		var shake_amount: float = clampf((velocity.length() - 150.0) / 400.0, 0.0, 1.0) * 1.5
+		position.x += randf_range(-shake_amount, shake_amount)
+		position.y += randf_range(-shake_amount * 0.5, shake_amount * 0.5)
 	else:
-		# Jump released - rocket goes idle (still active but not thrusting)
-		# Player can re-press jump to thrust again while fuel remains
+		# Jump released - coasting, can re-press to thrust again
 		pass
 
 
@@ -460,6 +471,26 @@ func _spawn_rocket_flame(flame_dir: Vector2) -> void:
 	tween.tween_property(flame, "position", target_pos, randf_range(0.1, 0.25))
 	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.15, 0.3))
 	tween.tween_property(flame, "scale", Vector2(0.2, 0.2), 0.25)
+	tween.chain().tween_callback(flame.queue_free)
+
+
+func _spawn_rocket_flame_big(exhaust_dir: Vector2) -> void:
+	var flame := ColorRect.new()
+	flame.color = Color(1.0, 0.6, 0.0, 0.9)
+	var size: float = randf_range(6.0, 12.0)
+	flame.size = Vector2(size, size)
+	flame.z_index = -1
+	flame.position = global_position + exhaust_dir * 6.0
+	get_parent().add_child(flame)
+
+	var target_pos: Vector2 = flame.position + exhaust_dir * randf_range(25, 50) + Vector2(randf_range(-10, 10), randf_range(-10, 10))
+	var tween := flame.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(flame, "position", target_pos, randf_range(0.15, 0.35))
+	tween.tween_property(flame, "modulate:a", 0.0, randf_range(0.2, 0.4))
+	tween.tween_property(flame, "scale", Vector2(0.1, 0.1), 0.35)
+	# Color shift from white-hot to red
+	tween.tween_property(flame, "color", Color(0.8, 0.1, 0.0, 0.0), 0.35)
 	tween.chain().tween_callback(flame.queue_free)
 
 
