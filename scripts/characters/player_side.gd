@@ -568,7 +568,10 @@ func _rocket_crash_explode() -> void:
 	# Blast radius and damage scale with how long they held the rocket
 	var blast_radius: float = lerpf(40.0, 150.0, chaos_sq)
 	var blast_damage: int = int(lerpf(10.0, 50.0, chaos_sq))
-	var self_damage: int = int(lerpf(5.0, 30.0, chaos_sq))
+	# Self damage = 40% of max health
+	var p_data: Dictionary = PlayerManager.get_player(player_index)
+	var max_hp: int = p_data.get("max_health", 100) if not p_data.is_empty() else 100
+	var self_damage: int = int(max_hp * 0.4)
 
 	AudioManager.play("explosion", 4.0, lerpf(0.8, 0.4, chaos))
 	if chaos > 0.5:
