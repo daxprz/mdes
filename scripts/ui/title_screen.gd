@@ -109,10 +109,10 @@ func _on_device_needs_profile(device_id: int) -> void:
 
 
 func _on_profile_selected(_player_index: int, profile: Dictionary) -> void:
-	# Existing profile chosen - bind to device and join
 	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	PlayerManager._try_join(_pending_device_id)
+	var dev_id: int = _pending_device_id
 	_pending_device_id = -99
+	call_deferred("_deferred_join", dev_id)
 
 
 func _on_create_new_requested(_player_index: int) -> void:
@@ -124,8 +124,14 @@ func _on_create_new_requested(_player_index: int) -> void:
 func _on_name_confirmed(player_name: String) -> void:
 	var profile: Dictionary = ProfileManager.create_profile(player_name)
 	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	PlayerManager._try_join(_pending_device_id)
+	# Defer the join to next frame so overlays fully close first
+	var dev_id: int = _pending_device_id
 	_pending_device_id = -99
+	call_deferred("_deferred_join", dev_id)
+
+
+func _deferred_join(device_id: int) -> void:
+	PlayerManager._try_join(device_id)
 
 
 func _on_name_cancelled() -> void:
@@ -134,8 +140,9 @@ func _on_name_cancelled() -> void:
 		guest_name = "Player %d" % (_pending_device_id + 1)
 	var profile: Dictionary = ProfileManager.create_profile(guest_name)
 	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	PlayerManager._try_join(_pending_device_id)
+	var dev_id: int = _pending_device_id
 	_pending_device_id = -99
+	call_deferred("_deferred_join", dev_id)
 
 
 func _process(delta: float) -> void:
