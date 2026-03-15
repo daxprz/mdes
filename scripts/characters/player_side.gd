@@ -120,7 +120,10 @@ const ROCKET_MAX_SPEED := 550.0
 var _rocket_can_activate: bool = false  # true after first jump, false on ground
 var _rocket_smoke_timer: float = 0.0
 var _rocket_flame_timer: float = 0.0
-var _rocket_hold_time: float = 0.0  # How long thrust has been held continuously
+var _rocket_hold_time: float = 0.0
+var _rocket_spin_direction: float = 0.0  # +1 or -1, chosen randomly on activation
+var _rocket_drift_angle: float = 0.0  # Accumulated rotational drift
+var _rocket_out_of_control: bool = false  # Past the point of no return
 
 # Controller state tracking
 var _controller_actions: Dictionary = {}
@@ -349,6 +352,9 @@ func _handle_jump() -> void:
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
 			_rocket_can_activate = false
 			_rocket_active = false
+			_rocket_out_of_control = false
+			_rocket_hold_time = 0.0
+			_rocket_drift_angle = 0.0
 			_rocket_fuel = ROCKET_FUEL_MAX
 
 	if not _is_device_action_just_pressed("jump"):
@@ -360,8 +366,12 @@ func _handle_jump() -> void:
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
 			_rocket_can_activate = true  # Next jump press activates rocket
 	elif character_class == PlayerManager.CharacterClass.DEMOLITIONIST and _rocket_can_activate and not _rocket_active and _rocket_fuel > 0.0:
-		# Double-jump in air activates the rocket!
 		_rocket_active = true
+		_rocket_hold_time = 0.0
+		_rocket_drift_angle = 0.0
+		_rocket_out_of_control = false
+		# Random spin direction: clockwise or counter-clockwise
+		_rocket_spin_direction = 1.0 if randf() > 0.5 else -1.0
 		AudioManager.play("explosion", -6.0, 2.0)
 	elif _is_wall_sliding:
 		if _wall_jump_stamina <= 0:
@@ -385,18 +395,30 @@ func _handle_rocket(delta: float) -> void:
 		_rocket_active = false
 		return
 
-	# While jump is HELD, rocket fires
-	if _is_device_action_pressed("jump"):
+	# Once out of control, player CANNOT stop - careens until crash
+	var pressing_thrust: bool = _is_device_action_pressed("jump") or _rocket_out_of_control
+
+	if pressing_thrust:
 		_rocket_fuel -= delta
 		_rocket_hold_time += delta
 
-		# --- Non-linear chaos: the longer you hold, the wilder it gets ---
-		# Chaos factor ramps up exponentially
-		var chaos: float = clampf(_rocket_hold_time / 3.0, 0.0, 1.0)  # 0→1 over 3 seconds
-		var chaos_sq: float = chaos * chaos  # Exponential ramp
+		# --- Chaos ramps FAST: 0→1 over 1.5 seconds ---
+		var chaos: float = clampf(_rocket_hold_time / 1.5, 0.0, 1.0)
+		var chaos_sq: float = chaos * chaos
 		var chaos_cube: float = chaos_sq * chaos
 
-		# Full 8-direction aiming
+		# Point of no return at 80% chaos (~1.2 seconds)
+		if chaos > 0.8 and not _rocket_out_of_control:
+			_rocket_out_of_control = true
+			AudioManager.play("boss_roar", -2.0, 2.0)
+
+		# --- Consistent rotational drift ---
+		# Drift angle accumulates in one direction (CW or CCW)
+		# Starts slow, accelerates with chaos
+		var drift_rate: float = chaos_sq * 3.0  # radians per second at max chaos
+		_rocket_drift_angle += _rocket_spin_direction * drift_rate * delta
+
+		# Player's aim input
 		var aim_dir := Vector2.ZERO
 		if _is_device_action_pressed("move_left"):
 			aim_dir.x -= 1.0
@@ -407,80 +429,94 @@ func _handle_rocket(delta: float) -> void:
 		if _is_device_action_pressed("move_down"):
 			aim_dir.y += 1.0
 
-		var thrust_dir: Vector2
+		var base_dir: Vector2
 		if aim_dir == Vector2.ZERO:
-			thrust_dir = Vector2(0, -1)
+			base_dir = Vector2(0, -1)
 		else:
-			thrust_dir = aim_dir.normalized()
+			base_dir = aim_dir.normalized()
 
-		# At high chaos, the thrust direction wobbles randomly
-		var wobble_angle: float = randf_range(-chaos_sq * 0.8, chaos_sq * 0.8)
-		thrust_dir = thrust_dir.rotated(wobble_angle)
+		# Apply accumulated drift rotation to the aimed direction
+		# At low chaos: player has full control
+		# At high chaos: drift overpowers the aim completely
+		var player_influence: float = 1.0 - chaos_cube  # 1.0 → 0.0
+		var thrust_dir: Vector2 = base_dir.rotated(_rocket_drift_angle * (1.0 - player_influence * 0.7))
+
+		# When out of control, thrust locks to whatever direction it's drifting
+		if _rocket_out_of_control:
+			thrust_dir = Vector2.UP.rotated(_rocket_drift_angle)
 
 		var exhaust_dir: Vector2 = -thrust_dir
 
-		# Non-linear thrust: starts smooth, gets WILD
-		# Base 800 → ramps to 1600 at max chaos
-		var current_thrust: float = ROCKET_THRUST * (1.0 + chaos_cube * 1.5)
+		# Non-linear thrust ramp
+		var current_thrust: float = ROCKET_THRUST * (1.0 + chaos_cube * 2.0)
 		velocity += thrust_dir * current_thrust * delta
 
-		# Speed cap also increases with chaos (550 → 900)
-		var current_max_speed: float = ROCKET_MAX_SPEED * (1.0 + chaos_sq * 0.7)
+		# Speed cap ramps with chaos
+		var current_max_speed: float = ROCKET_MAX_SPEED * (1.0 + chaos_sq * 0.8)
 		if velocity.length() > current_max_speed:
 			velocity = velocity.normalized() * current_max_speed
 
 		# Cancel gravity
 		velocity.y -= GRAVITY * delta * 0.85
 
-		# --- Flame jet: gets more chaotic ---
+		# Rotate the sprite to match flight direction
+		sprite.rotation = velocity.angle() + PI / 2.0 if _rocket_out_of_control else 0.0
+
+		# --- Flames: denser and wilder with chaos ---
 		_rocket_flame_timer += delta
-		var flame_interval: float = maxf(0.008, 0.015 - chaos * 0.007)  # Faster at high chaos
+		var flame_interval: float = maxf(0.006, 0.015 - chaos * 0.009)
 		if _rocket_flame_timer >= flame_interval:
 			_rocket_flame_timer -= flame_interval
 			_spawn_rocket_flame(exhaust_dir)
 			_spawn_rocket_flame(exhaust_dir)
 			if chaos > 0.3:
-				_spawn_rocket_flame(exhaust_dir)  # Triple flames
+				_spawn_rocket_flame(exhaust_dir)
 			if randi() % 2 == 0:
 				_spawn_rocket_flame_big(exhaust_dir)
-			# Wild sparks at high chaos
-			if chaos > 0.5 and randi() % 3 == 0:
-				var spark_dir: Vector2 = exhaust_dir.rotated(randf_range(-1.5, 1.5))
+			# Wild sparks spray sideways at high chaos
+			if chaos > 0.5:
+				var spark_dir: Vector2 = exhaust_dir.rotated(_rocket_spin_direction * randf_range(0.5, 1.5))
 				_spawn_rocket_flame(spark_dir)
 
-		# --- Smoke: more at high chaos ---
+		# --- Smoke ---
 		_rocket_smoke_timer += delta
-		var smoke_interval: float = maxf(0.02, 0.035 - chaos * 0.015)
+		var smoke_interval: float = maxf(0.015, 0.035 - chaos * 0.02)
 		if _rocket_smoke_timer >= smoke_interval:
 			_rocket_smoke_timer -= smoke_interval
 			_spawn_rocket_smoke()
-			if chaos > 0.6:
-				_spawn_rocket_smoke()  # Double smoke
+			if chaos > 0.5:
+				_spawn_rocket_smoke()
 
-		# Screen shake: escalates dramatically
-		var shake_amount: float = clampf(chaos_sq * 4.0, 0.0, 4.0)
+		# Screen shake escalates
+		var shake_amount: float = clampf(chaos_sq * 5.0, 0.0, 5.0)
 		position.x += randf_range(-shake_amount, shake_amount)
 		position.y += randf_range(-shake_amount, shake_amount)
 
-		# Visual: player tints orange/red as chaos builds
-		var chaos_color: Color = Color.WHITE.lerp(Color(1.0, 0.6, 0.2), chaos_sq)
+		# Tint: white → orange → red
+		var chaos_color: Color = Color.WHITE.lerp(Color(1.0, 0.4, 0.1), chaos_sq)
+		if _rocket_out_of_control:
+			# Flash red/white when out of control
+			chaos_color = Color(1.0, 0.2, 0.1) if fmod(_rocket_hold_time, 0.15) < 0.075 else Color(1.0, 0.6, 0.2)
 		modulate = chaos_color
 
-		# --- CRASH CHECK: if going fast and hit a wall or enemy ---
-		if velocity.length() > 300.0:
+		# --- CRASH CHECK ---
+		if velocity.length() > 250.0:
 			if is_on_wall() or is_on_floor() or is_on_ceiling():
+				sprite.rotation = 0.0
 				_rocket_crash_explode()
 				return
-			# Check enemy collision
 			for body in get_tree().get_nodes_in_group("enemies"):
 				if body is Node2D:
 					var dist: float = global_position.distance_to(body.global_position)
 					if dist < 20.0:
+						sprite.rotation = 0.0
 						_rocket_crash_explode()
 						return
 	else:
-		# Jump released - coasting, reset hold time
-		_rocket_hold_time = maxf(0.0, _rocket_hold_time - delta * 2.0)  # Chaos cools down
+		# Jump released (only possible if not out of control)
+		_rocket_hold_time = maxf(0.0, _rocket_hold_time - delta * 3.0)
+		_rocket_drift_angle *= (1.0 - delta * 4.0)  # Drift recovers when not thrusting
+		sprite.rotation = 0.0
 
 
 func _rocket_crash_explode() -> void:
