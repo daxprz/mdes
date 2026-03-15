@@ -112,6 +112,12 @@ var _demo_napalm: bool = false  # Leaves burning ground
 var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
 
 # Demolitionist rocket jetpack
+# Rogue stealth
+var _rogue_stealth: bool = false
+var _rogue_stealth_timer: float = 0.0
+const ROGUE_STEALTH_DURATION := 5.0
+const ROGUE_STEALTH_DAMAGE_MULT := 2.5  # 2.5x damage from stealth
+
 # Mage air-walk
 var _mage_airwalk: bool = false
 var _mage_airwalk_timer: float = 0.0
@@ -286,6 +292,8 @@ func _physics_process(delta: float) -> void:
 	_handle_delegate_toggle()
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
+	_handle_rogue_stealth_toggle()
+	_handle_rogue_stealth(delta)
 	_handle_block()
 	if _delegate_active:
 		# Summoner is frozen in delegate mode - skip normal input
@@ -1135,8 +1143,18 @@ func _attack_rogue() -> void:
 	AudioManager.play("dagger_stab")
 	_attack_cooldown = 0.5
 	var base_dir: Vector2 = _get_aim_direction()
-	var angles := [-0.2, 0.0, 0.2]  # Fan spread in radians
-	var scaled_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	var angles := [-0.2, 0.0, 0.2]
+	var base_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
+
+	# STEALTH BONUS: 2.5x damage from stealth = backstab!
+	var scaled_dmg: int = base_dmg
+	var was_stealthed: bool = _rogue_stealth
+	if _rogue_stealth:
+		scaled_dmg = int(base_dmg * ROGUE_STEALTH_DAMAGE_MULT)
+		_exit_stealth()  # Attacking breaks stealth
+		AudioManager.play("sword_slash", 3.0, 0.6)
+		# Show "BACK STAB!" for each knife that's thrown
+		_stealth_backstab_vfx(global_position + base_dir * 20.0)
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 	for angle in angles:
 		var dir: Vector2 = base_dir.rotated(angle)
@@ -1578,6 +1596,69 @@ func _special_summon_donut() -> void:
 	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
 	get_parent().add_child(buddy)
 	_donut_buddy_count += 1
+
+
+# -- Rogue Stealth -------------------------------------------------------------
+
+func _handle_rogue_stealth_toggle() -> void:
+	if character_class != PlayerManager.CharacterClass.ROGUE:
+		return
+	if not _is_device_action_just_pressed("interact"):
+		return
+	if _rogue_stealth:
+		return  # Already stealthed
+
+	_rogue_stealth = true
+	_rogue_stealth_timer = ROGUE_STEALTH_DURATION
+	AudioManager.play("shadow_dash", -3.0, 0.6)
+	# Go nearly invisible
+	modulate = Color(1.0, 1.0, 1.0, 0.15)
+
+
+func _handle_rogue_stealth(delta: float) -> void:
+	if not _rogue_stealth:
+		return
+
+	_rogue_stealth_timer -= delta
+
+	# Subtle shimmer while stealthed
+	modulate.a = 0.1 + sin(_rogue_stealth_timer * 8.0) * 0.05
+
+	# Warning: flicker more when almost out
+	if _rogue_stealth_timer <= 1.5:
+		modulate.a = 0.15 + sin(_rogue_stealth_timer * 20.0) * 0.1
+
+	# Time's up
+	if _rogue_stealth_timer <= 0.0:
+		_exit_stealth()
+
+
+func _exit_stealth() -> void:
+	_rogue_stealth = false
+	modulate = Color.WHITE
+	AudioManager.play("shadow_dash", -6.0, 1.2)
+
+
+func _stealth_backstab_vfx(hit_pos: Vector2) -> void:
+	# "BACK STAB!" text in orange, floats up, flickers, disappears
+	var label := Label.new()
+	label.text = "BACK STAB!"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 14)
+	label.modulate = Color(1.0, 0.6, 0.1)
+	label.position = hit_pos + Vector2(-30, -30)
+	label.z_index = 15
+	get_parent().add_child(label)
+
+	# Float up + flicker + fade
+	var tween := label.create_tween()
+	tween.tween_property(label, "position:y", label.position.y - 35, 1.0)
+	# Flicker by toggling alpha
+	for i in range(6):
+		tween.parallel().tween_property(label, "modulate:a", 0.2, 0.08).set_delay(0.1 * i)
+		tween.parallel().tween_property(label, "modulate:a", 1.0, 0.08).set_delay(0.1 * i + 0.08)
+	tween.tween_property(label, "modulate:a", 0.0, 0.2)
+	tween.tween_callback(label.queue_free)
 
 
 # -- Mage Air-Walk -------------------------------------------------------------
