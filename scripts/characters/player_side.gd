@@ -56,6 +56,15 @@ const COMBO_SWING_COLORS: Array[Color] = [
 ]
 const COMBO_PITCHES: Array[float] = [1.0, 0.9, 0.7]
 
+# Melee enrage
+var _melee_enraged: bool = false
+var _melee_enrage_timer: float = 0.0
+var _melee_enrage_cooldown: float = 0.0
+const MELEE_ENRAGE_DURATION := 10.0
+const MELEE_ENRAGE_COOLDOWN := 45.0
+const MELEE_ENRAGE_SPEED_MULT := 1.5
+const MELEE_ENRAGE_DAMAGE_MULT := 1.8
+
 # Melee ground slam
 var _ground_slam_active: bool = false
 var _ground_slam_damage := 45
@@ -306,6 +315,7 @@ func _physics_process(delta: float) -> void:
 	_handle_ranger_grapple()
 	_handle_demo_refuel()
 	_handle_healer_wind_gust()
+	_handle_melee_enrage(delta)
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
 	_handle_rogue_stealth_toggle()
@@ -370,6 +380,8 @@ func _handle_movement() -> void:
 		h_input += 1.0
 
 	var speed: float = PlayerManager.get_player(player_index).get("speed", 100)
+	if _melee_enraged:
+		speed *= MELEE_ENRAGE_SPEED_MULT
 	if _is_blocking:
 		speed *= 0.5
 	velocity.x = h_input * speed
@@ -882,6 +894,8 @@ func _attack_melee() -> void:
 
 	# Now check for hits
 	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
+	if _melee_enraged:
+		attack_bonus *= MELEE_ENRAGE_DAMAGE_MULT
 	for body in attack_area.get_overlapping_bodies():
 		if body.has_method("take_damage"):
 			var scaled_damage: int = int(damage * attack_bonus)
@@ -1691,6 +1705,77 @@ func _handle_demo_refuel() -> void:
 		var tt := fuel_text.create_tween()
 		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
 		tt.tween_callback(fuel_text.queue_free)
+
+
+# -- Melee Enrage (Circle) -----------------------------------------------------
+
+func _handle_melee_enrage(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.MELEE:
+		return
+	if _melee_enrage_cooldown > 0.0:
+		_melee_enrage_cooldown -= delta
+
+	# Toggle enrage on Circle press
+	if _is_device_action_just_pressed("interact"):
+		if _melee_enraged:
+			return  # Can't cancel early
+		if _melee_enrage_cooldown > 0.0:
+			_spawn_fail_flash()
+			return
+		# ENRAGE!
+		_melee_enraged = true
+		_melee_enrage_timer = MELEE_ENRAGE_DURATION
+		AudioManager.play("boss_roar", 0.0, 1.5)
+		AudioManager.play("shield_charge", 2.0, 0.5)
+		modulate = Color(1.3, 0.3, 0.2)
+		# Burst VFX
+		_spawn_vfx(Color(1.0, 0.2, 0.1, 0.7), Vector2(40, 40))
+		# "ENRAGED!" text
+		var rage_text := Label.new()
+		rage_text.text = "ENRAGED!"
+		rage_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		rage_text.add_theme_font_size_override("font_size", 14)
+		rage_text.modulate = Color(1.0, 0.3, 0.1)
+		rage_text.position = global_position + Vector2(-25, -40)
+		rage_text.z_index = 15
+		get_parent().add_child(rage_text)
+		var tt := rage_text.create_tween()
+		tt.tween_property(rage_text, "position:y", rage_text.position.y - 20, 0.8)
+		tt.parallel().tween_property(rage_text, "modulate:a", 0.0, 0.8)
+		tt.tween_callback(rage_text.queue_free)
+
+	# While enraged
+	if _melee_enraged:
+		_melee_enrage_timer -= delta
+
+		# Pulsing red glow
+		var pulse: float = 0.2 + sin(_melee_enrage_timer * 6.0) * 0.1
+		modulate = Color(1.3, 0.3 + pulse, 0.2 + pulse)
+
+		# Red particles emit while enraged
+		if randi() % 6 == 0:
+			var rp := ColorRect.new()
+			rp.color = Color(1.0, 0.2, 0.0, 0.6)
+			rp.size = Vector2(3, 3)
+			rp.position = global_position + Vector2(randf_range(-8, 8), randf_range(-5, 5))
+			rp.z_index = 5
+			get_parent().add_child(rp)
+			var rt := rp.create_tween()
+			rt.tween_property(rp, "position:y", rp.position.y - randf_range(10, 20), 0.3)
+			rt.parallel().tween_property(rp, "modulate:a", 0.0, 0.3)
+			rt.tween_callback(rp.queue_free)
+
+		# Warning flicker when almost done
+		if _melee_enrage_timer <= 2.0:
+			if fmod(_melee_enrage_timer, 0.2) < 0.1:
+				modulate = Color.WHITE
+
+		# Enrage ends
+		if _melee_enrage_timer <= 0.0:
+			_melee_enraged = false
+			_melee_enrage_cooldown = MELEE_ENRAGE_COOLDOWN
+			modulate = Color.WHITE
+			AudioManager.play("player_hurt", -4.0, 0.8)
 
 
 # -- Healer Wind Gust (Circle) -------------------------------------------------
