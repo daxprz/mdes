@@ -1005,19 +1005,23 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 
 
 func _attack_ranged() -> void:
-	AudioManager.play("crossbow_shoot")
-	var scaled_dmg: int = int(15 * PlayerManager.get_skill_bonus(player_index, "attack"))
-	_spawn_projectile(scaled_dmg, 350.0, "crossbow_bolt")
+	# Ranger: slow, powerful crossbow shot
+	AudioManager.play("crossbow_shoot", 0.0, 0.8)
+	_attack_cooldown = 1.0  # Slow fire rate
+	var scaled_dmg: int = int(35 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_spawn_projectile(scaled_dmg, 400.0, "crossbow_bolt")
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 
 func _attack_mage() -> void:
-	if not PlayerManager.use_mana(player_index, 10):
+	# Mage: fast, weak magic bolts
+	if not PlayerManager.use_mana(player_index, 3):
 		return
-	AudioManager.play("magic_bolt")
-	var scaled_dmg: int = int(20 * PlayerManager.get_skill_bonus(player_index, "attack"))
-	_spawn_projectile(scaled_dmg, 300.0, "magic_bolt")
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
+	AudioManager.play("magic_bolt", -4.0, 1.3)
+	_attack_cooldown = 0.15  # Rapid fire
+	var scaled_dmg: int = int(6 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_spawn_projectile(scaled_dmg, 450.0, "magic_bolt")
+	PlayerManager.add_skill_xp(player_index, "attack", 1)
 
 
 func _attack_summoner() -> void:
