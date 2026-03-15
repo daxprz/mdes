@@ -51,7 +51,7 @@ const POPCORN_GEYSER_SCENE := "res://scenes/traps/popcorn_geyser.tscn"
 const SPRINKLE_MINE_SCENE := "res://scenes/traps/sprinkle_mine.tscn"
 
 const MINIBOSS_SCENES: Dictionary = {
-	1: "res://scenes/enemies/cookie_cutter_miniboss.tscn",
+	1: "res://scenes/enemies/frosting_fountain_miniboss.tscn",  # Replaced cookie cutter
 	2: "res://scenes/enemies/frosting_fountain_miniboss.tscn",
 	3: "res://scenes/enemies/sprinkle_tornado_miniboss.tscn",
 	4: "res://scenes/enemies/batter_elemental_miniboss.tscn",
