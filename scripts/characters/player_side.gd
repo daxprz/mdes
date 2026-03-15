@@ -2276,27 +2276,125 @@ func _charged_ranged_shot(charge_ratio: float) -> void:
 
 
 func _charged_mage_bolt(charge_ratio: float) -> void:
-	var damage: int = int(lerpf(25.0, 60.0, charge_ratio))
-	var aoe_radius: float = lerpf(30.0, 80.0, charge_ratio)
-	if not PlayerManager.use_mana(player_index, 25):
+	# BEAM OF LIGHT - costs lots of mana, deals massive damage
+	var mana_cost: int = int(lerpf(40.0, 100.0, charge_ratio))
+	if not PlayerManager.use_mana(player_index, mana_cost):
 		_spawn_fail_flash()
 		return
-	AudioManager.play("magic_bolt", 2.0, 0.6)
-	_spawn_vfx(Color(0.6, 0.3, 1.0, 0.7), Vector2(16, 16))
-	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
-	if not projectile_scene:
-		return
-	var proj := projectile_scene.instantiate()
-	proj.damage = damage
-	proj.speed = 280.0
-	proj.direction = Vector2(1.0 if _facing_right else -1.0, 0.0)
-	proj.projectile_type = "magic_bolt"
-	proj.owner_index = player_index
-	if proj.has_method("set_explosion_radius"):
-		proj.set_explosion_radius(aoe_radius)
-	proj.global_position = global_position + Vector2(16.0 if _facing_right else -16.0, 0.0)
-	proj.scale = Vector2(1.0 + charge_ratio * 0.8, 1.0 + charge_ratio * 0.8)
-	get_parent().add_child(proj)
+
+	var aim: Vector2 = _get_aim_direction()
+	var beam_range: float = lerpf(200.0, 500.0, charge_ratio)
+	var beam_width: float = lerpf(8.0, 24.0, charge_ratio)
+	var beam_damage: int = int(lerpf(40.0, 120.0, charge_ratio))
+	var beam_hits: int = int(lerpf(3.0, 8.0, charge_ratio))  # Hits per enemy
+
+	AudioManager.play("magic_bolt", 4.0, 0.4)
+	AudioManager.play("shield_charge", 2.0, 1.5)
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
+
+	# Brief charge-up flash
+	modulate = Color(1.0, 1.0, 2.0)
+
+	# --- Raycast to find beam endpoint ---
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(
+		global_position,
+		global_position + aim * beam_range,
+		1  # World layer only for endpoint
+	)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+	var beam_end: Vector2 = global_position + aim * beam_range
+	if result:
+		beam_end = result["position"]
+
+	var beam_length: float = global_position.distance_to(beam_end)
+
+	# --- Draw the beam (multiple layers for glow effect) ---
+	var beam_start: Vector2 = global_position + aim * 8.0
+
+	# Outer glow (wide, faint)
+	var glow := ColorRect.new()
+	glow.color = Color(0.6, 0.5, 1.0, 0.3)
+	glow.size = Vector2(beam_length, beam_width * 3.0)
+	glow.position = beam_start - Vector2(0, beam_width * 1.5).rotated(aim.angle())
+	glow.rotation = aim.angle()
+	glow.z_index = 8
+	get_parent().add_child(glow)
+
+	# Middle beam (bright purple/white)
+	var mid_beam := ColorRect.new()
+	mid_beam.color = Color(0.8, 0.6, 1.0, 0.7)
+	mid_beam.size = Vector2(beam_length, beam_width * 1.5)
+	mid_beam.position = beam_start - Vector2(0, beam_width * 0.75).rotated(aim.angle())
+	mid_beam.rotation = aim.angle()
+	mid_beam.z_index = 9
+	get_parent().add_child(mid_beam)
+
+	# Core beam (white-hot center)
+	var core := ColorRect.new()
+	core.color = Color(1.0, 1.0, 1.0, 0.9)
+	core.size = Vector2(beam_length, beam_width * 0.5)
+	core.position = beam_start - Vector2(0, beam_width * 0.25).rotated(aim.angle())
+	core.rotation = aim.angle()
+	core.z_index = 10
+	get_parent().add_child(core)
+
+	# --- Sparkle particles along the beam ---
+	for i in range(int(beam_length / 8.0)):
+		var t: float = float(i) / maxf(beam_length / 8.0, 1.0)
+		var spark_pos: Vector2 = beam_start.lerp(beam_end, t) + Vector2(randf_range(-beam_width, beam_width), randf_range(-beam_width, beam_width))
+		var spark := ColorRect.new()
+		spark.color = [Color(1.0, 1.0, 1.0, 0.8), Color(0.7, 0.5, 1.0, 0.7), Color(0.9, 0.8, 1.0, 0.6)][i % 3]
+		spark.size = Vector2(3, 3)
+		spark.position = spark_pos
+		spark.z_index = 11
+		get_parent().add_child(spark)
+		var st := spark.create_tween()
+		st.tween_property(spark, "position", spark_pos + Vector2(randf_range(-15, 15), randf_range(-15, 15)), randf_range(0.2, 0.5))
+		st.parallel().tween_property(spark, "modulate:a", 0.0, randf_range(0.3, 0.5))
+		st.tween_callback(spark.queue_free)
+
+	# --- Deal damage to all enemies along the beam ---
+	var hit_enemies: Array = []
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		# Check if enemy is within the beam rectangle
+		var to_enemy: Vector2 = body.global_position - global_position
+		var along_beam: float = to_enemy.dot(aim)
+		if along_beam < 0 or along_beam > beam_length:
+			continue
+		var perp_dist: float = absf(to_enemy.cross(aim))
+		if perp_dist < beam_width * 2.0:
+			# HIT! Apply damage multiple times (beam burns)
+			if body.has_method("take_damage"):
+				for h in range(beam_hits):
+					body.take_damage(int(beam_damage / beam_hits), player_index)
+				hit_enemies.append(body)
+				_spawn_blood_particles(body.global_position)
+				# Knockback away from beam
+				if body.has_method("apply_knockback"):
+					var kb: Vector2 = aim * 200.0
+					body.apply_knockback(kb)
+
+	# --- Fade out the beam ---
+	var fade_time: float = lerpf(0.3, 0.6, charge_ratio)
+	var fade_tw := create_tween()
+	fade_tw.set_parallel(true)
+	fade_tw.tween_property(glow, "modulate:a", 0.0, fade_time)
+	fade_tw.tween_property(mid_beam, "modulate:a", 0.0, fade_time * 0.8)
+	fade_tw.tween_property(core, "modulate:a", 0.0, fade_time * 0.6)
+	fade_tw.chain().tween_callback(glow.queue_free)
+	fade_tw.tween_callback(mid_beam.queue_free)
+	fade_tw.tween_callback(core.queue_free)
+
+	# Screen shake
+	_screen_shake(lerpf(2.0, 8.0, charge_ratio), 0.2)
+
+	# Reset modulate
+	var mod_tw := create_tween()
+	mod_tw.tween_property(self, "modulate", Color.WHITE, 0.3)
 
 
 func _charged_summoner_donut(charge_ratio: float) -> void:
