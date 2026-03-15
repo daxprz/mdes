@@ -8,44 +8,44 @@
 Improve all pixel art from placeholder quality to polished retro style.
 
 ### Story 1.1: Character Sprites
-- [ ] Task: Melee knight - topdown spritesheet (128x128) with shading, outline, detail
-- [ ] Task: Melee knight - side spritesheet (192x32) with shading, outline, detail
-- [ ] Task: Ranged ranger - topdown spritesheet
-- [ ] Task: Ranged ranger - side spritesheet
-- [ ] Task: Mage wizard - topdown spritesheet
-- [ ] Task: Mage wizard - side spritesheet
-- [ ] Task: Summoner - topdown spritesheet
-- [ ] Task: Summoner - side spritesheet
-- [ ] Task: Rogue - topdown spritesheet
-- [ ] Task: Rogue - side spritesheet
-- [ ] Task: Donut buddy sprite (144x24)
+- [x] Task: Melee knight - topdown spritesheet (128x128) with shading, outline, detail
+- [x] Task: Melee knight - side spritesheet (192x32) with shading, outline, detail
+- [x] Task: Ranged ranger - topdown spritesheet
+- [x] Task: Ranged ranger - side spritesheet
+- [x] Task: Mage wizard - topdown spritesheet
+- [x] Task: Mage wizard - side spritesheet
+- [x] Task: Summoner - topdown spritesheet
+- [x] Task: Summoner - side spritesheet
+- [x] Task: Rogue - topdown spritesheet
+- [x] Task: Rogue - side spritesheet
+- [x] Task: Donut buddy sprite (144x24)
 
 ### Story 1.2: Boss Sprites
-- [ ] Task: Gingerbread Skeleton (256x64) - cookie bones, icing detail, gumdrop eyes
-- [ ] Task: Icing Goblin (256x64) - dripping frosting, cherry eyes, sprinkle decor
-- [ ] Task: Sprinkle Dragon (256x64) - rainbow sprinkle scales, candy fire breath
-- [ ] Task: Giant Muffin (256x64) - angry face, paper wrapper lines, chocolate chips
+- [x] Task: Gingerbread Skeleton (256x64) - cookie bones, icing detail, gumdrop eyes
+- [x] Task: Icing Goblin (256x64) - dripping frosting, cherry eyes, sprinkle decor
+- [x] Task: Sprinkle Dragon (256x64) - rainbow sprinkle scales, candy fire breath
+- [x] Task: Giant Muffin (256x64) - angry face, paper wrapper lines, chocolate chips
 
 ### Story 1.3: Enemy Sprites
-- [ ] Task: Skeleton enemy (128x32) - visible ribcage, glowing eyes, bone club
-- [ ] Task: Design & create 2-3 additional enemy types
+- [x] Task: Skeleton enemy (128x32) - visible ribcage, glowing eyes, bone club
+- [x] Task: Design & create 2-3 additional enemy types
 
 ### Story 1.4: Item Sprites
-- [ ] Task: Mini muffin (64x16) with sparkle animation
-- [ ] Task: Ultimate muffin (16x16) with halo glow
-- [ ] Task: 5 class artifacts (16x16 each)
-- [ ] Task: Mana potion / health potion pickups
+- [x] Task: Mini muffin (64x16) with sparkle animation
+- [x] Task: Ultimate muffin (16x16) with halo glow
+- [x] Task: 5 class artifacts (16x16 each)
+- [x] Task: Mana potion / health potion pickups
 
 ### Story 1.5: Environment Tiles
-- [ ] Task: Overworld tileset (160x160) - grass, paths, water, trees, rocks
-- [ ] Task: Tower tileset (160x160) - stone, platforms, ladders, spikes, torches
-- [ ] Task: Boss arena backgrounds (per boss theme)
+- [x] Task: Overworld tileset (160x160) - grass, paths, water, trees, rocks
+- [x] Task: Tower tileset (160x160) - stone, platforms, ladders, spikes, torches
+- [x] Task: Boss arena backgrounds (per boss theme)
 
 ### Story 1.6: UI Art
-- [ ] Task: Heart icon, mana icon, muffin counter icon
-- [ ] Task: Portal animation (128x32)
-- [ ] Task: Title logo "THE ULTIMATE MUFFIN" (256x64)
-- [ ] Task: Menu panel art / button styles
+- [x] Task: Heart icon, mana icon, muffin counter icon
+- [x] Task: Portal animation (128x32)
+- [x] Task: Title logo "THE ULTIMATE MUFFIN" (256x64)
+- [x] Task: Menu panel art / button styles
 
 ---
 
