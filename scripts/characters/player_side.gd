@@ -12,6 +12,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.ROGUE: "res://assets/sprites/characters/rogue_side.png",
 	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_side.png",
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
+	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -315,6 +316,7 @@ func _physics_process(delta: float) -> void:
 	_handle_ranger_grapple()
 	_handle_demo_refuel()
 	_handle_healer_wind_gust()
+	_handle_tank_fortify(delta)
 	_handle_melee_enrage(delta)
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
@@ -857,6 +859,8 @@ func _perform_attack() -> void:
 			_attack_demolitionist()
 		PlayerManager.CharacterClass.HEALER:
 			_attack_healer()
+		PlayerManager.CharacterClass.TANK:
+			_attack_tank()
 
 
 func _attack_melee() -> void:
@@ -1357,6 +1361,8 @@ func _perform_special() -> void:
 			_special_big_bomb()
 		PlayerManager.CharacterClass.HEALER:
 			_special_healing_burst()
+		PlayerManager.CharacterClass.TANK:
+			_special_tank_slam()
 
 
 var _shield_charging: bool = false
@@ -1705,6 +1711,115 @@ func _handle_demo_refuel() -> void:
 		var tt := fuel_text.create_tween()
 		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
 		tt.tween_callback(fuel_text.queue_free)
+
+
+# -- Tank Abilities ------------------------------------------------------------
+
+var _tank_fortify: bool = false
+var _tank_fortify_timer: float = 0.0
+var _tank_fortify_cooldown: float = 0.0
+const TANK_FORTIFY_DURATION := 8.0
+const TANK_FORTIFY_COOLDOWN := 25.0
+
+func _attack_tank() -> void:
+	# Heavy mace slam - slow, wide, powerful
+	AudioManager.play("sword_slash", 2.0, 0.5)
+	_attack_cooldown = 1.2  # Very slow
+	var aim: Vector2 = _get_aim_direction()
+	var base_dmg: int = int(45 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	if _tank_fortify:
+		base_dmg = int(base_dmg * 0.5)  # Less damage while fortified (tradeoff)
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	# Wide attack area
+	attack_area.position = aim * 20.0
+	attack_area.monitoring = true
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+
+	# VFX: ground slam impact
+	_spawn_vfx(Color(0.7, 0.6, 0.4, 0.6), Vector2(40, 20))
+
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(base_dmg, player_index)
+			_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			var kb: Vector2 = aim * 250.0
+			body.apply_knockback(kb)
+	await get_tree().create_timer(0.15).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+
+func _special_tank_slam() -> void:
+	# Ground pound - AoE stun around the tank
+	AudioManager.play("explosion", 2.0, 0.6)
+	AudioManager.play("shield_charge", 0.0, 0.4)
+	_screen_shake(6.0, 0.25)
+	_spawn_vfx(Color(0.6, 0.5, 0.3, 0.7), Vector2(80, 80))
+
+	# Damage + stun all enemies in radius
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < 80.0:
+			if body.has_method("take_damage"):
+				body.take_damage(30, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - global_position).normalized() * 150.0
+				body.apply_knockback(kb)
+			# Stun via hurt timer
+			if body.has_method("apply_slow"):
+				body.apply_slow(2.0)
+	PlayerManager.add_skill_xp(player_index, "special", 7)
+
+
+func _handle_tank_fortify(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.TANK:
+		return
+	if _tank_fortify_cooldown > 0.0:
+		_tank_fortify_cooldown -= delta
+
+	if _is_device_action_just_pressed("interact"):
+		if _tank_fortify:
+			return
+		if _tank_fortify_cooldown > 0.0:
+			_spawn_fail_flash()
+			return
+		# FORTIFY!
+		_tank_fortify = true
+		_tank_fortify_timer = TANK_FORTIFY_DURATION
+		AudioManager.play("shield_charge", 2.0, 0.3)
+		modulate = Color(0.7, 0.65, 0.5)
+		_spawn_vfx(Color(0.8, 0.7, 0.4, 0.6), Vector2(30, 30))
+		var fort_text := Label.new()
+		fort_text.text = "FORTIFIED!"
+		fort_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		fort_text.add_theme_font_size_override("font_size", 12)
+		fort_text.modulate = Color(0.8, 0.7, 0.4)
+		fort_text.position = global_position + Vector2(-25, -40)
+		fort_text.z_index = 15
+		get_parent().add_child(fort_text)
+		var tt := fort_text.create_tween()
+		tt.tween_property(fort_text, "position:y", fort_text.position.y - 15, 0.6)
+		tt.parallel().tween_property(fort_text, "modulate:a", 0.0, 0.6)
+		tt.tween_callback(fort_text.queue_free)
+
+	if _tank_fortify:
+		_tank_fortify_timer -= delta
+		# Pulsing bronze glow
+		modulate = Color(0.7, 0.65 + sin(_tank_fortify_timer * 4.0) * 0.05, 0.5)
+		# Warning
+		if _tank_fortify_timer <= 2.0:
+			if fmod(_tank_fortify_timer, 0.25) < 0.125:
+				modulate = Color.WHITE
+		if _tank_fortify_timer <= 0.0:
+			_tank_fortify = false
+			_tank_fortify_cooldown = TANK_FORTIFY_COOLDOWN
+			modulate = Color.WHITE
 
 
 # -- Melee Enrage (Circle) -----------------------------------------------------
@@ -2418,6 +2533,10 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 	if _rogue_stealth:
 		amount = int(amount * 0.5)
 
+	# Tank fortify: ignore 60% of damage
+	if _tank_fortify:
+		amount = int(amount * 0.4)
+
 	# Stagger: extra damage while staggered
 	if _is_staggered:
 		amount = int(amount * STAGGER_DAMAGE_MULT)
@@ -2877,6 +2996,31 @@ func _perform_charged_attack() -> void:
 			_charged_demo_mega_bomb(charge_ratio)
 		PlayerManager.CharacterClass.HEALER:
 			_charged_healer_wave(charge_ratio)
+		PlayerManager.CharacterClass.TANK:
+			_charged_tank_shockwave(charge_ratio)
+
+
+func _charged_tank_shockwave(charge_ratio: float) -> void:
+	# Massive ground shockwave - bigger than special, stuns longer
+	var radius: float = lerpf(60.0, 160.0, charge_ratio)
+	var damage: int = int(lerpf(20.0, 70.0, charge_ratio))
+	var stun_time: float = lerpf(1.0, 4.0, charge_ratio)
+	AudioManager.play("explosion", 4.0, 0.3)
+	_screen_shake(lerpf(4.0, 12.0, charge_ratio), 0.3)
+	_spawn_vfx(Color(0.6, 0.5, 0.3, 0.8), Vector2(radius * 2, radius * 2))
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < radius:
+			if body.has_method("take_damage"):
+				body.take_damage(damage, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - global_position).normalized() * 300.0
+				body.apply_knockback(kb)
+			if body.has_method("apply_slow"):
+				body.apply_slow(stun_time)
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
 
 
 func _charged_melee_slam(charge_ratio: float) -> void:

@@ -8,7 +8,7 @@ signal player_left(player_index: int)
 signal all_players_dead
 signal skill_leveled_up(player_index: int, skill: String, new_level: int)
 
-enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER }
+enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER, TANK }
 
 const MAX_PLAYERS := 4
 const MAX_SKILL_LEVEL := 20
@@ -63,6 +63,12 @@ const CLASS_STATS := {
 		"max_mana": 130,
 		"speed": 95,
 		"mana_regen": 2.5,
+	},
+	CharacterClass.TANK: {
+		"max_health": 250,
+		"max_mana": 30,
+		"speed": 70,
+		"mana_regen": 0.5,
 	},
 }
 

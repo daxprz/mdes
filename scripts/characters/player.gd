@@ -11,6 +11,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.ROGUE: "res://assets/sprites/characters/rogue_topdown.png",
 	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_topdown.png",
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_topdown.png",
+	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -333,6 +334,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.ROGUE: return 18
 		PlayerManager.CharacterClass.DEMOLITIONIST: return 25
 		PlayerManager.CharacterClass.HEALER: return 10
+		PlayerManager.CharacterClass.TANK: return 45
 	return 10
 
 
@@ -364,6 +366,8 @@ func _perform_special() -> void:
 			_special_demolitionist()
 		PlayerManager.CharacterClass.HEALER:
 			_special_healer()
+		PlayerManager.CharacterClass.TANK:
+			_special_tank_slam()
 
 
 func _special_melee() -> void:
@@ -595,6 +599,8 @@ func _special_healer() -> void:
 func take_damage(amount: int, _source_index: int = -1) -> void:
 	if _rogue_stealth:
 		amount = int(amount * 0.5)
+	if _tank_fortify:
+		amount = int(amount * 0.4)
 	PlayerManager.damage_player(player_index, amount)
 	if _health_bar:
 		var p := PlayerManager.get_player(player_index)
@@ -708,6 +714,8 @@ func _handle_circle_abilities(delta: float) -> void:
 			_handle_demo_refuel()
 		PlayerManager.CharacterClass.HEALER:
 			_handle_healer_wind_gust()
+		PlayerManager.CharacterClass.TANK:
+			_handle_tank_fortify(delta)
 
 
 # -- Melee Enrage (Circle) ----------------------------------------------------
@@ -1197,3 +1205,65 @@ func _handle_healer_wind_gust() -> void:
 			var push_strength: float = HEALER_GUST_FORCE * 0.6 * (1.0 - dist / HEALER_GUST_RADIUS)
 			if "velocity" in body:
 				body.velocity += push_dir * push_strength
+
+
+# -- Tank Abilities ------------------------------------------------------------
+
+var _tank_fortify: bool = false
+var _tank_fortify_timer: float = 0.0
+var _tank_fortify_cooldown: float = 0.0
+const TANK_FORTIFY_DURATION := 8.0
+const TANK_FORTIFY_COOLDOWN := 25.0
+
+func _special_tank_slam() -> void:
+	AudioManager.play("explosion", 2.0, 0.6)
+	_spawn_vfx(Color(0.6, 0.5, 0.3, 0.7), Vector2(80, 80))
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = global_position.distance_to(body.global_position)
+		if dist < 80.0:
+			if body.has_method("take_damage"):
+				body.take_damage(30, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - global_position).normalized() * 150.0
+				body.apply_knockback(kb)
+			if body.has_method("apply_slow"):
+				body.apply_slow(2.0)
+
+
+func _handle_tank_fortify(delta: float) -> void:
+	if _tank_fortify_cooldown > 0.0:
+		_tank_fortify_cooldown -= delta
+	if _is_device_action_just_pressed("interact"):
+		if _tank_fortify:
+			return
+		if _tank_fortify_cooldown > 0.0:
+			_spawn_fail_flash()
+			return
+		_tank_fortify = true
+		_tank_fortify_timer = TANK_FORTIFY_DURATION
+		AudioManager.play("shield_charge", 2.0, 0.3)
+		modulate = Color(0.7, 0.65, 0.5)
+		var ft := Label.new()
+		ft.text = "FORTIFIED!"
+		ft.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ft.add_theme_font_size_override("font_size", 12)
+		ft.modulate = Color(0.8, 0.7, 0.4)
+		ft.position = global_position + Vector2(-25, -40)
+		ft.z_index = 15
+		get_parent().add_child(ft)
+		var tt := ft.create_tween()
+		tt.tween_property(ft, "position:y", ft.position.y - 15, 0.6)
+		tt.parallel().tween_property(ft, "modulate:a", 0.0, 0.6)
+		tt.tween_callback(ft.queue_free)
+	if _tank_fortify:
+		_tank_fortify_timer -= delta
+		modulate = Color(0.7, 0.65 + sin(_tank_fortify_timer * 4.0) * 0.05, 0.5)
+		if _tank_fortify_timer <= 2.0:
+			if fmod(_tank_fortify_timer, 0.25) < 0.125:
+				modulate = Color.WHITE
+		if _tank_fortify_timer <= 0.0:
+			_tank_fortify = false
+			_tank_fortify_cooldown = TANK_FORTIFY_COOLDOWN
+			modulate = Color.WHITE
