@@ -25,7 +25,7 @@ func _ready() -> void:
 	queue_redraw()
 
 
-func take_damage(amount: int) -> void:
+func take_damage(amount: int, _source_index: int = -1) -> void:
 	hp -= amount
 	AudioManager.play("player_hurt")
 	queue_redraw()
