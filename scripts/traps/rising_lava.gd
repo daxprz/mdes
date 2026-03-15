@@ -38,6 +38,10 @@ func _ready() -> void:
 func _process(delta: float) -> void:
 	_time += delta
 
+	# Wait 15 seconds before rising
+	if _time < 15.0:
+		return
+
 	# Rise the lava
 	if _current_height < _max_height:
 		_current_height += rise_speed * delta
