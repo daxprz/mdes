@@ -115,7 +115,9 @@ var _demo_aspect: String = "none"  # "none", "electric", "fire", "impact", "ice"
 # Rogue stealth
 var _rogue_stealth: bool = false
 var _rogue_stealth_timer: float = 0.0
+var _rogue_stealth_cooldown: float = 0.0
 const ROGUE_STEALTH_DURATION := 5.0
+const ROGUE_STEALTH_COOLDOWN := 20.0
 const ROGUE_STEALTH_DAMAGE_MULT := 2.5  # 2.5x damage from stealth
 
 # Mage air-walk
@@ -1624,7 +1626,10 @@ func _handle_rogue_stealth_toggle() -> void:
 	if not _is_device_action_just_pressed("interact"):
 		return
 	if _rogue_stealth:
-		return  # Already stealthed
+		return
+	if _rogue_stealth_cooldown > 0.0:
+		_spawn_fail_flash()
+		return
 
 	_rogue_stealth = true
 	_rogue_stealth_timer = ROGUE_STEALTH_DURATION
@@ -1634,6 +1639,8 @@ func _handle_rogue_stealth_toggle() -> void:
 
 
 func _handle_rogue_stealth(delta: float) -> void:
+	if _rogue_stealth_cooldown > 0.0:
+		_rogue_stealth_cooldown -= delta
 	if not _rogue_stealth:
 		return
 
@@ -1653,6 +1660,7 @@ func _handle_rogue_stealth(delta: float) -> void:
 
 func _exit_stealth() -> void:
 	_rogue_stealth = false
+	_rogue_stealth_cooldown = ROGUE_STEALTH_COOLDOWN
 	modulate = Color.WHITE
 	AudioManager.play("shadow_dash", -6.0, 1.2)
 
