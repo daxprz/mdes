@@ -399,17 +399,17 @@ func _handle_rocket(delta: float) -> void:
 		if _is_device_action_pressed("move_down"):
 			aim_dir.y += 1.0
 
-		# The ROCKET fires OPPOSITE the aim direction
-		# Point stick DOWN → rocket blasts DOWN → you fly UP
-		# Point stick LEFT → rocket blasts LEFT → you fly RIGHT
+		# Point stick WHERE YOU WANT TO GO → flames shoot OPPOSITE
+		# Point stick UP → you fly UP → flames shoot DOWN
+		# Point stick RIGHT → you fly RIGHT → flames shoot LEFT
 		var thrust_dir: Vector2
 		if aim_dir == Vector2.ZERO:
-			# No direction = rocket fires downward (fly up)
+			# No direction = fly up, flames shoot down
 			thrust_dir = Vector2(0, -1)
 		else:
-			thrust_dir = (-aim_dir).normalized()  # Fly OPPOSITE to where you point
+			thrust_dir = aim_dir.normalized()  # Fly WHERE you point
 
-		# Exhaust direction = where the rocket flames shoot (opposite of flight)
+		# Exhaust = opposite of flight direction
 		var exhaust_dir: Vector2 = -thrust_dir
 
 		# Apply thrust
