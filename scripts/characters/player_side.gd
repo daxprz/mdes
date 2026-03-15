@@ -120,6 +120,7 @@ const ROCKET_MAX_SPEED := 550.0
 var _rocket_can_activate: bool = false  # true after first jump, false on ground
 var _rocket_smoke_timer: float = 0.0
 var _rocket_flame_timer: float = 0.0
+var _rocket_hold_time: float = 0.0  # How long thrust has been held continuously
 
 # Controller state tracking
 var _controller_actions: Dictionary = {}
@@ -387,8 +388,15 @@ func _handle_rocket(delta: float) -> void:
 	# While jump is HELD, rocket fires
 	if _is_device_action_pressed("jump"):
 		_rocket_fuel -= delta
+		_rocket_hold_time += delta
 
-		# Full 8-direction aiming with D-pad/stick
+		# --- Non-linear chaos: the longer you hold, the wilder it gets ---
+		# Chaos factor ramps up exponentially
+		var chaos: float = clampf(_rocket_hold_time / 3.0, 0.0, 1.0)  # 0→1 over 3 seconds
+		var chaos_sq: float = chaos * chaos  # Exponential ramp
+		var chaos_cube: float = chaos_sq * chaos
+
+		# Full 8-direction aiming
 		var aim_dir := Vector2.ZERO
 		if _is_device_action_pressed("move_left"):
 			aim_dir.x -= 1.0
@@ -399,51 +407,212 @@ func _handle_rocket(delta: float) -> void:
 		if _is_device_action_pressed("move_down"):
 			aim_dir.y += 1.0
 
-		# Point stick WHERE YOU WANT TO GO → flames shoot OPPOSITE
-		# Point stick UP → you fly UP → flames shoot DOWN
-		# Point stick RIGHT → you fly RIGHT → flames shoot LEFT
 		var thrust_dir: Vector2
 		if aim_dir == Vector2.ZERO:
-			# No direction = fly up, flames shoot down
 			thrust_dir = Vector2(0, -1)
 		else:
-			thrust_dir = aim_dir.normalized()  # Fly WHERE you point
+			thrust_dir = aim_dir.normalized()
 
-		# Exhaust = opposite of flight direction
+		# At high chaos, the thrust direction wobbles randomly
+		var wobble_angle: float = randf_range(-chaos_sq * 0.8, chaos_sq * 0.8)
+		thrust_dir = thrust_dir.rotated(wobble_angle)
+
 		var exhaust_dir: Vector2 = -thrust_dir
 
-		# Apply thrust
-		velocity += thrust_dir * ROCKET_THRUST * delta
+		# Non-linear thrust: starts smooth, gets WILD
+		# Base 800 → ramps to 1600 at max chaos
+		var current_thrust: float = ROCKET_THRUST * (1.0 + chaos_cube * 1.5)
+		velocity += thrust_dir * current_thrust * delta
 
-		# Cap speed
-		if velocity.length() > ROCKET_MAX_SPEED:
-			velocity = velocity.normalized() * ROCKET_MAX_SPEED
+		# Speed cap also increases with chaos (550 → 900)
+		var current_max_speed: float = ROCKET_MAX_SPEED * (1.0 + chaos_sq * 0.7)
+		if velocity.length() > current_max_speed:
+			velocity = velocity.normalized() * current_max_speed
 
-		# Cancel gravity while thrusting
+		# Cancel gravity
 		velocity.y -= GRAVITY * delta * 0.85
 
-		# --- Tight rocket flame jet ---
+		# --- Flame jet: gets more chaotic ---
 		_rocket_flame_timer += delta
-		if _rocket_flame_timer >= 0.015:  # ~67 flames/sec
-			_rocket_flame_timer -= 0.015
+		var flame_interval: float = maxf(0.008, 0.015 - chaos * 0.007)  # Faster at high chaos
+		if _rocket_flame_timer >= flame_interval:
+			_rocket_flame_timer -= flame_interval
 			_spawn_rocket_flame(exhaust_dir)
-			_spawn_rocket_flame(exhaust_dir)  # Double up for density
+			_spawn_rocket_flame(exhaust_dir)
+			if chaos > 0.3:
+				_spawn_rocket_flame(exhaust_dir)  # Triple flames
 			if randi() % 2 == 0:
 				_spawn_rocket_flame_big(exhaust_dir)
+			# Wild sparks at high chaos
+			if chaos > 0.5 and randi() % 3 == 0:
+				var spark_dir: Vector2 = exhaust_dir.rotated(randf_range(-1.5, 1.5))
+				_spawn_rocket_flame(spark_dir)
 
-		# --- Smoke trail ---
+		# --- Smoke: more at high chaos ---
 		_rocket_smoke_timer += delta
-		if _rocket_smoke_timer >= 0.035:  # More frequent smoke
-			_rocket_smoke_timer -= 0.035
+		var smoke_interval: float = maxf(0.02, 0.035 - chaos * 0.015)
+		if _rocket_smoke_timer >= smoke_interval:
+			_rocket_smoke_timer -= smoke_interval
 			_spawn_rocket_smoke()
+			if chaos > 0.6:
+				_spawn_rocket_smoke()  # Double smoke
 
-		# Screen shake scales with speed
-		var shake_amount: float = clampf((velocity.length() - 150.0) / 400.0, 0.0, 1.0) * 1.5
+		# Screen shake: escalates dramatically
+		var shake_amount: float = clampf(chaos_sq * 4.0, 0.0, 4.0)
 		position.x += randf_range(-shake_amount, shake_amount)
-		position.y += randf_range(-shake_amount * 0.5, shake_amount * 0.5)
+		position.y += randf_range(-shake_amount, shake_amount)
+
+		# Visual: player tints orange/red as chaos builds
+		var chaos_color: Color = Color.WHITE.lerp(Color(1.0, 0.6, 0.2), chaos_sq)
+		modulate = chaos_color
+
+		# --- CRASH CHECK: if going fast and hit a wall or enemy ---
+		if velocity.length() > 300.0:
+			if is_on_wall() or is_on_floor() or is_on_ceiling():
+				_rocket_crash_explode()
+				return
+			# Check enemy collision
+			for body in get_tree().get_nodes_in_group("enemies"):
+				if body is Node2D:
+					var dist: float = global_position.distance_to(body.global_position)
+					if dist < 20.0:
+						_rocket_crash_explode()
+						return
 	else:
-		# Jump released - coasting, can re-press to thrust again
-		pass
+		# Jump released - coasting, reset hold time
+		_rocket_hold_time = maxf(0.0, _rocket_hold_time - delta * 2.0)  # Chaos cools down
+
+
+func _rocket_crash_explode() -> void:
+	_rocket_active = false
+	var chaos: float = clampf(_rocket_hold_time / 3.0, 0.0, 1.0)
+	var chaos_sq: float = chaos * chaos
+	_rocket_hold_time = 0.0
+	modulate = Color.WHITE
+
+	# Blast radius and damage scale with how long they held the rocket
+	var blast_radius: float = lerpf(40.0, 150.0, chaos_sq)
+	var blast_damage: int = int(lerpf(10.0, 50.0, chaos_sq))
+	var self_damage: int = int(lerpf(5.0, 30.0, chaos_sq))
+
+	AudioManager.play("explosion", 4.0, lerpf(0.8, 0.4, chaos))
+	if chaos > 0.5:
+		AudioManager.play("boss_roar", -2.0, 1.5)  # Extra boom
+
+	# Self damage
+	PlayerManager.damage_player(player_index, self_damage)
+	_update_health_bar()
+
+	# Screen shake proportional to blast
+	_screen_shake(lerpf(3.0, 12.0, chaos_sq), lerpf(0.15, 0.4, chaos))
+
+	# Knockback self
+	velocity = Vector2(0, -200.0 - chaos * 200.0)
+
+	# --- EXPLOSION VFX ---
+	var explode_pos: Vector2 = global_position
+
+	# White-hot flash at center
+	var flash := ColorRect.new()
+	flash.color = Color(1.0, 1.0, 0.9, 0.9)
+	var flash_size: float = blast_radius * 0.6
+	flash.size = Vector2(flash_size, flash_size)
+	flash.position = explode_pos - Vector2(flash_size / 2.0, flash_size / 2.0)
+	flash.z_index = 12
+	get_parent().add_child(flash)
+	var flash_tw := flash.create_tween()
+	flash_tw.tween_property(flash, "modulate:a", 0.0, 0.15)
+	flash_tw.tween_callback(flash.queue_free)
+
+	# Expanding fire ring
+	var ring := ColorRect.new()
+	ring.color = Color(1.0, 0.4, 0.0, 0.7)
+	ring.size = Vector2(20, 20)
+	ring.position = explode_pos - Vector2(10, 10)
+	ring.pivot_offset = Vector2(10, 10)
+	ring.z_index = 11
+	get_parent().add_child(ring)
+	var ring_scale: float = blast_radius / 10.0
+	var ring_tw := ring.create_tween()
+	ring_tw.set_parallel(true)
+	ring_tw.tween_property(ring, "scale", Vector2(ring_scale, ring_scale), 0.25)
+	ring_tw.tween_property(ring, "modulate:a", 0.0, 0.35)
+	ring_tw.chain().tween_callback(ring.queue_free)
+
+	# Fire + smoke debris particles with physics
+	var particle_count: int = int(lerpf(12.0, 40.0, chaos_sq))
+	for i in range(particle_count):
+		var is_fire: bool = randf() < 0.6
+		var p := ColorRect.new()
+		if is_fire:
+			var fire_colors: Array[Color] = [
+				Color(1.0, 0.9, 0.3, 0.9),
+				Color(1.0, 0.5, 0.0, 0.85),
+				Color(1.0, 0.2, 0.0, 0.8),
+			]
+			p.color = fire_colors[i % fire_colors.size()]
+		else:
+			p.color = Color(0.4, 0.4, 0.4, 0.6)
+
+		var psize: float = randf_range(3.0, 8.0 + chaos * 5.0)
+		p.size = Vector2(psize, psize)
+		p.position = explode_pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		p.z_index = 10
+		get_parent().add_child(p)
+
+		# Physics: launch outward with gravity
+		var launch_angle: float = randf_range(0, TAU)
+		var launch_speed: float = randf_range(80.0, 250.0 + chaos * 200.0)
+		var p_vel: Vector2 = Vector2(cos(launch_angle), sin(launch_angle)) * launch_speed
+		_animate_crash_particle(p, p_vel, is_fire, blast_damage)
+
+	# Damage enemies in blast radius
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var dist: float = explode_pos.distance_to(body.global_position)
+		if dist < blast_radius and body.has_method("take_damage"):
+			body.take_damage(blast_damage, player_index)
+			if body.has_method("apply_knockback"):
+				var kb: Vector2 = (body.global_position - explode_pos).normalized()
+				body.apply_knockback(kb * (300.0 + chaos * 300.0))
+
+
+func _animate_crash_particle(p: ColorRect, vel: Vector2, is_fire: bool, contact_damage: int) -> void:
+	var gravity: float = 300.0
+	var age: float = 0.0
+	var max_age: float = randf_range(0.8, 2.0)
+
+	while age < max_age and is_instance_valid(p) and is_inside_tree():
+		var dt: float = get_process_delta_time()
+		age += dt
+		vel.y += gravity * dt
+		vel *= (1.0 - 0.8 * dt)  # Air drag
+		p.position += vel * dt
+
+		# Fade out
+		if age > max_age * 0.5:
+			p.modulate.a = lerpf(1.0, 0.0, (age - max_age * 0.5) / (max_age * 0.5))
+
+		# Fire particles can damage enemies they touch
+		if is_fire and age < max_age * 0.6:
+			for body in get_tree().get_nodes_in_group("enemies"):
+				if body is Node2D:
+					var dist: float = p.position.distance_to(body.global_position)
+					if dist < 12.0 and body.has_method("take_damage"):
+						body.take_damage(int(contact_damage * 0.3), -1)
+						# Only damage each enemy once per particle
+						is_fire = false
+						break
+
+		# Smoke particles expand
+		if not is_fire:
+			p.scale += Vector2(dt * 1.5, dt * 1.5)
+
+		await get_tree().process_frame
+
+	if is_instance_valid(p):
+		p.queue_free()
 
 
 func _spawn_rocket_flame(flame_dir: Vector2) -> void:
