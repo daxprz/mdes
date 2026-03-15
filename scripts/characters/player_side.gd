@@ -122,6 +122,13 @@ const ROGUE_STEALTH_DURATION := 5.0
 const ROGUE_STEALTH_COOLDOWN := 20.0
 const ROGUE_STEALTH_DAMAGE_MULT := 3.75  # 3.75x damage from stealth (was 2.5)
 
+# Ranger ammo
+var _ranger_arrows: int = 10
+const RANGER_MAX_ARROWS := 10
+const RANGER_RELOAD_TIME := 3.0
+var _ranger_reload_timer: float = 0.0
+var _ranger_reloading: bool = false
+
 # Mage air-walk
 var _mage_airwalk: bool = false
 var _mage_airwalk_timer: float = 0.0
@@ -300,6 +307,7 @@ func _physics_process(delta: float) -> void:
 	_handle_mage_airwalk(delta)
 	_handle_rogue_stealth_toggle()
 	_handle_rogue_stealth(delta)
+	_handle_ranger_reload(delta)
 	_handle_block()
 	if _delegate_active:
 		# Summoner is frozen in delegate mode - skip normal input
@@ -1028,12 +1036,24 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 
 
 func _attack_ranged() -> void:
-	# Ranger: slow, powerful crossbow shot
+	# Ranger: powerful crossbow, uses ammo
+	if _ranger_arrows <= 0:
+		_spawn_fail_flash()
+		AudioManager.play("menu_select", -6.0, 0.5)
+		return
+
+	_ranger_arrows -= 1
 	AudioManager.play("crossbow_shoot", 0.0, 0.8)
-	_attack_cooldown = 1.0  # Slow fire rate
-	var scaled_dmg: int = int(35 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_attack_cooldown = 0.6
+	# 70% more damage than base (35 * 1.7 = ~60)
+	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
 	_spawn_projectile(scaled_dmg, 400.0, "crossbow_bolt")
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	# Auto-start reload when not full
+	if not _ranger_reloading:
+		_ranger_reloading = true
+		_ranger_reload_timer = RANGER_RELOAD_TIME
 
 
 func _attack_mage() -> void:
@@ -1622,6 +1642,44 @@ func _special_summon_donut() -> void:
 	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
 	get_parent().add_child(buddy)
 	_donut_buddy_count += 1
+
+
+# -- Ranger Reload -------------------------------------------------------------
+
+func _handle_ranger_reload(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.RANGED:
+		return
+	if not _ranger_reloading:
+		# Start reloading if not full
+		if _ranger_arrows < RANGER_MAX_ARROWS:
+			_ranger_reloading = true
+			_ranger_reload_timer = RANGER_RELOAD_TIME
+		return
+
+	_ranger_reload_timer -= delta
+	if _ranger_reload_timer <= 0.0:
+		# Reload one arrow
+		_ranger_arrows = mini(_ranger_arrows + 1, RANGER_MAX_ARROWS)
+		AudioManager.play("menu_confirm", -8.0, 1.5)
+
+		# Small arrow VFX
+		var arrow_text := Label.new()
+		arrow_text.text = "%d/%d" % [_ranger_arrows, RANGER_MAX_ARROWS]
+		arrow_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		arrow_text.add_theme_font_size_override("font_size", 8)
+		arrow_text.modulate = Color(0.3, 0.8, 0.3)
+		arrow_text.position = global_position + Vector2(-10, -35)
+		arrow_text.z_index = 12
+		get_parent().add_child(arrow_text)
+		var tt := arrow_text.create_tween()
+		tt.tween_property(arrow_text, "position:y", arrow_text.position.y - 10, 0.4)
+		tt.parallel().tween_property(arrow_text, "modulate:a", 0.0, 0.4)
+		tt.tween_callback(arrow_text.queue_free)
+
+		if _ranger_arrows < RANGER_MAX_ARROWS:
+			_ranger_reload_timer = RANGER_RELOAD_TIME
+		else:
+			_ranger_reloading = false
 
 
 # -- Rogue Stealth -------------------------------------------------------------
