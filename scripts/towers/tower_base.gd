@@ -16,8 +16,8 @@ const TOWER_SIZES: Dictionary = {
 
 var TOWER_WIDTH := BASE_TOWER_WIDTH
 var TOWER_HEIGHT := BASE_TOWER_HEIGHT
-const PLATFORM_COUNT_BASE := 12
-const MAX_PLATFORM_SPACING := 140.0  # Must be below max jump height (v²/2g = 168px)
+const PLATFORM_COUNT_BASE := 22
+const MAX_PLATFORM_SPACING := 110.0  # Tighter spacing for more platforms
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 const MUFFIN_SCENE_PATH := "res://scenes/items/mini_muffin.tscn"
 const SKELETON_SCENE_PATH := "res://scenes/enemies/skeleton.tscn"
