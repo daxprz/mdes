@@ -304,6 +304,7 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
+	_handle_demo_refuel()
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
 	_handle_rogue_stealth_toggle()
@@ -387,7 +388,7 @@ func _handle_jump() -> void:
 			_rocket_out_of_control = false
 			_rocket_hold_time = 0.0
 			_rocket_drift_angle = 0.0
-			_rocket_fuel = ROCKET_FUEL_MAX
+			# NO auto-refuel on landing - must hold Circle to refuel
 
 	if not _is_device_action_just_pressed("jump"):
 		return
@@ -1636,6 +1637,50 @@ func _special_summon_donut() -> void:
 	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
 	get_parent().add_child(buddy)
 	_donut_buddy_count += 1
+
+
+# -- Demolitionist Refuel (Circle) ---------------------------------------------
+
+func _handle_demo_refuel() -> void:
+	if character_class != PlayerManager.CharacterClass.DEMOLITIONIST:
+		return
+	if not _is_device_action_pressed("interact"):
+		return
+	if _rocket_active:
+		return  # Can't refuel while flying!
+	if _rocket_fuel >= ROCKET_FUEL_MAX:
+		return
+
+	# Refuel 1 unit per second while holding Circle
+	var dt: float = get_process_delta_time()
+	_rocket_fuel = minf(_rocket_fuel + dt * 1.5, ROCKET_FUEL_MAX)
+
+	# VFX: orange fuel particles rising
+	if randi() % 5 == 0:
+		var fuel_p := ColorRect.new()
+		fuel_p.color = Color(1.0, 0.6, 0.1, 0.6)
+		fuel_p.size = Vector2(3, 3)
+		fuel_p.position = global_position + Vector2(randf_range(-5, 5), randf_range(4, 10))
+		fuel_p.z_index = 5
+		get_parent().add_child(fuel_p)
+		var ft := fuel_p.create_tween()
+		ft.tween_property(fuel_p, "position:y", fuel_p.position.y - 15, 0.3)
+		ft.parallel().tween_property(fuel_p, "modulate:a", 0.0, 0.3)
+		ft.tween_callback(fuel_p.queue_free)
+
+		# Show fuel level
+		var fuel_pct: int = int(_rocket_fuel / ROCKET_FUEL_MAX * 100)
+		var fuel_text := Label.new()
+		fuel_text.text = "FUEL %d%%" % fuel_pct
+		fuel_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		fuel_text.add_theme_font_size_override("font_size", 7)
+		fuel_text.modulate = Color(1.0, 0.6, 0.1)
+		fuel_text.position = global_position + Vector2(-15, -35)
+		fuel_text.z_index = 12
+		get_parent().add_child(fuel_text)
+		var tt := fuel_text.create_tween()
+		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
+		tt.tween_callback(fuel_text.queue_free)
 
 
 # -- Ranger Fire Crossbow (Triangle) -------------------------------------------
