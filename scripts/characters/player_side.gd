@@ -1148,15 +1148,31 @@ func _attack_rogue() -> void:
 	var angles := [-0.2, 0.0, 0.2]
 	var base_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
 
-	# STEALTH BONUS: 2.5x damage from stealth = backstab!
-	var scaled_dmg: int = base_dmg
-	var was_stealthed: bool = _rogue_stealth
+	# STEALTH: close-range backstab instead of throwing knives
 	if _rogue_stealth:
-		scaled_dmg = int(base_dmg * ROGUE_STEALTH_DAMAGE_MULT)
-		_exit_stealth()  # Attacking breaks stealth
+		var backstab_dmg: int = int(base_dmg * ROGUE_STEALTH_DAMAGE_MULT)
+		_exit_stealth()
 		AudioManager.play("sword_slash", 3.0, 0.6)
-		# Show "BACK STAB!" for each knife that's thrown
-		_stealth_backstab_vfx(global_position + base_dir * 20.0)
+		_stealth_backstab_vfx(global_position + base_dir * 16.0)
+
+		# Small square melee hit in front of rogue
+		attack_area.position = base_dir * 14.0
+		attack_area.monitoring = true
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+		for body in attack_area.get_overlapping_bodies():
+			if body.has_method("take_damage"):
+				body.take_damage(backstab_dmg, player_index)
+				_spawn_blood_particles(body.global_position)
+				PlayerManager.add_skill_xp(player_index, "attack", 5)
+		await get_tree().create_timer(0.1).timeout
+		if is_inside_tree():
+			attack_area.monitoring = false
+		return
+
+	# Normal: throw 3 knives in a fan spread
+	var scaled_dmg: int = base_dmg
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 	for angle in angles:
 		var dir: Vector2 = base_dir.rotated(angle)
