@@ -1037,8 +1037,17 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 
 
 func _attack_ranged() -> void:
-	# Square is reload for Ranger - do nothing here
-	pass
+	# Square: fire crossbow
+	if _ranger_arrows <= 0:
+		_spawn_fail_flash()
+		AudioManager.play("menu_select", -6.0, 0.5)
+		return
+	_ranger_arrows -= 1
+	AudioManager.play("crossbow_shoot", 0.0, 0.8)
+	_attack_cooldown = 0.6
+	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	_spawn_projectile(scaled_dmg, 400.0, "crossbow_bolt")
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 
 func _attack_mage() -> void:
@@ -1312,7 +1321,7 @@ func _perform_special() -> void:
 		PlayerManager.CharacterClass.MELEE:
 			_special_shield_charge()
 		PlayerManager.CharacterClass.RANGED:
-			_ranger_fire_crossbow()
+			_special_grappling_hook()
 		PlayerManager.CharacterClass.MAGE:
 			_special_frosting_freeze()
 		PlayerManager.CharacterClass.SUMMONER:
@@ -1647,11 +1656,8 @@ func _ranger_fire_crossbow() -> void:
 # -- Ranger Grapple (Circle) ---------------------------------------------------
 
 func _handle_ranger_grapple() -> void:
-	if character_class != PlayerManager.CharacterClass.RANGED:
-		return
-	if not _is_device_action_just_pressed("interact"):
-		return
-	_special_grappling_hook()
+	# This slot now unused - grapple moved to Triangle (special)
+	pass
 
 
 # -- Ranger Reload -------------------------------------------------------------
@@ -1660,13 +1666,13 @@ func _handle_ranger_reload(delta: float) -> void:
 	if character_class != PlayerManager.CharacterClass.RANGED:
 		return
 
-	# Press Square (attack) to start/continue reloading
-	if _is_device_action_pressed("attack") and _ranger_arrows < RANGER_MAX_ARROWS:
+	# Press Circle (interact) to start/continue reloading
+	if _is_device_action_pressed("interact") and _ranger_arrows < RANGER_MAX_ARROWS:
 		if not _ranger_reloading:
 			_ranger_reloading = true
 			_ranger_reload_timer = RANGER_RELOAD_TIME
-	elif not _is_device_action_pressed("attack"):
-		# Released Square - stop reloading
+	elif not _is_device_action_pressed("interact"):
+		# Released Circle - stop reloading
 		_ranger_reloading = false
 		_ranger_reload_timer = RANGER_RELOAD_TIME
 		return
