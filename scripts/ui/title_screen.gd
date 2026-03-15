@@ -77,7 +77,10 @@ func _setup_camera() -> void:
 	add_child(cam)
 
 
+var _profile_select: Node = null
+
 func _setup_name_entry() -> void:
+	# Name entry overlay
 	var name_script := load("res://scripts/ui/name_entry_overlay.gd")
 	_name_entry = CanvasLayer.new()
 	_name_entry.set_script(name_script)
@@ -85,25 +88,47 @@ func _setup_name_entry() -> void:
 	_name_entry.name_confirmed.connect(_on_name_confirmed)
 	_name_entry.cancelled.connect(_on_name_cancelled)
 
+	# Profile selection overlay
+	var select_script := load("res://scripts/ui/profile_select_overlay.gd")
+	_profile_select = CanvasLayer.new()
+	_profile_select.set_script(select_script)
+	add_child(_profile_select)
+	_profile_select.profile_selected.connect(_on_profile_selected)
+	_profile_select.create_new_requested.connect(_on_create_new_requested)
+
 
 func _on_device_needs_profile(device_id: int) -> void:
-	# Show name entry for this device
 	_pending_device_id = device_id
+	# If profiles exist, let the player choose or create new
+	if not ProfileManager.profiles.is_empty() and _profile_select and _profile_select.has_method("setup"):
+		_profile_select.setup(-1, device_id)  # -1 since player isn't joined yet
+	else:
+		# No profiles exist - go straight to name entry
+		if _name_entry and _name_entry.has_method("setup"):
+			_name_entry.setup(device_id)
+
+
+func _on_profile_selected(_player_index: int, profile: Dictionary) -> void:
+	# Existing profile chosen - bind to device and join
+	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
+	PlayerManager._try_join(_pending_device_id)
+	_pending_device_id = -99
+
+
+func _on_create_new_requested(_player_index: int) -> void:
+	# Player wants to create a new profile - show name entry
 	if _name_entry and _name_entry.has_method("setup"):
-		_name_entry.setup(device_id)
+		_name_entry.setup(_pending_device_id)
 
 
 func _on_name_confirmed(player_name: String) -> void:
-	# Create profile and bind to the pending device
 	var profile: Dictionary = ProfileManager.create_profile(player_name)
 	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	# Now re-trigger the join for this device
 	PlayerManager._try_join(_pending_device_id)
 	_pending_device_id = -99
 
 
 func _on_name_cancelled() -> void:
-	# Create a guest profile automatically
 	var guest_name: String = "Guest"
 	if _pending_device_id >= 0:
 		guest_name = "Player %d" % (_pending_device_id + 1)

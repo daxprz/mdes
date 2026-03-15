@@ -4,6 +4,7 @@ extends Node
 ## Profiles track per-class skill XP, lifetime stats, and class preferences.
 
 const SAVE_PATH := "user://profiles.json"
+const BINDINGS_PATH := "user://controller_bindings.json"
 const MAX_PROFILES := 8
 
 signal profile_loaded(profile_id: String)
@@ -12,7 +13,8 @@ signal device_needs_profile(device_id: int)  # Emitted when a new controller nee
 
 var profiles: Array[Dictionary] = []
 var active_profiles: Dictionary = {}  # player_index -> profile dict
-var device_profiles: Dictionary = {}  # device_id -> profile dict (persists across joins)
+var device_profiles: Dictionary = {}  # device_id -> profile dict (current session)
+var _controller_bindings: Dictionary = {}  # controller_name -> profile_id (persists to disk)
 
 
 # -- XP / Leveling Constants --------------------------------------------------
@@ -53,6 +55,7 @@ func get_overall_level(profile: Dictionary, class_key: String) -> int:
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_profiles()
+	_load_bindings()
 
 
 # -- Save / Load ---------------------------------------------------------------
@@ -212,16 +215,42 @@ func unassign_all() -> void:
 
 func bind_device_to_profile(device_id: int, profile: Dictionary) -> void:
 	device_profiles[device_id] = profile
+	# Persist: save controller name → profile ID
+	var controller_name: String = _get_controller_name(device_id)
+	var pid: String = profile.get("id", "")
+	if not controller_name.is_empty() and not pid.is_empty():
+		_controller_bindings[controller_name] = pid
+		_save_bindings()
 
 
 func get_device_profile(device_id: int) -> Dictionary:
+	# First check session binding
 	if device_profiles.has(device_id):
 		return device_profiles[device_id]
+	# Then check persistent binding by controller name
+	var controller_name: String = _get_controller_name(device_id)
+	if _controller_bindings.has(controller_name):
+		var pid: String = _controller_bindings[controller_name]
+		var profile: Dictionary = get_profile(pid)
+		if not profile.is_empty():
+			# Restore the session binding
+			device_profiles[device_id] = profile
+			return profile
 	return {}
 
 
 func has_device_profile(device_id: int) -> bool:
-	return device_profiles.has(device_id)
+	if device_profiles.has(device_id):
+		return true
+	# Check persistent binding
+	var controller_name: String = _get_controller_name(device_id)
+	if _controller_bindings.has(controller_name):
+		var pid: String = _controller_bindings[controller_name]
+		var profile: Dictionary = get_profile(pid)
+		if not profile.is_empty():
+			device_profiles[device_id] = profile
+			return true
+	return false
 
 
 func unbind_device(device_id: int) -> void:
@@ -229,8 +258,52 @@ func unbind_device(device_id: int) -> void:
 
 
 func request_profile_for_device(device_id: int) -> void:
-	# Called when a device tries to join but has no profile
 	device_needs_profile.emit(device_id)
+
+
+func _get_controller_name(device_id: int) -> String:
+	if device_id == -1:
+		return "keyboard"
+	var joy_name: String = Input.get_joy_name(device_id)
+	if joy_name.is_empty():
+		return "controller_%d" % device_id
+	# Include device index to differentiate multiple identical controllers
+	return joy_name + "_%d" % device_id
+
+
+# -- Persistent Bindings (controller → profile) --------------------------------
+
+func _save_bindings() -> void:
+	var file := FileAccess.open(BINDINGS_PATH, FileAccess.WRITE)
+	if file == null:
+		return
+	file.store_string(JSON.stringify(_controller_bindings, "\t"))
+	file.close()
+
+
+func _load_bindings() -> void:
+	if not FileAccess.file_exists(BINDINGS_PATH):
+		_controller_bindings = {}
+		return
+	var file := FileAccess.open(BINDINGS_PATH, FileAccess.READ)
+	if file == null:
+		_controller_bindings = {}
+		return
+	var content: String = file.get_as_text()
+	file.close()
+	if content.is_empty():
+		_controller_bindings = {}
+		return
+	var json := JSON.new()
+	var err: Error = json.parse(content)
+	if err != OK:
+		_controller_bindings = {}
+		return
+	var data: Variant = json.data
+	if data is Dictionary:
+		_controller_bindings = data as Dictionary
+	else:
+		_controller_bindings = {}
 
 
 # -- Session Sync --------------------------------------------------------------
