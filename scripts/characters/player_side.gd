@@ -1168,7 +1168,7 @@ func _perform_special() -> void:
 		PlayerManager.CharacterClass.MELEE:
 			_special_shield_charge()
 		PlayerManager.CharacterClass.RANGED:
-			_special_explosive_muffin()
+			_special_grappling_hook()
 		PlayerManager.CharacterClass.MAGE:
 			_special_frosting_freeze()
 		PlayerManager.CharacterClass.SUMMONER:
@@ -1295,10 +1295,109 @@ func _special_shield_charge() -> void:
 		velocity.x = 0.0
 
 
-func _special_explosive_muffin() -> void:
-	AudioManager.play("explosion")
-	_spawn_projectile(35, 250.0, "muffin_grenade")
-	_spawn_vfx(Color(0.2, 0.9, 0.2, 0.7), Vector2(20, 20))
+func _special_grappling_hook() -> void:
+	# Fire a grappling hook in the aimed direction
+	# If it hits a wall/platform: pull the player to that point
+	# If it hits an enemy: pull the player TO the enemy and deal damage
+	var aim: Vector2 = _get_aim_direction()
+	var hook_range: float = 250.0
+
+	AudioManager.play("crossbow_shoot", 0.0, 0.7)
+
+	# Raycast to find what the hook hits
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(
+		global_position,
+		global_position + aim * hook_range,
+		1 | 8  # Mask: world (1) + enemies (8)
+	)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+
+	var hook_target: Vector2
+	var hit_enemy: Node2D = null
+
+	if result:
+		hook_target = result["position"]
+		var collider: Node = result["collider"]
+		if collider.is_in_group("enemies"):
+			hit_enemy = collider as Node2D
+	else:
+		# No hit - hook goes to max range and does nothing (visual only)
+		hook_target = global_position + aim * hook_range
+
+	# --- Visual: draw the hook line extending outward ---
+	var hook_line := ColorRect.new()
+	hook_line.color = Color(0.5, 0.4, 0.3, 0.8)
+	var line_vec: Vector2 = hook_target - global_position
+	var line_len: float = line_vec.length()
+	hook_line.size = Vector2(line_len, 2)
+	hook_line.position = global_position
+	hook_line.rotation = line_vec.angle()
+	hook_line.z_index = 6
+	get_parent().add_child(hook_line)
+
+	# Hook head (small square at the tip)
+	var hook_head := ColorRect.new()
+	hook_head.color = Color(0.6, 0.5, 0.35)
+	hook_head.size = Vector2(6, 6)
+	hook_head.position = hook_target - Vector2(3, 3)
+	hook_head.z_index = 7
+	get_parent().add_child(hook_head)
+
+	if not result:
+		# Miss - retract and fade
+		var miss_tween := hook_line.create_tween()
+		miss_tween.tween_property(hook_line, "modulate:a", 0.0, 0.2)
+		miss_tween.tween_callback(hook_line.queue_free)
+		var miss_head := hook_head.create_tween()
+		miss_head.tween_property(hook_head, "modulate:a", 0.0, 0.2)
+		miss_head.tween_callback(hook_head.queue_free)
+		return
+
+	# --- Pull player to the hook point ---
+	AudioManager.play("shield_charge", -3.0, 1.4)
+
+	# Disable physics during pull
+	set_physics_process(false)
+	collision_layer = 0  # Invincible during grapple
+
+	# Stop at hook point (or slightly before for walls)
+	var pull_target: Vector2
+	if hit_enemy:
+		pull_target = hit_enemy.global_position + (-aim * 16.0)
+	else:
+		pull_target = hook_target + (-aim * 8.0)  # Stop slightly before wall
+
+	# Tween player position to target
+	var pull_speed: float = 600.0
+	var pull_time: float = clampf(line_len / pull_speed, 0.08, 0.4)
+
+	var pull_tween := create_tween()
+	pull_tween.tween_property(self, "global_position", pull_target, pull_time).set_ease(Tween.EASE_IN)
+	await pull_tween.finished
+
+	# Clean up hook visuals
+	if is_instance_valid(hook_line):
+		hook_line.queue_free()
+	if is_instance_valid(hook_head):
+		hook_head.queue_free()
+
+	# Re-enable physics
+	if is_inside_tree():
+		set_physics_process(true)
+		collision_layer = 2
+		velocity = aim * 100.0  # Small momentum on arrival
+
+		# If hit an enemy: deal damage + small AoE
+		if hit_enemy and is_instance_valid(hit_enemy):
+			if hit_enemy.has_method("take_damage"):
+				var hook_dmg: int = int(20 * PlayerManager.get_skill_bonus(player_index, "attack"))
+				hit_enemy.take_damage(hook_dmg, player_index)
+				PlayerManager.add_skill_xp(player_index, "special", 7)
+				_spawn_blood_particles(hit_enemy.global_position)
+			AudioManager.play("sword_slash", 0.0, 0.9)
+			_spawn_vfx(Color(0.3, 0.8, 0.3, 0.6), Vector2(24, 24))
 
 
 func _special_frosting_freeze() -> void:
