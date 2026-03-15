@@ -289,9 +289,6 @@ func _build_tower() -> void:
 	# Tower walls with themed color
 	_apply_wall_theme()
 
-	# Interior walls - small obstacles inside the tower
-	_place_interior_walls(platform_count, vertical_spacing)
-
 	# Place traps throughout the tower (more in harder towers)
 	_place_traps(platform_count, vertical_spacing)
 
