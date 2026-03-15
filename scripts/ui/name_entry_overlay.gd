@@ -47,8 +47,9 @@ func setup(device_id: int) -> void:
 	_grid_y = 0
 	_active = true
 	visible = true
-	# Pause the game tree so characters stop moving
-	get_tree().paused = true
+	# Only pause if we're NOT on the title screen (title screen is already safe)
+	if GameManager.current_state != GameManager.GameState.TITLE:
+		get_tree().paused = true
 	_update_display()
 	_update_grid_highlight()
 
@@ -348,7 +349,6 @@ func _update_grid_highlight() -> void:
 func _finish() -> void:
 	var trimmed: String = _current_name.strip_edges()
 	if trimmed.length() < MIN_LENGTH:
-		# Flash red to indicate too short
 		if _name_label:
 			_name_label.modulate = Color.RED
 			var tween := create_tween()
@@ -357,12 +357,14 @@ func _finish() -> void:
 
 	_active = false
 	visible = false
-	get_tree().paused = false
+	if get_tree().paused:
+		get_tree().paused = false
 	name_confirmed.emit(trimmed)
 
 
 func _cancel() -> void:
 	_active = false
 	visible = false
-	get_tree().paused = false
+	if get_tree().paused:
+		get_tree().paused = false
 	cancelled.emit()

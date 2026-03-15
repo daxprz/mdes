@@ -49,9 +49,7 @@ var _spawned_players: Dictionary = {}  # player_index -> node
 # Track which device triggered class cycle to avoid repeat
 var _cycle_cooldowns: Dictionary = {}  # device_id -> float
 
-# Profile selection UI
-var _profile_select: Node = null
-var _name_entry: Node = null
+# Profile / name entry
 var _pending_device_id: int = -99  # Device waiting for profile creation
 var _name_entry: Node = null
 
@@ -235,60 +233,6 @@ func _get_player_index_for_device(device_id: int) -> int:
 	return -1
 
 
-# -- Profile Overlay Setup -----------------------------------------------------
-
-func _setup_profile_overlays() -> void:
-	# Profile selection overlay
-	var select_script := load("res://scripts/ui/profile_select_overlay.gd")
-	_profile_select = CanvasLayer.new()
-	_profile_select.set_script(select_script)
-	add_child(_profile_select)
-	_profile_select.profile_selected.connect(_on_profile_selected)
-	_profile_select.create_new_requested.connect(_on_create_new_profile)
-
-	# Name entry overlay
-	var name_script := load("res://scripts/ui/name_entry_overlay.gd")
-	_name_entry = CanvasLayer.new()
-	_name_entry.set_script(name_script)
-	add_child(_name_entry)
-	_name_entry.name_confirmed.connect(_on_name_confirmed)
-	_name_entry.cancelled.connect(_on_name_cancelled)
-
-
-func _on_profile_selected(player_index: int, profile: Dictionary) -> void:
-	ProfileManager.assign_profile_to_player(player_index, profile)
-	_update_slot(player_index)
-
-
-func _on_create_new_profile(player_index: int) -> void:
-	_pending_profile_player = player_index
-	var p_data: Dictionary = PlayerManager.get_player(player_index)
-	var device_id: int = p_data.get("device_id", -1)
-	_name_entry.setup(device_id)
-
-
-func _on_name_confirmed(player_name: String) -> void:
-	if _pending_profile_player >= 0:
-		var profile: Dictionary = ProfileManager.create_profile(player_name)
-		if not profile.is_empty():
-			ProfileManager.assign_profile_to_player(_pending_profile_player, profile)
-			_update_slot(_pending_profile_player)
-	_pending_profile_player = -1
-
-
-func _on_name_cancelled() -> void:
-	# If cancelled, assign a Guest profile automatically
-	if _pending_profile_player >= 0:
-		_auto_assign_guest(_pending_profile_player)
-	_pending_profile_player = -1
-
-
-func _auto_assign_guest(player_index: int) -> void:
-	var guest_name: String = "Guest P" + str(player_index + 1)
-	var profile: Dictionary = ProfileManager.create_profile(guest_name)
-	if not profile.is_empty():
-		ProfileManager.assign_profile_to_player(player_index, profile)
-		_update_slot(player_index)
 
 
 # -- Signal Callbacks ----------------------------------------------------------
@@ -298,18 +242,6 @@ func _on_player_joined(player_index: int) -> void:
 	_update_slot(player_index)
 	_update_start_visibility()
 	_spawn_lobby_player(player_index)
-
-	# Show profile selection for this player
-	var p_data: Dictionary = PlayerManager.get_player(player_index)
-	var device_id: int = p_data.get("device_id", -1)
-
-	if ProfileManager.profiles.is_empty():
-		# No profiles exist - go straight to name entry
-		_pending_profile_player = player_index
-		_name_entry.setup(device_id)
-	else:
-		# Show profile selection
-		_profile_select.setup(player_index, device_id)
 
 
 func _on_player_left(player_index: int) -> void:
