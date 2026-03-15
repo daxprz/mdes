@@ -1154,8 +1154,6 @@ func _attack_rogue() -> void:
 	if _rogue_stealth:
 		var backstab_dmg: int = int(base_dmg * ROGUE_STEALTH_DAMAGE_MULT)
 		_exit_stealth()
-		AudioManager.play("sword_slash", 3.0, 0.6)
-		_stealth_backstab_vfx(global_position + base_dir * 16.0)
 
 		# Small square melee hit in front of rogue
 		attack_area.position = base_dir * 14.0
@@ -1163,11 +1161,17 @@ func _attack_rogue() -> void:
 		await get_tree().physics_frame
 		if not is_inside_tree():
 			return
+		var hit_something := false
 		for body in attack_area.get_overlapping_bodies():
 			if body.has_method("take_damage"):
 				body.take_damage(backstab_dmg, player_index)
 				_spawn_blood_particles(body.global_position)
 				PlayerManager.add_skill_xp(player_index, "attack", 5)
+				hit_something = true
+		# Only show BACK STAB text + sound if we actually hit an enemy
+		if hit_something:
+			AudioManager.play("sword_slash", 3.0, 0.6)
+			_stealth_backstab_vfx(global_position + base_dir * 16.0)
 		await get_tree().create_timer(0.1).timeout
 		if is_inside_tree():
 			attack_area.monitoring = false
