@@ -125,7 +125,7 @@ const ROGUE_STEALTH_DAMAGE_MULT := 3.75  # 3.75x damage from stealth (was 2.5)
 # Ranger ammo
 var _ranger_arrows: int = 10
 const RANGER_MAX_ARROWS := 10
-const RANGER_RELOAD_TIME := 3.0
+const RANGER_RELOAD_TIME := 1.5
 var _ranger_reload_timer: float = 0.0
 var _ranger_reloading: bool = false
 
