@@ -2013,9 +2013,18 @@ func _handle_balloonist_float(delta: float) -> void:
 			AudioManager.play("explosion", -8.0, 2.0)  # Pop
 
 func _attack_balloonist() -> void:
-	# Shoot a dart with string + balloon attached
+	# Max 10 active balloons
+	var active_count: int = 0
+	for dart in get_tree().get_nodes_in_group("balloon_darts"):
+		if dart.has_method("_get_entity_weight") and dart.get("owner_index") == player_index:
+			active_count += 1
+	if active_count >= 10:
+		_spawn_fail_flash()
+		return
+
+	# 3x faster fire rate (0.8 → 0.27)
 	AudioManager.play("crossbow_shoot", -3.0, 1.5)
-	_attack_cooldown = 0.8
+	_attack_cooldown = 0.27
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 	var aim: Vector2 = _get_aim_direction()
