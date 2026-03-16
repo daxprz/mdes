@@ -14,7 +14,7 @@ const MAP_HEIGHT: int = GRID_HEIGHT * CELL_SIZE  # 960
 
 const PLAYER_SCENE := preload("res://scenes/characters/player.tscn")
 const MUFFIN_SCENE_PATH := "res://scenes/items/mini_muffin.tscn"
-const SKELETON_SCENE_PATH := "res://scenes/enemies/skeleton.tscn"
+const SKELETON_SCENE_PATH := "res://scenes/enemies/overworld_patrol_skeleton.tscn"
 const SPIKES_SCENE := "res://scenes/traps/spikes.tscn"
 const LAVA_POOL_SCENE := "res://scenes/traps/lava_pool.tscn"
 

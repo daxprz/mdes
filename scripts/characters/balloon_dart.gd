@@ -33,6 +33,8 @@ var _balloon_color: Color
 var _age: float = 0.0
 var _wind_dir: Vector2 = Vector2.ZERO
 var _wind_force: float = 0.0
+var _shadow_node: ColorRect = null
+var _is_topdown: bool = false  # Detected from GameManager state
 
 # Weight constants for different entity types
 const WEIGHTS: Dictionary = {
@@ -62,6 +64,9 @@ func _ready() -> void:
 	_dart_pos = global_position
 	_dart_vel = dart_direction.normalized() * DART_SPEED
 
+	# Detect if we're in top-down mode
+	_is_topdown = GameManager.current_state == GameManager.GameState.OVERWORLD or GameManager.current_tower_id == 2
+
 	# Initialize string points from dart to spawn
 	_string_points.clear()
 	for i in range(STRING_SEGMENTS):
@@ -89,7 +94,8 @@ func _process(delta: float) -> void:
 
 
 func _update_dart(delta: float) -> void:
-	_dart_vel.y += 100.0 * delta  # Slight gravity on dart
+	if not _is_topdown:
+		_dart_vel.y += 100.0 * delta  # Slight gravity on dart (side-view only)
 	_dart_pos += _dart_vel * delta
 
 	# Check for enemy hits
@@ -160,12 +166,21 @@ func _update_balloon(delta: float) -> void:
 		if dist < _balloon_radius + 8.0:
 			# Check if it's a fire/flame projectile
 			var is_flame: bool = false
+			# Check property
 			if "projectile_type" in proj:
 				var ptype: String = str(proj.projectile_type).to_lower()
 				if "fire" in ptype or "flame" in ptype or "napalm" in ptype or "muffin_grenade" in ptype:
 					is_flame = true
-			# Also check demo fire aspect
+			# Check meta (fireball uses this)
+			if proj.has_meta("projectile_type"):
+				var mtype: String = str(proj.get_meta("projectile_type")).to_lower()
+				if "fire" in mtype or "flame" in mtype:
+					is_flame = true
+			# Check demo fire aspect
 			if proj.has_meta("aspect") and str(proj.get_meta("aspect")) == "fire":
+				is_flame = true
+			# Check name
+			if "Fireball" in proj.name or "fireball" in proj.name:
 				is_flame = true
 
 			if is_flame:
@@ -243,20 +258,22 @@ func _apply_balloon_force(delta: float) -> void:
 		if net_force < 0.0:
 			# Balloon is winning! Tug the entity upward
 			_attached_to.velocity.y += net_force * delta * 3.0
-			# Cap upward velocity
 			if _attached_to.velocity.y < -120.0:
 				_attached_to.velocity.y = -120.0
-		# Even if not fully lifting, reduce gravity effect (balloon assists)
+		# Even if not fully lifting, reduce gravity effect
 		_attached_to.velocity.y -= absf(lift_force) * delta * 1.5
 
-		# Multiple balloons stack! Check how many are attached
+		# Multiple balloons stack
 		var balloon_count: int = 0
 		for dart in get_tree().get_nodes_in_group("balloon_darts"):
 			if dart != self and dart.has_method("_get_entity_weight") and dart._attached_to == _attached_to:
 				balloon_count += 1
 		if balloon_count > 0:
-			# Extra lift per additional balloon
 			_attached_to.velocity.y -= 40.0 * balloon_count * delta
+
+		# Shadow under floating entity (top-down or side-view)
+		if net_force < -20.0:
+			_update_shadow()
 
 
 func _get_entity_weight(entity: Node2D) -> float:
@@ -444,9 +461,34 @@ func _spawn_pop_particles() -> void:
 			cam.offset = orig
 
 
+func _update_shadow() -> void:
+	if not is_instance_valid(_attached_to):
+		return
+	if not is_instance_valid(_shadow_node):
+		_shadow_node = ColorRect.new()
+		_shadow_node.color = Color(0, 0, 0, 0.25)
+		_shadow_node.size = Vector2(16, 6)
+		_shadow_node.z_index = -5
+		get_parent().add_child(_shadow_node)
+	# Shadow stays at the entity's original ground position
+	# (offset slightly below where entity started)
+	if _attached_to.has_meta("shadow_ground_y"):
+		_shadow_node.position = Vector2(_attached_to.global_position.x - 8, _attached_to.get_meta("shadow_ground_y"))
+	else:
+		# First time: record ground position
+		_attached_to.set_meta("shadow_ground_y", _attached_to.global_position.y + 14)
+		_shadow_node.position = Vector2(_attached_to.global_position.x - 8, _attached_to.global_position.y + 14)
+	# Shadow shrinks as entity floats higher
+	var height_diff: float = absf(_attached_to.get_meta("shadow_ground_y") - _attached_to.global_position.y)
+	var shadow_scale: float = clampf(1.0 - height_diff / 200.0, 0.2, 1.0)
+	_shadow_node.scale = Vector2(shadow_scale, shadow_scale)
+
+
 func _detach_and_free() -> void:
 	_attached_to = null
 	_balloon_inflating = false
+	if is_instance_valid(_shadow_node):
+		_shadow_node.queue_free()
 	queue_free()
 
 

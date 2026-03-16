@@ -1,7 +1,9 @@
 extends CharacterBody2D
 
-## Top-down patrol skeleton for the overworld valley.
-## Walks back and forth along a horizontal path and deals contact damage.
+## Top-down patrol skeleton for the overworld valley and dungeon.
+## Walks back and forth and deals contact damage. No gravity (top-down).
+
+signal died(global_pos: Vector2)
 
 const PATROL_SPEED := 30.0
 const CHASE_SPEED := 50.0
@@ -145,6 +147,7 @@ func _flash_hit() -> void:
 func _die() -> void:
 	_state = State.DEAD
 	AudioManager.play("enemy_die")
+	died.emit(global_position)
 	collision_shape.set_deferred("disabled", true)
 	if hitbox:
 		hitbox.set_deferred("monitoring", false)
