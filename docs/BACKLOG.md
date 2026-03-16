@@ -673,6 +673,46 @@ Advanced physics interactions between balloons, gas, fire, and lava.
 
 ---
 
+## EPIC 27: Inline Player HUD & Selection Rework (`ui`, `mechanics`)
+Replace the menu-based profile/class selection with an always-visible inline HUD.
+Players select profile and class directly via D-pad on the title screen while
+playing in the lobby arena. The HUD persists throughout all game modes.
+
+### Story 27.1: Persistent Player HUD
+- [ ] Task: Create new `player_hud.gd` autoload with CanvasLayer (layer 100)
+- [ ] Task: Show 1-4 HUD panels at bottom-center, evenly spaced, based on connected controllers
+- [ ] Task: Each HUD shows: profile name (default "P1"-"P4"), class name, class color icon, HP/mana bars
+- [ ] Task: HUD visible in ALL game states (title, overworld, tower, boss)
+- [ ] Task: Remove old HUD from GameManager (`_create_hud`, `_muffin_label`, `_player_stat_labels`)
+
+### Story 27.2: Inline Profile Selection (Title Screen Only)
+- [ ] Task: D-pad up/down cycles through available profiles on the title screen
+- [ ] Task: Profiles already selected by another player are skipped
+- [ ] Task: Default display is "P1"-"P4" when no profile is bound
+- [ ] Task: HUD updates immediately when profile changes
+- [ ] Task: START button shows "Create Profile" name entry overlay (title screen only)
+- [ ] Task: Newly created profile auto-selects for that player
+
+### Story 27.3: Inline Class Selection (Title Screen Only)
+- [ ] Task: D-pad left/right cycles through available classes on the title screen
+- [ ] Task: Classes already selected by another player are skipped
+- [ ] Task: On class change: red portal appears at player position, player becomes ghost
+- [ ] Task: Character model swaps with smoke poof VFX at same position
+- [ ] Task: Pressing any non-movement button spawns 2nd red portal, player becomes interactive
+
+### Story 27.4: Play Area Buffer
+- [ ] Task: Add bottom margin to camera/viewport so HUD doesn't cover gameplay
+- [ ] Task: Ensure HUD is readable over all backgrounds (slight dark backing)
+
+### Story 27.5: Remove Old Selection System
+- [ ] Task: Remove `profile_select_overlay.gd` and its menu UI
+- [ ] Task: Remove profile/class selection logic from `title_screen.gd` (`_input` overlay triggers)
+- [ ] Task: Remove old player slot UI from `title_screen.tscn` (PlayerSlots HBoxContainer)
+- [ ] Task: Clean up `PlayerManager._input` join flow — auto-join on controller connect
+- [ ] Task: Clean up unused signals and methods in ProfileManager
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)
