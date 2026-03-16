@@ -162,9 +162,9 @@ const GRAPPLE_BASE_ANGULAR_VEL := 14.0  # rad/s
 const GRAPPLE_ANGULAR_ACCEL := 12.0  # rad/s²
 const GRAPPLE_MAX_ANGULAR_VEL := 35.0  # rad/s
 const GRAPPLE_MIN_HOLD := 0.3  # seconds before throw is valid
-const GRAPPLE_BASE_THROW_SPEED := 200.0
-const GRAPPLE_THROW_SPEED_PER_SEC := 150.0
-const GRAPPLE_MAX_THROW_SPEED := 500.0
+const GRAPPLE_BASE_THROW_SPEED := 2000.0
+const GRAPPLE_THROW_SPEED_PER_SEC := 1500.0
+const GRAPPLE_MAX_THROW_SPEED := 5000.0
 const GRAPPLE_HOOK_GRAVITY := 400.0
 const GRAPPLE_HOOK_DRAG := 0.98
 const GRAPPLE_ROPE_SEGMENTS := 20
@@ -197,6 +197,7 @@ var _grapple_swing_angle: float = 0.0  # Pendulum angle from vertical
 var _grapple_swing_vel: float = 0.0  # Pendulum angular velocity
 var _grapple_rope_points: Array[Vector2] = []  # Verlet rope segments
 var _grapple_retract_timer: float = 0.0
+var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -451,7 +452,14 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
-	# While swinging on grapple, skip normal movement/gravity
+	# While winding up or swinging on grapple, skip normal movement/gravity
+	if _grapple_state == GrappleState.WINDUP:
+		velocity = Vector2.ZERO
+		_update_health_bar()
+		_update_animation(delta)
+		_controller_just_pressed.clear()
+		queue_redraw()
+		return
 	if _grapple_state == GrappleState.SWINGING:
 		_update_health_bar()
 		_update_animation(delta)
@@ -1877,6 +1885,7 @@ func _special_grappling_hook() -> void:
 		_grapple_hold_time = 0.0
 		_grapple_angle = 0.0
 		_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
+		_grapple_locked_aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
 	elif _grapple_state == GrappleState.SWINGING:
 		# Press grapple again while swinging = release or tug
 		if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
@@ -2745,11 +2754,37 @@ func _grapple_tick_windup(delta: float) -> void:
 	)
 	_grapple_angle += _grapple_angular_vel * delta
 
+	# Lock feet to ground — zero out velocity during windup
+	velocity = Vector2.ZERO
+
 	# Hook orbits player
 	_grapple_hook_pos = global_position + Vector2(
 		cos(_grapple_angle) * GRAPPLE_SWING_RADIUS,
 		sin(_grapple_angle) * GRAPPLE_SWING_RADIUS
 	)
+
+	# Update locked aim: only change if stick has input, otherwise keep last direction
+	var stick_aim: Vector2 = _get_aim_direction_analog()
+	if device_id >= 0:
+		var stick := Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+		)
+		if stick.length() > 0.2:
+			_grapple_locked_aim = stick.normalized()
+	else:
+		# Keyboard: only update if actively pressing a direction
+		var kb_aim := Vector2.ZERO
+		if _is_device_action_pressed("move_left"):
+			kb_aim.x -= 1.0
+		if _is_device_action_pressed("move_right"):
+			kb_aim.x += 1.0
+		if _is_device_action_pressed("move_up"):
+			kb_aim.y -= 1.0
+		if _is_device_action_pressed("move_down"):
+			kb_aim.y += 1.0
+		if kb_aim != Vector2.ZERO:
+			_grapple_locked_aim = kb_aim.normalized()
 
 	# Release check: special button released
 	if not _is_device_action_pressed("special"):
@@ -2760,7 +2795,7 @@ func _grapple_tick_windup(delta: float) -> void:
 
 
 func _grapple_throw() -> void:
-	var aim: Vector2 = _get_aim_direction_analog()
+	var aim: Vector2 = _grapple_locked_aim
 	var throw_speed: float = clampf(
 		GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
 		GRAPPLE_BASE_THROW_SPEED,
@@ -2990,7 +3025,7 @@ func _draw_grapple() -> void:
 			draw_circle(hook_local, 4.0, hook_color)
 
 			# Draw aim direction indicator (dotted line showing throw trajectory)
-			var aim: Vector2 = _get_aim_direction_analog()
+			var aim: Vector2 = _grapple_locked_aim
 			var throw_speed: float = clampf(
 				GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
 				GRAPPLE_BASE_THROW_SPEED, GRAPPLE_MAX_THROW_SPEED
