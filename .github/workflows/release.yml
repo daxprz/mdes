@@ -7,26 +7,23 @@ on:
 
 env:
   GODOT_VERSION: "4.4.1"
-  PROJECT_NAME: "TheUltimateMuffin"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - platform: "Linux"
-            export_name: "TheUltimateMuffin.x86_64"
+          - preset: "Linux"
+            export_path: "build/linux/TheUltimateMuffin.x86_64"
             artifact_name: "TheUltimateMuffin-Linux"
-            archive_ext: "tar.gz"
-          - platform: "Windows Desktop"
-            export_name: "TheUltimateMuffin.exe"
+          - preset: "Windows"
+            export_path: "build/windows/TheUltimateMuffin.exe"
             artifact_name: "TheUltimateMuffin-Windows"
-            archive_ext: "zip"
-          - platform: "macOS"
-            export_name: "TheUltimateMuffin.zip"
+          - preset: "macOS"
+            export_path: "build/macos/TheUltimateMuffin.zip"
             artifact_name: "TheUltimateMuffin-macOS"
-            archive_ext: "zip"
 
     steps:
       - name: Checkout
@@ -55,26 +52,19 @@ jobs:
 
       - name: Build
         run: |
-          mkdir -p build/output
-          godot --headless --export-release "${{ matrix.platform }}" build/output/${{ matrix.export_name }}
+          mkdir -p $(dirname ${{ matrix.export_path }})
+          godot --headless --export-release "${{ matrix.preset }}" ${{ matrix.export_path }}
 
-      - name: Archive (Linux)
-        if: matrix.archive_ext == 'tar.gz'
+      - name: Archive
         run: |
-          cd build/output
-          tar czf ../../${{ matrix.artifact_name }}.tar.gz *
-
-      - name: Archive (Windows/macOS)
-        if: matrix.archive_ext == 'zip'
-        run: |
-          cd build/output
-          zip -r ../../${{ matrix.artifact_name }}.zip *
+          cd $(dirname ${{ matrix.export_path }})
+          zip -r ${{ github.workspace }}/${{ matrix.artifact_name }}.zip *
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+          path: ${{ matrix.artifact_name }}.zip
 
   release:
     needs: build
@@ -95,19 +85,20 @@ jobs:
           body: |
             ## The Ultimate Muffin ${{ github.ref_name }}
 
-            4-player local co-op PVE action game.
+            4-player local co-op PVE action game built in Godot 4.
 
             ### Downloads
             - **Windows:** `TheUltimateMuffin-Windows.zip`
             - **macOS:** `TheUltimateMuffin-macOS.zip`
-            - **Linux:** `TheUltimateMuffin-Linux.tar.gz`
+            - **Linux:** `TheUltimateMuffin-Linux.zip`
 
-            ### Requirements
-            - 1-4 controllers (PS5, Xbox, etc.)
-            - Keyboard supported for single player
+            ### How to Play
+            - Connect 1-4 controllers (PS5, Xbox, etc.)
+            - D-pad to select profile and class
+            - Press START to begin
           files: |
             artifacts/TheUltimateMuffin-Windows/TheUltimateMuffin-Windows.zip
             artifacts/TheUltimateMuffin-macOS/TheUltimateMuffin-macOS.zip
-            artifacts/TheUltimateMuffin-Linux/TheUltimateMuffin-Linux.tar.gz
+            artifacts/TheUltimateMuffin-Linux/TheUltimateMuffin-Linux.zip
           draft: false
           prerelease: true
