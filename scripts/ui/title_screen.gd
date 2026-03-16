@@ -161,30 +161,25 @@ func _setup_name_entry() -> void:
 
 
 func _on_device_needs_profile(device_id: int) -> void:
-	_pending_device_id = device_id
-	# If only 1 profile exists, auto-select it (fast rejoin)
-	if ProfileManager.profiles.size() == 1:
-		var profile: Dictionary = ProfileManager.profiles[0]
-		# Check it's not already bound
+	# Auto-assign a profile immediately so the player can just play
+	# Try to find an unbound existing profile first
+	for profile in ProfileManager.profiles:
+		var pid: String = profile.get("id", "")
 		var already_bound := false
 		for did in ProfileManager.device_profiles:
-			if ProfileManager.device_profiles[did].get("id", "") == profile.get("id", ""):
+			if ProfileManager.device_profiles[did].get("id", "") == pid:
 				already_bound = true
 				break
 		if not already_bound:
 			ProfileManager.bind_device_to_profile(device_id, profile)
-			var dev_id: int = device_id
-			_pending_device_id = -99
-			call_deferred("_deferred_join", dev_id)
+			call_deferred("_deferred_join", device_id)
 			return
 
-	# Multiple profiles: show selection
-	if ProfileManager.profiles.size() > 1 and _profile_select and _profile_select.has_method("setup"):
-		_profile_select.setup(-1, device_id)
-	else:
-		# No profiles - go to name entry
-		if _name_entry and _name_entry.has_method("setup"):
-			_name_entry.setup(device_id)
+	# No unbound profiles - create a guest
+	var guest_num: int = ProfileManager.profiles.size() + 1
+	var guest: Dictionary = ProfileManager.create_profile("Player %d" % guest_num)
+	ProfileManager.bind_device_to_profile(device_id, guest)
+	call_deferred("_deferred_join", device_id)
 
 
 func _on_profile_selected(_player_index: int, profile: Dictionary) -> void:
