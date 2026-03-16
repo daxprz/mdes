@@ -89,6 +89,7 @@ func _process(delta: float) -> void:
 
 	_update_string_physics(delta)
 	_apply_balloon_force(delta)
+	_repulse_other_balloons(delta)
 
 	queue_redraw()
 
@@ -660,6 +661,27 @@ func _h2_explode() -> void:
 	cloud_script.reload()
 	cloud.set_script(cloud_script)
 	cloud.set("owner_index", gas_owner)
+
+
+func _repulse_other_balloons(delta: float) -> void:
+	if _balloon_radius < 4.0:
+		return  # Not inflated enough yet
+	for other in get_tree().get_nodes_in_group("balloon_darts"):
+		if other == self or not other is Node2D:
+			continue
+		if not ("_balloon_pos" in other and "_balloon_radius" in other):
+			continue
+		var other_pos: Vector2 = other._balloon_pos
+		var other_r: float = other._balloon_radius
+		if other_r < 4.0:
+			continue
+		var diff: Vector2 = _balloon_pos - other_pos
+		var dist: float = diff.length()
+		var min_dist: float = _balloon_radius + other_r + 4.0  # Gap between balloons
+		if dist < min_dist and dist > 0.1:
+			# Push apart
+			var push: Vector2 = diff.normalized() * (min_dist - dist) * 2.0 * delta
+			_balloon_pos += push
 
 
 func _update_shadow() -> void:
