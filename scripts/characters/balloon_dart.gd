@@ -98,15 +98,29 @@ func _update_dart(delta: float) -> void:
 			continue
 		var dist: float = _dart_pos.distance_to(body.global_position)
 		if dist < 16.0:
-			# HIT! Attach to enemy
 			_dart_active = false
 			_attached_to = body
 			_balloon_inflating = true
 			_balloon_timer = 0.0
 			AudioManager.play("grapple_hit")
-			# Deal dart damage
 			if body.has_method("take_damage"):
 				body.take_damage(DART_DAMAGE, owner_index)
+			return
+
+	# Check for player hits (attach balloon to teammates - no damage!)
+	for body in get_tree().get_nodes_in_group("players"):
+		if not body is Node2D:
+			continue
+		# Don't attach to the balloonist who shot it
+		if "player_index" in body and body.player_index == owner_index:
+			continue
+		var dist: float = _dart_pos.distance_to(body.global_position)
+		if dist < 16.0:
+			_dart_active = false
+			_attached_to = body
+			_balloon_inflating = true
+			_balloon_timer = 0.0
+			AudioManager.play("muffin_collect", -2.0, 1.2)
 			return
 
 	# Check for wall hits
@@ -201,12 +215,24 @@ func _apply_balloon_force(delta: float) -> void:
 	var net_force: float = lift_force + entity_weight
 	# negative net_force = upward, positive = stays grounded
 
-	if net_force < 0.0 and "velocity" in _attached_to:
-		# Balloon is winning! Tug the entity upward
-		_attached_to.velocity.y += net_force * delta * 2.0
-		# Cap upward velocity
-		if _attached_to.velocity.y < -150.0:
-			_attached_to.velocity.y = -150.0
+	if "velocity" in _attached_to:
+		if net_force < 0.0:
+			# Balloon is winning! Tug the entity upward
+			_attached_to.velocity.y += net_force * delta * 3.0
+			# Cap upward velocity
+			if _attached_to.velocity.y < -120.0:
+				_attached_to.velocity.y = -120.0
+		# Even if not fully lifting, reduce gravity effect (balloon assists)
+		_attached_to.velocity.y -= absf(lift_force) * delta * 1.5
+
+		# Multiple balloons stack! Check how many are attached
+		var balloon_count: int = 0
+		for dart in get_tree().get_nodes_in_group("balloon_darts"):
+			if dart != self and dart.has_method("_get_entity_weight") and dart._attached_to == _attached_to:
+				balloon_count += 1
+		if balloon_count > 0:
+			# Extra lift per additional balloon
+			_attached_to.velocity.y -= 40.0 * balloon_count * delta
 
 
 func _get_entity_weight(entity: Node2D) -> float:
