@@ -102,7 +102,22 @@ func take_damage(amount: int, _source_index: int = -1) -> void:
 	if is_dead:
 		return
 
-	health = max(0, health - amount)
+	# If a rift tentacle is attached, it absorbs damage first
+	var actual_damage: int = amount
+	if has_meta("rift_tentacle"):
+		var tentacle: Node2D = get_meta("rift_tentacle")
+		if is_instance_valid(tentacle) and tentacle.has_method("take_tentacle_damage"):
+			actual_damage = tentacle.take_tentacle_damage(amount)
+		else:
+			remove_meta("rift_tentacle")
+			remove_meta("rift_attached")
+	if actual_damage <= 0:
+		# All damage absorbed by tentacle — still flash and play sound
+		AudioManager.play("enemy_hit", -2.0, 0.7)
+		_hit_flash()
+		return
+
+	health = max(0, health - actual_damage)
 	health_changed.emit(health, max_health)
 	if _health_bar:
 		_health_bar.set_health(health, max_health)

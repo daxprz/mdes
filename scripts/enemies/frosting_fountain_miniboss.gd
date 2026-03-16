@@ -138,6 +138,16 @@ func _check_phase() -> void:
 func take_damage(amount: int, _source_index: int = -1) -> void:
 	if is_dead:
 		return
+	# Rift tentacle absorbs damage first
+	if has_meta("rift_tentacle"):
+		var tentacle: Node2D = get_meta("rift_tentacle")
+		if is_instance_valid(tentacle) and tentacle.has_method("take_tentacle_damage"):
+			amount = tentacle.take_tentacle_damage(amount)
+			if amount <= 0:
+				return
+		else:
+			remove_meta("rift_tentacle")
+			remove_meta("rift_attached")
 
 	var final_amount: int = amount
 	# Double damage when NOT spraying (vulnerable window)

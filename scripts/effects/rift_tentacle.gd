@@ -18,6 +18,7 @@ const SMASH_INTERVAL := 0.4
 const SUCKER_RADIUS := 3.0
 const ATTACHED_ATTACK_COOLDOWN := 4.0  # Seconds between attacks when attached to enemy
 const FLING_SPEED := 600.0
+const TENTACLE_MAX_HEALTH := 50.0  # Sub-health for the tentacle when attached
 
 # Phases: 0=wiggle, 1=hunt, 2=smashing player, 3=attached to enemy (permanent)
 var _segments: Array[Vector2] = []  # positions in local space
@@ -37,6 +38,8 @@ var _attached_attack_timer: float = 0.0  # Cooldown for attached tentacle attack
 var _attached_target: Node2D = null  # Player being grabbed by attached tentacle
 var _attached_target_pi: int = -1
 var _attached_smash_phase: int = 0  # 0=hunting, 1=grabbed/pound, 2=flinging
+var _tentacle_health: float = TENTACLE_MAX_HEALTH  # Sub-health shown as rift size
+var _original_take_damage: Callable  # Stores enemy's original take_damage
 
 
 func setup(owner_index: int) -> void:
@@ -203,11 +206,72 @@ func _release_grab() -> void:
 func _attach_to_enemy(enemy: Node2D) -> void:
 	_attached_enemy = enemy
 	_phase = 3
+	_tentacle_health = TENTACLE_MAX_HEALTH
 	enemy.set_meta("rift_attached", true)
+	enemy.set_meta("rift_tentacle", self)
 	# Permanently lock this player from changing classes
 	PlayerHUD.tentacle_lost[_owner_player_index] = true
 	PlayerHUD.class_change_locked.erase(_owner_player_index)
 	_buff_enemy(enemy)
+	# Intercept enemy damage: tentacle absorbs damage first
+	if enemy.has_method("take_damage"):
+		enemy.set_meta("_original_take_damage", enemy.take_damage)
+
+
+## Called by the enemy's damage pipeline — absorbs damage for the tentacle
+func take_tentacle_damage(amount: int) -> int:
+	## Returns the amount of damage that passes through to the enemy
+	if _tentacle_health <= 0:
+		return amount
+	var absorbed: float = minf(amount, _tentacle_health)
+	_tentacle_health -= absorbed
+	var passthrough: int = amount - int(absorbed)
+	if _tentacle_health <= 0:
+		_destroy_tentacle()
+	return passthrough
+
+
+func _destroy_tentacle() -> void:
+	## Tentacle dies: big smoke puff, detach from enemy, restore killability
+	if is_instance_valid(_attached_enemy):
+		_attached_enemy.remove_meta("rift_attached")
+		_attached_enemy.remove_meta("rift_tentacle")
+		# Restore enemy visuals
+		var restore_tween := _attached_enemy.create_tween()
+		restore_tween.tween_property(_attached_enemy, "modulate", Color.WHITE, 0.3)
+	# Big smoke puff
+	_spawn_death_smoke()
+	# Unlock class changes for the owner
+	PlayerHUD.tentacle_lost.erase(_owner_player_index)
+	PlayerHUD.active_tentacle_count = maxi(0, PlayerHUD.active_tentacle_count - 1)
+	queue_free()
+
+
+func _spawn_death_smoke() -> void:
+	## Large puff of smoke when tentacle is destroyed
+	var pos: Vector2 = global_position
+	var parent: Node = get_parent()
+	if not parent:
+		return
+	for i in range(12):
+		var smoke := ColorRect.new()
+		smoke.color = Color(0.6, 0.4, 0.7, 0.7)
+		smoke.size = Vector2(12, 12)
+		smoke.z_index = 8
+		smoke.position = pos - Vector2(6, 6)
+		parent.add_child(smoke)
+
+		var angle: float = randf() * TAU
+		var dist: float = 30.0 + randf() * 50.0
+		var target: Vector2 = pos + Vector2(cos(angle), sin(angle)) * dist - Vector2(6, 6)
+
+		var tween := smoke.create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(smoke, "position", target, 0.6)
+		tween.tween_property(smoke, "modulate:a", 0.0, 0.8)
+		tween.tween_property(smoke, "scale", Vector2(3.0, 3.0), 0.6)
+		tween.set_parallel(false)
+		tween.tween_callback(smoke.queue_free)
 
 
 func _buff_enemy(enemy: Node2D) -> void:
@@ -393,10 +457,13 @@ func _draw_rift() -> void:
 	var pulse: float = 1.0 + 0.15 * sin(_timer * 6.0)
 	var rift_size: float = 22.0 * _rift_scale * pulse
 
-	# Attached to enemy: smaller persistent rift with red-purple tint
+	# Attached to enemy: rift size scales with tentacle sub-health
 	if _phase == 3:
-		rift_size = 14.0 * pulse
-		draw_circle(Vector2.ZERO, rift_size + 4, Color(0.7, 0.1, 0.3, 0.2))
+		var health_ratio: float = clampf(_tentacle_health / TENTACLE_MAX_HEALTH, 0.0, 1.0)
+		rift_size = 14.0 * health_ratio * pulse
+		if rift_size < 0.5:
+			return  # Too small to draw
+		draw_circle(Vector2.ZERO, rift_size + 4, Color(0.7, 0.1, 0.3, 0.2 * health_ratio))
 		draw_circle(Vector2.ZERO, rift_size, Color(0.6, 0.05, 0.2, 0.6))
 		draw_circle(Vector2.ZERO, rift_size * 0.4, Color(0.9, 0.3, 0.5, 0.8))
 		return

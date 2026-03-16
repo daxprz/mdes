@@ -222,6 +222,16 @@ func _damage_player(player: Node2D, amount: int) -> void:
 func take_damage(amount: int, _source_index: int = -1) -> void:
 	if is_dead:
 		return
+	# Rift tentacle absorbs damage first
+	if has_meta("rift_tentacle"):
+		var tentacle: Node2D = get_meta("rift_tentacle")
+		if is_instance_valid(tentacle) and tentacle.has_method("take_tentacle_damage"):
+			amount = tentacle.take_tentacle_damage(amount)
+			if amount <= 0:
+				return
+		else:
+			remove_meta("rift_tentacle")
+			remove_meta("rift_attached")
 	health = maxi(0, health - amount)
 	if _health_bar:
 		_health_bar.set_health(health, MAX_HEALTH)

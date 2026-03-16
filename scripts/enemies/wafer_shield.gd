@@ -220,6 +220,16 @@ func break_shield() -> void:
 func take_damage(amount: int, _source_index: int = -1) -> void:
 	if _state == State.DEAD:
 		return
+	# Rift tentacle absorbs damage first
+	if has_meta("rift_tentacle"):
+		var tentacle: Node2D = get_meta("rift_tentacle")
+		if is_instance_valid(tentacle) and tentacle.has_method("take_tentacle_damage"):
+			amount = tentacle.take_tentacle_damage(amount)
+			if amount <= 0:
+				return
+		else:
+			remove_meta("rift_tentacle")
+			remove_meta("rift_attached")
 
 	# Check if hit from the front (shielded side)
 	if _shield_active and _source_index >= 0:
