@@ -156,6 +156,8 @@ func _flash_hit() -> void:
 
 func _die() -> void:
 	_state = State.DEAD
+	var HealthPickup := load("res://scripts/items/health_pickup.gd")
+	HealthPickup.try_spawn(get_parent(), global_position)
 	AudioManager.play("enemy_die")
 	died.emit(global_position)
 	collision_shape.set_deferred("disabled", true)
