@@ -158,9 +158,9 @@ var _ranger_reloading: bool = false
 
 # Physics grappling hook
 const GRAPPLE_SWING_RADIUS := 40.0
-const GRAPPLE_BASE_ANGULAR_VEL := 4.0  # rad/s
-const GRAPPLE_ANGULAR_ACCEL := 3.0  # rad/s²
-const GRAPPLE_MAX_ANGULAR_VEL := 12.0  # rad/s
+const GRAPPLE_BASE_ANGULAR_VEL := 8.0  # rad/s
+const GRAPPLE_ANGULAR_ACCEL := 6.0  # rad/s²
+const GRAPPLE_MAX_ANGULAR_VEL := 20.0  # rad/s
 const GRAPPLE_MIN_HOLD := 0.3  # seconds before throw is valid
 const GRAPPLE_BASE_THROW_SPEED := 200.0
 const GRAPPLE_THROW_SPEED_PER_SEC := 150.0
@@ -2695,6 +2695,15 @@ func _ranger_fire_crossbow() -> void:
 func _handle_ranger_grapple() -> void:
 	if character_class != PlayerManager.CharacterClass.RANGED:
 		return
+
+	# Check for special press to release/tug while connected (bypasses cooldown)
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		if _is_device_action_just_pressed("special"):
+			if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
+				_grapple_tug()
+			else:
+				_grapple_release()
+
 	if _grapple_state == GrappleState.IDLE:
 		return
 
@@ -2967,6 +2976,29 @@ func _draw_grapple() -> void:
 			draw_line(Vector2.ZERO, hook_local, rope_color, 2.0)
 			draw_circle(hook_local, 4.0, hook_color)
 
+			# Draw aim direction indicator (dotted line showing throw trajectory)
+			var aim: Vector2 = _get_aim_direction()
+			var throw_speed: float = clampf(
+				GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
+				GRAPPLE_BASE_THROW_SPEED, GRAPPLE_MAX_THROW_SPEED
+			)
+			var indicator_len: float = throw_speed * 0.3  # Visual preview length
+			var aim_color := Color(1.0, 0.8, 0.2, 0.4)
+			# Dotted line: draw segments with gaps
+			var dash_len: float = 8.0
+			var gap_len: float = 6.0
+			var total: float = 0.0
+			while total < indicator_len:
+				var seg_start: Vector2 = aim * total
+				var seg_end: Vector2 = aim * minf(total + dash_len, indicator_len)
+				draw_line(seg_start, seg_end, aim_color, 1.5)
+				total += dash_len + gap_len
+			# Arrowhead at the end
+			var arrow_tip: Vector2 = aim * indicator_len
+			var perp: Vector2 = Vector2(-aim.y, aim.x)
+			draw_line(arrow_tip, arrow_tip - aim * 8.0 + perp * 5.0, aim_color, 1.5)
+			draw_line(arrow_tip, arrow_tip - aim * 8.0 - perp * 5.0, aim_color, 1.5)
+
 		GrappleState.THROWN:
 			# Draw rope trailing behind hook
 			if _grapple_rope_points.size() >= 2:
@@ -2978,17 +3010,19 @@ func _draw_grapple() -> void:
 			draw_circle(hook_local, 4.0, hook_color)
 
 		GrappleState.CONNECTED, GrappleState.SWINGING:
-			# Draw rope from player to anchor
+			# Draw rope from player to anchor with physics-based slack
 			var anchor_local: Vector2 = _grapple_anchor - global_position
-			# Simple rope with sag
+			var straight_dist: float = anchor_local.length()
+			# Slack = how much extra rope vs straight-line distance
+			var slack: float = maxf(_grapple_rope_len - straight_dist, 0.0)
 			var seg_count: int = maxi(int(_grapple_rope_len / GRAPPLE_ROPE_SEGMENT_LEN), 3)
 			var prev_pt: Vector2 = Vector2.ZERO
 			for i in range(1, seg_count + 1):
 				var t: float = float(i) / float(seg_count)
 				var pt: Vector2 = Vector2.ZERO.lerp(anchor_local, t)
-				# Add slight sag
-				var sag: float = sin(t * PI) * minf(_grapple_rope_len * 0.05, 10.0)
-				pt.y += sag
+				# Catenary-like sag: more slack = more droop, weighted toward middle
+				var sag_amount: float = slack * 0.5 + 5.0  # Always slight sag + slack contribution
+				pt.y += sin(t * PI) * sag_amount
 				draw_line(prev_pt, pt, rope_color, 2.0)
 				prev_pt = pt
 			draw_circle(anchor_local, 5.0, hook_color)
