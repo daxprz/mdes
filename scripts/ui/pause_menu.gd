@@ -307,6 +307,15 @@ func _confirm() -> void:
 	elif _selected == 1:
 		# Auto-save profiles before quitting to menu
 		ProfileManager.auto_save()
+		# Save player choices so they persist on title screen
+		var saved_choices: Dictionary = {}
+		for pi in PlayerManager.players.keys():
+			var p: Dictionary = PlayerManager.players[pi]
+			saved_choices[pi] = {
+				"device_id": p.get("device_id", -1),
+				"character_class": p.get("character_class", 0),
+			}
+		PlayerManager.set_meta("saved_choices", saved_choices)
 		_unpause()
 		GameManager.reset_game()
 		PlayerManager.reset_all_players()

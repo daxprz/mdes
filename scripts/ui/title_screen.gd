@@ -73,10 +73,41 @@ func _ready() -> void:
 	PlayerManager.player_joined.connect(_on_player_joined)
 	PlayerManager.player_left.connect(_on_player_left)
 	ProfileManager.device_needs_profile.connect(_on_device_needs_profile)
+	# Check if returning from quit-to-menu with saved choices
+	var saved_choices: Dictionary = {}
+	if PlayerManager.has_meta("saved_choices"):
+		saved_choices = PlayerManager.get_meta("saved_choices")
+		PlayerManager.remove_meta("saved_choices")
 	PlayerManager.reset_all_players()
 	ProfileManager.unassign_all()
-	# Clear session device bindings so players must select their profile
 	ProfileManager.device_profiles.clear()
+
+	# Restore saved player choices - auto-rejoin with same class
+	if not saved_choices.is_empty():
+		for pi in saved_choices.keys():
+			var choice: Dictionary = saved_choices[pi]
+			var dev_id: int = choice.get("device_id", -1)
+			var char_class: int = choice.get("character_class", 0)
+			# Bind their profile back and join
+			var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(dev_id)
+			if not last_profile.is_empty():
+				ProfileManager.bind_device_to_profile(dev_id, last_profile)
+			else:
+				var guest: Dictionary = ProfileManager.create_profile("Player %d" % (pi + 1))
+				ProfileManager.bind_device_to_profile(dev_id, guest)
+			PlayerManager._try_join(dev_id)
+			# Override class to what they had
+			if PlayerManager.players.has(pi):
+				var p_data: Dictionary = PlayerManager.players[pi]
+				p_data["character_class"] = char_class
+				var stats: Dictionary = PlayerManager.CLASS_STATS.get(char_class, {})
+				if not stats.is_empty():
+					p_data["max_health"] = stats["max_health"]
+					p_data["health"] = stats["max_health"]
+					p_data["max_mana"] = stats["max_mana"]
+					p_data["mana"] = stats["max_mana"]
+					p_data["speed"] = stats["speed"]
+					p_data["mana_regen"] = stats["mana_regen"]
 	_refresh_all_slots()
 	_update_start_visibility()
 	_setup_camera()
