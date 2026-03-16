@@ -21,93 +21,9 @@ var current_tower_id: int = 0
 var _transitioning := false
 
 
-var _hud_layer: CanvasLayer = null
-var _muffin_label: Label = null
-var _player_stats_container: VBoxContainer = null
-var _player_stat_labels: Dictionary = {}  # player_index -> Label
-
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	PlayerManager.all_players_dead.connect(_on_all_players_dead)
-	_create_hud()
-
-
-func _create_hud() -> void:
-	_hud_layer = CanvasLayer.new()
-	_hud_layer.layer = 5
-	_hud_layer.process_mode = Node.PROCESS_MODE_ALWAYS
-	add_child(_hud_layer)
-
-	# Total muffin counter - top center
-	_muffin_label = Label.new()
-	_muffin_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_muffin_label.add_theme_font_size_override("font_size", 14)
-	_muffin_label.modulate = Color(1.0, 0.85, 0.2)
-	_muffin_label.anchors_preset = Control.PRESET_CENTER_TOP
-	_muffin_label.anchor_left = 0.5
-	_muffin_label.anchor_right = 0.5
-	_muffin_label.offset_left = -100
-	_muffin_label.offset_right = 100
-	_muffin_label.offset_top = 5
-	_muffin_label.offset_bottom = 25
-	_muffin_label.text = "Muffins: 0"
-	_hud_layer.add_child(_muffin_label)
-
-	# Player stats - top right
-	_player_stats_container = VBoxContainer.new()
-	_player_stats_container.anchors_preset = Control.PRESET_TOP_RIGHT
-	_player_stats_container.anchor_left = 1.0
-	_player_stats_container.anchor_right = 1.0
-	_player_stats_container.offset_left = -200
-	_player_stats_container.offset_right = -5
-	_player_stats_container.offset_top = 5
-	_player_stats_container.offset_bottom = 200
-	_player_stats_container.add_theme_constant_override("separation", 2)
-	_hud_layer.add_child(_player_stats_container)
-
-
-func _process(_delta: float) -> void:
-	if current_state == GameState.TITLE:
-		if _hud_layer:
-			_hud_layer.visible = false
-		return
-	if _hud_layer:
-		_hud_layer.visible = true
-
-	# Update total muffin count
-	var total_muffins: int = 0
-	for pi in mini_muffin_counts:
-		total_muffins += mini_muffin_counts[pi]
-	if _muffin_label:
-		_muffin_label.text = "Muffins: %d" % total_muffins
-
-	# Update per-player stats
-	for pi in PlayerManager.players.keys():
-		var p: Dictionary = PlayerManager.players[pi]
-		if not _player_stat_labels.has(pi):
-			var lbl := Label.new()
-			lbl.add_theme_font_size_override("font_size", 10)
-			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-			_player_stats_container.add_child(lbl)
-			_player_stat_labels[pi] = lbl
-
-		var lbl: Label = _player_stat_labels[pi]
-		var pname: String = "P%d" % (pi + 1)
-		var profile: Dictionary = ProfileManager.get_active_profile(pi)
-		if not profile.is_empty():
-			pname = profile.get("name", pname)
-		var hp: int = int(p.get("health", 0))
-		var max_hp: int = int(p.get("max_health", 1))
-		var muffins: int = int(p.get("muffin_count", 0)) + get_mini_muffin_count(pi)
-		var alive_str: String = "" if p.get("is_alive", true) else " [DEAD]"
-		lbl.text = "%s: %d/%d HP | %d muffins%s" % [pname, hp, max_hp, muffins, alive_str]
-		lbl.modulate = Color(0.7, 0.7, 0.7) if p.get("is_alive", true) else Color(0.5, 0.3, 0.3)
-
-	# Clean up labels for disconnected players
-	for pi in _player_stat_labels.keys():
-		if not PlayerManager.players.has(pi):
-			_player_stat_labels[pi].queue_free()
-			_player_stat_labels.erase(pi)
 
 
 func _on_all_players_dead() -> void:

@@ -140,10 +140,21 @@ func _try_join(device_id: int) -> void:
 	if _joined_devices.has(device_id):
 		return
 
-	# Check if this device has a profile - if not, request one
+	# Auto-create guest profile if no profile bound
 	if not ProfileManager.has_device_profile(device_id):
-		ProfileManager.request_profile_for_device(device_id)
-		return
+		var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(device_id)
+		if not last_profile.is_empty():
+			var pid: String = last_profile.get("id", "")
+			var already_bound := false
+			for did in ProfileManager.device_profiles:
+				if ProfileManager.device_profiles[did].get("id", "") == pid:
+					already_bound = true
+					break
+			if not already_bound:
+				ProfileManager.bind_device_to_profile(device_id, last_profile)
+		if not ProfileManager.has_device_profile(device_id):
+			var guest: Dictionary = ProfileManager.create_profile("Player %d" % (players.size() + 1))
+			ProfileManager.bind_device_to_profile(device_id, guest)
 	if players.size() >= MAX_PLAYERS:
 		return
 

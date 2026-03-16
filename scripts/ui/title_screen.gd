@@ -1,79 +1,32 @@
 extends Node2D
 
 ## Title screen with a playable lobby arena.
-## Players can jump around, fight, and choose their class before starting.
+## Players auto-join when a controller is connected.
+## Profile/class selection is handled inline via the PlayerHUD autoload.
+## Class changes trigger a red portal + ghost + poof sequence.
 
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 
-const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
-	PlayerManager.CharacterClass.MELEE,
-	PlayerManager.CharacterClass.RANGED,
-	PlayerManager.CharacterClass.MAGE,
-	PlayerManager.CharacterClass.SUMMONER,
-	PlayerManager.CharacterClass.ROGUE,
-	PlayerManager.CharacterClass.DEMOLITIONIST,
-	PlayerManager.CharacterClass.HEALER,
-	PlayerManager.CharacterClass.TANK,
-	PlayerManager.CharacterClass.NINJA,
-	PlayerManager.CharacterClass.BALLOONIST,
-	PlayerManager.CharacterClass.GUITARIST,
-	PlayerManager.CharacterClass.WEREWOLF,
-]
-
-const CLASS_NAMES := {
-	PlayerManager.CharacterClass.MELEE: "Melee",
-	PlayerManager.CharacterClass.RANGED: "Ranged",
-	PlayerManager.CharacterClass.MAGE: "Mage",
-	PlayerManager.CharacterClass.SUMMONER: "Summoner",
-	PlayerManager.CharacterClass.ROGUE: "Rogue",
-	PlayerManager.CharacterClass.DEMOLITIONIST: "Demolitionist",
-	PlayerManager.CharacterClass.HEALER: "Healer",
-	PlayerManager.CharacterClass.TANK: "Tank",
-	PlayerManager.CharacterClass.NINJA: "Ninja",
-	PlayerManager.CharacterClass.BALLOONIST: "Balloonist",
-	PlayerManager.CharacterClass.GUITARIST: "Guitarist",
-	PlayerManager.CharacterClass.WEREWOLF: "Werewolf",
-}
-
-const CLASS_COLORS := {
-	PlayerManager.CharacterClass.MELEE: Color(0.9, 0.3, 0.2),
-	PlayerManager.CharacterClass.RANGED: Color(0.2, 0.8, 0.3),
-	PlayerManager.CharacterClass.MAGE: Color(0.3, 0.4, 0.95),
-	PlayerManager.CharacterClass.SUMMONER: Color(0.8, 0.5, 0.9),
-	PlayerManager.CharacterClass.ROGUE: Color(0.95, 0.85, 0.2),
-	PlayerManager.CharacterClass.DEMOLITIONIST: Color(0.9, 0.6, 0.1),
-	PlayerManager.CharacterClass.HEALER: Color(0.3, 0.9, 0.4),
-	PlayerManager.CharacterClass.TANK: Color(0.6, 0.5, 0.35),
-	PlayerManager.CharacterClass.NINJA: Color(0.2, 0.9, 0.9),
-	PlayerManager.CharacterClass.BALLOONIST: Color(0.9, 0.4, 0.7),
-	PlayerManager.CharacterClass.GUITARIST: Color(0.9, 0.7, 0.2),
-	PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
-}
-
-const EMPTY_SLOT_COLOR := Color(0.3, 0.3, 0.3, 1.0)
-
-@onready var player_slots: HBoxContainer = $UI/PlayerSlots
 @onready var start_text: Label = $UI/StartText
+@onready var title_label: Label = $UI/Title
 @onready var join_text: Label = $UI/JoinText
 @onready var players_container: Node2D = $Players
 @onready var spawn_point: Marker2D = $PlaygroundSpawn
 
 var _blink_timer: float = 0.0
-var _just_joined := false
 var _spawned_players: Dictionary = {}  # player_index -> node
-# Track which device triggered class cycle to avoid repeat
-var _cycle_cooldowns: Dictionary = {}  # device_id -> float
-
-# Profile / name entry
-var _pending_device_id: int = -99
+var _ghost_players: Dictionary = {}  # player_index -> true (waiting for non-movement input)
 var _name_entry: Node = null
-var _returning_from_game: bool = false  # True if quit-to-menu, false if fresh launch
+var _pending_device_id: int = -99
+var _returning_from_game: bool = false
 
 
 func _ready() -> void:
 	PlayerManager.player_joined.connect(_on_player_joined)
 	PlayerManager.player_left.connect(_on_player_left)
-	ProfileManager.device_needs_profile.connect(_on_device_needs_profile)
+	PlayerHUD.class_changed.connect(_on_class_changed)
+	PlayerHUD.create_profile_requested.connect(_on_create_profile_requested)
+
 	# Check if returning from quit-to-menu with saved choices
 	var saved_choices: Dictionary = {}
 	if PlayerManager.has_meta("saved_choices"):
@@ -83,36 +36,37 @@ func _ready() -> void:
 	ProfileManager.unassign_all()
 	ProfileManager.device_profiles.clear()
 
-	# Always set up camera and overlays (needed for fresh launch AND return-from-game)
 	_setup_camera()
 	_setup_name_entry()
 
-	# Restore saved player choices - auto-rejoin with same class
+	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
 	if _returning_from_game:
-		for pi in saved_choices.keys():
-			var choice: Dictionary = saved_choices[pi]
-			var dev_id: int = choice.get("device_id", -1)
-			var char_class: int = choice.get("character_class", 0)
-			# Bind their profile back and join
-			var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(dev_id)
-			if not last_profile.is_empty():
-				ProfileManager.bind_device_to_profile(dev_id, last_profile)
-			else:
-				var guest: Dictionary = ProfileManager.create_profile("Player %d" % (pi + 1))
-				ProfileManager.bind_device_to_profile(dev_id, guest)
-			PlayerManager._try_join(dev_id)
-		# Override classes AFTER all players joined (deferred)
-		call_deferred("_apply_saved_classes", saved_choices)
+		_restore_saved_choices(saved_choices)
+	else:
+		_auto_join_connected_controllers()
 
 
-func _apply_saved_classes(saved_choices: Dictionary) -> void:
-	# Match by device_id since player_index might differ
+func _restore_saved_choices(saved_choices: Dictionary) -> void:
 	for pi in saved_choices.keys():
 		var choice: Dictionary = saved_choices[pi]
 		var dev_id: int = choice.get("device_id", -1)
 		var char_class: int = choice.get("character_class", 0)
-		# Find which player has this device
+		var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(dev_id)
+		if not last_profile.is_empty():
+			ProfileManager.bind_device_to_profile(dev_id, last_profile)
+		else:
+			var guest: Dictionary = ProfileManager.create_profile("Player %d" % (pi + 1))
+			ProfileManager.bind_device_to_profile(dev_id, guest)
+		PlayerManager._try_join(dev_id)
+	call_deferred("_apply_saved_classes", saved_choices)
+
+
+func _apply_saved_classes(saved_choices: Dictionary) -> void:
+	for pi in saved_choices.keys():
+		var choice: Dictionary = saved_choices[pi]
+		var dev_id: int = choice.get("device_id", -1)
+		var char_class: int = choice.get("character_class", 0)
 		for p_idx in PlayerManager.players.keys():
 			var p_data: Dictionary = PlayerManager.players[p_idx]
 			if p_data.get("device_id", -99) == dev_id:
@@ -125,24 +79,49 @@ func _apply_saved_classes(saved_choices: Dictionary) -> void:
 					p_data["mana"] = stats["max_mana"]
 					p_data["speed"] = stats["speed"]
 					p_data["mana_regen"] = stats["mana_regen"]
-				_update_slot(p_idx)
 				_remove_lobby_player(p_idx)
 				_spawn_lobby_player(p_idx)
 				break
-	_refresh_all_slots()
-	_update_start_visibility()
+
+
+func _auto_join_connected_controllers() -> void:
+	## Auto-join all connected controllers + keyboard
+	# Keyboard player
+	_auto_join_device(-1)
+	# Connected joypads
+	for dev_id in Input.get_connected_joypads():
+		_auto_join_device(dev_id)
+
+
+func _auto_join_device(device_id: int) -> void:
+	## Auto-assign a profile (or create guest) and join
+	if not ProfileManager.has_device_profile(device_id):
+		var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(device_id)
+		if not last_profile.is_empty():
+			# Check it's not already bound to another device
+			var pid: String = last_profile.get("id", "")
+			var already_bound := false
+			for did in ProfileManager.device_profiles:
+				if ProfileManager.device_profiles[did].get("id", "") == pid:
+					already_bound = true
+					break
+			if not already_bound:
+				ProfileManager.bind_device_to_profile(device_id, last_profile)
+		# If still no profile, create a guest
+		if not ProfileManager.has_device_profile(device_id):
+			var guest_name := "Player %d" % (PlayerManager.players.size() + 1)
+			var guest: Dictionary = ProfileManager.create_profile(guest_name)
+			ProfileManager.bind_device_to_profile(device_id, guest)
+	PlayerManager._try_join(device_id)
 
 
 func _setup_camera() -> void:
 	var cam := Camera2D.new()
-	cam.position = Vector2(960, 540)
+	cam.position = Vector2(960, 505)  # Shift up 35px for HUD buffer
 	add_child(cam)
 
 
-var _profile_select: Node = null
-
 func _setup_name_entry() -> void:
-	# Name entry overlay
 	var name_script := load("res://scripts/ui/name_entry_overlay.gd")
 	_name_entry = CanvasLayer.new()
 	_name_entry.set_script(name_script)
@@ -150,283 +129,174 @@ func _setup_name_entry() -> void:
 	_name_entry.name_confirmed.connect(_on_name_confirmed)
 	_name_entry.cancelled.connect(_on_name_cancelled)
 
-	# Profile selection overlay
-	var select_script := load("res://scripts/ui/profile_select_overlay.gd")
-	_profile_select = CanvasLayer.new()
-	_profile_select.set_script(select_script)
-	add_child(_profile_select)
-	_profile_select.profile_selected.connect(_on_profile_selected)
-	_profile_select.create_new_requested.connect(_on_create_new_requested)
+
+# -- Process -------------------------------------------------------------------
+
+func _process(delta: float) -> void:
+	_blink_timer += delta
+
+	# Blink start text
+	if start_text.visible:
+		start_text.modulate.a = 0.5 + 0.5 * sin(_blink_timer * 4.0)
+
+	# Blink join text
+	join_text.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.003)
+
+	# Update start visibility
+	start_text.visible = PlayerManager.get_active_player_count() > 0
+
+	# Check ghost players for non-movement button press to materialize
+	for pi in _ghost_players.keys():
+		var p_data: Dictionary = PlayerManager.get_player(pi)
+		if p_data.is_empty():
+			_ghost_players.erase(pi)
+			continue
+		if _check_non_movement_press(p_data["device_id"]):
+			_materialize_player(pi)
 
 
-func _on_device_needs_profile(device_id: int) -> void:
-	_pending_device_id = device_id
-
-	if _returning_from_game:
-		# Returning from quit-to-menu: auto-assign quickly
-		_auto_assign_profile(device_id)
-		return
-
-	# FRESH LAUNCH: show profile selection or name entry
-	if not ProfileManager.profiles.is_empty() and _profile_select and _profile_select.has_method("setup"):
-		_profile_select.setup(-1, device_id)
+func _check_non_movement_press(device_id: int) -> bool:
+	## Check if any non-movement button is pressed for this device
+	if device_id == -1:
+		# Keyboard
+		return Input.is_action_just_pressed("attack") or \
+			   Input.is_action_just_pressed("special") or \
+			   Input.is_action_just_pressed("jump") or \
+			   Input.is_action_just_pressed("block") or \
+			   Input.is_action_just_pressed("interact")
 	else:
-		# No profiles exist - name entry
-		if _name_entry and _name_entry.has_method("setup"):
-			_name_entry.setup(device_id)
+		# Joypad - check standard action buttons (not D-pad, not START)
+		return Input.is_joy_button_pressed(device_id, JOY_BUTTON_A) or \
+			   Input.is_joy_button_pressed(device_id, JOY_BUTTON_B) or \
+			   Input.is_joy_button_pressed(device_id, JOY_BUTTON_X) or \
+			   Input.is_joy_button_pressed(device_id, JOY_BUTTON_Y) or \
+			   Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_SHOULDER) or \
+			   Input.is_joy_button_pressed(device_id, JOY_BUTTON_LEFT_SHOULDER)
 
 
-func _auto_assign_profile(device_id: int) -> void:
-	# Find first unbound profile
-	for profile in ProfileManager.profiles:
-		var pid: String = profile.get("id", "")
-		var already_bound := false
-		for did in ProfileManager.device_profiles:
-			if ProfileManager.device_profiles[did].get("id", "") == pid:
-				already_bound = true
-				break
-		if not already_bound:
-			ProfileManager.bind_device_to_profile(device_id, profile)
-			_pending_device_id = -99
-			call_deferred("_deferred_join", device_id)
-			return
-	# No unbound profiles - create guest
-	var guest: Dictionary = ProfileManager.create_profile("Player %d" % (ProfileManager.profiles.size() + 1))
-	ProfileManager.bind_device_to_profile(device_id, guest)
-	_pending_device_id = -99
-	call_deferred("_deferred_join", device_id)
+# -- Input ---------------------------------------------------------------------
+
+func _input(event: InputEvent) -> void:
+	# START to begin game (only if at least 1 player joined)
+	if event.is_action_pressed("ps_button"):
+		if PlayerManager.get_active_player_count() > 0:
+			_start_game()
 
 
-func _on_profile_selected(_player_index: int, profile: Dictionary) -> void:
-	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	var dev_id: int = _pending_device_id
-	_pending_device_id = -99
-	call_deferred("_deferred_join", dev_id)
+# -- Profile Creation ----------------------------------------------------------
 
-
-func _on_create_new_requested(_player_index: int) -> void:
-	# Player wants to create a new profile - show name entry
+func _on_create_profile_requested(device_id: int) -> void:
+	_pending_device_id = device_id
 	if _name_entry and _name_entry.has_method("setup"):
-		_name_entry.setup(_pending_device_id)
+		_name_entry.setup(device_id)
 
 
 func _on_name_confirmed(player_name: String) -> void:
 	var profile: Dictionary = ProfileManager.create_profile(player_name)
 	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	# Defer the join to next frame so overlays fully close first
-	var dev_id: int = _pending_device_id
+	var pi := _get_player_index_for_device(_pending_device_id)
+	if pi >= 0:
+		ProfileManager.assign_profile_to_player(pi, profile)
 	_pending_device_id = -99
-	call_deferred("_deferred_join", dev_id)
-
-
-func _deferred_join(device_id: int) -> void:
-	PlayerManager._try_join(device_id)
 
 
 func _on_name_cancelled() -> void:
-	var guest_name: String = "Guest"
-	if _pending_device_id >= 0:
-		guest_name = "Player %d" % (_pending_device_id + 1)
-	var profile: Dictionary = ProfileManager.create_profile(guest_name)
-	ProfileManager.bind_device_to_profile(_pending_device_id, profile)
-	var dev_id: int = _pending_device_id
 	_pending_device_id = -99
-	call_deferred("_deferred_join", dev_id)
 
 
-func _process(delta: float) -> void:
-	if start_text.visible:
-		_blink_timer += delta
-		start_text.modulate.a = 0.5 + 0.5 * sin(_blink_timer * 4.0)
-	join_text.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.003)
+# -- Class Change with Portal/Ghost/Poof Sequence -----------------------------
 
-	# Cooldown timers for class cycling
-	for key in _cycle_cooldowns.keys():
-		_cycle_cooldowns[key] -= delta
-		if _cycle_cooldowns[key] <= 0.0:
-			_cycle_cooldowns.erase(key)
-
-
-func _input(event: InputEvent) -> void:
-	# START to join or start game
-	if event.is_action_pressed("ps_button"):
-		if _just_joined:
-			_just_joined = false
-			return
-		if PlayerManager.get_active_player_count() > 0:
-			_start_game()
-
-	# Triangle (special) = open profile re-selection for this player
-	if event.is_action_pressed("special"):
-		var device_id: int = event.device if not (event is InputEventKey) else -1
-		var player_index := _get_player_index_for_device(device_id)
-		if player_index >= 0 and ProfileManager.profiles.size() > 1:
-			if _profile_select and _profile_select.has_method("setup"):
-				_pending_device_id = device_id
-				_profile_select.setup(player_index, device_id)
-
-	# Class cycling with D-pad ONLY (buttons 13=left, 14=right)
-	if event is InputEventJoypadButton and event.pressed:
-		var device_id: int = event.device
-		var player_index := _get_player_index_for_device(device_id)
-		if player_index < 0:
-			return
-
-		var cooldown_key := "%d_%d" % [device_id, event.button_index]
-		if _cycle_cooldowns.has(cooldown_key):
-			return
-
-		# D-pad Left/Right = cycle class
-		if event.button_index == 13:
-			_cycle_class(player_index, -1)
-			_cycle_cooldowns[cooldown_key] = 0.2
-		elif event.button_index == 14:
-			_cycle_class(player_index, 1)
-			_cycle_cooldowns[cooldown_key] = 0.2
-		# D-pad Up/Down = cycle profile
-		elif event.button_index == 11:  # D-pad Up
-			_cycle_profile(player_index, device_id, -1)
-			_cycle_cooldowns[cooldown_key] = 0.3
-		elif event.button_index == 12:  # D-pad Down
-			_cycle_profile(player_index, device_id, 1)
-			_cycle_cooldowns[cooldown_key] = 0.3
-
-	# Keyboard class cycling with Q/E
-	if event is InputEventKey and event.pressed:
-		var player_index := _get_player_index_for_device(-1)
-		if player_index < 0:
-			return
-		if event.keycode == KEY_Q:
-			_cycle_class(player_index, -1)
-		elif event.keycode == KEY_E:
-			_cycle_class(player_index, 1)
-
-
-# -- Class Cycling -------------------------------------------------------------
-
-func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
-	# Cycle through available profiles for this player
-	if ProfileManager.profiles.size() <= 1:
-		return  # Only one profile, nothing to cycle
-
-	var current_profile: Dictionary = ProfileManager.get_active_profile(player_index)
-	var current_id: String = current_profile.get("id", "")
-
-	# Build list of unbound profiles (plus current one)
-	var available: Array[Dictionary] = []
-	for profile in ProfileManager.profiles:
-		var pid: String = profile.get("id", "")
-		var is_bound := false
-		for did in ProfileManager.device_profiles:
-			if ProfileManager.device_profiles[did].get("id", "") == pid and did != device_id:
-				is_bound = true
-				break
-		if not is_bound:
-			available.append(profile)
-
-	if available.size() <= 1:
+func _on_class_changed(player_index: int, new_class: PlayerManager.CharacterClass) -> void:
+	if not _spawned_players.has(player_index):
+		_spawn_lobby_player(player_index)
 		return
 
-	# Find current index and step
-	var current_idx: int = 0
-	for i in range(available.size()):
-		if available[i].get("id", "") == current_id:
-			current_idx = i
-			break
+	var old_node: CharacterBody2D = _spawned_players[player_index]
+	var pos: Vector2 = old_node.global_position
 
-	var new_idx: int = (current_idx + direction) % available.size()
-	if new_idx < 0:
-		new_idx += available.size()
+	# Spawn red portal at player position
+	_spawn_red_portal(pos)
 
-	var new_profile: Dictionary = available[new_idx]
-	ProfileManager.bind_device_to_profile(device_id, new_profile)
-	ProfileManager.assign_profile_to_player(player_index, new_profile)
-	AudioManager.play("menu_select")
-	_update_slot(player_index)
+	# Make player ghost (semi-transparent)
+	old_node.queue_free()
+	_spawned_players.erase(player_index)
 
+	# Spawn smoke poof
+	_spawn_poof(pos)
 
-func _cycle_class(player_index: int, direction: int) -> void:
+	# Spawn new character at same position
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
 	if p_data.is_empty():
 		return
 
-	var current_class: PlayerManager.CharacterClass = p_data["character_class"]
-	var available := _get_available_classes(player_index)
-	if available.is_empty():
+	var player_node: CharacterBody2D = PLAYER_SIDE_SCENE.instantiate()
+	player_node.player_index = player_index
+	player_node.device_id = p_data["device_id"]
+	player_node.character_class = new_class
+	player_node.global_position = pos
+	player_node.modulate = Color(1, 1, 1, 0.4)  # Ghost
+	players_container.add_child(player_node)
+	_spawned_players[player_index] = player_node
+
+	# Mark as ghost
+	_ghost_players[player_index] = true
+
+
+func _materialize_player(player_index: int) -> void:
+	_ghost_players.erase(player_index)
+	if not _spawned_players.has(player_index):
 		return
 
-	# Find current class in the full list and step
-	var current_idx := ALL_CLASSES.find(current_class)
-	var new_class := current_class
+	var node: CharacterBody2D = _spawned_players[player_index]
+	var pos: Vector2 = node.global_position
 
-	# Step through ALL_CLASSES in direction, skipping taken ones
-	for i in range(1, ALL_CLASSES.size() + 1):
-		var check_idx := (current_idx + direction * i) % ALL_CLASSES.size()
-		if check_idx < 0:
-			check_idx += ALL_CLASSES.size()
-		var candidate: PlayerManager.CharacterClass = ALL_CLASSES[check_idx]
-		if candidate in available:
-			new_class = candidate
-			break
+	# Second red portal
+	_spawn_red_portal(pos)
 
-	if new_class == current_class:
-		return
-
-	AudioManager.play("menu_select")
-	# Update player data
-	p_data["character_class"] = new_class
-	var stats: Dictionary = PlayerManager.CLASS_STATS[new_class]
-	p_data["max_health"] = stats["max_health"]
-	p_data["health"] = stats["max_health"]
-	p_data["max_mana"] = stats["max_mana"]
-	p_data["mana"] = stats["max_mana"]
-	p_data["speed"] = stats["speed"]
-	p_data["mana_regen"] = stats["mana_regen"]
-
-	# Update UI slot
-	_update_slot(player_index)
-
-	# Respawn lobby player with new class
-	_remove_lobby_player(player_index)
-	_spawn_lobby_player(player_index)
+	# Restore opacity
+	var tween := create_tween()
+	tween.tween_property(node, "modulate:a", 1.0, 0.2)
 
 
-func _get_available_classes(for_player_index: int) -> Array[PlayerManager.CharacterClass]:
-	var taken: Array[PlayerManager.CharacterClass] = []
-	for pi in PlayerManager.players:
-		if pi != for_player_index:
-			taken.append(PlayerManager.players[pi]["character_class"])
+func _spawn_red_portal(pos: Vector2) -> void:
+	## Red swirling portal effect (ColorRect + tween for now)
+	var portal := ColorRect.new()
+	portal.color = Color(0.9, 0.1, 0.1, 0.8)
+	portal.size = Vector2(40, 60)
+	portal.position = pos - Vector2(20, 50)
+	portal.z_index = 5
+	players_container.add_child(portal)
 
-	var available: Array[PlayerManager.CharacterClass] = []
-	for c in ALL_CLASSES:
-		if c not in taken:
-			available.append(c)
-	return available
-
-
-func _get_player_index_for_device(device_id: int) -> int:
-	for pi in PlayerManager.players:
-		if PlayerManager.players[pi]["device_id"] == device_id:
-			return pi
-	return -1
+	var tween := create_tween()
+	tween.tween_property(portal, "scale", Vector2(1.5, 1.5), 0.15)
+	tween.parallel().tween_property(portal, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(portal.queue_free)
 
 
+func _spawn_poof(pos: Vector2) -> void:
+	## Smoke poof (expanding circle that fades)
+	var poof := ColorRect.new()
+	poof.color = Color(0.8, 0.8, 0.8, 0.7)
+	poof.size = Vector2(30, 30)
+	poof.position = pos - Vector2(15, 30)
+	poof.z_index = 6
+	players_container.add_child(poof)
+
+	var tween := create_tween()
+	tween.tween_property(poof, "scale", Vector2(2.5, 2.5), 0.3)
+	tween.parallel().tween_property(poof, "modulate:a", 0.0, 0.4)
+	tween.tween_callback(poof.queue_free)
 
 
-# -- Signal Callbacks ----------------------------------------------------------
+# -- Player Join/Leave Callbacks -----------------------------------------------
 
 func _on_player_joined(player_index: int) -> void:
-	_just_joined = true
-	_update_slot(player_index)
-	_update_start_visibility()
 	_spawn_lobby_player(player_index)
 
 
 func _on_player_left(player_index: int) -> void:
-	_clear_slot(player_index)
-	_update_start_visibility()
 	_remove_lobby_player(player_index)
-	ProfileManager.unassign_profile(player_index)
+	_ghost_players.erase(player_index)
 
 
 # -- Lobby Player Spawning -----------------------------------------------------
@@ -454,76 +324,11 @@ func _remove_lobby_player(player_index: int) -> void:
 		_spawned_players.erase(player_index)
 
 
-# -- Slot Management -----------------------------------------------------------
-
-func _get_slot(index: int) -> PanelContainer:
-	return player_slots.get_child(index) as PanelContainer
-
-
-func _update_slot(player_index: int) -> void:
-	var slot := _get_slot(player_index)
-	if slot == null:
-		return
-	var data: Dictionary = PlayerManager.get_player(player_index)
-	if data.is_empty():
-		_clear_slot(player_index)
-		return
-	var char_class: PlayerManager.CharacterClass = data["character_class"]
-	var vbox: VBoxContainer = slot.get_node("VBox")
-	var class_icon: ColorRect = vbox.get_node("ClassIcon")
-	var class_label: Label = vbox.get_node("ClassLabel")
-	class_icon.color = CLASS_COLORS.get(char_class, EMPTY_SLOT_COLOR)
-
-	# Show profile name + level if available
-	var profile: Dictionary = ProfileManager.get_active_profile(player_index)
-	var class_name_text: String = CLASS_NAMES.get(char_class, "???")
-	if not profile.is_empty():
-		var pname: String = profile.get("name", "")
-		var class_key: String = str(int(char_class))
-		var level: int = ProfileManager.get_overall_level(profile, class_key)
-		if level > 0:
-			class_label.text = pname + " - " + class_name_text + " Lv." + str(level)
-		else:
-			class_label.text = pname + " - " + class_name_text
-	else:
-		class_label.text = class_name_text
-
-	# Update arrows hint
-	var arrows: Label = vbox.get_node_or_null("Arrows")
-	if not arrows:
-		arrows = Label.new()
-		arrows.name = "Arrows"
-		arrows.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		arrows.add_theme_font_size_override("font_size", 10)
-		arrows.modulate = Color(0.7, 0.7, 0.7)
-		vbox.add_child(arrows)
-	arrows.text = "L/R: Class | Triangle: Switch Profile"
-
-
-func _clear_slot(player_index: int) -> void:
-	var slot := _get_slot(player_index)
-	if slot == null:
-		return
-	var vbox: VBoxContainer = slot.get_node("VBox")
-	var class_icon: ColorRect = vbox.get_node("ClassIcon")
-	var class_label: Label = vbox.get_node("ClassLabel")
-	class_icon.color = EMPTY_SLOT_COLOR
-	class_label.text = "---"
-	var arrows: Label = vbox.get_node_or_null("Arrows")
-	if arrows:
-		arrows.text = ""
-
-
-func _refresh_all_slots() -> void:
-	for i in range(PlayerManager.MAX_PLAYERS):
-		if PlayerManager.players.has(i):
-			_update_slot(i)
-		else:
-			_clear_slot(i)
-
-
-func _update_start_visibility() -> void:
-	start_text.visible = PlayerManager.get_active_player_count() > 0
+func _get_player_index_for_device(device_id: int) -> int:
+	for pi in PlayerManager.players:
+		if PlayerManager.players[pi]["device_id"] == device_id:
+			return pi
+	return -1
 
 
 # -- Transition ----------------------------------------------------------------
