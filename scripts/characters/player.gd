@@ -14,6 +14,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_topdown.png",
 	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_topdown.png",
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_topdown.png",
+	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -272,6 +273,11 @@ func _perform_attack() -> void:
 		_attack_rogue()
 		return
 
+	# Guitarist fires musical notes
+	if character_class == PlayerManager.CharacterClass.GUITARIST:
+		_attack_guitarist_topdown()
+		return
+
 	# Position the attack area based on facing direction
 	var offset := Vector2.ZERO
 	match _direction:
@@ -339,6 +345,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.TANK: return 45
 		PlayerManager.CharacterClass.NINJA: return 15
 		PlayerManager.CharacterClass.BALLOONIST: return 8
+		PlayerManager.CharacterClass.GUITARIST: return 12
 	return 10
 
 
@@ -376,6 +383,8 @@ func _perform_special() -> void:
 			_special_jumper_dash_attack()
 		PlayerManager.CharacterClass.BALLOONIST:
 			_special_balloonist_burst_topdown()
+		PlayerManager.CharacterClass.GUITARIST:
+			_special_guitarist_blast_topdown()
 
 
 func _special_melee() -> void:
@@ -728,6 +737,8 @@ func _handle_circle_abilities(delta: float) -> void:
 			_handle_jumper_dash()
 		PlayerManager.CharacterClass.BALLOONIST:
 			pass  # No Circle ability in top-down
+		PlayerManager.CharacterClass.GUITARIST:
+			_handle_guitarist_amp_up_topdown(delta)
 
 
 # -- Melee Enrage (Circle) ----------------------------------------------------
@@ -1328,3 +1339,269 @@ func _special_balloonist_burst_topdown() -> void:
 			var dist: float = global_position.distance_to(body.global_position)
 			if dist < 60.0 and body.has_method("take_damage"):
 				body.take_damage(20, player_index)
+
+
+# -- Guitarist Abilities (top-down) --------------------------------------------
+
+var _guitarist_amp_up_active_td: bool = false
+var _guitarist_amp_up_timer_td: float = 0.0
+var _guitarist_amp_up_cooldown_td: float = 0.0
+const GUITARIST_AMP_DURATION_TD := 15.0
+const GUITARIST_AMP_COOLDOWN_TD := 30.0
+
+
+func _attack_guitarist_topdown() -> void:
+	AudioManager.play("menu_confirm", -2.0, 1.0)
+	_attack_cooldown = 0.7
+
+	var aim: Vector2 = _get_aim_direction()
+	var pitches: Array[float] = [1.0, 1.25, 1.5]
+
+	for note_i in range(3):
+		if not is_inside_tree():
+			return
+		if note_i > 0:
+			await get_tree().create_timer(0.1).timeout
+			if not is_inside_tree():
+				return
+		AudioManager.play("menu_confirm", -4.0, pitches[note_i])
+		_spawn_musical_note_td(aim, note_i)
+
+
+func _spawn_musical_note_td(aim: Vector2, note_index: int) -> void:
+	var note := Node2D.new()
+	note.name = "MusicalNote"
+	note.global_position = global_position + aim * 12.0
+	note.z_index = 8
+	note.add_to_group("loose_items")
+
+	var note_script := GDScript.new()
+	note_script.source_code = """extends Node2D
+
+var direction: Vector2 = Vector2.ZERO
+var speed: float = 250.0
+var damage: int = 8
+var owner_index: int = 0
+var note_color: Color = Color(1.0, 0.8, 0.2)
+var _age: float = 0.0
+var _distance_traveled: float = 0.0
+var _sine_amplitude: float = 20.0
+var _perp: Vector2 = Vector2.ZERO
+var _base_pos: Vector2 = Vector2.ZERO
+
+func _ready() -> void:
+	add_to_group("loose_items")
+	_perp = Vector2(-direction.y, direction.x)
+	_base_pos = global_position
+
+func _draw() -> void:
+	draw_circle(Vector2(0, 2), 3.0, note_color)
+	draw_line(Vector2(3, 2), Vector2(3, -6), note_color, 1.5)
+	draw_line(Vector2(3, -6), Vector2(6, -4), note_color, 1.5)
+
+func _process(delta: float) -> void:
+	_age += delta
+	if _age >= 2.0:
+		queue_free()
+		return
+
+	_distance_traveled += speed * delta
+	var base_offset: Vector2 = direction * _distance_traveled
+	var sine_offset: float = sin(_distance_traveled * 0.08) * _sine_amplitude
+	global_position = _base_pos + base_offset + _perp * sine_offset
+	queue_redraw()
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < 12.0:
+				if body.has_method("take_damage"):
+					body.take_damage(damage, owner_index)
+				if is_inside_tree():
+					var p := ColorRect.new()
+					p.color = note_color
+					p.size = Vector2(6, 6)
+					p.position = global_position
+					p.z_index = 9
+					get_parent().add_child(p)
+					var tw := p.create_tween()
+					tw.set_parallel(true)
+					tw.tween_property(p, "scale", Vector2(3.0, 3.0), 0.2)
+					tw.tween_property(p, "modulate:a", 0.0, 0.2)
+					tw.chain().tween_callback(p.queue_free)
+				queue_free()
+				return
+"""
+	note_script.reload()
+	note.set_script(note_script)
+
+	var bright_colors: Array[Color] = [
+		Color(1.0, 0.3, 0.5),
+		Color(0.3, 1.0, 0.5),
+		Color(0.3, 0.5, 1.0),
+		Color(1.0, 0.9, 0.2),
+		Color(0.9, 0.4, 1.0),
+		Color(0.2, 1.0, 1.0),
+	]
+	note.direction = aim
+	note.speed = 250.0
+	note.damage = 12
+	note.owner_index = player_index
+	note.note_color = bright_colors[randi() % bright_colors.size()]
+
+	get_parent().add_child(note)
+
+
+func _special_guitarist_blast_topdown() -> void:
+	if not PlayerManager.use_mana(player_index, 25):
+		_special_cooldown = 0.0
+		return
+
+	AudioManager.play("explosion", 4.0, 0.3)
+	AudioManager.play("shield_charge", 2.0, 0.4)
+
+	var aim: Vector2 = _get_aim_direction()
+	var aim_angle: float = aim.angle()
+
+	# Spawn expanding arc blast wave
+	var wave := Node2D.new()
+	wave.name = "BlastWaveTopdown"
+	wave.global_position = global_position
+	wave.z_index = 7
+
+	var wave_script := GDScript.new()
+	wave_script.source_code = """extends Node2D
+
+var center_angle: float = 0.0
+var half_arc: float = 0.524
+var max_radius: float = 150.0
+var wave_speed: float = 200.0
+var duration: float = 0.5
+var tick_damage: int = 5
+var push_force_base: float = 300.0
+var owner_index: int = 0
+var origin_pos: Vector2 = Vector2.ZERO
+var _age: float = 0.0
+var _current_radius: float = 10.0
+var _tick_timer: float = 0.0
+
+func _draw() -> void:
+	var alpha: float = clampf(1.0 - _age / duration, 0.1, 0.6)
+	var color: Color = Color(0.95, 0.85, 0.3, alpha)
+	var points: int = 16
+	var inner_radius: float = maxf(0.0, _current_radius - 15.0)
+
+	var arc_points: PackedVector2Array = PackedVector2Array()
+	for i in range(points + 1):
+		var angle: float = center_angle - half_arc + (half_arc * 2.0) * (float(i) / float(points))
+		arc_points.append(Vector2(cos(angle), sin(angle)) * inner_radius)
+	for i in range(points, -1, -1):
+		var angle: float = center_angle - half_arc + (half_arc * 2.0) * (float(i) / float(points))
+		arc_points.append(Vector2(cos(angle), sin(angle)) * _current_radius)
+
+	if arc_points.size() >= 3:
+		var colors: PackedColorArray = PackedColorArray()
+		for i in range(arc_points.size()):
+			colors.append(color)
+		draw_polygon(arc_points, colors)
+
+func _process(delta: float) -> void:
+	_age += delta
+	if _age >= duration:
+		queue_free()
+		return
+
+	_current_radius = minf(_current_radius + wave_speed * delta, max_radius)
+	queue_redraw()
+
+	_tick_timer += delta
+	if _tick_timer >= 0.1:
+		_tick_timer -= 0.1
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var to_body: Vector2 = body.global_position - origin_pos
+			var dist: float = to_body.length()
+			if dist > _current_radius or dist < 1.0:
+				continue
+			var body_angle: float = to_body.angle()
+			var angle_diff: float = wrapf(body_angle - center_angle, -PI, PI)
+			if absf(angle_diff) > half_arc:
+				continue
+			if body.has_method("take_damage"):
+				body.take_damage(tick_damage, owner_index)
+			var push_dir: Vector2 = to_body.normalized()
+			var weight: float = 50.0
+			if body.has_meta("weight"):
+				weight = body.get_meta("weight")
+			var force: float = push_force_base / (weight / 50.0)
+			if body.has_method("apply_knockback"):
+				body.apply_knockback(push_dir * force)
+			elif "velocity" in body:
+				body.velocity += push_dir * force
+"""
+	wave_script.reload()
+	wave.set_script(wave_script)
+	wave.center_angle = aim_angle
+	wave.half_arc = deg_to_rad(30.0)
+	wave.max_radius = 150.0
+	wave.wave_speed = 200.0
+	wave.duration = 0.5
+	wave.tick_damage = 5
+	wave.push_force_base = 300.0
+	wave.owner_index = player_index
+	wave.origin_pos = global_position
+
+	get_parent().add_child(wave)
+
+
+func _handle_guitarist_amp_up_topdown(delta: float) -> void:
+	if _guitarist_amp_up_cooldown_td > 0.0:
+		_guitarist_amp_up_cooldown_td -= delta
+
+	if _is_device_action_just_pressed("interact"):
+		if _guitarist_amp_up_active_td:
+			return
+		if _guitarist_amp_up_cooldown_td > 0.0:
+			_spawn_fail_flash()
+			return
+		_guitarist_amp_up_active_td = true
+		_guitarist_amp_up_timer_td = GUITARIST_AMP_DURATION_TD
+		AudioManager.play("shield_charge", 2.0, 0.6)
+		AudioManager.play("menu_confirm", 0.0, 0.8)
+		modulate = Color(1.2, 1.0, 0.5)
+
+		var amp_text := Label.new()
+		amp_text.text = "AMP UP!"
+		amp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		amp_text.add_theme_font_size_override("font_size", 14)
+		amp_text.modulate = Color(1.0, 0.9, 0.2)
+		amp_text.position = global_position + Vector2(-22, -40)
+		amp_text.z_index = 15
+		get_parent().add_child(amp_text)
+		var tt := amp_text.create_tween()
+		tt.tween_property(amp_text, "position:y", amp_text.position.y - 20, 0.8)
+		tt.parallel().tween_property(amp_text, "modulate:a", 0.0, 0.8)
+		tt.tween_callback(amp_text.queue_free)
+
+	if _guitarist_amp_up_active_td:
+		_guitarist_amp_up_timer_td -= delta
+		var pulse: float = 0.15 + sin(_guitarist_amp_up_timer_td * 4.0) * 0.1
+		modulate = Color(1.2, 1.0 + pulse, 0.5 + pulse)
+
+		if randi() % 5 == 0:
+			var gp := ColorRect.new()
+			gp.color = Color(1.0, 0.9, 0.3, 0.5)
+			gp.size = Vector2(2, 2)
+			gp.position = global_position + Vector2(randf_range(-12, 12), randf_range(-12, 12))
+			gp.z_index = 7
+			get_parent().add_child(gp)
+			var gt := gp.create_tween()
+			gt.tween_property(gp, "position:y", gp.position.y - randf_range(5, 12), 0.4)
+			gt.parallel().tween_property(gp, "modulate:a", 0.0, 0.4)
+			gt.tween_callback(gp.queue_free)
+
+		if _guitarist_amp_up_timer_td <= 0.0:
+			_guitarist_amp_up_active_td = false
+			_guitarist_amp_up_cooldown_td = GUITARIST_AMP_COOLDOWN_TD
+			modulate = Color.WHITE

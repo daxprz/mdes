@@ -15,6 +15,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
 	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_side.png",
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_side.png",
+	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -337,6 +338,7 @@ func _physics_process(delta: float) -> void:
 	_handle_melee_enrage(delta)
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
+	_handle_guitarist_amp_up(delta)
 	_handle_rogue_stealth_toggle()
 	_handle_rogue_stealth(delta)
 	_handle_ranger_reload(delta)
@@ -906,6 +908,8 @@ func _perform_attack() -> void:
 			_attack_jumper()
 		PlayerManager.CharacterClass.BALLOONIST:
 			_attack_balloonist()
+		PlayerManager.CharacterClass.GUITARIST:
+			_attack_guitarist()
 
 
 func _attack_melee() -> void:
@@ -1125,14 +1129,200 @@ func _attack_ranged() -> void:
 
 
 func _attack_mage() -> void:
-	# Mage: fast, weak magic bolts
-	if not PlayerManager.use_mana(player_index, 3):
+	# Mage: FIREBALL - slow, high damage, fire trail
+	if not PlayerManager.use_mana(player_index, 5):
 		return
-	AudioManager.play("magic_bolt", -4.0, 1.3)
-	_attack_cooldown = 0.15  # Rapid fire
-	var scaled_dmg: int = int(6 * PlayerManager.get_skill_bonus(player_index, "attack"))
-	_spawn_projectile(scaled_dmg, 450.0, "magic_bolt")
-	PlayerManager.add_skill_xp(player_index, "attack", 1)
+	AudioManager.play("explosion", -6.0, 1.5)
+	_attack_cooldown = 0.6
+	var scaled_dmg: int = int(18 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	var aim: Vector2 = _get_aim_direction()
+	_spawn_fireball(aim, scaled_dmg)
+
+
+func _spawn_fireball(aim: Vector2, damage: int) -> void:
+	var fireball := Node2D.new()
+	fireball.name = "Fireball"
+	fireball.global_position = global_position + aim * 16.0
+	fireball.z_index = 8
+	fireball.add_to_group("loose_items")
+	fireball.set_meta("projectile_type", "fire")
+
+	# Attach a script-like behavior via inline approach: store data on meta
+	fireball.set_meta("direction", aim)
+	fireball.set_meta("speed", 200.0)
+	fireball.set_meta("damage", damage)
+	fireball.set_meta("owner_index", player_index)
+	fireball.set_meta("lifetime", 3.0)
+
+	# Add a public property for balloon detection
+	var fb_script := GDScript.new()
+	fb_script.source_code = """extends Node2D
+
+var projectile_type: String = "fire"
+var direction: Vector2 = Vector2.ZERO
+var speed: float = 200.0
+var damage: int = 18
+var owner_index: int = 0
+var lifetime: float = 3.0
+var _age: float = 0.0
+var _fire_timer: float = 0.0
+var _smoke_timer: float = 0.0
+
+func _ready() -> void:
+	add_to_group("loose_items")
+
+func _draw() -> void:
+	# Outer glow
+	draw_circle(Vector2.ZERO, 10.0, Color(1.0, 0.5, 0.0, 0.3))
+	# Main fireball body
+	draw_circle(Vector2.ZERO, 8.0, Color(1.0, 0.6, 0.1, 0.9))
+	# Bright center
+	draw_circle(Vector2.ZERO, 4.0, Color(1.0, 0.95, 0.5, 1.0))
+	# Hot core
+	draw_circle(Vector2.ZERO, 2.0, Color(1.0, 1.0, 0.9, 1.0))
+
+func _process(delta: float) -> void:
+	_age += delta
+	if _age >= lifetime:
+		_fizzle_out()
+		return
+
+	# Move
+	global_position += direction * speed * delta
+	queue_redraw()
+
+	# Fire trail particles
+	_fire_timer += delta
+	if _fire_timer >= 0.03:
+		_fire_timer -= 0.03
+		_spawn_fire_particle()
+
+	# Smoke trail particles
+	_smoke_timer += delta
+	if _smoke_timer >= 0.06:
+		_smoke_timer -= 0.06
+		_spawn_smoke_particle()
+
+	# Check enemy collision
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < 12.0:
+				_hit_enemy(body)
+				return
+
+	# Raycast for wall collision
+	var space: PhysicsDirectSpaceState2D = get_world_2d().direct_space_state
+	var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(
+		global_position,
+		global_position + direction * speed * delta * 2.0,
+		1
+	)
+	var result: Dictionary = space.intersect_ray(query)
+	if result:
+		_explode_fire_burst()
+		return
+
+
+func _hit_enemy(body: Node2D) -> void:
+	if body.has_method("take_damage"):
+		body.take_damage(damage, owner_index)
+	if body.has_method("apply_knockback"):
+		var kb: Vector2 = direction.normalized() * 150.0
+		body.apply_knockback(kb)
+	_explode_fire_burst()
+
+
+func _explode_fire_burst() -> void:
+	AudioManager.play("explosion", -4.0, 1.2)
+	# Spawn explosion particles
+	if is_inside_tree():
+		for i in range(12):
+			var p := ColorRect.new()
+			var colors: Array[Color] = [
+				Color(1.0, 0.9, 0.3, 0.9),
+				Color(1.0, 0.5, 0.0, 0.8),
+				Color(1.0, 0.2, 0.0, 0.7),
+			]
+			p.color = colors[i % colors.size()]
+			p.size = Vector2(randf_range(3, 6), randf_range(3, 6))
+			p.position = global_position + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+			p.z_index = 10
+			get_parent().add_child(p)
+			var angle: float = randf_range(0, TAU)
+			var dist: float = randf_range(20, 50)
+			var target: Vector2 = p.position + Vector2(cos(angle), sin(angle)) * dist
+			var tw := p.create_tween()
+			tw.set_parallel(true)
+			tw.tween_property(p, "position", target, 0.3)
+			tw.tween_property(p, "modulate:a", 0.0, 0.3)
+			tw.chain().tween_callback(p.queue_free)
+	queue_free()
+
+
+func _fizzle_out() -> void:
+	if is_inside_tree():
+		for i in range(5):
+			var p := ColorRect.new()
+			p.color = Color(0.5, 0.5, 0.5, 0.4)
+			p.size = Vector2(3, 3)
+			p.position = global_position + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+			p.z_index = 8
+			get_parent().add_child(p)
+			var tw := p.create_tween()
+			tw.tween_property(p, "modulate:a", 0.0, 0.4)
+			tw.tween_callback(p.queue_free)
+	queue_free()
+
+
+func _spawn_fire_particle() -> void:
+	if not is_inside_tree():
+		return
+	var p := ColorRect.new()
+	var fire_colors: Array[Color] = [
+		Color(1.0, 0.7, 0.1, 0.8),
+		Color(1.0, 0.4, 0.0, 0.7),
+		Color(1.0, 0.2, 0.0, 0.6),
+	]
+	p.color = fire_colors[randi() % fire_colors.size()]
+	p.size = Vector2(randf_range(2, 5), randf_range(2, 5))
+	p.position = global_position + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+	p.z_index = 7
+	get_parent().add_child(p)
+	var tw := p.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(p, "modulate:a", 0.0, 0.25)
+	tw.tween_property(p, "scale", Vector2(0.3, 0.3), 0.25)
+	tw.chain().tween_callback(p.queue_free)
+
+
+func _spawn_smoke_particle() -> void:
+	if not is_inside_tree():
+		return
+	var p := ColorRect.new()
+	p.color = Color(0.4, 0.4, 0.4, 0.4)
+	p.size = Vector2(3, 3)
+	p.position = global_position + Vector2(randf_range(-2, 2), randf_range(-2, 2))
+	p.z_index = 6
+	get_parent().add_child(p)
+	var tw := p.create_tween()
+	tw.set_parallel(true)
+	tw.tween_property(p, "position:y", p.position.y - randf_range(8, 15), 0.4)
+	tw.tween_property(p, "modulate:a", 0.0, 0.4)
+	tw.tween_property(p, "scale", Vector2(2.0, 2.0), 0.4)
+	tw.chain().tween_callback(p.queue_free)
+"""
+	fb_script.reload()
+	fireball.set_script(fb_script)
+	fireball.direction = aim
+	fireball.speed = 200.0
+	fireball.damage = damage
+	fireball.owner_index = player_index
+	fireball.lifetime = 3.0
+
+	get_parent().add_child(fireball)
 
 
 func _attack_summoner() -> void:
@@ -1412,6 +1602,8 @@ func _perform_special() -> void:
 			_special_jumper_dive()
 		PlayerManager.CharacterClass.BALLOONIST:
 			_special_balloonist_burst()
+		PlayerManager.CharacterClass.GUITARIST:
+			_special_guitarist_blast_wave()
 
 
 var _shield_charging: bool = false
@@ -3425,6 +3617,8 @@ func _perform_charged_attack() -> void:
 			_charged_jumper_meteor(charge_ratio)
 		PlayerManager.CharacterClass.BALLOONIST:
 			_charged_balloonist_barrage(charge_ratio)
+		PlayerManager.CharacterClass.GUITARIST:
+			_charged_guitarist_power_chord(charge_ratio)
 
 
 func _charged_tank_shockwave(charge_ratio: float) -> void:
@@ -4419,6 +4613,360 @@ func _special_healing_burst() -> void:
 		if dist < 80.0:
 			var p_idx: int = p.get("player_index")
 			PlayerManager.heal_player(p_idx, 30)
+
+
+# -- Guitarist -----------------------------------------------------------------
+
+var _guitarist_amp_up_active: bool = false
+var _guitarist_amp_up_timer: float = 0.0
+var _guitarist_amp_up_cooldown: float = 0.0
+const GUITARIST_AMP_DURATION := 15.0
+const GUITARIST_AMP_COOLDOWN := 30.0
+const GUITARIST_AMP_RADIUS := 80.0
+
+
+func _attack_guitarist() -> void:
+	# Musical Notes - 3 sine-wave notes in quick succession
+	AudioManager.play("menu_confirm", -2.0, 1.0)
+	_attack_cooldown = 0.7
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	var aim: Vector2 = _get_aim_direction()
+	var pitches: Array[float] = [1.0, 1.25, 1.5]
+
+	for note_i in range(3):
+		if not is_inside_tree():
+			return
+		if note_i > 0:
+			await get_tree().create_timer(0.1).timeout
+			if not is_inside_tree():
+				return
+		AudioManager.play("menu_confirm", -4.0, pitches[note_i])
+		_spawn_musical_note(aim, note_i)
+
+
+func _spawn_musical_note(aim: Vector2, note_index: int) -> void:
+	var note := Node2D.new()
+	note.name = "MusicalNote"
+	note.global_position = global_position + aim * 12.0
+	note.z_index = 8
+	note.add_to_group("loose_items")
+
+	var note_script := GDScript.new()
+	note_script.source_code = """extends Node2D
+
+var direction: Vector2 = Vector2.ZERO
+var speed: float = 250.0
+var damage: int = 8
+var owner_index: int = 0
+var note_color: Color = Color(1.0, 0.8, 0.2)
+var _age: float = 0.0
+var _distance_traveled: float = 0.0
+var _sine_amplitude: float = 20.0
+var _perp: Vector2 = Vector2.ZERO
+var _base_pos: Vector2 = Vector2.ZERO
+var _hit: bool = false
+
+func _ready() -> void:
+	add_to_group("loose_items")
+	_perp = Vector2(-direction.y, direction.x)
+	_base_pos = global_position
+
+func _draw() -> void:
+	# Musical note: small filled circle + stem
+	draw_circle(Vector2(0, 2), 3.0, note_color)
+	draw_line(Vector2(3, 2), Vector2(3, -6), note_color, 1.5)
+	draw_line(Vector2(3, -6), Vector2(6, -4), note_color, 1.5)
+
+func _process(delta: float) -> void:
+	if _hit:
+		return
+	_age += delta
+	if _age >= 2.0:
+		queue_free()
+		return
+
+	# Move along direction
+	_distance_traveled += speed * delta
+	var base_offset: Vector2 = direction * _distance_traveled
+	# Sine wave perpendicular to travel direction
+	var sine_offset: float = sin(_distance_traveled * 0.08) * _sine_amplitude
+	global_position = _base_pos + base_offset + _perp * sine_offset
+	queue_redraw()
+
+	# Check enemy collision
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < 12.0:
+				_hit = true
+				if body.has_method("take_damage"):
+					body.take_damage(damage, owner_index)
+				# Hit VFX
+				if is_inside_tree():
+					var p := ColorRect.new()
+					p.color = note_color
+					p.size = Vector2(6, 6)
+					p.position = global_position
+					p.z_index = 9
+					get_parent().add_child(p)
+					var tw := p.create_tween()
+					tw.set_parallel(true)
+					tw.tween_property(p, "scale", Vector2(3.0, 3.0), 0.2)
+					tw.tween_property(p, "modulate:a", 0.0, 0.2)
+					tw.chain().tween_callback(p.queue_free)
+				queue_free()
+				return
+"""
+	note_script.reload()
+	note.set_script(note_script)
+
+	var bright_colors: Array[Color] = [
+		Color(1.0, 0.3, 0.5),
+		Color(0.3, 1.0, 0.5),
+		Color(0.3, 0.5, 1.0),
+		Color(1.0, 0.9, 0.2),
+		Color(0.9, 0.4, 1.0),
+		Color(0.2, 1.0, 1.0),
+	]
+	note.direction = aim
+	note.speed = 250.0
+	note.damage = int(8 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	note.owner_index = player_index
+	note.note_color = bright_colors[randi() % bright_colors.size()]
+
+	get_parent().add_child(note)
+
+
+func _special_guitarist_blast_wave() -> void:
+	# Blast Wave - 60 degree arc that expands outward
+	if not PlayerManager.use_mana(player_index, 25):
+		_spawn_fail_flash()
+		_special_cooldown = 0.0
+		return
+
+	AudioManager.play("explosion", 4.0, 0.3)
+	AudioManager.play("shield_charge", 2.0, 0.4)
+	PlayerManager.add_skill_xp(player_index, "special", 7)
+
+	var aim: Vector2 = _get_aim_direction()
+	var aim_angle: float = aim.angle()
+	_spawn_blast_wave_arc(aim_angle, deg_to_rad(30.0), 150.0, 200.0, 0.5, 5, 300.0)
+
+
+func _spawn_blast_wave_arc(center_angle: float, half_arc: float, max_radius: float, wave_speed: float, duration: float, tick_damage: int, push_force_base: float) -> void:
+	var wave := Node2D.new()
+	wave.name = "BlastWave"
+	wave.global_position = global_position
+	wave.z_index = 7
+
+	var wave_script := GDScript.new()
+	wave_script.source_code = """extends Node2D
+
+var center_angle: float = 0.0
+var half_arc: float = 0.524
+var max_radius: float = 150.0
+var wave_speed: float = 200.0
+var duration: float = 0.5
+var tick_damage: int = 5
+var push_force_base: float = 300.0
+var owner_index: int = 0
+var origin_pos: Vector2 = Vector2.ZERO
+var _age: float = 0.0
+var _current_radius: float = 10.0
+var _tick_timer: float = 0.0
+var _hit_this_tick: Dictionary = {}
+
+func _draw() -> void:
+	# Draw expanding arc
+	var alpha: float = clampf(1.0 - _age / duration, 0.1, 0.6)
+	var color: Color = Color(0.95, 0.85, 0.3, alpha)
+	var points: int = 16
+	var inner_radius: float = maxf(0.0, _current_radius - 15.0)
+
+	# Draw arc wedge
+	var arc_points: PackedVector2Array = PackedVector2Array()
+	# Inner arc (from left to right)
+	for i in range(points + 1):
+		var angle: float = center_angle - half_arc + (half_arc * 2.0) * (float(i) / float(points))
+		arc_points.append(Vector2(cos(angle), sin(angle)) * inner_radius)
+	# Outer arc (from right to left)
+	for i in range(points, -1, -1):
+		var angle: float = center_angle - half_arc + (half_arc * 2.0) * (float(i) / float(points))
+		arc_points.append(Vector2(cos(angle), sin(angle)) * _current_radius)
+
+	if arc_points.size() >= 3:
+		var colors: PackedColorArray = PackedColorArray()
+		for i in range(arc_points.size()):
+			colors.append(color)
+		draw_polygon(arc_points, colors)
+
+	# Bright edge
+	var edge_color: Color = Color(1.0, 1.0, 0.8, alpha * 1.5)
+	for i in range(points):
+		var a1: float = center_angle - half_arc + (half_arc * 2.0) * (float(i) / float(points))
+		var a2: float = center_angle - half_arc + (half_arc * 2.0) * (float(i + 1) / float(points))
+		var p1: Vector2 = Vector2(cos(a1), sin(a1)) * _current_radius
+		var p2: Vector2 = Vector2(cos(a2), sin(a2)) * _current_radius
+		draw_line(p1, p2, edge_color, 2.0)
+
+
+func _process(delta: float) -> void:
+	_age += delta
+	if _age >= duration:
+		queue_free()
+		return
+
+	_current_radius = minf(_current_radius + wave_speed * delta, max_radius)
+	queue_redraw()
+
+	# Damage tick
+	_tick_timer += delta
+	if _tick_timer >= 0.1:
+		_tick_timer -= 0.1
+		_hit_this_tick.clear()
+		_apply_damage_and_push()
+
+
+func _apply_damage_and_push() -> void:
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var to_body: Vector2 = body.global_position - origin_pos
+		var dist: float = to_body.length()
+		if dist > _current_radius or dist < 1.0:
+			continue
+		# Check angle
+		var body_angle: float = to_body.angle()
+		var angle_diff: float = wrapf(body_angle - center_angle, -PI, PI)
+		if absf(angle_diff) > half_arc:
+			continue
+
+		# Deal damage
+		if body.has_method("take_damage"):
+			body.take_damage(tick_damage, owner_index)
+
+		# Push effect
+		var push_dir: Vector2 = to_body.normalized()
+		var weight: float = 50.0
+		if body.has_meta("weight"):
+			weight = body.get_meta("weight")
+		elif body.has_method("get_weight"):
+			weight = body.get_weight()
+		var force: float = push_force_base / (weight / 50.0)
+		if body.has_method("apply_knockback"):
+			body.apply_knockback(push_dir * force)
+		elif "velocity" in body:
+			body.velocity += push_dir * force
+"""
+	wave_script.reload()
+	wave.set_script(wave_script)
+	wave.center_angle = center_angle
+	wave.half_arc = half_arc
+	wave.max_radius = max_radius
+	wave.wave_speed = wave_speed
+	wave.duration = duration
+	wave.tick_damage = tick_damage
+	wave.push_force_base = push_force_base
+	wave.owner_index = player_index
+	wave.origin_pos = global_position
+
+	get_parent().add_child(wave)
+
+
+func _handle_guitarist_amp_up(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.GUITARIST:
+		return
+	if _guitarist_amp_up_cooldown > 0.0:
+		_guitarist_amp_up_cooldown -= delta
+
+	# Toggle amp up on Circle press
+	if _is_device_action_just_pressed("interact"):
+		if _guitarist_amp_up_active:
+			return  # Can't cancel early
+		if _guitarist_amp_up_cooldown > 0.0:
+			_spawn_fail_flash()
+			return
+		# AMP UP!
+		_guitarist_amp_up_active = true
+		_guitarist_amp_up_timer = GUITARIST_AMP_DURATION
+		AudioManager.play("shield_charge", 2.0, 0.6)
+		AudioManager.play("menu_confirm", 0.0, 0.8)
+		modulate = Color(1.2, 1.0, 0.5)
+
+		# "AMP UP!" text
+		var amp_text := Label.new()
+		amp_text.text = "AMP UP!"
+		amp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		amp_text.add_theme_font_size_override("font_size", 14)
+		amp_text.modulate = Color(1.0, 0.9, 0.2)
+		amp_text.position = global_position + Vector2(-22, -40)
+		amp_text.z_index = 15
+		get_parent().add_child(amp_text)
+		var tt := amp_text.create_tween()
+		tt.tween_property(amp_text, "position:y", amp_text.position.y - 20, 0.8)
+		tt.parallel().tween_property(amp_text, "modulate:a", 0.0, 0.8)
+		tt.tween_callback(amp_text.queue_free)
+
+	# While amp up is active
+	if _guitarist_amp_up_active:
+		_guitarist_amp_up_timer -= delta
+
+		# Golden aura pulse
+		var pulse: float = 0.15 + sin(_guitarist_amp_up_timer * 4.0) * 0.1
+		modulate = Color(1.2, 1.0 + pulse, 0.5 + pulse)
+
+		# Golden particles
+		if randi() % 5 == 0:
+			var gp := ColorRect.new()
+			gp.color = Color(1.0, 0.9, 0.3, 0.5)
+			gp.size = Vector2(2, 2)
+			gp.position = global_position + Vector2(randf_range(-12, 12), randf_range(-12, 12))
+			gp.z_index = 7
+			get_parent().add_child(gp)
+			var gt := gp.create_tween()
+			gt.tween_property(gp, "position:y", gp.position.y - randf_range(5, 12), 0.4)
+			gt.parallel().tween_property(gp, "modulate:a", 0.0, 0.4)
+			gt.tween_callback(gp.queue_free)
+
+		# Boost nearby allies
+		for p in get_tree().get_nodes_in_group("players"):
+			if not (p is CharacterBody2D):
+				continue
+			if p == self:
+				continue
+			var dist: float = global_position.distance_to(p.global_position)
+			if dist < GUITARIST_AMP_RADIUS:
+				# Speed boost (temporary per-frame)
+				if "velocity" in p:
+					p.velocity *= 1.0 + 0.20 * delta * 60.0 * 0.016
+
+		if _guitarist_amp_up_timer <= 0.0:
+			_guitarist_amp_up_active = false
+			_guitarist_amp_up_cooldown = GUITARIST_AMP_COOLDOWN
+			modulate = Color.WHITE
+
+
+func _charged_guitarist_power_chord(charge_ratio: float) -> void:
+	# Charged power chord: bigger blast wave
+	var mana_cost: int = int(lerpf(15.0, 40.0, charge_ratio))
+	if not PlayerManager.use_mana(player_index, mana_cost):
+		_spawn_fail_flash()
+		return
+
+	AudioManager.play("explosion", 6.0, 0.25)
+	AudioManager.play("shield_charge", 4.0, 0.35)
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
+
+	var aim: Vector2 = _get_aim_direction()
+	var aim_angle: float = aim.angle()
+	var arc_half: float = deg_to_rad(lerpf(30.0, 45.0, charge_ratio))
+	var radius: float = lerpf(150.0, 200.0, charge_ratio)
+	var push: float = lerpf(300.0, 500.0, charge_ratio)
+	var dmg: int = int(lerpf(5.0, 12.0, charge_ratio))
+
+	_screen_shake(lerpf(3.0, 8.0, charge_ratio), 0.25)
+	_spawn_blast_wave_arc(aim_angle, arc_half, radius, 200.0, lerpf(0.5, 0.7, charge_ratio), dmg, push)
 
 
 func _spawn_fail_flash() -> void:
