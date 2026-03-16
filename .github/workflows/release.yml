@@ -9,7 +9,7 @@ env:
   GODOT_VERSION: "4.4.1"
 
 jobs:
-  build:
+  build-linux-windows:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -21,9 +21,6 @@ jobs:
           - preset: "Windows"
             export_path: "build/windows/TheUltimateMuffin.exe"
             artifact_name: "TheUltimateMuffin-Windows"
-          - preset: "macOS"
-            export_path: "build/macos/TheUltimateMuffin.zip"
-            artifact_name: "TheUltimateMuffin-macOS"
 
     steps:
       - name: Checkout
@@ -66,8 +63,63 @@ jobs:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}.zip
 
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Install Godot
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_macos.universal.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_macos.universal.zip
+          sudo cp -R Godot.app /Applications/Godot.app
+          sudo ln -sf /Applications/Godot.app/Contents/MacOS/Godot /usr/local/bin/godot
+
+      - name: Install Export Templates
+        run: |
+          mkdir -p ~/Library/Application\ Support/Godot/export_templates/${GODOT_VERSION}.stable
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          mv templates/* ~/Library/Application\ Support/Godot/export_templates/${GODOT_VERSION}.stable/
+
+      - name: Import Project
+        run: |
+          godot --headless --import 2>&1 || true
+          sleep 2
+
+      - name: Build
+        run: |
+          mkdir -p build/macos
+          godot --headless --export-release "macOS" build/macos/TheUltimateMuffin.zip
+
+      - name: Sign App Bundle
+        run: |
+          cd build/macos
+          # Godot exports macOS as a .zip containing the .app bundle
+          unzip -q TheUltimateMuffin.zip
+          rm TheUltimateMuffin.zip
+          # Find the .app bundle
+          APP_PATH=$(find . -name "*.app" -maxdepth 1 | head -1)
+          # Remove any quarantine attributes
+          xattr -cr "$APP_PATH"
+          # Ad-hoc codesign with proper flags
+          codesign --force --deep --sign - --options runtime "$APP_PATH"
+          # Verify
+          codesign --verify --deep --strict "$APP_PATH"
+          # Re-zip with ditto to preserve macOS metadata and resource forks
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" ${{ github.workspace }}/TheUltimateMuffin-macOS.zip
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TheUltimateMuffin-macOS
+          path: TheUltimateMuffin-macOS.zip
+
   release:
-    needs: build
+    needs: [build-linux-windows, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -91,6 +143,12 @@ jobs:
             - **Windows:** `TheUltimateMuffin-Windows.zip`
             - **macOS:** `TheUltimateMuffin-macOS.zip`
             - **Linux:** `TheUltimateMuffin-Linux.zip`
+
+            ### macOS Users
+            If macOS blocks the app, right-click the app → **Open** → **Open** to bypass Gatekeeper on first launch. Or run:
+            ```
+            xattr -cr "/Applications/The Ultimate Muffin.app"
+            ```
 
             ### How to Play
             - Connect 1-4 controllers (PS5, Xbox, etc.)
