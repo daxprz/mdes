@@ -1,11 +1,14 @@
 extends Camera2D
 
 ## Camera that dynamically pans and zooms to keep all players on screen.
+## Accounts for the bottom HUD strip so players are always visible above it.
 
 @export var min_zoom: float = 0.4
 @export var max_zoom: float = 1.5
 @export var zoom_margin: Vector2 = Vector2(120, 100)  # Extra padding around players
 @export var smooth_speed: float = 4.0
+
+const HUD_RESERVED_HEIGHT := 90.0  # PlayerHUD height (80) + margin (10)
 
 var _target_pos := Vector2.ZERO
 var _target_zoom := 1.0
@@ -25,15 +28,19 @@ func _process(delta: float) -> void:
 		max_pos.x = max(max_pos.x, p.x)
 		max_pos.y = max(max_pos.y, p.y)
 
-	# Target position = center of all players
+	# Target position = center of players, shifted up so they sit above the HUD
 	_target_pos = (min_pos + max_pos) / 2.0
+	# Shift camera up by half the HUD height (in world units, scaled by zoom)
+	var hud_world_offset: float = (HUD_RESERVED_HEIGHT * 0.5) / maxf(_target_zoom, 0.1)
+	_target_pos.y -= hud_world_offset
 
-	# Target zoom = fit all players + margin into viewport
+	# Target zoom = fit all players + margin into the usable viewport (above HUD)
 	var viewport_size: Vector2 = get_viewport_rect().size
+	var usable_height: float = viewport_size.y - HUD_RESERVED_HEIGHT
 	var spread: Vector2 = max_pos - min_pos + zoom_margin * 2.0
 
 	var zoom_x: float = viewport_size.x / maxf(spread.x, 1.0)
-	var zoom_y: float = viewport_size.y / maxf(spread.y, 1.0)
+	var zoom_y: float = usable_height / maxf(spread.y, 1.0)
 	_target_zoom = clampf(minf(zoom_x, zoom_y), min_zoom, max_zoom)
 
 	# Smooth lerp toward target
