@@ -152,7 +152,9 @@ func _process(delta: float) -> void:
 		_rift_locks[pi] -= delta
 		if _rift_locks[pi] <= 0.0:
 			_rift_locks.erase(pi)
-			PlayerHUD.class_change_locked.erase(pi)
+			if not PlayerHUD.tentacle_lost.has(pi):
+				PlayerHUD.class_change_locked.erase(pi)
+				PlayerHUD.active_tentacle_count = maxi(0, PlayerHUD.active_tentacle_count - 1)
 
 	# Check ghost players for non-movement button press to materialize
 	for pi in _ghost_players.keys():
@@ -282,9 +284,10 @@ func _materialize_player(player_index: int) -> void:
 	tween.tween_property(node, "modulate:a", 1.0, 0.2)
 
 	# Spawn persistent rift with tentacle
+	PlayerHUD.active_tentacle_count += 1
 	var rift := Node2D.new()
 	rift.set_script(RIFT_TENTACLE_SCENE)
-	rift.global_position = pos + Vector2(0, -30)  # Above player feet
+	rift.global_position = pos + Vector2(0, -30)
 	rift.setup(player_index)
 	players_container.add_child(rift)
 

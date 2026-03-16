@@ -198,6 +198,9 @@ func _attach_to_enemy(enemy: Node2D) -> void:
 	_attached_enemy = enemy
 	_phase = 3
 	enemy.set_meta("rift_attached", true)
+	# Permanently lock this player from changing classes
+	PlayerHUD.tentacle_lost[_owner_player_index] = true
+	PlayerHUD.class_change_locked.erase(_owner_player_index)
 	_buff_enemy(enemy)
 
 

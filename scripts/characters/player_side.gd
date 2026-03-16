@@ -204,6 +204,7 @@ func _ready() -> void:
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
 	ProfileManager.profile_loaded.connect(_on_profile_changed)
+	PlayerHUD.class_changed.connect(_on_class_changed_inline)
 	PlayerManager.apply_level_bonuses(player_index)
 
 
@@ -246,6 +247,74 @@ func _update_player_label() -> void:
 
 func _on_profile_changed(_profile_id: String) -> void:
 	_update_player_label()
+
+
+func _on_class_changed_inline(p_index: int, new_class: PlayerManager.CharacterClass) -> void:
+	if p_index != player_index:
+		return
+	# On title screen, title_screen.gd handles the full respawn + rift
+	if GameManager.current_state == GameManager.GameState.TITLE:
+		return
+	# Update class and sprite in-place (no respawn needed)
+	character_class = new_class
+	_apply_class_sprite()
+	_update_player_label()
+
+	# Red portal + smoke poof VFX at current position
+	_spawn_class_change_vfx()
+
+
+func _spawn_class_change_vfx() -> void:
+	# Red portal
+	var portal := ColorRect.new()
+	portal.color = Color(0.9, 0.1, 0.1, 0.8)
+	portal.size = Vector2(40, 60)
+	portal.position = global_position - Vector2(20, 50)
+	portal.z_index = 5
+	get_parent().add_child(portal)
+
+	var tween := create_tween()
+	tween.tween_property(portal, "scale", Vector2(1.5, 1.5), 0.15)
+	tween.parallel().tween_property(portal, "modulate:a", 0.0, 0.5)
+	tween.tween_callback(portal.queue_free)
+
+	# Smoke poof
+	var poof := ColorRect.new()
+	poof.color = Color(0.8, 0.8, 0.8, 0.7)
+	poof.size = Vector2(30, 30)
+	poof.position = global_position - Vector2(15, 30)
+	poof.z_index = 6
+	get_parent().add_child(poof)
+
+	var poof_tween := create_tween()
+	poof_tween.tween_property(poof, "scale", Vector2(2.5, 2.5), 0.3)
+	poof_tween.parallel().tween_property(poof, "modulate:a", 0.0, 0.4)
+	poof_tween.tween_callback(poof.queue_free)
+
+	# Ghost effect: fade out then back in
+	modulate = Color(1, 1, 1, 0.4)
+	var restore_tween := create_tween()
+	restore_tween.tween_property(self, "modulate:a", 1.0, 0.5)
+
+	# Spawn rift tentacle (counts toward global limit)
+	PlayerHUD.active_tentacle_count += 1
+	var rift_script := load("res://scripts/effects/rift_tentacle.gd")
+	var rift := Node2D.new()
+	rift.set_script(rift_script)
+	rift.global_position = global_position + Vector2(0, -30)
+	rift.setup(player_index)
+	get_parent().add_child(rift)
+
+	# Lock class changes for this player
+	PlayerHUD.class_change_locked[player_index] = true
+	# Unlock after rift duration (15s) via a timer — unless tentacle attached permanently
+	var unlock_timer := get_tree().create_timer(15.0)
+	var pi_capture: int = player_index
+	unlock_timer.timeout.connect(func() -> void:
+		if not PlayerHUD.tentacle_lost.has(pi_capture):
+			PlayerHUD.class_change_locked.erase(pi_capture)
+			PlayerHUD.active_tentacle_count = maxi(0, PlayerHUD.active_tentacle_count - 1)
+	)
 
 
 func _on_skill_leveled_up(p_index: int, skill: String, new_level: int) -> void:

@@ -80,7 +80,10 @@ var _backing: ColorRect = null
 var _panels: Dictionary = {}  # player_index -> Dictionary of UI nodes
 var _muffin_label: Label = null
 var _cycle_cooldowns: Dictionary = {}  # "device_button" -> float
-var class_change_locked: Dictionary = {}  # player_index -> true (set by title screen during rift)
+var class_change_locked: Dictionary = {}  # player_index -> true (temporary rift lock)
+var tentacle_lost: Dictionary = {}  # player_index -> true (permanent: tentacle attached to enemy)
+const MAX_ACTIVE_TENTACLES := 4  # Max rift tentacles in-game at once
+var active_tentacle_count: int = 0
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -279,13 +282,21 @@ func _process(delta: float) -> void:
 	for pi in _panels.keys():
 		_update_panel(pi)
 
-	# Show hints on title screen
+	# Show hints / tentacle status
 	for pi in _panels.keys():
 		var hint: Label = _panels[pi]["hint_label"]
-		if is_title:
+		if tentacle_lost.has(pi):
+			hint.text = "TENTACLE LOST"
+			hint.modulate = Color(0.7, 0.2, 0.3)
+		elif class_change_locked.has(pi):
+			hint.text = "RIFT ACTIVE..."
+			hint.modulate = Color(0.9, 0.3, 0.2)
+		elif is_title:
 			hint.text = "D-Pad: profile/class | START: new profile"
+			hint.modulate = Color(0.5, 0.5, 0.5)
 		else:
-			hint.text = ""
+			hint.text = "L/R: change class"
+			hint.modulate = Color(0.4, 0.6, 0.4)
 
 
 func _update_panel(player_index: int) -> void:
@@ -345,14 +356,11 @@ func _update_panel(player_index: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Only handle D-pad selection on title screen
-	if GameManager.current_state != GameManager.GameState.TITLE:
-		return
-
 	var device_id := _get_device_from_event(event)
+	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
 
-	# START = create profile (if player doesn't have one yet)
-	if event.is_action_pressed("ps_button"):
+	# Title-screen only: START = create profile
+	if is_title and event.is_action_pressed("ps_button"):
 		var pi := _get_player_index_for_device(device_id)
 		if pi >= 0:
 			var profile: Dictionary = ProfileManager.get_active_profile(pi)
@@ -360,7 +368,7 @@ func _input(event: InputEvent) -> void:
 				create_profile_requested.emit(device_id)
 				return
 
-	# D-pad for profile/class cycling
+	# D-pad input
 	if event is InputEventJoypadButton and event.pressed:
 		var pi := _get_player_index_for_device(device_id)
 		if pi < 0:
@@ -370,20 +378,24 @@ func _input(event: InputEvent) -> void:
 		if _cycle_cooldowns.has(cooldown_key):
 			return
 
-		if event.button_index == 11:  # D-pad Up
-			_cycle_profile(pi, device_id, -1)
-			_cycle_cooldowns[cooldown_key] = 0.3
-		elif event.button_index == 12:  # D-pad Down
-			_cycle_profile(pi, device_id, 1)
-			_cycle_cooldowns[cooldown_key] = 0.3
-		elif event.button_index == 13:  # D-pad Left
+		# Profile cycling: title screen only
+		if is_title:
+			if event.button_index == 11:  # D-pad Up
+				_cycle_profile(pi, device_id, -1)
+				_cycle_cooldowns[cooldown_key] = 0.3
+			elif event.button_index == 12:  # D-pad Down
+				_cycle_profile(pi, device_id, 1)
+				_cycle_cooldowns[cooldown_key] = 0.3
+
+		# Class cycling: ANY time
+		if event.button_index == 13:  # D-pad Left
 			_cycle_class(pi, -1)
 			_cycle_cooldowns[cooldown_key] = 0.2
 		elif event.button_index == 14:  # D-pad Right
 			_cycle_class(pi, 1)
 			_cycle_cooldowns[cooldown_key] = 0.2
 
-	# Keyboard: Q/E for class, R/F for profile
+	# Keyboard: Q/E for class (always), R/F for profile (title only)
 	if event is InputEventKey and event.pressed:
 		var pi := _get_player_index_for_device(-1)
 		if pi < 0:
@@ -392,9 +404,9 @@ func _input(event: InputEvent) -> void:
 			_cycle_class(pi, -1)
 		elif event.keycode == KEY_E:
 			_cycle_class(pi, 1)
-		elif event.keycode == KEY_R:
+		elif is_title and event.keycode == KEY_R:
 			_cycle_profile(pi, -1, -1)
-		elif event.keycode == KEY_F:
+		elif is_title and event.keycode == KEY_F:
 			_cycle_profile(pi, -1, 1)
 
 
@@ -467,6 +479,10 @@ func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
 
 func _cycle_class(player_index: int, direction: int) -> void:
 	if class_change_locked.has(player_index):
+		return
+	if tentacle_lost.has(player_index):
+		return
+	if active_tentacle_count >= MAX_ACTIVE_TENTACLES:
 		return
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
 	if p_data.is_empty():
