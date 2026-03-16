@@ -185,8 +185,7 @@ func _input(event: InputEvent) -> void:
 		if PlayerManager.get_active_player_count() > 0:
 			_start_game()
 
-	# Class cycling with shoulder buttons (L1/R1) or interact/special
-	# L1 = button 9, R1 = button 10 on PS5
+	# Class cycling with shoulder buttons (L1/R1) or D-pad left/right
 	if event is InputEventJoypadButton and event.pressed:
 		var device_id: int = event.device
 		var player_index := _get_player_index_for_device(device_id)
@@ -197,21 +196,41 @@ func _input(event: InputEvent) -> void:
 		if _cycle_cooldowns.has(cooldown_key):
 			return
 
-		if event.button_index == 9:  # L1 - previous class
+		# L1 or D-pad Left = previous class
+		if event.button_index == 9 or event.button_index == 13:
 			_cycle_class(player_index, -1)
 			_cycle_cooldowns[cooldown_key] = 0.2
-		elif event.button_index == 10:  # R1 - next class
+		# R1 or D-pad Right = next class
+		elif event.button_index == 10 or event.button_index == 14:
 			_cycle_class(player_index, 1)
 			_cycle_cooldowns[cooldown_key] = 0.2
 
-	# Keyboard class cycling with Q/E for player on keyboard
+	# D-pad via stick (move_left/move_right actions) for class cycling
+	if event.is_action_pressed("move_left"):
+		var device_id: int = event.device if not (event is InputEventKey) else -1
+		var player_index := _get_player_index_for_device(device_id)
+		if player_index >= 0:
+			var cooldown_key := "stick_%d_left" % device_id
+			if not _cycle_cooldowns.has(cooldown_key):
+				_cycle_class(player_index, -1)
+				_cycle_cooldowns[cooldown_key] = 0.25
+	elif event.is_action_pressed("move_right"):
+		var device_id: int = event.device if not (event is InputEventKey) else -1
+		var player_index := _get_player_index_for_device(device_id)
+		if player_index >= 0:
+			var cooldown_key := "stick_%d_right" % device_id
+			if not _cycle_cooldowns.has(cooldown_key):
+				_cycle_class(player_index, 1)
+				_cycle_cooldowns[cooldown_key] = 0.25
+
+	# Keyboard class cycling with Q/E
 	if event is InputEventKey and event.pressed:
 		var player_index := _get_player_index_for_device(-1)
 		if player_index < 0:
 			return
-		if event.keycode == KEY_Q:  # Q - previous
+		if event.keycode == KEY_Q:
 			_cycle_class(player_index, -1)
-		elif event.keycode == KEY_E:  # E - next
+		elif event.keycode == KEY_E:
 			_cycle_class(player_index, 1)
 
 
@@ -369,7 +388,7 @@ func _update_slot(player_index: int) -> void:
 		arrows.add_theme_font_size_override("font_size", 10)
 		arrows.modulate = Color(0.7, 0.7, 0.7)
 		vbox.add_child(arrows)
-	arrows.text = "< L1 / R1 >"
+	arrows.text = "< D-Pad / L1 / R1 >"
 
 
 func _clear_slot(player_index: int) -> void:
