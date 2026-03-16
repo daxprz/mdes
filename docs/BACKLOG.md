@@ -754,6 +754,70 @@ Tentacle emerges from a red rift portal when players change class.
 
 ---
 
+## EPIC 30: Ranger Grappling Hook Rework (`mechanics`, `physics`)
+Replace the current grappling hook with a full physics-based system.
+The hook swings, launches, and creates momentum-based traversal.
+Grappled entities react based on true mass physics.
+
+### Story 30.1: Grapple Windup & Throw
+- [ ] Task: Holding grapple button starts swinging the hook in a circle around the player
+- [ ] Task: Swing speed increases the longer the button is held
+- [ ] Task: On release, hook is thrown in the direction of the thumbstick aim
+- [ ] Task: Throw distance scales with hold duration (longer hold = farther throw)
+- [ ] Task: Hook follows a physics-based arc (gravity + initial velocity)
+- [ ] Task: Visual: rope/chain trails behind the hook during flight
+
+### Story 30.2: Grapple Connection & Launch
+- [ ] Task: Hook connects on contact with any wall (StaticBody2D) or entity
+- [ ] Task: On connection, player launches toward the hook point at 50% of jump velocity
+- [ ] Task: At the apex of the launch, the grapple line goes taut
+- [ ] Task: Player transitions to pendulum swing with existing momentum
+
+### Story 30.3: Pendulum Swing Physics
+- [ ] Task: Player swings as a pendulum from the grapple anchor point
+- [ ] Task: Thumbstick left/right adjusts swing momentum (push in swing direction = accelerate)
+- [ ] Task: Thumbstick up shortens the grapple line (player rises toward anchor)
+- [ ] Task: Thumbstick down lengthens the grapple line (player drops away from anchor)
+- [ ] Task: Rope rendered as verlet chain between player and anchor (like balloon string)
+- [ ] Task: Natural momentum decay over time (friction)
+
+### Story 30.4: Grapple Release & Enemy Tug
+- [ ] Task: Pressing grapple button again while connected to a wall releases the line
+- [ ] Task: Line retracts visually back into the player on release
+- [ ] Task: Player retains momentum from the swing on release (fling)
+- [ ] Task: Pressing grapple button again while connected to an enemy tugs based on mass
+- [ ] Task: Tug physics: force = constant, acceleration = force / mass for BOTH entities
+- [ ] Task: Both player and enemy accelerate toward each other proportionally
+
+### Story 30.5: Entity Mass System
+- [ ] Task: Every entity has a `mass` property relative to their size
+- [ ] Task: Small entities (mass < player): flung toward the player on tug
+- [ ] Task: Medium entities (mass ≈ player): both entities pulled toward each other
+- [ ] Task: Large entities (mass > player): player pulled toward the enemy (reverse tug)
+- [ ] Task: True Newtonian physics: F=ma applied to both ends of the grapple
+- [ ] Task: Mass values for all existing enemies and bosses
+
+| Entity | Mass | Tug Behavior |
+|--------|------|-------------|
+| Sprinkle Swarm | 5 | Flung hard |
+| Fairy Cake Bat | 8 | Flung |
+| Skeleton | 30 | Flung |
+| Candy Corn | 25 | Flung |
+| Cookie Archer | 30 | Flung |
+| Cupcake Bomber | 35 | Tugged |
+| Licorice Whip | 40 | Tugged |
+| Peppermint Roller | 25 | Flung |
+| Marshmallow Blob | 50 | Tugged |
+| Gummy Bear | 60 | Tugged |
+| Wafer Shield | 55 | Tugged |
+| Jellybean Sniper | 30 | Flung |
+| Candy Golem | 150 | Reverse tug |
+| Player | 70 | Reference |
+| Mini-bosses | 120 | Reverse tug (slight) |
+| Bosses | 300 | Reverse tug (strong) |
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)
