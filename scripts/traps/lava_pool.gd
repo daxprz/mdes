@@ -14,6 +14,7 @@ var _players_inside: Array[Node2D] = []
 var _sound_played: bool = false
 
 func _ready() -> void:
+	add_to_group("lava_traps")
 	collision_layer = 0
 	collision_mask = 2
 

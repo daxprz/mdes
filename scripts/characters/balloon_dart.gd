@@ -190,9 +190,10 @@ func _update_balloon(delta: float) -> void:
 				AudioManager.play("rocket_crash", -2.0, 1.5)
 				_spawn_hydrogen_explosion()
 			else:
-				# Normal pop
+				# Normal pop - release H2 gas cloud
 				AudioManager.play("explosion", -6.0, 2.0)
 				_spawn_pop_particles()
+				_spawn_h2_gas_cloud()
 
 			proj.queue_free()
 			_detach_and_free()
@@ -460,6 +461,201 @@ func _spawn_pop_particles() -> void:
 			await get_tree().create_timer(0.03).timeout
 		if is_instance_valid(cam):
 			cam.offset = orig
+
+
+func _spawn_h2_gas_cloud() -> void:
+	# Spawn a cloud of H2 gas particles that float upward
+	# If they touch anything hot (fire projectiles, lava) → EXPLODE
+	var gas_pos: Vector2 = _balloon_pos
+	var gas_owner: int = owner_index
+	var parent_node: Node2D = get_parent()
+	if not parent_node:
+		return
+
+	# Create a gas cloud controller node
+	var cloud := Node2D.new()
+	cloud.name = "H2Cloud"
+	cloud.global_position = gas_pos
+	cloud.z_index = 7
+	cloud.add_to_group("h2_clouds")
+	parent_node.add_child(cloud)
+
+	# Attach behavior via inline script
+	var cloud_script := GDScript.new()
+	cloud_script.source_code = """extends Node2D
+
+var particles: Array = []
+var _age: float = 0.0
+const LIFETIME := 6.0
+const GAS_SPEED := -40.0  # Float upward
+const SPREAD := 30.0
+const EXPLOSION_RADIUS := 100.0
+const EXPLOSION_DAMAGE := 35
+var owner_index: int = -1
+var _exploded := false
+
+func _ready() -> void:
+	# Spawn 12 gas particles
+	for i in range(12):
+		var p := ColorRect.new()
+		p.color = Color(0.6, 0.8, 0.5, 0.35)
+		var s: float = randf_range(6, 14)
+		p.size = Vector2(s, s)
+		p.position = Vector2(randf_range(-10, 10), randf_range(-10, 10))
+		p.z_index = 7
+		add_child(p)
+		particles.append({
+			\"node\": p,
+			\"vel\": Vector2(randf_range(-15, 15), GAS_SPEED + randf_range(-10, 5)),
+			\"wobble_phase\": randf_range(0, 6.28),
+		})
+
+func _process(delta: float) -> void:
+	if _exploded:
+		return
+	_age += delta
+
+	# Move particles upward with wobble
+	for pd in particles:
+		if not is_instance_valid(pd[\"node\"]):
+			continue
+		var p: ColorRect = pd[\"node\"]
+		pd[\"vel\"].x += sin(_age * 2.0 + pd[\"wobble_phase\"]) * 20.0 * delta
+		p.position += pd[\"vel\"] * delta
+		# Expand slowly
+		p.scale += Vector2(delta * 0.3, delta * 0.3)
+		# Fade over time
+		p.modulate.a = lerpf(0.35, 0.0, _age / LIFETIME)
+
+	# Check for fire/heat sources
+	# 1. Fire projectiles (loose_items with fire type)
+	for proj in get_tree().get_nodes_in_group(\"loose_items\"):
+		if not proj is Node2D:
+			continue
+		var dist: float = global_position.distance_to(proj.global_position)
+		if dist > 80.0:
+			continue
+		var is_fire := false
+		if \"projectile_type\" in proj and \"fire\" in str(proj.projectile_type).to_lower():
+			is_fire = true
+		if proj.has_meta(\"projectile_type\") and \"fire\" in str(proj.get_meta(\"projectile_type\")).to_lower():
+			is_fire = true
+		if \"Fireball\" in proj.name:
+			is_fire = true
+		if is_fire:
+			_h2_explode()
+			return
+
+	# 2. Lava pools
+	for lava in get_tree().get_nodes_in_group(\"lava_traps\"):
+		if lava is Node2D:
+			var dist: float = global_position.distance_to(lava.global_position)
+			if dist < 60.0:
+				_h2_explode()
+				return
+
+	# 3. Other H2 explosions (chain reaction!)
+	# (handled by the explosion damaging this cloud)
+
+	if _age >= LIFETIME:
+		queue_free()
+
+func _h2_explode() -> void:
+	if _exploded:
+		return
+	_exploded = true
+	AudioManager.play(\"explosion\", 3.0, 0.5)
+	AudioManager.play(\"rocket_crash\", 0.0, 1.2)
+
+	var pos: Vector2 = global_position
+
+	# Big fire explosion
+	# Flash
+	var flash := ColorRect.new()
+	flash.color = Color(1.0, 1.0, 0.8, 0.9)
+	flash.size = Vector2(60, 60)
+	flash.position = pos - Vector2(30, 30)
+	flash.z_index = 12
+	get_parent().add_child(flash)
+	var ft := flash.create_tween()
+	ft.tween_property(flash, \"modulate:a\", 0.0, 0.15)
+	ft.tween_callback(flash.queue_free)
+
+	# Fire rings
+	for ri in range(3):
+		var ring := ColorRect.new()
+		var rc: Array = [Color(1.0, 0.9, 0.3, 0.7), Color(1.0, 0.5, 0.1, 0.5), Color(1.0, 0.2, 0.0, 0.4)]
+		ring.color = rc[ri]
+		var rs: float = 20.0 + ri * 10.0
+		ring.size = Vector2(rs, rs)
+		ring.position = pos - Vector2(rs/2, rs/2)
+		ring.pivot_offset = Vector2(rs/2, rs/2)
+		ring.z_index = 11
+		get_parent().add_child(ring)
+		var scale_t: float = EXPLOSION_RADIUS * 2.0 / rs
+		var rt := ring.create_tween()
+		rt.set_parallel(true)
+		rt.tween_property(ring, \"scale\", Vector2(scale_t, scale_t), 0.25 + ri * 0.05)
+		rt.tween_property(ring, \"modulate:a\", 0.0, 0.3 + ri * 0.05)
+		rt.chain().tween_callback(ring.queue_free)
+
+	# Fire particles
+	for i in range(15):
+		var fp := ColorRect.new()
+		var fc: Array = [Color(1.0, 0.9, 0.3, 0.9), Color(1.0, 0.5, 0.0, 0.8), Color(1.0, 0.2, 0.0, 0.7)]
+		fp.color = fc[i % 3]
+		fp.size = Vector2(randf_range(3, 6), randf_range(3, 6))
+		fp.position = pos
+		fp.z_index = 10
+		get_parent().add_child(fp)
+		var vel := Vector2(randf_range(-100, 100), randf_range(-120, 40))
+		var fpt := fp.create_tween()
+		fpt.tween_property(fp, \"position\", fp.position + vel * 0.3, 0.3)
+		fpt.parallel().tween_property(fp, \"modulate:a\", 0.0, 0.35)
+		fpt.tween_callback(fp.queue_free)
+
+	# Damage enemies
+	for body in get_tree().get_nodes_in_group(\"enemies\"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < EXPLOSION_RADIUS and body.has_method(\"take_damage\"):
+				body.take_damage(EXPLOSION_DAMAGE, owner_index)
+				if body.has_method(\"apply_knockback\"):
+					var kb: Vector2 = (body.global_position - pos).normalized() * 300.0
+					body.apply_knockback(kb)
+
+	# Damage players (friendly fire)
+	for body in get_tree().get_nodes_in_group(\"players\"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < EXPLOSION_RADIUS and body.has_method(\"take_damage\"):
+				body.take_damage(10, -1)
+
+	# Chain: trigger other nearby H2 clouds
+	for other_cloud in get_tree().get_nodes_in_group(\"h2_clouds\"):
+		if other_cloud != self and other_cloud is Node2D:
+			var dist: float = pos.distance_to(other_cloud.global_position)
+			if dist < EXPLOSION_RADIUS and other_cloud.has_method(\"_h2_explode\"):
+				other_cloud.call_deferred(\"_h2_explode\")
+
+	# Screen shake
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		var orig: Vector2 = cam.offset
+		for sh in range(6):
+			cam.offset = orig + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+			await get_tree().create_timer(0.03).timeout
+		if is_instance_valid(cam):
+			cam.offset = orig
+
+	# Clean up
+	await get_tree().create_timer(0.5).timeout
+	if is_inside_tree():
+		queue_free()
+"""
+	cloud_script.reload()
+	cloud.set_script(cloud_script)
+	cloud.set("owner_index", gas_owner)
 
 
 func _update_shadow() -> void:

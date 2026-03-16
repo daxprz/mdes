@@ -18,6 +18,7 @@ var _col_shape: CollisionShape2D
 var _rect_shape: RectangleShape2D
 
 func _ready() -> void:
+	add_to_group("lava_traps")
 	collision_layer = 0
 	collision_mask = 2 | 8  # Detect players (2) AND enemies (8)
 
