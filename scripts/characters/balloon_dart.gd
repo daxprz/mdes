@@ -486,8 +486,8 @@ func _spawn_h2_gas_cloud() -> void:
 
 var particles: Array = []
 var _age: float = 0.0
-const LIFETIME := 6.0
-const GAS_SPEED := -40.0  # Float upward
+const LIFETIME := 25.0  # Lingers for a long time
+const GAS_SPEED := -15.0  # Slow gentle float upward
 const SPREAD := 30.0
 const EXPLOSION_RADIUS := 100.0
 const EXPLOSION_DAMAGE := 35
@@ -525,7 +525,11 @@ func _process(delta: float) -> void:
 		# Expand slowly
 		p.scale += Vector2(delta * 0.3, delta * 0.3)
 		# Fade over time
-		p.modulate.a = lerpf(0.35, 0.0, _age / LIFETIME)
+		# Stay opaque most of the time, only fade in the last 30%
+		if _age > LIFETIME * 0.7:
+			p.modulate.a = lerpf(0.35, 0.0, (_age - LIFETIME * 0.7) / (LIFETIME * 0.3))
+		else:
+			p.modulate.a = 0.35
 
 	# Check for fire/heat sources
 	# 1. Fire projectiles (loose_items with fire type)

@@ -465,6 +465,7 @@ func _animate_falling_cherry(cherry: Area2D) -> void:
 		if cherry.global_position.y > 500.0:
 			cherry.queue_free()
 			return
+
 		await get_tree().process_frame
 
 
