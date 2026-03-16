@@ -19,7 +19,7 @@ var _rect_shape: RectangleShape2D
 
 func _ready() -> void:
 	collision_layer = 0
-	collision_mask = 2
+	collision_mask = 2 | 8  # Detect players (2) AND enemies (8)
 
 	_max_height = tower_height * max_rise_fraction
 	_current_height = 12.0  # Start as a thin layer
@@ -59,7 +59,7 @@ func _process(delta: float) -> void:
 	for key: int in keys_to_remove:
 		_hit_timers.erase(key)
 
-	# Damage players inside
+	# Damage players and enemies inside
 	for body: Node2D in _players_inside:
 		if not is_instance_valid(body):
 			continue
@@ -67,6 +67,15 @@ func _process(delta: float) -> void:
 		if _hit_timers.has(id):
 			continue
 		_hit_timers[id] = damage_interval
+
+		# Enemies: instant kill
+		if body.is_in_group("enemies"):
+			if body.has_method("take_damage"):
+				body.take_damage(9999, -1)
+			AudioManager.play("enemy_die", -4.0)
+			continue
+
+		# Players: normal damage
 		if body.has_method("take_damage"):
 			body.take_damage(damage)
 			AudioManager.play("player_hurt")
