@@ -158,9 +158,9 @@ var _ranger_reloading: bool = false
 
 # Physics grappling hook
 const GRAPPLE_SWING_RADIUS := 40.0
-const GRAPPLE_BASE_ANGULAR_VEL := 8.0  # rad/s
-const GRAPPLE_ANGULAR_ACCEL := 6.0  # rad/s²
-const GRAPPLE_MAX_ANGULAR_VEL := 20.0  # rad/s
+const GRAPPLE_BASE_ANGULAR_VEL := 14.0  # rad/s
+const GRAPPLE_ANGULAR_ACCEL := 12.0  # rad/s²
+const GRAPPLE_MAX_ANGULAR_VEL := 35.0  # rad/s
 const GRAPPLE_MIN_HOLD := 0.3  # seconds before throw is valid
 const GRAPPLE_BASE_THROW_SPEED := 200.0
 const GRAPPLE_THROW_SPEED_PER_SEC := 150.0
@@ -169,7 +169,7 @@ const GRAPPLE_HOOK_GRAVITY := 400.0
 const GRAPPLE_HOOK_DRAG := 0.98
 const GRAPPLE_ROPE_SEGMENTS := 20
 const GRAPPLE_ROPE_SEGMENT_LEN := 12.0
-const GRAPPLE_LAUNCH_SPEED_RATIO := 0.5  # 50% of JUMP_VELOCITY
+const GRAPPLE_LAUNCH_SPEED_RATIO := 2.5  # 250% of JUMP_VELOCITY (5x the original 50%)
 const GRAPPLE_PENDULUM_GRAVITY := 600.0
 const GRAPPLE_SWING_DAMPING := 0.02
 const GRAPPLE_INPUT_BOOST := 1.5  # rad/s² when pushing with swing
@@ -1610,6 +1610,19 @@ func _attack_rogue() -> void:
 		get_parent().add_child(knife)
 
 
+func _get_aim_direction_analog() -> Vector2:
+	## Returns full analog aim direction from the joystick (not snapped to 8 dirs).
+	## Falls back to _get_aim_direction() for keyboard or if stick is neutral.
+	if device_id >= 0:
+		var stick := Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+		)
+		if stick.length() > 0.2:  # Deadzone
+			return stick.normalized()
+	return _get_aim_direction()
+
+
 func _get_aim_direction() -> Vector2:
 	## Returns the direction the player is aiming with D-pad/stick.
 	## Falls back to facing direction if no directional input.
@@ -2747,7 +2760,7 @@ func _grapple_tick_windup(delta: float) -> void:
 
 
 func _grapple_throw() -> void:
-	var aim: Vector2 = _get_aim_direction()
+	var aim: Vector2 = _get_aim_direction_analog()
 	var throw_speed: float = clampf(
 		GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
 		GRAPPLE_BASE_THROW_SPEED,
@@ -2977,7 +2990,7 @@ func _draw_grapple() -> void:
 			draw_circle(hook_local, 4.0, hook_color)
 
 			# Draw aim direction indicator (dotted line showing throw trajectory)
-			var aim: Vector2 = _get_aim_direction()
+			var aim: Vector2 = _get_aim_direction_analog()
 			var throw_speed: float = clampf(
 				GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
 				GRAPPLE_BASE_THROW_SPEED, GRAPPLE_MAX_THROW_SPEED
