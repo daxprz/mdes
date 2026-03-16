@@ -16,6 +16,8 @@ const WIGGLE_SPEED := 3.0
 const SMASH_DAMAGE := 8
 const SMASH_INTERVAL := 0.4
 const SUCKER_RADIUS := 3.0
+const ATTACHED_ATTACK_COOLDOWN := 4.0  # Seconds between attacks when attached to enemy
+const FLING_SPEED := 600.0
 
 # Phases: 0=wiggle, 1=hunt, 2=smashing player, 3=attached to enemy (permanent)
 var _segments: Array[Vector2] = []  # positions in local space
@@ -31,6 +33,10 @@ var _smash_count: int = 0
 var _lunge_cooldown: float = 0.0
 var _rift_scale: float = 0.0  # Grows from 0 to 1 on spawn
 var _owner_player_index: int = -1
+var _attached_attack_timer: float = 0.0  # Cooldown for attached tentacle attacks
+var _attached_target: Node2D = null  # Player being grabbed by attached tentacle
+var _attached_target_pi: int = -1
+var _attached_smash_phase: int = 0  # 0=hunting, 1=grabbed/pound, 2=flinging
 
 
 func setup(owner_index: int) -> void:
@@ -260,23 +266,101 @@ func _spawn_buff_particles(pos: Vector2) -> void:
 
 
 func _follow_enemy(delta: float) -> void:
-	## Permanently follow the attached enemy - rift moves with it
+	## Permanently follow the attached enemy and attack nearby players
 	if not is_instance_valid(_attached_enemy):
 		queue_free()
 		return
 
-	# Anchor rift to enemy position (above their center)
+	# Anchor rift to enemy position
 	global_position = _attached_enemy.global_position + Vector2(0, -20)
 
-	# Gentle wiggle while attached
-	for i in range(1, SEGMENT_COUNT):
-		var wiggle_offset := Vector2(
-			sin(_timer * 2.0 + i * 0.5) * 6.0,
-			cos(_timer * 1.8 + i * 0.7) * 4.0
-		)
+	_attached_attack_timer -= delta
+
+	match _attached_smash_phase:
+		0:  # Hunting / idle wiggle
+			_attached_hunt(delta)
+		1:  # Grabbed a player - single pound
+			_attached_pound(delta)
+		2:  # Fling complete, return to idle
+			_attached_smash_phase = 0
+			_attached_attack_timer = ATTACHED_ATTACK_COOLDOWN
+
+
+func _attached_hunt(delta: float) -> void:
+	## While attached to enemy, seek nearby players
+	var tip: Vector2 = _segments[SEGMENT_COUNT - 1]
+	var tip_global: Vector2 = global_position + tip
+
+	# Find closest player
+	var best_dist: float = STRETCH_RANGE
+	var best_node: Node2D = null
+	var best_pi: int = -1
+
+	if _attached_attack_timer <= 0.0:
+		for node in get_tree().get_nodes_in_group("players"):
+			if not node is CharacterBody2D:
+				continue
+			var dist: float = tip_global.distance_to(node.global_position)
+			if dist < best_dist:
+				best_dist = dist
+				best_node = node
+				best_pi = node.get("player_index")
+
+	if best_node and best_dist < 25.0:
+		# Grab!
+		_attached_target = best_node
+		_attached_target_pi = best_pi
+		_attached_smash_phase = 1
+		_smash_timer = 0.0
+	elif best_node:
+		# Move tip toward target
+		var target_pos: Vector2 = best_node.global_position - global_position
+		var dir: Vector2 = (target_pos - tip).normalized()
+		_prev_segments[SEGMENT_COUNT - 1] = _segments[SEGMENT_COUNT - 1]
+		_segments[SEGMENT_COUNT - 1] += dir * LUNGE_SPEED * delta
+	else:
+		# Idle wiggle
+		for i in range(1, SEGMENT_COUNT):
+			var wiggle_offset := Vector2(
+				sin(_timer * 2.0 + i * 0.5) * 6.0,
+				cos(_timer * 1.8 + i * 0.7) * 4.0
+			)
+			var vel: Vector2 = _segments[i] - _prev_segments[i]
+			_prev_segments[i] = _segments[i]
+			_segments[i] += vel * 0.9 + wiggle_offset * delta + Vector2(0, 8.0 * delta)
+
+
+func _attached_pound(delta: float) -> void:
+	## Single pound then fling in random direction
+	if not is_instance_valid(_attached_target):
+		_attached_smash_phase = 2
+		return
+
+	# Keep tip at player
+	var player_local: Vector2 = _attached_target.global_position - global_position
+	_segments[SEGMENT_COUNT - 1] = player_local
+
+	_smash_timer += delta
+	if _smash_timer >= SMASH_INTERVAL:
+		# Single smash damage
+		PlayerManager.damage_player(_attached_target_pi, SMASH_DAMAGE)
+		_spawn_smash_smoke(_attached_target.global_position)
+
+		# Fling in random direction at high speed
+		var fling_angle: float = randf() * TAU
+		_attached_target.velocity = Vector2(cos(fling_angle), sin(fling_angle)) * FLING_SPEED
+		# Ensure some upward component so they fly
+		_attached_target.velocity.y = minf(_attached_target.velocity.y, -200.0)
+
+		_attached_target = null
+		_attached_target_pi = -1
+		_attached_smash_phase = 2
+
+	# Gravity on other segments
+	for i in range(1, SEGMENT_COUNT - 1):
 		var vel: Vector2 = _segments[i] - _prev_segments[i]
 		_prev_segments[i] = _segments[i]
-		_segments[i] += vel * 0.9 + wiggle_offset * delta + Vector2(0, 8.0 * delta)
+		_segments[i] += vel * 0.9 + Vector2(0, 10.0 * delta)
 
 
 func _apply_constraints() -> void:

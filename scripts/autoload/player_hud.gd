@@ -90,6 +90,14 @@ func _ready() -> void:
 	_build_hud()
 	PlayerManager.player_joined.connect(_on_player_joined)
 	PlayerManager.player_left.connect(_on_player_left)
+	GameManager.state_changed.connect(_on_state_changed)
+
+
+func _on_state_changed(_new_state: GameManager.GameState) -> void:
+	# Reset tentacle status at the start of each level
+	class_change_locked.clear()
+	tentacle_lost.clear()
+	active_tentacle_count = 0
 
 
 func _build_hud() -> void:
