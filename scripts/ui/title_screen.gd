@@ -13,9 +13,12 @@ const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 @onready var players_container: Node2D = $Players
 @onready var spawn_point: Marker2D = $PlaygroundSpawn
 
+const RIFT_TENTACLE_SCENE := preload("res://scripts/effects/rift_tentacle.gd")
+
 var _blink_timer: float = 0.0
 var _spawned_players: Dictionary = {}  # player_index -> node
 var _ghost_players: Dictionary = {}  # player_index -> true (waiting for non-movement input)
+var _rift_locks: Dictionary = {}  # player_index -> float (seconds remaining on rift lock)
 var _name_entry: Node = null
 var _pending_device_id: int = -99
 var _returning_from_game: bool = false
@@ -144,6 +147,13 @@ func _process(delta: float) -> void:
 	# Update start visibility
 	start_text.visible = PlayerManager.get_active_player_count() > 0
 
+	# Count down rift locks
+	for pi in _rift_locks.keys():
+		_rift_locks[pi] -= delta
+		if _rift_locks[pi] <= 0.0:
+			_rift_locks.erase(pi)
+			PlayerHUD.class_change_locked.erase(pi)
+
 	# Check ghost players for non-movement button press to materialize
 	for pi in _ghost_players.keys():
 		var p_data: Dictionary = PlayerManager.get_player(pi)
@@ -221,6 +231,9 @@ func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
 # -- Class Change with Portal/Ghost/Poof Sequence -----------------------------
 
 func _on_class_changed(player_index: int, new_class: PlayerManager.CharacterClass) -> void:
+	# Block class changes while rift is active for this player
+	if _rift_locks.has(player_index):
+		return
 	if not _spawned_players.has(player_index):
 		_spawn_lobby_player(player_index)
 		return
@@ -264,12 +277,20 @@ func _materialize_player(player_index: int) -> void:
 	var node: CharacterBody2D = _spawned_players[player_index]
 	var pos: Vector2 = node.global_position
 
-	# Second red portal
-	_spawn_red_portal(pos)
-
 	# Restore opacity
 	var tween := create_tween()
 	tween.tween_property(node, "modulate:a", 1.0, 0.2)
+
+	# Spawn persistent rift with tentacle
+	var rift := Node2D.new()
+	rift.set_script(RIFT_TENTACLE_SCENE)
+	rift.global_position = pos + Vector2(0, -30)  # Above player feet
+	rift.setup(player_index)
+	players_container.add_child(rift)
+
+	# Lock class changes for this player for the rift duration
+	_rift_locks[player_index] = 15.0
+	PlayerHUD.class_change_locked[player_index] = true
 
 
 func _spawn_red_portal(pos: Vector2) -> void:

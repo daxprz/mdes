@@ -80,6 +80,7 @@ var _backing: ColorRect = null
 var _panels: Dictionary = {}  # player_index -> Dictionary of UI nodes
 var _muffin_label: Label = null
 var _cycle_cooldowns: Dictionary = {}  # "device_button" -> float
+var class_change_locked: Dictionary = {}  # player_index -> true (set by title screen during rift)
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -465,6 +466,8 @@ func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
 # -- Class Cycling -------------------------------------------------------------
 
 func _cycle_class(player_index: int, direction: int) -> void:
+	if class_change_locked.has(player_index):
+		return
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
 	if p_data.is_empty():
 		return
