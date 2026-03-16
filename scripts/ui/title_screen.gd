@@ -65,8 +65,9 @@ var _spawned_players: Dictionary = {}  # player_index -> node
 var _cycle_cooldowns: Dictionary = {}  # device_id -> float
 
 # Profile / name entry
-var _pending_device_id: int = -99  # Device waiting for profile creation
+var _pending_device_id: int = -99
 var _name_entry: Node = null
+var _returning_from_game: bool = false  # True if quit-to-menu, false if fresh launch
 
 
 func _ready() -> void:
@@ -83,7 +84,8 @@ func _ready() -> void:
 	ProfileManager.device_profiles.clear()
 
 	# Restore saved player choices - auto-rejoin with same class
-	if not saved_choices.is_empty():
+	_returning_from_game = not saved_choices.is_empty()
+	if _returning_from_game:
 		for pi in saved_choices.keys():
 			var choice: Dictionary = saved_choices[pi]
 			var dev_id: int = choice.get("device_id", -1)
@@ -161,8 +163,24 @@ func _setup_name_entry() -> void:
 
 
 func _on_device_needs_profile(device_id: int) -> void:
-	# Auto-assign a profile immediately so the player can just play
-	# Try to find an unbound existing profile first
+	_pending_device_id = device_id
+
+	if _returning_from_game:
+		# Returning from quit-to-menu: auto-assign quickly
+		_auto_assign_profile(device_id)
+		return
+
+	# FRESH LAUNCH: show profile selection or name entry
+	if not ProfileManager.profiles.is_empty() and _profile_select and _profile_select.has_method("setup"):
+		_profile_select.setup(-1, device_id)
+	else:
+		# No profiles exist - name entry
+		if _name_entry and _name_entry.has_method("setup"):
+			_name_entry.setup(device_id)
+
+
+func _auto_assign_profile(device_id: int) -> void:
+	# Find first unbound profile
 	for profile in ProfileManager.profiles:
 		var pid: String = profile.get("id", "")
 		var already_bound := false
@@ -172,13 +190,13 @@ func _on_device_needs_profile(device_id: int) -> void:
 				break
 		if not already_bound:
 			ProfileManager.bind_device_to_profile(device_id, profile)
+			_pending_device_id = -99
 			call_deferred("_deferred_join", device_id)
 			return
-
-	# No unbound profiles - create a guest
-	var guest_num: int = ProfileManager.profiles.size() + 1
-	var guest: Dictionary = ProfileManager.create_profile("Player %d" % guest_num)
+	# No unbound profiles - create guest
+	var guest: Dictionary = ProfileManager.create_profile("Player %d" % (ProfileManager.profiles.size() + 1))
 	ProfileManager.bind_device_to_profile(device_id, guest)
+	_pending_device_id = -99
 	call_deferred("_deferred_join", device_id)
 
 
@@ -241,8 +259,16 @@ func _input(event: InputEvent) -> void:
 		if PlayerManager.get_active_player_count() > 0:
 			_start_game()
 
+	# Triangle (special) = open profile re-selection for this player
+	if event.is_action_pressed("special"):
+		var device_id: int = event.device if not (event is InputEventKey) else -1
+		var player_index := _get_player_index_for_device(device_id)
+		if player_index >= 0 and ProfileManager.profiles.size() > 1:
+			if _profile_select and _profile_select.has_method("setup"):
+				_pending_device_id = device_id
+				_profile_select.setup(player_index, device_id)
+
 	# Class cycling with D-pad ONLY (buttons 13=left, 14=right)
-	# NO bumpers, NO thumbsticks
 	if event is InputEventJoypadButton and event.pressed:
 		var device_id: int = event.device
 		var player_index := _get_player_index_for_device(device_id)
@@ -474,7 +500,7 @@ func _update_slot(player_index: int) -> void:
 		arrows.add_theme_font_size_override("font_size", 10)
 		arrows.modulate = Color(0.7, 0.7, 0.7)
 		vbox.add_child(arrows)
-	arrows.text = "L/R: Class | U/D: Profile"
+	arrows.text = "L/R: Class | Triangle: Switch Profile"
 
 
 func _clear_slot(player_index: int) -> void:
