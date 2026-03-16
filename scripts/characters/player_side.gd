@@ -2092,30 +2092,59 @@ func _charged_balloonist_barrage(charge_ratio: float) -> void:
 # -- Jumper Abilities ----------------------------------------------------------
 
 func _attack_jumper() -> void:
-	# Momentum kick - damage scales with how fast you're moving!
-	AudioManager.play("sword_slash", -2.0, 1.4)
-	_attack_cooldown = 0.35
+	# 3 fast sequential slices - damage scales with speed
+	_attack_cooldown = 0.45
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
 	var aim: Vector2 = _get_aim_direction()
 	var speed_ratio: float = clampf(velocity.length() / 400.0, 0.0, 1.0)
-	var base_dmg: int = int(lerpf(8.0, 35.0, speed_ratio) * PlayerManager.get_skill_bonus(player_index, "attack"))
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
+	var base_dmg: int = int(lerpf(6.0, 20.0, speed_ratio) * PlayerManager.get_skill_bonus(player_index, "attack"))
 
-	attack_area.position = aim * 18.0
-	attack_area.monitoring = true
-	await get_tree().physics_frame
-	if not is_inside_tree():
-		return
+	# Slash angles: horizontal, diagonal down, diagonal up
+	var slash_angles: Array[float] = [0.0, 0.5, -0.5]
+	var slash_colors: Array[Color] = [
+		Color(0.3, 1.0, 1.0, 0.8),
+		Color(0.5, 1.0, 0.9, 0.7),
+		Color(0.2, 0.9, 1.0, 0.9),
+	]
 
-	# Kick VFX - cyan arc
-	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.5 + speed_ratio * 0.3), Vector2(20 + speed_ratio * 15, 12))
+	for i in range(3):
+		if not is_inside_tree():
+			return
+		if i > 0:
+			await get_tree().create_timer(0.07).timeout
+			if not is_inside_tree():
+				return
 
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("take_damage"):
-			body.take_damage(base_dmg, player_index)
-			if speed_ratio > 0.5:
+		AudioManager.play("sword_slash", -2.0, 1.3 + i * 0.15)
+
+		# Slash line VFX
+		var slash_dir: Vector2 = aim.rotated(slash_angles[i])
+		var slash := ColorRect.new()
+		slash.color = slash_colors[i]
+		slash.size = Vector2(35, 2)
+		slash.position = global_position + slash_dir * 6.0
+		slash.rotation = slash_dir.angle() + 0.785
+		slash.z_index = 9
+		get_parent().add_child(slash)
+		var st := slash.create_tween()
+		st.set_parallel(true)
+		st.tween_property(slash, "position", slash.position + slash_dir * 18.0, 0.08)
+		st.tween_property(slash, "modulate:a", 0.0, 0.12)
+		st.chain().tween_callback(slash.queue_free)
+
+		# Hit check
+		attack_area.position = aim * 20.0
+		attack_area.monitoring = true
+		await get_tree().physics_frame
+		if not is_inside_tree():
+			return
+		for body in attack_area.get_overlapping_bodies():
+			if body.has_method("take_damage"):
+				body.take_damage(base_dmg, player_index)
 				_spawn_blood_particles(body.global_position)
-		if body.has_method("apply_knockback"):
-			body.apply_knockback(aim * (150.0 + speed_ratio * 250.0))
+			if body.has_method("apply_knockback") and i == 2:
+				body.apply_knockback(aim * (100.0 + speed_ratio * 200.0))
+		attack_area.monitoring = false
 	await get_tree().create_timer(0.1).timeout
 	if is_inside_tree():
 		attack_area.monitoring = false
