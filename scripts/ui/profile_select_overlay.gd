@@ -17,6 +17,7 @@ const NAV_COOLDOWN_TIME := 0.2
 var _labels: Array[Label] = []
 var _entries: Array[Dictionary] = []  # profile dicts, last entry is "create new"
 var _vbox: VBoxContainer = null
+var _hint_label: Label = null
 
 
 func setup(player_index: int, device_id: int) -> void:
@@ -83,14 +84,17 @@ func _build_ui() -> void:
 
 
 func _populate_list() -> void:
-	# Clear old labels
+	# Clear old labels and hint
 	for lbl: Label in _labels:
 		if is_instance_valid(lbl):
 			lbl.queue_free()
 	_labels.clear()
 	_entries.clear()
+	if _hint_label and is_instance_valid(_hint_label):
+		_hint_label.queue_free()
+		_hint_label = null
 
-	# Add existing profiles (skip those already bound to another device)
+	# Add existing profiles, excluding those already bound to another device
 	var bound_ids: Array[String] = []
 	for did: Variant in ProfileManager.device_profiles:
 		var bound_prof: Dictionary = ProfileManager.device_profiles[did]
@@ -98,16 +102,13 @@ func _populate_list() -> void:
 
 	for profile: Dictionary in ProfileManager.profiles:
 		var pid: String = profile.get("id", "")
-		var is_bound: bool = pid in bound_ids
+		if pid in bound_ids:
+			continue
 		_entries.append(profile)
 		var lbl := Label.new()
 		var pname: String = profile.get("name", "???")
 		var last_played: String = profile.get("last_played", "")
-		if is_bound:
-			lbl.text = "  " + pname + "  (IN USE)"
-			lbl.modulate = Color(0.4, 0.4, 0.4)
-		else:
-			lbl.text = "  " + pname + "  (" + last_played + ")"
+		lbl.text = "  " + pname + "  (" + last_played + ")"
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 		lbl.add_theme_font_size_override("font_size", 18)
 		_vbox.add_child(lbl)
@@ -124,12 +125,12 @@ func _populate_list() -> void:
 	_labels.append(new_lbl)
 
 	# Add hint at bottom
-	var hint := Label.new()
-	hint.text = "D-Pad: navigate | X: select"
-	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hint.add_theme_font_size_override("font_size", 12)
-	hint.modulate = Color(0.5, 0.5, 0.5)
-	_vbox.add_child(hint)
+	_hint_label = Label.new()
+	_hint_label.text = "D-Pad: navigate | X: select"
+	_hint_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_hint_label.add_theme_font_size_override("font_size", 12)
+	_hint_label.modulate = Color(0.5, 0.5, 0.5)
+	_vbox.add_child(_hint_label)
 
 
 func _process(delta: float) -> void:
@@ -205,17 +206,4 @@ func _confirm_selection() -> void:
 		# Create new
 		create_new_requested.emit(_player_index)
 	else:
-		# Check if this profile is already bound to another device
-		var pid: String = entry.get("id", "")
-		for did: Variant in ProfileManager.device_profiles:
-			var bound_prof: Dictionary = ProfileManager.device_profiles[did]
-			if bound_prof.get("id", "") == pid:
-				# Already in use - flash red and reject
-				if _selected < _labels.size() and is_instance_valid(_labels[_selected]):
-					_labels[_selected].modulate = Color.RED
-					var tween := create_tween()
-					tween.tween_property(_labels[_selected], "modulate", Color(0.4, 0.4, 0.4), 0.3)
-				_active = true
-				visible = true
-				return
 		profile_selected.emit(_player_index, entry)

@@ -83,6 +83,10 @@ func _ready() -> void:
 	ProfileManager.unassign_all()
 	ProfileManager.device_profiles.clear()
 
+	# Always set up camera and overlays (needed for fresh launch AND return-from-game)
+	_setup_camera()
+	_setup_name_entry()
+
 	# Restore saved player choices - auto-rejoin with same class
 	_returning_from_game = not saved_choices.is_empty()
 	if _returning_from_game:
@@ -127,18 +131,11 @@ func _apply_saved_classes(saved_choices: Dictionary) -> void:
 				break
 	_refresh_all_slots()
 	_update_start_visibility()
-	_setup_camera()
-	_setup_name_entry()
 
 
 func _setup_camera() -> void:
-	var multi_cam_script := load("res://scripts/ui/multi_camera.gd")
 	var cam := Camera2D.new()
-	cam.set_script(multi_cam_script)
-	cam.min_zoom = 0.8
-	cam.max_zoom = 1.3
-	cam.zoom_margin = Vector2(200, 150)
-	cam.position = Vector2(640, 450)
+	cam.position = Vector2(960, 540)
 	add_child(cam)
 
 

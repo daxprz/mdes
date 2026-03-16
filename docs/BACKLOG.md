@@ -105,6 +105,14 @@ Improve all pixel art from placeholder quality to polished retro style.
     so they don't push the boss. Added safety teleport in boss_base if boss
     position.y > 600 (below arena).
 
+### Story 2.9: Title Screen START Button Ignored
+- [x] Task: BUG: On the title screen when no players are connected, pressing START does nothing
+  - ROOT CAUSE: `_setup_name_entry()` and `_setup_camera()` were only called from
+    `_apply_saved_classes()`, which only runs on return-from-game. On fresh launch,
+    the profile/name overlays were never created, so `_on_device_needs_profile()`
+    silently did nothing — no profile was bound and `_try_join()` kept bailing out.
+  - FIX: Call `_setup_camera()` and `_setup_name_entry()` unconditionally in `_ready()`.
+
 ---
 
 ## EPIC 3: Overworld Progression (`design`, `mechanics`)
