@@ -415,7 +415,7 @@ Player profiles that survive game crashes and sessions.
   - Direct keyboard typing support
   - Name validation (no empty, no duplicates)
 - [x] Task: Create new profile step 2: Stack-rank class preferences (drag/reorder list)
-  - Shows all 8 classes in a list
+  - Shows all 12 classes in a list
   - D-pad up/down to select, X to grab, move up/down, X to drop
   - Top preference = default class when joining
 - [x] Task: Create new profile step 3: Optionally name each sub-character per class
@@ -562,6 +562,106 @@ All side-scrolling abilities ported to work in top-down overworld.
 - [x] Task: Profile selection required before joining game
 - [x] Task: Profile persistence across sessions (JSON in user://)
 - [x] Task: ProfileManager autoload handles device-profile mapping
+
+---
+
+## EPIC 20: New Class - Ninja (`classes`)
+Fast aerial specialist with triple jump and dive attacks.
+
+### Story 20.1: Base Ninja Class
+- [x] Task: Add NINJA to CharacterClass enum + stats (85 HP, 70 mana, 140 speed, 1.5 mana regen)
+- [x] Task: Create ninja topdown + side spritesheets
+- [x] Task: Basic attack: 3 fast sequential slices
+- [x] Task: Special: dive kick (fast downward kick, bounces on hit)
+- [x] Task: Charge attack: meteor strike (charge in air, slam down with scaling damage/radius)
+- [x] Task: Circle ability: air dash / item pickup (dash through air + pull nearby items)
+- [x] Task: Passive: triple jump (3 jumps before needing ground)
+
+---
+
+## EPIC 21: New Class - Balloonist (`classes`)
+Chaos controller with physics-based balloons and H2 gas explosions.
+
+### Story 21.1: Base Balloonist Class
+- [x] Task: Add BALLOONIST to CharacterClass enum + stats (80 HP, 90 mana, 100 speed, 1.0 mana regen)
+- [x] Task: Create balloonist topdown + side spritesheets
+- [x] Task: Basic attack: balloon darts (physics string with 12 segments, teardrop-shaped balloons)
+- [x] Task: Balloon physics: repulsion between balloons, wind sensitivity, weight system
+- [x] Task: 3x fire rate, max 10 active balloons
+- [x] Task: Special: Pop All (Triangle) - pop all active balloons, release H2 gas
+- [x] Task: Charge attack: giant balloon (larger, more lift, scales with charge)
+- [x] Task: Circle ability: self-float (attach balloon to self for flight)
+
+### Story 21.2: H2 Gas & Hydrogen Explosion System
+- [x] Task: H2 gas lingers for 25 seconds after balloon pop
+- [x] Task: H2 gas ignites on contact with fire-type attacks or lava
+- [x] Task: Hydrogen explosion with area damage on ignition
+- [x] Task: Chain reactions: explosions ignite nearby H2 clouds
+- [x] Task: Mage fireballs (fire type) explode balloons and ignite H2 gas
+
+---
+
+## EPIC 22: New Class - Guitarist (`classes`)
+Rhythm-based fighter with sine wave projectiles and weight-based push.
+
+### Story 22.1: Base Guitarist Class
+- [x] Task: Add GUITARIST to CharacterClass enum + stats (110 HP, 100 mana, 95 speed, 2.0 mana regen)
+- [x] Task: Create guitarist topdown + side spritesheets
+- [x] Task: Basic attack: musical notes (sine wave trajectory)
+- [x] Task: Special: blast wave (60-degree arc, weight-based push using entity weight system)
+- [x] Task: Charge attack: power chord (massive sound blast, scales with charge)
+- [x] Task: Circle ability: amp up (15s duration, 30s cooldown, amplified damage + effect radius)
+- [x] Task: Guitar sounds via Karplus-Strong string synthesis (guitar_note.wav, guitar_blast.wav)
+
+---
+
+## EPIC 23: New Class - Werewolf (`classes`)
+Brutal melee brawler with blood effects and frenzy mode.
+
+### Story 23.1: Base Werewolf Class
+- [x] Task: Add WEREWOLF to CharacterClass enum + stats (200 HP, 40 mana, 120 speed, 0.5 mana regen)
+- [x] Task: Create werewolf topdown + side spritesheets
+- [x] Task: Basic attack: triple claw slash (3-hit combo, 8 blood drops per slash)
+- [x] Task: Special: roar push (30-degree arc, 250px range, weight-based push)
+- [x] Task: Charge attack: pounce (charge and leap, damage/distance scale with charge)
+- [x] Task: Circle ability: frenzy (8s duration, 35s cooldown, boosted attack/move speed)
+
+---
+
+## EPIC 24: Entity Weight System (`mechanics`)
+Physics weight system for knockback and push calculations.
+
+### Story 24.1: Weight Implementation
+- [x] Task: Assign weight values: Player 70, Skeleton 30, Bat 5, Golem 150, Boss 300
+- [x] Task: Guitarist blast wave uses weight for push distance calculation
+- [x] Task: Werewolf roar uses weight for push distance calculation
+- [x] Task: Balloon lift affected by entity weight
+
+---
+
+## EPIC 25: Balloon Physics & Environmental Interactions (`mechanics`)
+Advanced physics interactions between balloons, gas, fire, and lava.
+
+### Story 25.1: Environmental Interactions
+- [x] Task: Rising chocolate lava kills enemies instantly
+- [x] Task: Rising chocolate lava ignites H2 gas on contact
+- [x] Task: Mage fireballs are fire type - explode balloons on contact
+- [x] Task: Dead players removed from "players" group (enemies stop targeting)
+- [x] Task: Stealthed rogue removed from "players" group (invisible to enemy AI)
+
+---
+
+## EPIC 26: HUD & Profile Enhancements (`ui`)
+
+### Story 26.1: Always-Visible HUD
+- [x] Task: Total muffins display (top center)
+- [x] Task: Per-player stats display (top right)
+
+### Story 26.2: Profile Flow Improvements
+- [x] Task: Auto-join on return from quit-to-menu
+- [x] Task: Profile selection on fresh launch only
+- [x] Task: Triangle to switch profile on title screen
+- [x] Task: D-pad left/right for class cycling on title screen
 
 ---
 

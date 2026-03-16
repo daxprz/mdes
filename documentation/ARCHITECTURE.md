@@ -6,10 +6,10 @@
 test123/
 ├── project.godot              # Godot project config, input maps, autoloads
 ├── assets/
-│   ├── sounds/                # 37 WAV sound effects
+│   ├── sounds/                # 39 WAV sound effects (incl. guitar via Karplus-Strong synthesis)
 │   └── sprites/
 │       ├── bosses/            # 4 boss spritesheets (256×64 each)
-│       ├── characters/        # 8 classes × 2 views + donut buddy
+│       ├── characters/        # 12 classes × 2 views + donut buddy
 │       ├── enemies/           # Skeleton spritesheet
 │       ├── environment/       # Overworld + tower tilesets
 │       ├── items/             # Muffins, artifacts
@@ -28,7 +28,7 @@ test123/
 ├── scripts/                   # .gd script files (mirrors scenes/)
 │   ├── autoload/              # Global singletons
 │   │   ├── game_manager.gd    # Game state, tower tracking, transitions
-│   │   ├── player_manager.gd  # Player join/leave, 8 class stats, health/mana, leveling
+│   │   ├── player_manager.gd  # Player join/leave, 12 class stats, health/mana, leveling
 │   │   ├── audio_manager.gd   # Sound playback with pooling
 │   │   └── profile_manager.gd # Persistent player profiles (JSON save/load)
 │   ├── bosses/                # Boss base class + 4 boss scripts
@@ -53,9 +53,9 @@ test123/
 | Name | Script | Purpose |
 |------|--------|---------|
 | `GameManager` | game_manager.gd | Game state machine, tower tracking, scene transitions |
-| `PlayerManager` | player_manager.gd | Player join/leave, 8 class stats, health/mana, leveling/XP |
+| `PlayerManager` | player_manager.gd | Player join/leave, 12 class stats, health/mana, leveling/XP |
 | `PauseMenu` | pause_menu.gd | Global pause overlay with resume/quit + profile stats |
-| `AudioManager` | audio_manager.gd | Pooled sound effect playback (37 sounds) |
+| `AudioManager` | audio_manager.gd | Pooled sound effect playback (39 sounds) |
 | `ProfileManager` | profile_manager.gd | Persistent player profiles, save/load JSON, device-profile mapping |
 
 ## Scene Hierarchy
@@ -65,7 +65,7 @@ test123/
 - 5 platforms at calculated heights for lobby play
 - PlaygroundSpawn (Marker2D)
 - Players container (Node2D - lobby characters spawned here)
-- UI (CanvasLayer) - title, join text, 4 player slots (8 classes), start text
+- UI (CanvasLayer) - title, join text, 4 player slots (12 classes), start text
 - Profile selection overlay (triggered on first START press)
 - Dynamic multi-camera
 
@@ -123,17 +123,21 @@ test123/
 
 ```
 CharacterBody2D
-├── Player (overworld, top-down) - all 8 classes
-├── PlayerSide (tower/boss, side-scrolling) - all 8 classes
+├── Player (overworld, top-down) - all 12 classes
+├── PlayerSide (tower/boss, side-scrolling) - all 12 classes
 │   Abilities by class:
 │   ├── Melee: combo, ground slam, shield charge, enrage, ground pound charge
-│   ├── Ranged: crossbow (ammo), grappling hook, reload, piercing shot charge
-│   ├── Mage: rapid bolts, mana potion, air-walk, beam of light charge
+│   ├── Ranged: crossbow (10 ammo), grappling hook, reload, piercing shot charge
+│   ├── Mage: fireball (fire type, explodes balloons), mana potion, air-walk (drains mana), beam of light charge
 │   ├── Summoner: homing mark, summon buddy, delegate mode, empowered buddy charge
-│   ├── Rogue: knife fan, shadow dash, stealth/backstab, charged backstab
+│   ├── Rogue: 3 knife fan, shadow dash, stealth/backstab, charged backstab
 │   ├── Demolitionist: bombs, big bomb, rocket jetpack, refuel, mega bomb charge
 │   ├── Healer: healing potion throw, healing burst, wind gust, channel heal charge
-│   └── Tank: mace slam, ground pound stun, fortify, shockwave charge
+│   ├── Tank: mace slam, ground pound stun, fortify, shockwave charge
+│   ├── Ninja: 3 fast slices, dive kick, air dash/item pickup, triple jump, meteor charge
+│   ├── Balloonist: balloon darts (physics string + teardrop), pop all, self-float, 3x fire rate, max 10
+│   ├── Guitarist: sine wave notes, blast wave (60° arc, weight-based), amp up, power chord charge
+│   └── Werewolf: triple claw slash (8 blood drops), roar push (30° arc, 250px), frenzy, pounce charge
 ├── Skeleton (enemy)
 ├── FairyCakeBat, CookieArcher, CandyGolem, SprinkleSwarm (wave 1 enemies)
 ├── CupcakeBomber, LicoriceWhip, GummyBear, WaferShield (wave 2 enemies)
@@ -162,7 +166,7 @@ Node2D
 
 Node
 ├── GameManager (autoload)
-├── PlayerManager (autoload) - 8 classes, leveling/XP system
+├── PlayerManager (autoload) - 12 classes, leveling/XP system
 ├── AudioManager (autoload)
 └── ProfileManager (autoload) - persistent profiles, JSON save/load
 

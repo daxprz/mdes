@@ -71,7 +71,7 @@ Global `AudioManager` autoload with pooled playback:
 - Steals oldest player if pool is full
 - Process mode: ALWAYS (plays even when paused)
 
-### Sound List (37 sounds)
+### Sound List (39 sounds)
 | Sound | Used For |
 |-------|----------|
 | sword_slash | Melee attack (pitch varies by combo hit) |
@@ -111,6 +111,8 @@ Global `AudioManager` autoload with pooled playback:
 | rocket_crash | Demolitionist crash landing explosion |
 | stealth_activate | Rogue stealth activation |
 | wind_gust | Healer wind gust knockback |
+| guitar_note | Guitarist musical note attack (Karplus-Strong synthesis) |
+| guitar_blast | Guitarist blast wave special |
 
 ## 6. Scene Transition System
 
@@ -316,7 +318,102 @@ ProfileManager autoload manages player profiles saved as JSON in `user://`.
 
 ---
 
-## 20. Display Settings
+## 20. Balloon Physics System
+
+Balloons are core to the Balloonist class and interact with multiple game systems.
+
+**Balloon Properties:**
+- Teardrop-shaped visual with physics string (12 chain segments)
+- Balloons repulse each other (spread out naturally)
+- Affected by wind gusts and environmental forces
+- Weight system: balloons add lift force to attached entities
+
+**H2 Gas System:**
+- When a balloon is popped, it releases H2 (hydrogen) gas
+- H2 gas lingers in the air for 25 seconds
+- H2 gas ignites on contact with fire-type attacks or lava
+- Ignition causes a hydrogen explosion with area damage
+- Chain reactions: one explosion can ignite nearby H2 clouds
+- Mage fireballs (fire type) are the primary ignition source
+- Rising chocolate lava also ignites H2 gas on contact
+
+**Balloon Interactions:**
+- Mage fireballs explode balloons on contact (fire type)
+- Popping creates H2 gas clouds
+- Balloonist "Pop All" detonates all active balloons at once
+- Chain reaction potential: pop all near fire = massive explosion
+
+---
+
+## 21. Entity Weight System
+
+Entities have weight values that affect physics interactions (knockback, push, balloon lift).
+
+| Entity | Weight |
+|--------|--------|
+| Bat (Fairy Cake Bat) | 5 |
+| Skeleton | 30 |
+| Player | 70 |
+| Candy Golem | 150 |
+| Boss | 300 |
+
+Weight affects:
+- Guitarist blast wave push distance (lighter = pushed further)
+- Werewolf roar push distance
+- Balloon lift (lighter entities float higher)
+- General knockback calculations
+
+---
+
+## 22. Rising Chocolate Lava
+
+- Chocolate lava rises from the bottom of certain tower sections
+- Kills enemies instantly on contact
+- Forces players to climb faster (acts as a timer mechanic)
+- Ignites H2 gas on contact (interacts with balloon system)
+- Visual: bubbling brown lava surface with particle effects
+
+---
+
+## 23. Enemy Targeting & Group System
+
+**Dead Players:**
+- Dead players are removed from the "players" group
+- Enemies stop targeting dead players immediately
+- Prevents enemies from attacking ghosts waiting for revive
+
+**Stealthed Rogue:**
+- Stealthed rogue is removed from the "players" group
+- Enemies cannot detect or target the stealthed rogue
+- Rogue becomes fully invisible to enemy AI (not just reduced detection)
+
+---
+
+## 24. Always-Visible HUD
+
+The HUD displays persistent information across all scenes:
+
+**Top Center:** Total muffins collected (all players combined)
+**Top Right:** Per-player stats (health, mana, class icon, level)
+
+The HUD remains visible during gameplay and updates in real-time.
+
+---
+
+## 25. Profile System (Enhanced)
+
+**Auto-Join on Return:**
+- When a player quits to menu and returns, they auto-join with their previous profile
+- No re-selection needed for returning players
+
+**Fresh Launch Flow:**
+- On first launch, profile selection screen appears
+- Triangle button switches between profiles on title screen
+- D-pad left/right cycles class selection on title screen
+
+---
+
+## 26. Display Settings
 
 | Setting | Value |
 |---------|-------|

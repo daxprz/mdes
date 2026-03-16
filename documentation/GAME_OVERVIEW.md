@@ -4,7 +4,7 @@
 
 The Ultimate Muffin is a **4-player local co-op PVE action game** built in Godot 4. Players work together to conquer bakery-themed towers, defeat sweet-themed bosses, and claim the Ultimate Muffin.
 
-Players choose from **8 unique classes** (Melee, Ranged, Mage, Summoner, Rogue, Demolitionist, Healer, Tank), each with distinct attacks, specials, charge attacks, and Circle-button abilities. Persistent player profiles track levels, XP, and stats across sessions.
+Players choose from **12 unique classes** (Melee, Ranged, Mage, Summoner, Rogue, Demolitionist, Healer, Tank, Ninja, Balloonist, Guitarist, Werewolf), each with distinct attacks, specials, charge attacks, and Circle-button abilities. Persistent player profiles track levels, XP, and stats across sessions.
 
 The game has three modes of play:
 1. **Top-down overworld** (Zelda-style) - explore a valley, choose which tower to enter
@@ -19,8 +19,11 @@ The game has three modes of play:
 TITLE SCREEN (playable lobby arena)
   - Press START (Options) to select/create a profile
   - Profile chosen → join with your preferred class
-  - Use L1/R1 to pick your class (8 classes, no duplicates)
+  - Use D-pad left/right to pick your class (12 classes, no duplicates)
+  - Press Triangle to switch profile
   - Jump around and test your moves
+  - Auto-join on return from quit-to-menu
+  - Profile selection on fresh launch
   - Press START again to begin
         |
         v
@@ -62,12 +65,11 @@ FINAL TOWER + GIANT MUFFIN BOSS
 | Left Stick | Move / Aim |
 | X (Cross) | Jump (Demolitionist: 2nd press = rocket jetpack) |
 | Square | Attack (hold to charge) |
-| Triangle | Special ability |
-| Circle | Class ability (Enrage / Reload / Air-Walk / Delegate / Stealth / Refuel / Wind Gust / Fortify) |
+| Triangle | Special ability (also: switch profile on title screen) |
+| Circle | Class ability (Enrage / Reload / Air-Walk / Delegate / Stealth / Refuel / Wind Gust / Fortify / Air Dash / Self-Float / Amp Up / Frenzy) |
+| D-pad Left/Right | Cycle class (title screen) |
 | R2 / L Shift | Block (perfect parry within 0.2s) |
 | Options (Start) | Profile select / Join game / Pause |
-| L1 | Previous class (title screen) |
-| R1 | Next class (title screen) |
 
 ### Keyboard
 | Key | Action |

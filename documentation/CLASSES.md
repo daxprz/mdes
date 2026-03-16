@@ -2,12 +2,12 @@
 
 ## Class Comparison
 
-| Stat | Melee | Ranged | Mage | Summoner | Rogue | Demolitionist | Healer | Tank |
-|------|-------|--------|------|----------|-------|---------------|--------|------|
-| **Health** | 175 | 100 | 80 | 90 | 90 | 100 | 90 | 250 |
-| **Mana** | 50 | 80 | 150 | 120 | 60 | 100 | 130 | 30 |
-| **Speed** | 110 | 120 | 90 | 95 | 150 | 105 | 95 | 70 |
-| **Mana Regen** | 1.0/s | 1.5/s | 3.0/s | 2.0/s | 1.5/s | 1.5/s | 2.5/s | 0.5/s |
+| Stat | Melee | Ranged | Mage | Summoner | Rogue | Demolitionist | Healer | Tank | Ninja | Balloonist | Guitarist | Werewolf |
+|------|-------|--------|------|----------|-------|---------------|--------|------|-------|------------|-----------|----------|
+| **Health** | 175 | 100 | 80 | 90 | 90 | 100 | 90 | 250 | 85 | 80 | 110 | 200 |
+| **Mana** | 50 | 80 | 150 | 120 | 60 | 100 | 130 | 30 | 70 | 90 | 100 | 40 |
+| **Speed** | 110 | 120 | 90 | 95 | 150 | 105 | 95 | 70 | 140 | 100 | 95 | 120 |
+| **Mana Regen** | 1.0/s | 1.5/s | 3.0/s | 2.0/s | 1.5/s | 1.5/s | 2.5/s | 0.5/s | 1.5/s | 1.0/s | 2.0/s | 0.5/s |
 
 ---
 
@@ -53,7 +53,7 @@
 
 **Basic Attack - Crossbow Bolt**
 - 60 damage projectile at 400px/s
-- Ammo system: limited arrows, must reload
+- Ammo system: 10 arrows max, must reload
 - Fires in aimed direction (right stick / movement)
 
 **Special - Grappling Hook**
@@ -78,10 +78,11 @@
 ## Mage (Wizard)
 **Color scheme:** Royal purple / Deep gold
 
-**Basic Attack - Rapid Fire Magic Bolts**
-- 6 damage per bolt at 450px/s
+**Basic Attack - Fireball**
+- Fire-type projectile at 450px/s
 - Costs mana per shot
 - Fast fire rate, aimed direction
+- Fire type: explodes balloons on contact (triggers H2 gas release + chain reactions)
 
 **Special - Mana Potion**
 - Restores 60% of max mana
@@ -100,9 +101,10 @@
 
 **Circle Ability - Air-Walk** (5s duration, 10s cooldown)
 - No gravity while active - walk on air
+- Drains mana while active
 - Sound: airwalk_activate.wav
 
-**Identity:** High sustained damage caster. Glass cannon - lowest HP but fastest mana regen (3.0/s). Mana potion ensures uptime. Beam of Light is devastating fully charged. Air-walk grants unique positioning.
+**Identity:** High sustained damage caster. Glass cannon - lowest HP but fastest mana regen (3.0/s). Mana potion ensures uptime. Beam of Light is devastating fully charged. Air-walk grants unique positioning. Fireballs are fire-type and interact with the balloon/H2 gas system for chain explosions.
 
 ---
 
@@ -153,7 +155,8 @@ Buddies automatically follow summoner, chase enemies within 120px, and attack ev
 ## Rogue
 **Color scheme:** Dark crimson / Charcoal black
 
-**Basic Attack - Knife Fan**
+**Basic Attack - Knife Fan** (3 knives)
+- 3 knives thrown in a fan pattern
 - 22 damage (tower) / 18 damage (overworld)
 - Fast attack (0.1s active window)
 - Medium range (18px)
@@ -281,3 +284,119 @@ Buddies automatically follow summoner, chase enemies within 120px, and attack ev
 - "FORTIFIED!" floating text on activation
 
 **Identity:** Ultimate tank. Highest HP in the game (250). Slowest movement (70) but nearly unkillable when fortified. Ground pound + shockwave provide crowd control. Best for absorbing boss damage.
+
+---
+
+## Ninja
+**Color scheme:** Dark purple / Black
+
+**Basic Attack - Fast Slices** (3-hit sequential)
+- 3 fast sequential slices in rapid succession
+- Quick attack speed, medium damage per hit
+- Flows naturally into movement
+
+**Special - Dive Kick**
+- Fast downward kick from air
+- Deals damage and bounces ninja upward on hit
+
+**Charge Attack - Meteor Strike**
+- Charge while airborne, then slam down as a meteor
+- Damage and blast radius scale with charge time
+- Devastating from height
+
+**Circle Ability - Air Dash / Item Pickup**
+- Dash through the air in aimed direction
+- Also pulls nearby items toward the ninja
+- Enables rapid aerial repositioning
+
+**Passive - Triple Jump**
+- Ninja can jump 3 times before needing to touch ground
+- Highest aerial mobility of any class
+
+**Identity:** Fastest aerial class. Triple jump + air dash + dive kick make the ninja unmatched in vertical mobility. Fast slices keep up pressure while meteor strike punishes from above.
+
+---
+
+## Balloonist
+**Color scheme:** Sky blue / Bright yellow
+
+**Basic Attack - Balloon Darts**
+- Fires darts that spawn physics-based balloons on hit
+- Balloons are teardrop-shaped with physics string (12 segments)
+- Balloons repulse each other, affected by wind
+- 3x fire rate, max 10 balloons active
+- Balloon weight system affects entity movement
+
+**Special - Pop All** (Triangle)
+- Pops all active balloons simultaneously
+- Each pop releases H2 gas that lingers for 25 seconds
+- H2 gas ignites on contact with fire or lava, causing chain explosions
+
+**Charge Attack - Giant Balloon**
+- Charge to create a larger balloon with more lift
+- Scales with charge time
+
+**Circle Ability - Self-Float**
+- Attach a balloon to self for temporary flight
+- Slowly rises while active
+- Can be popped by enemies or fire
+
+**Identity:** Chaos controller. Balloons create battlefield hazards through physics interactions. Pop-and-ignite combos with Mage fireballs enable devastating chain reactions. H2 gas + fire = hydrogen explosions.
+
+---
+
+## Guitarist
+**Color scheme:** Electric red / Chrome silver
+
+**Basic Attack - Musical Notes**
+- Fires musical note projectiles that travel in a sine wave pattern
+- Notes bounce and weave through the air
+- Consistent ranged damage with unique trajectory
+
+**Special - Blast Wave** (Triangle)
+- 60-degree arc shockwave in aimed direction
+- Weight-based push: lighter enemies pushed further
+- Uses entity weight system (Bat 5 = far push, Golem 150 = barely moves)
+
+**Charge Attack - Power Chord**
+- Charge up a massive sound blast
+- Damage and range scale with charge time
+- Screen shake on release
+
+**Circle Ability - Amp Up** (15s duration, 30s cooldown)
+- Amplifies all attacks with increased damage and effect radius
+- Musical VFX intensify during amp mode
+- "AMP UP!" floating text on activation
+
+**Sound Design:** Guitar sounds use Karplus-Strong string synthesis for authentic plucked-string tones (guitar_note.wav, guitar_blast.wav).
+
+**Identity:** Rhythm-based fighter with unique sine-wave projectiles. Blast wave leverages the entity weight system for tactical crowd control. Amp Up turns the guitarist into a damage powerhouse.
+
+---
+
+## Werewolf
+**Color scheme:** Dark grey / Blood red
+
+**Basic Attack - Triple Claw Slash**
+- 3-hit claw combo that shreds enemies
+- Each slash spawns 8 blood drop particles
+- Fast attack with visceral VFX
+
+**Special - Roar Push**
+- 30-degree arc directional roar
+- 250px range push effect
+- Pushes all enemies in the cone away from werewolf
+- Weight-based: lighter enemies pushed further
+
+**Charge Attack - Pounce**
+- Charge up and leap at a target
+- Distance and damage scale with charge time
+- Lands with impact damage in area
+
+**Circle Ability - Frenzy** (8s duration, 35s cooldown)
+- Attack speed dramatically increased
+- Movement speed boosted
+- Blood-red VFX aura, "FRENZY!" floating text
+- Claw attacks become even more ferocious during frenzy
+
+**Identity:** Brutal melee brawler. Triple claw slash with blood particles creates visceral combat feel. Roar provides directional crowd control. Frenzy mode turns the werewolf into an unstoppable close-range killer. Second highest HP (200) after Tank.
