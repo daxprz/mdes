@@ -13,7 +13,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_side.png",
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
-	PlayerManager.CharacterClass.JUMPER: "res://assets/sprites/characters/jumper_side.png",
+	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -426,12 +426,12 @@ func _handle_jump() -> void:
 		return
 
 	if is_on_floor():
-		var jump_vel: float = JUMPER_JUMP_VELOCITY if character_class == PlayerManager.CharacterClass.JUMPER else JUMP_VELOCITY
+		var jump_vel: float = JUMPER_JUMP_VELOCITY if character_class == PlayerManager.CharacterClass.NINJA else JUMP_VELOCITY
 		velocity.y = jump_vel
 		AudioManager.play("jump", -5.0)
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
 			_rocket_can_activate = true
-	elif character_class == PlayerManager.CharacterClass.JUMPER and _jumper_air_jumps < JUMPER_MAX_AIR_JUMPS:
+	elif character_class == PlayerManager.CharacterClass.NINJA and _jumper_air_jumps < JUMPER_MAX_AIR_JUMPS:
 		# TRIPLE JUMP - each jump slightly weaker
 		_jumper_air_jumps += 1
 		var jump_power: float = JUMPER_JUMP_VELOCITY * (1.0 - _jumper_air_jumps * 0.15)
@@ -887,7 +887,7 @@ func _perform_attack() -> void:
 			_attack_healer()
 		PlayerManager.CharacterClass.TANK:
 			_attack_tank()
-		PlayerManager.CharacterClass.JUMPER:
+		PlayerManager.CharacterClass.NINJA:
 			_attack_jumper()
 
 
@@ -1391,7 +1391,7 @@ func _perform_special() -> void:
 			_special_healing_burst()
 		PlayerManager.CharacterClass.TANK:
 			_special_tank_slam()
-		PlayerManager.CharacterClass.JUMPER:
+		PlayerManager.CharacterClass.NINJA:
 			_special_jumper_dive()
 
 
@@ -1797,7 +1797,7 @@ func _special_jumper_dive() -> void:
 
 
 func _handle_jumper_dash() -> void:
-	if character_class != PlayerManager.CharacterClass.JUMPER:
+	if character_class != PlayerManager.CharacterClass.NINJA:
 		return
 	if _jumper_dash_cooldown > 0.0:
 		_jumper_dash_cooldown -= get_process_delta_time()
@@ -1940,7 +1940,7 @@ func _throw_held_item() -> void:
 
 
 func _handle_jumper_momentum(delta: float) -> void:
-	if character_class != PlayerManager.CharacterClass.JUMPER:
+	if character_class != PlayerManager.CharacterClass.NINJA:
 		return
 
 	# Dive kick landing
@@ -2344,7 +2344,8 @@ func _handle_rogue_stealth_toggle() -> void:
 	_rogue_stealth = true
 	_rogue_stealth_timer = ROGUE_STEALTH_DURATION
 	AudioManager.play("stealth_activate")
-	# Go nearly invisible
+	# Go nearly invisible + enemies can't see us
+	remove_from_group("players")
 	modulate = Color(1.0, 1.0, 1.0, 0.15)
 
 
@@ -2371,6 +2372,7 @@ func _handle_rogue_stealth(delta: float) -> void:
 func _exit_stealth() -> void:
 	_rogue_stealth = false
 	_rogue_stealth_cooldown = ROGUE_STEALTH_COOLDOWN
+	add_to_group("players")  # Enemies can see us again
 	modulate = Color.WHITE
 	AudioManager.play("stealth_activate", -4.0, 1.3)
 
@@ -2874,6 +2876,8 @@ func _die() -> void:
 	_is_dead = true
 	_revive_progress = 0.0
 	AudioManager.play("player_die")
+	# Remove from players group so enemies stop targeting us
+	remove_from_group("players")
 	# Ghost appearance
 	modulate = Color(0.5, 0.5, 0.8, 0.4)
 	collision_layer = 0  # Can't be hit
@@ -2936,6 +2940,7 @@ func _revive() -> void:
 	_is_dead = false
 	_revive_progress = 0.0
 	AudioManager.play("player_revive")
+	add_to_group("players")  # Re-visible to enemies
 	collision_layer = 2
 	modulate = Color.WHITE
 
@@ -3280,7 +3285,7 @@ func _perform_charged_attack() -> void:
 			_charged_healer_wave(charge_ratio)
 		PlayerManager.CharacterClass.TANK:
 			_charged_tank_shockwave(charge_ratio)
-		PlayerManager.CharacterClass.JUMPER:
+		PlayerManager.CharacterClass.NINJA:
 			_charged_jumper_meteor(charge_ratio)
 
 

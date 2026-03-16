@@ -12,7 +12,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_topdown.png",
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_topdown.png",
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_topdown.png",
-	PlayerManager.CharacterClass.JUMPER: "res://assets/sprites/characters/jumper_topdown.png",
+	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -336,7 +336,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.DEMOLITIONIST: return 25
 		PlayerManager.CharacterClass.HEALER: return 10
 		PlayerManager.CharacterClass.TANK: return 45
-		PlayerManager.CharacterClass.JUMPER: return 15
+		PlayerManager.CharacterClass.NINJA: return 15
 	return 10
 
 
@@ -370,7 +370,7 @@ func _perform_special() -> void:
 			_special_healer()
 		PlayerManager.CharacterClass.TANK:
 			_special_tank_slam()
-		PlayerManager.CharacterClass.JUMPER:
+		PlayerManager.CharacterClass.NINJA:
 			_special_jumper_dash_attack()
 
 
@@ -720,7 +720,7 @@ func _handle_circle_abilities(delta: float) -> void:
 			_handle_healer_wind_gust()
 		PlayerManager.CharacterClass.TANK:
 			_handle_tank_fortify(delta)
-		PlayerManager.CharacterClass.JUMPER:
+		PlayerManager.CharacterClass.NINJA:
 			_handle_jumper_dash()
 
 
@@ -1278,13 +1278,13 @@ func _handle_tank_fortify(delta: float) -> void:
 # -- Jumper Abilities ----------------------------------------------------------
 
 var _jumper_dash_cooldown: float = 0.0
-const JUMPER_DASH_COOLDOWN_TD := 0.8
-const JUMPER_DASH_SPEED_TD := 400.0
+const NINJA_DASH_COOLDOWN_TD := 0.8
+const NINJA_DASH_SPEED_TD := 400.0
 
 func _special_jumper_dash_attack() -> void:
 	# Quick dash in aimed direction + damage at endpoint
 	var aim: Vector2 = _get_aim_direction()
-	velocity = aim * JUMPER_DASH_SPEED_TD
+	velocity = aim * NINJA_DASH_SPEED_TD
 	AudioManager.play("shadow_dash", -2.0, 1.5)
 	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.5), Vector2(14, 14))
 	# Damage at destination
@@ -1305,8 +1305,8 @@ func _handle_jumper_dash() -> void:
 	if _jumper_dash_cooldown > 0.0:
 		_spawn_fail_flash()
 		return
-	_jumper_dash_cooldown = JUMPER_DASH_COOLDOWN_TD
+	_jumper_dash_cooldown = NINJA_DASH_COOLDOWN_TD
 	var aim: Vector2 = _get_aim_direction()
-	velocity = aim * JUMPER_DASH_SPEED_TD
+	velocity = aim * NINJA_DASH_SPEED_TD
 	AudioManager.play("shadow_dash", -2.0, 1.5)
 	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.4), Vector2(10, 10))
