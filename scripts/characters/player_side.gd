@@ -1801,8 +1801,8 @@ func _handle_jumper_dash() -> void:
 		return
 	if _jumper_dash_cooldown > 0.0:
 		_jumper_dash_cooldown -= get_process_delta_time()
-	if _jumper_steal_cooldown > 0.0:
-		_jumper_steal_cooldown -= get_process_delta_time()
+	if _jumper_pickup_cooldown > 0.0:
+		_jumper_pickup_cooldown -= get_process_delta_time()
 
 	if not _is_device_action_just_pressed("interact"):
 		return
