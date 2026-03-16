@@ -41,6 +41,7 @@ func _ready() -> void:
 
 	_setup_camera()
 	_setup_name_entry()
+	_setup_version_label()
 
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
@@ -130,6 +131,22 @@ func _setup_name_entry() -> void:
 	add_child(_name_entry)
 	_name_entry.name_confirmed.connect(_on_name_confirmed)
 	_name_entry.cancelled.connect(_on_name_cancelled)
+
+
+func _setup_version_label() -> void:
+	var ver_label := Label.new()
+	ver_label.text = "v" + Version.get_string()
+	ver_label.add_theme_font_size_override("font_size", 12)
+	ver_label.modulate = Color(0.5, 0.5, 0.5, 0.6)
+	ver_label.anchor_left = 1.0
+	ver_label.anchor_right = 1.0
+	ver_label.anchor_top = 0.0
+	ver_label.offset_left = -80
+	ver_label.offset_right = -10
+	ver_label.offset_top = 10
+	ver_label.offset_bottom = 30
+	ver_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	$UI.add_child(ver_label)
 
 
 # -- Process -------------------------------------------------------------------
