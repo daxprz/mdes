@@ -2,13 +2,12 @@
 
 ## 1. Player Join System
 
-- Up to 4 players can join at any time by pressing START (Options) / Enter
-- On first START press, player must select or create a profile via ProfileManager
-- Once a profile is chosen, the player joins with their preferred class
+- Up to 4 players — connected controllers auto-join on the title screen
+- Keyboard is NOT auto-joined (controller-only game)
 - Each player is assigned the next available player index (0-3)
-- If preferred class is taken, next preference from stack-rank is used
-- Players can join mid-game in any scene - they spawn at the scene's spawn point
-- Controller disconnect removes the player
+- A guest profile is auto-created if no saved profile exists for the controller
+- Controller hot-plug: connecting mid-title-screen auto-joins, disconnecting removes the player
+- Players can also join mid-game via START in any scene
 
 ## 2. Death & Revive System
 
@@ -50,14 +49,17 @@ Towers are procedurally generated based on `tower_id`:
 
 Dynamic camera that keeps all players on screen:
 - Calculates bounding box of all players + donut buddies
-- Centers on the midpoint of all players
+- Centers on the midpoint of all players, shifted up to account for bottom HUD
+- Reserves 90px at viewport bottom for the PlayerHUD strip
+- Zoom uses reduced usable height so players aren't framed behind HUD
 - Zooms out when players spread apart, in when close
 - Smooth lerp at speed 4.0
 - Configurable min/max zoom and margin per scene
+- Title screen uses a fixed camera (no pan/zoom) centered at (960, 495)
 
 | Scene | Min Zoom | Max Zoom | Margin |
 |-------|----------|----------|--------|
-| Title Screen | 0.8 | 1.3 | 200×150 |
+| Title Screen | Fixed | Fixed | N/A |
 | Overworld | 0.6 | 1.2 | 200×150 |
 | Tower | 0.5 | 1.8 | 100×80 |
 | Boss Arena | 0.6 | 1.2 | 150×100 |
@@ -389,27 +391,120 @@ Weight affects:
 
 ---
 
-## 24. Always-Visible HUD
+## 24. Inline Player HUD
 
-The HUD displays persistent information across all scenes:
+`PlayerHUD` autoload (CanvasLayer 100) — always visible across all game states.
 
-**Top Center:** Total muffins collected (all players combined)
-**Top Right:** Per-player stats (health, mana, class icon, level)
+**Layout:** 1-4 panels at bottom-center, evenly spaced based on connected controllers.
+Dark backing strip spans full width, 80px tall with 10px bottom margin.
 
-The HUD remains visible during gameplay and updates in real-time.
+**Each panel shows:**
+- Class sprite (first frame of side spritesheet via AtlasTexture, 32×32)
+- Profile name (default "P1"-"P4", updates when profile selected)
+- Class name (updates on class change)
+- HP bar (red) and mana bar (blue)
+- Status line: tentacle/class-change status or selection hints
+
+**HUD Status Indicators:**
+| State | Text | Color |
+|-------|------|-------|
+| Available | "L/R: change class" | Green |
+| Rift active (15s) | "RIFT ACTIVE..." | Red |
+| Tentacle lost | "TENTACLE LOST" | Dark red |
+| Title screen | "D-Pad: profile/class \| START: new profile" | Grey |
+
+**Top Center:** Total muffins collected (hidden on title screen)
 
 ---
 
-## 25. Profile System (Enhanced)
+## 25. Inline Profile & Class Selection
 
-**Auto-Join on Return:**
-- When a player quits to menu and returns, they auto-join with their previous profile
-- No re-selection needed for returning players
+**Profile Selection (Title Screen Only):**
+- D-pad up/down cycles through available profiles
+- Profiles already bound to another controller are skipped
+- START opens name entry overlay to create a new profile
+- Newly created profile auto-selects for that player
 
-**Fresh Launch Flow:**
-- On first launch, profile selection screen appears
-- Triangle button switches between profiles on title screen
-- D-pad left/right cycles class selection on title screen
+**Class Selection (Any Game State):**
+- D-pad left/right cycles through available classes
+- Classes taken by other players are skipped
+- Keyboard: Q/E for class, R/F for profile (title only)
+
+**Class Change VFX Sequence:**
+1. Red portal + smoke poof at player position
+2. Character sprite swaps in-place
+3. Player briefly becomes ghost (semi-transparent)
+4. Rift tentacle spawns (see System 27)
+5. 15-second class-change lockout while rift is active
+
+---
+
+## 26. Display Settings
+
+| Setting | Value |
+|---------|-------|
+| Viewport | 1920×1080 |
+| Window Mode | Fullscreen (mode 3) |
+| Stretch Mode | canvas_items |
+| Stretch Aspect | expand |
+| Texture Filter | Nearest (pixel-perfect) |
+| Renderer | GL Compatibility |
+
+---
+
+## 27. Rift Tentacle System
+
+When a player changes class, a red rift portal opens and a multi-segmented
+tentacle emerges. The tentacle uses verlet physics (14 segments, ~126px).
+
+**Phases:**
+| Phase | Duration | Behavior |
+|-------|----------|----------|
+| Wiggle | 0-5s | Confused wiggling, sine-wave motion |
+| Hunt | 5-15s | AI seeks nearest non-owner player OR enemy |
+| Smash (player) | On grab | 4 smashes (8 dmg each) + smoke bursts, then fling |
+| Attached (enemy) | Permanent | Buffs enemy, attacks nearby players |
+
+**Player Grab:** 4 back-and-forth smashes at 8 damage each with smoke VFX,
+then flings the player away. Returns to hunt phase.
+
+**Enemy Grab:** Permanently attaches to enemy with buffs:
+- 2× health, 1.5× scale, red-purple tint
+- Tentacle follows enemy indefinitely with smaller red-purple rift
+- Attacks nearby players: single pound + random high-speed fling (600px/s)
+- 4-second cooldown between attacks
+
+**Tentacle Sub-Health (50 HP):**
+- When attached to an enemy, all damage to the enemy goes to tentacle first
+- Rift size visually scales with remaining tentacle health
+- At 0 HP: large purple smoke puff, tentacle vanishes, enemy restored to normal
+- Owner player's class-change ability is restored
+
+**Limits:**
+- Max 4 active tentacles in-game at once
+- If tentacle attaches to enemy, owner permanently loses class-change ability
+  (until next level or tentacle is destroyed)
+- All tentacle state resets on level/scene transitions
+
+**Visual:**
+- Purple outer / light-purple inner segments
+- Circular suckers alternating sides at segment joints
+- Menacing curled hook at the tip
+- Red glow on player grab, purple glow when attached to enemy
+
+---
+
+## 28. Health Pickup System
+
+Enemies have a 25% chance to drop a health pickup on death.
+
+**Appearance:** Green + shaped item (drawn with `_draw()`), pulsing glow
+**Sparkles:** Green particles spawn every 0.3s, float upward and fade
+**Motion:** Pops up 30px on spawn, then bobbles gently up and down
+**Heal:** 15 HP on player contact
+**Despawn:** Fades out after 30 seconds if not collected
+**Collect VFX:** Burst of 6 green sparkles + scale-up fade
+**Sound:** "muffin_collect" at -3dB, pitch 1.3
 
 ---
 

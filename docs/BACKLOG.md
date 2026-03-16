@@ -713,6 +713,47 @@ playing in the lobby arena. The HUD persists throughout all game modes.
 
 ---
 
+## EPIC 28: Rift Tentacle System (`mechanics`)
+Tentacle emerges from a red rift portal when players change class.
+
+### Story 28.1: Base Tentacle
+- [x] Task: Verlet physics tentacle (14 segments, ~126px) with purple visual
+- [x] Task: Phase 0 (0-5s): confused wiggling
+- [x] Task: Phase 1 (5-15s): hunt nearest non-owner player, lunge at 1.5x reach
+- [x] Task: Phase 2 (grab): 4 smashes (8 dmg each) + smoke VFX + fling
+- [x] Task: Red portal + ghost + smoke poof on class change
+- [x] Task: 15-second class-change lockout during rift
+
+### Story 28.2: Enemy Attachment
+- [x] Task: Tentacle also grabs enemies (permanent attach)
+- [x] Task: Enemy buff: 2x health, 1.5x scale, red-purple tint
+- [x] Task: Attached tentacle attacks players: single pound + random fling
+- [x] Task: Owner permanently loses class-change ability on attachment
+
+### Story 28.3: Tentacle Sub-Health
+- [x] Task: 50 HP sub-health absorbs damage before enemy takes it
+- [x] Task: Rift size scales with tentacle health
+- [x] Task: At 0 HP: purple smoke puff, enemy restored, owner unlocked
+- [x] Task: Patched boss_base.gd + all 18 enemy take_damage functions
+
+### Story 28.4: Tentacle Limits & Reset
+- [x] Task: Max 4 active tentacles in-game
+- [x] Task: All tentacle state resets on level/scene transition
+- [x] Task: HUD shows tentacle status (available/active/lost)
+
+---
+
+## EPIC 29: Item Drops (`mechanics`)
+
+### Story 29.1: Health Pickup
+- [x] Task: Green + shaped health pickup with sparkle particles
+- [x] Task: 25% drop chance on enemy death (all 18 enemy types)
+- [x] Task: Heals 15 HP on player contact
+- [x] Task: 30-second despawn timer, bobble animation
+- [x] Task: Collect VFX: green particle burst + scale-up fade
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)

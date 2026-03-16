@@ -4,7 +4,7 @@ extends Area2D
 ## Spawned with a 25% chance when enemies die.
 
 const HEAL_AMOUNT := 15
-const LIFETIME := 12.0  # Despawn after this many seconds
+const LIFETIME := 30.0  # Despawn after this many seconds
 const BOBBLE_SPEED := 3.0
 const BOBBLE_HEIGHT := 4.0
 const SPARKLE_INTERVAL := 0.3
