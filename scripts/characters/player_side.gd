@@ -3521,15 +3521,16 @@ func _handle_charge(delta: float) -> void:
 			_is_charging = true
 			velocity.y = 0.0  # Freeze in air immediately
 
-		# EXCEPTION: Werewolf charges instantly on hold (pounce)
-		if character_class == PlayerManager.CharacterClass.WEREWOLF and _attack_cooldown <= 0.0:
-			_is_charging = true
+		# Werewolf: track press start but DON'T charge instantly
+		# (quick taps need to do triple slash, hold does pounce)
+		if character_class == PlayerManager.CharacterClass.WEREWOLF:
 			_charge_time = 0.0
 
-	# Transition from normal hold to charge after holding for 0.3s
+	# Transition from normal hold to charge (0.15s for werewolf, 0.3s others)
 	if pressing_attack and _was_pressing_attack and not _is_charging and _attack_cooldown <= 0.0:
 		_charge_time += delta
-		if _charge_time >= 0.3:
+		var charge_threshold: float = 0.15 if character_class == PlayerManager.CharacterClass.WEREWOLF else 0.3
+		if _charge_time >= charge_threshold:
 			# Now start charging
 			_is_charging = true
 			_charge_time = 0.3
