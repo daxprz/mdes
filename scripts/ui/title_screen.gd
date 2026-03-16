@@ -96,9 +96,20 @@ func _ready() -> void:
 				var guest: Dictionary = ProfileManager.create_profile("Player %d" % (pi + 1))
 				ProfileManager.bind_device_to_profile(dev_id, guest)
 			PlayerManager._try_join(dev_id)
-			# Override class to what they had
-			if PlayerManager.players.has(pi):
-				var p_data: Dictionary = PlayerManager.players[pi]
+		# Override classes AFTER all players joined (deferred)
+		call_deferred("_apply_saved_classes", saved_choices)
+
+
+func _apply_saved_classes(saved_choices: Dictionary) -> void:
+	# Match by device_id since player_index might differ
+	for pi in saved_choices.keys():
+		var choice: Dictionary = saved_choices[pi]
+		var dev_id: int = choice.get("device_id", -1)
+		var char_class: int = choice.get("character_class", 0)
+		# Find which player has this device
+		for p_idx in PlayerManager.players.keys():
+			var p_data: Dictionary = PlayerManager.players[p_idx]
+			if p_data.get("device_id", -99) == dev_id:
 				p_data["character_class"] = char_class
 				var stats: Dictionary = PlayerManager.CLASS_STATS.get(char_class, {})
 				if not stats.is_empty():
@@ -108,6 +119,10 @@ func _ready() -> void:
 					p_data["mana"] = stats["max_mana"]
 					p_data["speed"] = stats["speed"]
 					p_data["mana_regen"] = stats["mana_regen"]
+				_update_slot(p_idx)
+				_remove_lobby_player(p_idx)
+				_spawn_lobby_player(p_idx)
+				break
 	_refresh_all_slots()
 	_update_start_visibility()
 	_setup_camera()
