@@ -367,19 +367,81 @@ func _spawn_hydrogen_explosion() -> void:
 
 
 func _spawn_pop_particles() -> void:
-	for i in range(8):
+	var pos: Vector2 = _balloon_pos
+
+	# Big white flash at center
+	var flash := ColorRect.new()
+	flash.color = Color(1.0, 1.0, 1.0, 0.8)
+	flash.size = Vector2(40, 40)
+	flash.position = pos - Vector2(20, 20)
+	flash.z_index = 12
+	get_parent().add_child(flash)
+	var ft := flash.create_tween()
+	ft.tween_property(flash, "modulate:a", 0.0, 0.15)
+	ft.tween_callback(flash.queue_free)
+
+	# Expanding balloon-colored ring
+	var ring := ColorRect.new()
+	ring.color = _balloon_color
+	ring.color.a = 0.6
+	ring.size = Vector2(16, 16)
+	ring.position = pos - Vector2(8, 8)
+	ring.pivot_offset = Vector2(8, 8)
+	ring.z_index = 11
+	get_parent().add_child(ring)
+	var rt := ring.create_tween()
+	rt.set_parallel(true)
+	rt.tween_property(ring, "scale", Vector2(5.0, 5.0), 0.25)
+	rt.tween_property(ring, "modulate:a", 0.0, 0.3)
+	rt.chain().tween_callback(ring.queue_free)
+
+	# Rubber shred particles flying everywhere
+	for i in range(20):
 		var p := ColorRect.new()
-		p.color = _balloon_color
-		p.color.a = 0.7
-		p.size = Vector2(4, 4)
-		p.position = _balloon_pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
-		p.z_index = 8
+		if i % 3 == 0:
+			p.color = _balloon_color
+		elif i % 3 == 1:
+			p.color = _balloon_color.darkened(0.3)
+		else:
+			p.color = Color(1.0, 1.0, 1.0, 0.6)
+		var psize: float = randf_range(3, 8)
+		p.size = Vector2(psize, psize * randf_range(0.3, 1.0))
+		p.rotation = randf_range(0, TAU)
+		p.position = pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		p.z_index = 10
 		get_parent().add_child(p)
-		var vel: Vector2 = Vector2(randf_range(-60, 60), randf_range(-60, 30))
+		var vel: Vector2 = Vector2(randf_range(-150, 150), randf_range(-180, 60))
 		var pt := p.create_tween()
-		pt.tween_property(p, "position", p.position + vel * 0.3, 0.3)
-		pt.parallel().tween_property(p, "modulate:a", 0.0, 0.3)
-		pt.tween_callback(p.queue_free)
+		pt.set_parallel(true)
+		pt.tween_property(p, "position", p.position + vel * 0.4, 0.4)
+		pt.tween_property(p, "modulate:a", 0.0, 0.45)
+		pt.tween_property(p, "rotation", p.rotation + randf_range(-3, 3), 0.4)
+		pt.chain().tween_callback(p.queue_free)
+
+	# Small smoke puffs
+	for i in range(6):
+		var smoke := ColorRect.new()
+		smoke.color = Color(0.7, 0.7, 0.7, 0.3)
+		smoke.size = Vector2(8, 8)
+		smoke.position = pos + Vector2(randf_range(-10, 10), randf_range(-10, 5))
+		smoke.z_index = 9
+		get_parent().add_child(smoke)
+		var st := smoke.create_tween()
+		st.set_parallel(true)
+		st.tween_property(smoke, "position:y", smoke.position.y - randf_range(15, 35), 0.6)
+		st.tween_property(smoke, "modulate:a", 0.0, 0.7)
+		st.tween_property(smoke, "scale", Vector2(2.5, 2.5), 0.7)
+		st.chain().tween_callback(smoke.queue_free)
+
+	# Screen shake on pop
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		var orig: Vector2 = cam.offset
+		for s in range(4):
+			cam.offset = orig + Vector2(randf_range(-3, 3), randf_range(-3, 3))
+			await get_tree().create_timer(0.03).timeout
+		if is_instance_valid(cam):
+			cam.offset = orig
 
 
 func _detach_and_free() -> void:
