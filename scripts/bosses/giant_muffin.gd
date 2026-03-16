@@ -32,7 +32,7 @@ func _setup_boss() -> void:
 		sprite.scale = Vector2(3.0, 3.0)
 
 	var shape := RectangleShape2D.new()
-	shape.size = Vector2(72, 72)
+	shape.size = Vector2(120, 120)
 	collision_shape.shape = shape
 
 	add_to_group("bosses")

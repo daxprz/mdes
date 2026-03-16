@@ -103,7 +103,8 @@ func _update_dart(delta: float) -> void:
 		if not body is Node2D:
 			continue
 		var dist: float = _dart_pos.distance_to(body.global_position)
-		if dist < 16.0:
+		var hit_radius: float = 50.0 if body.is_in_group("bosses") else 16.0
+		if dist < hit_radius:
 			_dart_active = false
 			_attached_to = body
 			_balloon_inflating = true
@@ -508,20 +509,47 @@ func _draw() -> void:
 		var string_color := Color(0.6, 0.6, 0.6, 0.7)
 		draw_line(p1, p2, string_color, 1.0)
 
-	# Draw balloon
+	# Draw balloon (teardrop shape)
 	if _balloon_inflating or _balloon_radius > 2.0:
 		var local_balloon: Vector2 = _balloon_pos - global_position
-
-		# Balloon body (oval)
 		var r: float = _balloon_radius
-		# Outer
-		draw_circle(local_balloon, r, _balloon_color)
-		# Highlight
-		draw_circle(local_balloon + Vector2(-r * 0.3, -r * 0.3), r * 0.3, Color(1, 1, 1, 0.4))
-		# Knot at bottom
-		draw_circle(local_balloon + Vector2(0, r * 0.8), 2.0, _balloon_color.darkened(0.3))
+
+		# Teardrop shape using polygon: wide top, narrow bottom point
+		var segments: int = 16
+		var points := PackedVector2Array()
+		var colors := PackedColorArray()
+		for i in range(segments):
+			var angle: float = TAU * float(i) / float(segments)
+			# Teardrop: wider at top (negative y), narrower at bottom
+			var rx: float = r * cos(angle)
+			var ry: float
+			if sin(angle) > 0:
+				# Bottom half: pinch to a point
+				ry = r * sin(angle) * 1.4  # Elongated downward
+				rx *= (1.0 - sin(angle) * 0.6)  # Narrow toward bottom
+			else:
+				# Top half: round and full
+				ry = r * sin(angle) * 0.9
+			points.append(local_balloon + Vector2(rx, ry))
+			colors.append(_balloon_color)
+		if points.size() >= 3:
+			draw_polygon(points, colors)
+
+		# Highlight (shiny spot on upper-left)
+		draw_circle(local_balloon + Vector2(-r * 0.25, -r * 0.35), r * 0.25, Color(1, 1, 1, 0.35))
+
+		# Knot at bottom tip
+		var knot_pos: Vector2 = local_balloon + Vector2(0, r * 1.3)
+		draw_circle(knot_pos, 2.0, _balloon_color.darkened(0.3))
+
+		# Small triangle tie at knot
+		var tie_points := PackedVector2Array([
+			knot_pos + Vector2(-3, -2),
+			knot_pos + Vector2(3, -2),
+			knot_pos + Vector2(0, 3),
+		])
+		draw_polygon(tie_points, PackedColorArray([_balloon_color.darkened(0.2), _balloon_color.darkened(0.2), _balloon_color.darkened(0.2)]))
 
 		# Tie string to balloon knot
-		var knot: Vector2 = local_balloon + Vector2(0, r * 0.8)
 		var last_string: Vector2 = _string_points[STRING_SEGMENTS - 1] - global_position
-		draw_line(last_string, knot, Color(0.6, 0.6, 0.6, 0.7), 1.0)
+		draw_line(last_string, knot_pos, Color(0.6, 0.6, 0.6, 0.7), 1.0)

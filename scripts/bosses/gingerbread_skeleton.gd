@@ -27,7 +27,7 @@ func _setup_boss() -> void:
 
 	# Collision
 	var shape := RectangleShape2D.new()
-	shape.size = Vector2(48, 56)
+	shape.size = Vector2(80, 90)
 	collision_shape.shape = shape
 	collision_shape.position = Vector2(0, -4)
 
