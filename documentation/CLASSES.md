@@ -56,12 +56,19 @@
 - Ammo system: 10 arrows max, must reload
 - Fires in aimed direction (right stick / movement)
 
-**Special - Grappling Hook**
-- Fires in aimed direction, 250px range
-- Hits wall/platform: pulls player to that point
-- Hits enemy: pulls player TO enemy + 20 damage
-- Raycasts for collision, rope visual connects player to hook
-- Sound: grapple_launch.wav (fire), grapple_hit.wav (impact)
+**Special - Physics Grappling Hook**
+- Hold button: hook swings in a circle (4–12 rad/s, speeds up over time)
+- Release: thrown in thumbstick direction with gravity arc
+- Longer hold = faster swing = farther throw (200–500 px/s)
+- Connects to walls or entities on contact (10 damage on hit)
+- Wall: player launches toward anchor, then swings as pendulum
+  - Left/right: adjust swing momentum. Up/down: adjust rope length
+  - Press grapple again: release with full swing momentum (fling)
+- Enemy: same swing, but press grapple again to **tug** (Newtonian F=ma)
+  - Light enemies flung toward player, heavy enemies pull player toward them
+  - Equal mass = both pulled together (10 damage on tug)
+- Rope rendered as verlet chain (20 segments)
+- Sound: grapple_launch.wav (throw), grapple_hit.wav (connect)
 
 **Charge Attack - Piercing Shot**
 - Charged bolt that pierces enemies, bigger projectile
@@ -71,7 +78,7 @@
 - Hold Circle to reload arrows (1.5s reload time)
 - reload_click.wav on completion
 
-**Identity:** High single-target damage dealer. Ammo management adds tactical depth. Grappling hook provides mobility and engage/escape options.
+**Identity:** High single-target damage dealer. Ammo management adds tactical depth. Physics grappling hook provides momentum-based traversal, enemy manipulation via mass-based tug mechanics, and dynamic engage/escape options.
 
 ---
 

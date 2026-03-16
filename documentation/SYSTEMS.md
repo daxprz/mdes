@@ -347,19 +347,32 @@ Balloons are core to the Balloonist class and interact with multiple game system
 
 ---
 
-## 21. Entity Weight System
+## 21. Entity Mass System
 
-Entities have weight values that affect physics interactions (knockback, push, balloon lift).
+Every entity has a `mass` property used for all physics interactions:
+grapple tug, knockback, blast wave push, balloon lift.
 
-| Entity | Weight |
-|--------|--------|
-| Bat (Fairy Cake Bat) | 5 |
-| Skeleton | 30 |
-| Player | 70 |
-| Candy Golem | 150 |
-| Boss | 300 |
+| Entity | Mass | Category |
+|--------|------|----------|
+| Sprinkle Swarm | 5 | Tiny |
+| Fairy Cake Bat | 8 | Tiny |
+| Peppermint Roller | 25 | Small |
+| Candy Corn | 25 | Small |
+| Skeleton | 30 | Small |
+| Cookie Archer | 30 | Small |
+| Jellybean Sniper | 30 | Small |
+| Cupcake Bomber | 35 | Medium |
+| Licorice Whip | 40 | Medium |
+| Marshmallow Blob | 50 | Medium |
+| Wafer Shield | 55 | Medium |
+| Gummy Bear | 60 | Medium |
+| Player | 70 | Reference |
+| Mini-bosses | 120 | Heavy |
+| Candy Golem | 150 | Heavy |
+| Bosses | 300 | Very Heavy |
 
-Weight affects:
+Mass affects:
+- Grapple tug: F=ma applied to both ends (see §29)
 - Guitarist blast wave push distance (lighter = pushed further)
 - Werewolf roar push distance
 - Balloon lift (lighter entities float higher)
@@ -505,6 +518,41 @@ Enemies have a 25% chance to drop a health pickup on death.
 **Despawn:** Fades out after 30 seconds if not collected
 **Collect VFX:** Burst of 6 green sparkles + scale-up fade
 **Sound:** "muffin_collect" at -3dB, pitch 1.3
+
+---
+
+## 29. Physics-Based Grappling Hook (Ranger)
+
+Full physics simulation replacing the old raycast grapple. See
+`docs/design/grappling_hook_physics.md` for detailed constants and formulas.
+
+**State Machine:** IDLE → WINDUP → THROWN → CONNECTED → SWINGING → RETRACTING
+
+**Windup:** Hold grapple button to swing the hook in a circle. Angular velocity
+increases with hold time (4–12 rad/s). Visual: hook orbiting at 40px radius.
+
+**Throw:** Release in thumbstick direction. Speed scales with hold time
+(200–500 px/s). Hook follows a gravity arc. Rope trails as verlet chain.
+
+**Connection:** Hook anchors to walls (StaticBody2D) or entities. Player
+launches toward anchor at 50% of jump velocity.
+
+**Pendulum Swing:** At apex, rope goes taut. Player swings as a pendulum
+(`α = -(g/L)*sin(θ)`). Left/right adjusts momentum, up/down adjusts rope length.
+
+**Release (Wall):** Player retains swing momentum. Rope retracts visually.
+
+**Tug (Enemy):** Newtonian physics — constant force applied, both entities
+accelerate proportionally to `F/mass`. Light enemies flung toward player,
+equal mass = mutual pull, heavy enemies = player flung toward them.
+
+| Tug Result | Mass Ratio (enemy/player) |
+|------------|--------------------------|
+| Enemy flung hard | < 0.5 |
+| Enemy pulled | 0.5 – 0.8 |
+| Both pulled equally | 0.8 – 1.2 |
+| Player pulled | 1.2 – 2.0 |
+| Player flung toward enemy | > 2.0 |
 
 ---
 
