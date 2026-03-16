@@ -17,6 +17,7 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.NINJA,
 	PlayerManager.CharacterClass.BALLOONIST,
 	PlayerManager.CharacterClass.GUITARIST,
+	PlayerManager.CharacterClass.WEREWOLF,
 ]
 
 const CLASS_NAMES := {
@@ -31,6 +32,7 @@ const CLASS_NAMES := {
 	PlayerManager.CharacterClass.NINJA: "Ninja",
 	PlayerManager.CharacterClass.BALLOONIST: "Balloonist",
 	PlayerManager.CharacterClass.GUITARIST: "Guitarist",
+	PlayerManager.CharacterClass.WEREWOLF: "Werewolf",
 }
 
 const CLASS_COLORS := {
@@ -45,6 +47,7 @@ const CLASS_COLORS := {
 	PlayerManager.CharacterClass.NINJA: Color(0.2, 0.9, 0.9),
 	PlayerManager.CharacterClass.BALLOONIST: Color(0.9, 0.4, 0.7),
 	PlayerManager.CharacterClass.GUITARIST: Color(0.9, 0.7, 0.2),
+	PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
 }
 
 const EMPTY_SLOT_COLOR := Color(0.3, 0.3, 0.3, 1.0)

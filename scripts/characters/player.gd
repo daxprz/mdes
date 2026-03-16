@@ -15,6 +15,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_topdown.png",
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_topdown.png",
 	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_topdown.png",
+	PlayerManager.CharacterClass.WEREWOLF: "res://assets/sprites/characters/werewolf_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -206,6 +207,8 @@ func _handle_movement(_delta: float) -> void:
 	var speed: float = PlayerManager.get_player(player_index).get("speed", 100)
 	if _melee_enraged:
 		speed *= MELEE_ENRAGE_SPEED_MULT
+	if _werewolf_frenzy_active_td:
+		speed *= 1.25
 	velocity = input_vec * speed
 
 	if _is_moving:
@@ -278,6 +281,11 @@ func _perform_attack() -> void:
 		_attack_guitarist_topdown()
 		return
 
+	# Werewolf triple claw slash
+	if character_class == PlayerManager.CharacterClass.WEREWOLF:
+		_attack_werewolf_topdown()
+		return
+
 	# Position the attack area based on facing direction
 	var offset := Vector2.ZERO
 	match _direction:
@@ -346,6 +354,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.NINJA: return 15
 		PlayerManager.CharacterClass.BALLOONIST: return 8
 		PlayerManager.CharacterClass.GUITARIST: return 12
+		PlayerManager.CharacterClass.WEREWOLF: return 15
 	return 10
 
 
@@ -385,6 +394,8 @@ func _perform_special() -> void:
 			_special_balloonist_burst_topdown()
 		PlayerManager.CharacterClass.GUITARIST:
 			_special_guitarist_blast_topdown()
+		PlayerManager.CharacterClass.WEREWOLF:
+			_special_werewolf_roar_topdown()
 
 
 func _special_melee() -> void:
@@ -739,6 +750,8 @@ func _handle_circle_abilities(delta: float) -> void:
 			pass  # No Circle ability in top-down
 		PlayerManager.CharacterClass.GUITARIST:
 			_handle_guitarist_amp_up_topdown(delta)
+		PlayerManager.CharacterClass.WEREWOLF:
+			_handle_werewolf_frenzy_topdown(delta)
 
 
 # -- Melee Enrage (Circle) ----------------------------------------------------
@@ -1605,3 +1618,169 @@ func _handle_guitarist_amp_up_topdown(delta: float) -> void:
 			_guitarist_amp_up_active_td = false
 			_guitarist_amp_up_cooldown_td = GUITARIST_AMP_COOLDOWN_TD
 			modulate = Color.WHITE
+
+
+# -- Werewolf (topdown) -------------------------------------------------------
+
+var _werewolf_frenzy_active_td: bool = false
+var _werewolf_frenzy_timer_td: float = 0.0
+var _werewolf_frenzy_cooldown_td: float = 0.0
+const WEREWOLF_FRENZY_DURATION_TD := 8.0
+const WEREWOLF_FRENZY_COOLDOWN_TD := 35.0
+
+
+func _attack_werewolf_topdown() -> void:
+	# Triple claw slash in aimed direction
+	var base_cooldown: float = 0.5
+	if _werewolf_frenzy_active_td:
+		base_cooldown *= 0.5
+	_attack_cooldown = base_cooldown
+
+	var aim: Vector2 = _get_aim_direction()
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
+	if _werewolf_frenzy_active_td:
+		attack_bonus *= 1.3
+	var slash_damage: int = int(15 * attack_bonus)
+
+	for slash_i in range(3):
+		if not is_inside_tree():
+			return
+		if slash_i > 0:
+			await get_tree().create_timer(0.05).timeout
+			if not is_inside_tree():
+				return
+		AudioManager.play("sword_slash", 2.0, 1.3)
+
+		# Slash VFX
+		var slash := ColorRect.new()
+		slash.color = Color(1.0, 1.0, 1.0, 0.8)
+		var offset_angle: float = -0.3 + slash_i * 0.3
+		var slash_dir: Vector2 = aim.rotated(offset_angle)
+		var slash_start: Vector2 = global_position + slash_dir * 8.0
+		slash.size = Vector2(30, 3)
+		slash.position = slash_start
+		slash.rotation = slash_dir.angle() + 0.785
+		slash.z_index = 8
+		slash.pivot_offset = Vector2(0, 1.5)
+		get_parent().add_child(slash)
+
+		var st := slash.create_tween()
+		st.set_parallel(true)
+		st.tween_property(slash, "position", slash_start + slash_dir * 20.0, 0.1)
+		st.tween_property(slash, "modulate:a", 0.0, 0.15)
+		st.chain().tween_callback(slash.queue_free)
+
+		# Hit detection
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = global_position.distance_to(body.global_position)
+			var to_enemy: Vector2 = body.global_position - global_position
+			var dot_val: float = to_enemy.normalized().dot(aim)
+			if dist < 45.0 and dot_val > 0.3:
+				if body.has_method("take_damage"):
+					body.take_damage(slash_damage, player_index)
+					_spawn_blood_particles(body.global_position)
+
+
+func _special_werewolf_roar_topdown() -> void:
+	# Roar Push - no mana cost, narrow 30-degree arc
+	AudioManager.play("boss_roar", 3.0, 1.2)
+	AudioManager.play("wind_gust", 2.0, 0.7)
+	_special_cooldown = 2.0
+
+	var aim: Vector2 = _get_aim_direction()
+	var aim_angle: float = aim.angle()
+	var half_arc: float = deg_to_rad(15.0)
+	var push_range: float = 250.0
+	var push_force: float = 500.0
+
+	# Cone VFX
+	var cone := ColorRect.new()
+	cone.color = Color(0.9, 0.9, 0.9, 0.5)
+	cone.size = Vector2(push_range, 30)
+	cone.position = global_position
+	cone.rotation = aim_angle - 0.06
+	cone.pivot_offset = Vector2(0, 15)
+	cone.z_index = 7
+	get_parent().add_child(cone)
+
+	var ct := cone.create_tween()
+	ct.set_parallel(true)
+	ct.tween_property(cone, "scale", Vector2(1.2, 2.0), 0.2)
+	ct.tween_property(cone, "modulate:a", 0.0, 0.3)
+	ct.chain().tween_callback(cone.queue_free)
+
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var to_enemy: Vector2 = body.global_position - global_position
+		var dist: float = to_enemy.length()
+		if dist > push_range:
+			continue
+		var angle_to: float = to_enemy.angle()
+		var angle_diff: float = abs(wrapf(angle_to - aim_angle, -PI, PI))
+		if angle_diff > half_arc:
+			continue
+		if body.has_method("take_damage"):
+			body.take_damage(10, player_index)
+		if body.has_method("apply_knockback"):
+			var kb_dir: Vector2 = to_enemy.normalized()
+			body.apply_knockback(kb_dir * push_force)
+
+
+func _handle_werewolf_frenzy_topdown(delta: float) -> void:
+	if _werewolf_frenzy_cooldown_td > 0.0:
+		_werewolf_frenzy_cooldown_td -= delta
+
+	if _is_device_action_just_pressed("interact"):
+		if _werewolf_frenzy_active_td:
+			return
+		if _werewolf_frenzy_cooldown_td > 0.0:
+			_spawn_fail_flash()
+			return
+		_werewolf_frenzy_active_td = true
+		_werewolf_frenzy_timer_td = WEREWOLF_FRENZY_DURATION_TD
+		AudioManager.play("enrage_roar", 2.0, 1.3)
+		modulate = Color(0.7, 0.3, 0.2)
+		_spawn_vfx(Color(0.8, 0.15, 0.1, 0.7), Vector2(40, 40))
+
+		var frenzy_text := Label.new()
+		frenzy_text.text = "FRENZY!"
+		frenzy_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		frenzy_text.add_theme_font_size_override("font_size", 14)
+		frenzy_text.modulate = Color(1.0, 0.2, 0.1)
+		frenzy_text.position = global_position + Vector2(-25, -40)
+		frenzy_text.z_index = 15
+		get_parent().add_child(frenzy_text)
+		var tt := frenzy_text.create_tween()
+		tt.tween_property(frenzy_text, "position:y", frenzy_text.position.y - 20, 0.8)
+		tt.parallel().tween_property(frenzy_text, "modulate:a", 0.0, 0.8)
+		tt.tween_callback(frenzy_text.queue_free)
+
+	if _werewolf_frenzy_active_td:
+		_werewolf_frenzy_timer_td -= delta
+		var pulse: float = 0.15 + sin(_werewolf_frenzy_timer_td * 6.0) * 0.1
+		modulate = Color(0.7 + pulse, 0.3, 0.2)
+
+		if randi() % 4 == 0:
+			var rp := ColorRect.new()
+			rp.color = Color(1.0, 0.1, 0.0, 0.6)
+			rp.size = Vector2(3, 3)
+			rp.position = global_position + Vector2(randf_range(-10, 10), randf_range(-8, 8))
+			rp.z_index = 5
+			get_parent().add_child(rp)
+			var rt := rp.create_tween()
+			rt.tween_property(rp, "position:y", rp.position.y - randf_range(10, 20), 0.3)
+			rt.parallel().tween_property(rp, "modulate:a", 0.0, 0.3)
+			rt.tween_callback(rp.queue_free)
+
+		if _werewolf_frenzy_timer_td <= 2.0:
+			if fmod(_werewolf_frenzy_timer_td, 0.2) < 0.1:
+				modulate = Color.WHITE
+
+		if _werewolf_frenzy_timer_td <= 0.0:
+			_werewolf_frenzy_active_td = false
+			_werewolf_frenzy_cooldown_td = WEREWOLF_FRENZY_COOLDOWN_TD
+			modulate = Color.WHITE
+			AudioManager.play("player_hurt", -4.0, 0.8)
