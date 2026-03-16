@@ -253,14 +253,20 @@ func _input(event: InputEvent) -> void:
 		if _cycle_cooldowns.has(cooldown_key):
 			return
 
-		# D-pad Left only
+		# D-pad Left/Right = cycle class
 		if event.button_index == 13:
 			_cycle_class(player_index, -1)
 			_cycle_cooldowns[cooldown_key] = 0.2
-		# D-pad Right only
 		elif event.button_index == 14:
 			_cycle_class(player_index, 1)
 			_cycle_cooldowns[cooldown_key] = 0.2
+		# D-pad Up/Down = cycle profile
+		elif event.button_index == 11:  # D-pad Up
+			_cycle_profile(player_index, device_id, -1)
+			_cycle_cooldowns[cooldown_key] = 0.3
+		elif event.button_index == 12:  # D-pad Down
+			_cycle_profile(player_index, device_id, 1)
+			_cycle_cooldowns[cooldown_key] = 0.3
 
 	# Keyboard class cycling with Q/E
 	if event is InputEventKey and event.pressed:
@@ -274,6 +280,47 @@ func _input(event: InputEvent) -> void:
 
 
 # -- Class Cycling -------------------------------------------------------------
+
+func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
+	# Cycle through available profiles for this player
+	if ProfileManager.profiles.size() <= 1:
+		return  # Only one profile, nothing to cycle
+
+	var current_profile: Dictionary = ProfileManager.get_active_profile(player_index)
+	var current_id: String = current_profile.get("id", "")
+
+	# Build list of unbound profiles (plus current one)
+	var available: Array[Dictionary] = []
+	for profile in ProfileManager.profiles:
+		var pid: String = profile.get("id", "")
+		var is_bound := false
+		for did in ProfileManager.device_profiles:
+			if ProfileManager.device_profiles[did].get("id", "") == pid and did != device_id:
+				is_bound = true
+				break
+		if not is_bound:
+			available.append(profile)
+
+	if available.size() <= 1:
+		return
+
+	# Find current index and step
+	var current_idx: int = 0
+	for i in range(available.size()):
+		if available[i].get("id", "") == current_id:
+			current_idx = i
+			break
+
+	var new_idx: int = (current_idx + direction) % available.size()
+	if new_idx < 0:
+		new_idx += available.size()
+
+	var new_profile: Dictionary = available[new_idx]
+	ProfileManager.bind_device_to_profile(device_id, new_profile)
+	ProfileManager.assign_profile_to_player(player_index, new_profile)
+	AudioManager.play("menu_select")
+	_update_slot(player_index)
+
 
 func _cycle_class(player_index: int, direction: int) -> void:
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
@@ -427,7 +474,7 @@ func _update_slot(player_index: int) -> void:
 		arrows.add_theme_font_size_override("font_size", 10)
 		arrows.modulate = Color(0.7, 0.7, 0.7)
 		vbox.add_child(arrows)
-	arrows.text = "< D-Pad >"
+	arrows.text = "L/R: Class | U/D: Profile"
 
 
 func _clear_slot(player_index: int) -> void:
