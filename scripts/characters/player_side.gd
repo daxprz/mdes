@@ -13,6 +13,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_side.png",
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
+	PlayerManager.CharacterClass.JUMPER: "res://assets/sprites/characters/jumper_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -56,6 +57,16 @@ const COMBO_SWING_COLORS: Array[Color] = [
 	Color(1.0, 0.6, 0.1, 0.6),  # hit3 = orange
 ]
 const COMBO_PITCHES: Array[float] = [1.0, 0.9, 0.7]
+
+# Jumper
+var _jumper_air_jumps: int = 0
+const JUMPER_MAX_AIR_JUMPS := 3  # Triple jump!
+const JUMPER_JUMP_VELOCITY := -620.0  # Higher than normal (-550)
+var _jumper_dive_active: bool = false
+var _jumper_dash_cooldown: float = 0.0
+const JUMPER_DASH_COOLDOWN := 0.8
+const JUMPER_DASH_SPEED := 500.0
+var _jumper_momentum_dmg_mult: float = 1.0  # More damage the faster you go
 
 # Melee enrage
 var _melee_enraged: bool = false
@@ -317,6 +328,8 @@ func _physics_process(delta: float) -> void:
 	_handle_demo_refuel()
 	_handle_healer_wind_gust()
 	_handle_tank_fortify(delta)
+	_handle_jumper_dash()
+	_handle_jumper_momentum(delta)
 	_handle_melee_enrage(delta)
 	_handle_mage_airwalk_toggle()
 	_handle_mage_airwalk(delta)
@@ -397,6 +410,8 @@ func _handle_jump() -> void:
 	# Reset wall jump stamina and rocket when on the floor
 	if is_on_floor():
 		_wall_jump_stamina = WALL_JUMP_STAMINA_MAX
+		_jumper_air_jumps = 0
+		_jumper_dive_active = false
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
 			_rocket_can_activate = false
 			_rocket_active = false
@@ -409,10 +424,19 @@ func _handle_jump() -> void:
 		return
 
 	if is_on_floor():
-		velocity.y = JUMP_VELOCITY
+		var jump_vel: float = JUMPER_JUMP_VELOCITY if character_class == PlayerManager.CharacterClass.JUMPER else JUMP_VELOCITY
+		velocity.y = jump_vel
 		AudioManager.play("jump", -5.0)
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
-			_rocket_can_activate = true  # Next jump press activates rocket
+			_rocket_can_activate = true
+	elif character_class == PlayerManager.CharacterClass.JUMPER and _jumper_air_jumps < JUMPER_MAX_AIR_JUMPS:
+		# TRIPLE JUMP - each jump slightly weaker
+		_jumper_air_jumps += 1
+		var jump_power: float = JUMPER_JUMP_VELOCITY * (1.0 - _jumper_air_jumps * 0.15)
+		velocity.y = jump_power
+		AudioManager.play("jump", -3.0, 1.0 + _jumper_air_jumps * 0.2)
+		# Wind puff VFX at feet
+		_spawn_vfx(Color(0.5, 1.0, 1.0, 0.4), Vector2(12, 12))
 	elif character_class == PlayerManager.CharacterClass.DEMOLITIONIST and _rocket_can_activate and not _rocket_active and _rocket_fuel > 0.0:
 		_rocket_active = true
 		_rocket_hold_time = 0.0
@@ -861,6 +885,8 @@ func _perform_attack() -> void:
 			_attack_healer()
 		PlayerManager.CharacterClass.TANK:
 			_attack_tank()
+		PlayerManager.CharacterClass.JUMPER:
+			_attack_jumper()
 
 
 func _attack_melee() -> void:
@@ -1363,6 +1389,8 @@ func _perform_special() -> void:
 			_special_healing_burst()
 		PlayerManager.CharacterClass.TANK:
 			_special_tank_slam()
+		PlayerManager.CharacterClass.JUMPER:
+			_special_jumper_dive()
 
 
 var _shield_charging: bool = false
@@ -1711,6 +1739,148 @@ func _handle_demo_refuel() -> void:
 		var tt := fuel_text.create_tween()
 		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
 		tt.tween_callback(fuel_text.queue_free)
+
+
+# -- Jumper Abilities ----------------------------------------------------------
+
+func _attack_jumper() -> void:
+	# Momentum kick - damage scales with how fast you're moving!
+	AudioManager.play("sword_slash", -2.0, 1.4)
+	_attack_cooldown = 0.35
+	var aim: Vector2 = _get_aim_direction()
+	var speed_ratio: float = clampf(velocity.length() / 400.0, 0.0, 1.0)
+	var base_dmg: int = int(lerpf(8.0, 35.0, speed_ratio) * PlayerManager.get_skill_bonus(player_index, "attack"))
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	attack_area.position = aim * 18.0
+	attack_area.monitoring = true
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+
+	# Kick VFX - cyan arc
+	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.5 + speed_ratio * 0.3), Vector2(20 + speed_ratio * 15, 12))
+
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(base_dmg, player_index)
+			if speed_ratio > 0.5:
+				_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			body.apply_knockback(aim * (150.0 + speed_ratio * 250.0))
+	await get_tree().create_timer(0.1).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+
+func _special_jumper_dive() -> void:
+	# Dive kick downward - faster the higher you are
+	if is_on_floor():
+		# On ground: super jump upward
+		velocity.y = JUMPER_JUMP_VELOCITY * 1.5
+		AudioManager.play("jump", 0.0, 0.6)
+		_spawn_vfx(Color(0.3, 1.0, 1.0, 0.6), Vector2(24, 24))
+		PlayerManager.add_skill_xp(player_index, "special", 7)
+	else:
+		# In air: DIVE KICK downward at aimed angle
+		_jumper_dive_active = true
+		var aim: Vector2 = _get_aim_direction()
+		if aim.y < 0.3:
+			aim.y = 0.5  # Default to downward-ish if aiming up
+		aim = aim.normalized()
+		velocity = aim * 700.0
+		AudioManager.play("shield_charge", 0.0, 1.6)
+		modulate = Color(0.3, 1.0, 1.0)
+		PlayerManager.add_skill_xp(player_index, "special", 7)
+
+
+func _handle_jumper_dash() -> void:
+	if character_class != PlayerManager.CharacterClass.JUMPER:
+		return
+	if _jumper_dash_cooldown > 0.0:
+		_jumper_dash_cooldown -= get_process_delta_time()
+
+	if not _is_device_action_just_pressed("interact"):
+		return
+	if _jumper_dash_cooldown > 0.0:
+		_spawn_fail_flash()
+		return
+
+	# AIR DASH - horizontal burst in aimed direction
+	_jumper_dash_cooldown = JUMPER_DASH_COOLDOWN
+	var aim: Vector2 = _get_aim_direction()
+	velocity = aim * JUMPER_DASH_SPEED
+	velocity.y = minf(velocity.y, -50.0)  # Always go slightly up
+	AudioManager.play("shadow_dash", -2.0, 1.5)
+	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.5), Vector2(14, 28))
+
+	# Trail particles
+	for i in range(5):
+		var trail := ColorRect.new()
+		trail.color = Color(0.3, 1.0, 1.0, 0.4 - i * 0.06)
+		trail.size = Vector2(8, 8)
+		trail.position = global_position - aim * (i * 8)
+		trail.z_index = -1
+		get_parent().add_child(trail)
+		var tt := trail.create_tween()
+		tt.tween_property(trail, "modulate:a", 0.0, 0.3)
+		tt.tween_callback(trail.queue_free)
+
+
+func _handle_jumper_momentum(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.JUMPER:
+		return
+
+	# Dive kick landing
+	if _jumper_dive_active and is_on_floor():
+		_jumper_dive_active = false
+		modulate = Color.WHITE
+		# Impact damage based on fall speed
+		var impact_speed: float = clampf(velocity.length() / 500.0, 0.0, 1.0)
+		var impact_dmg: int = int(lerpf(10.0, 50.0, impact_speed))
+		AudioManager.play("explosion", -2.0, 1.2)
+		_spawn_vfx(Color(0.3, 1.0, 1.0, 0.7), Vector2(40 + impact_speed * 40, 16))
+		_screen_shake(impact_speed * 5.0, 0.15)
+
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if not body is Node2D:
+				continue
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < 50.0 + impact_speed * 30.0 and body.has_method("take_damage"):
+				body.take_damage(impact_dmg, player_index)
+				if body.has_method("apply_knockback"):
+					var kb: Vector2 = (body.global_position - global_position).normalized()
+					body.apply_knockback(kb * 300.0)
+
+	# Speed trails while moving fast
+	if velocity.length() > 200.0 and randi() % 3 == 0:
+		var trail := ColorRect.new()
+		trail.color = Color(0.3, 1.0, 1.0, 0.25)
+		trail.size = Vector2(4, 4)
+		trail.position = global_position + Vector2(randf_range(-4, 4), randf_range(-4, 4))
+		trail.z_index = -1
+		get_parent().add_child(trail)
+		var tt := trail.create_tween()
+		tt.tween_property(trail, "modulate:a", 0.0, 0.2)
+		tt.tween_callback(trail.queue_free)
+
+
+func _charged_jumper_meteor(charge_ratio: float) -> void:
+	# METEOR DROP - launch up then slam down with massive impact
+	AudioManager.play("jump", 2.0, 0.4)
+	velocity.y = lerpf(-600.0, -900.0, charge_ratio)
+	_jumper_dive_active = true
+	modulate = Color(1.0, 0.6, 0.2)  # Orange meteor tint
+
+	# Delay then dive - after reaching apex
+	await get_tree().create_timer(lerpf(0.3, 0.6, charge_ratio)).timeout
+	if not is_inside_tree():
+		return
+	velocity.y = lerpf(500.0, 900.0, charge_ratio)
+	velocity.x = 0.0
+	modulate = Color(1.0, 0.3, 0.1)  # Red-hot
+	_spawn_vfx(Color(1.0, 0.5, 0.1, 0.7), Vector2(20, 20))
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
 
 
 # -- Tank Abilities ------------------------------------------------------------
@@ -2998,6 +3168,8 @@ func _perform_charged_attack() -> void:
 			_charged_healer_wave(charge_ratio)
 		PlayerManager.CharacterClass.TANK:
 			_charged_tank_shockwave(charge_ratio)
+		PlayerManager.CharacterClass.JUMPER:
+			_charged_jumper_meteor(charge_ratio)
 
 
 func _charged_tank_shockwave(charge_ratio: float) -> void:

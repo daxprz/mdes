@@ -14,6 +14,7 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.DEMOLITIONIST,
 	PlayerManager.CharacterClass.HEALER,
 	PlayerManager.CharacterClass.TANK,
+	PlayerManager.CharacterClass.JUMPER,
 ]
 
 const CLASS_NAMES := {
@@ -25,6 +26,7 @@ const CLASS_NAMES := {
 	PlayerManager.CharacterClass.DEMOLITIONIST: "Demolitionist",
 	PlayerManager.CharacterClass.HEALER: "Healer",
 	PlayerManager.CharacterClass.TANK: "Tank",
+	PlayerManager.CharacterClass.JUMPER: "Jumper",
 }
 
 const CLASS_COLORS := {
@@ -36,6 +38,7 @@ const CLASS_COLORS := {
 	PlayerManager.CharacterClass.DEMOLITIONIST: Color(0.9, 0.6, 0.1),
 	PlayerManager.CharacterClass.HEALER: Color(0.3, 0.9, 0.4),
 	PlayerManager.CharacterClass.TANK: Color(0.6, 0.5, 0.35),
+	PlayerManager.CharacterClass.JUMPER: Color(0.2, 0.9, 0.9),
 }
 
 const EMPTY_SLOT_COLOR := Color(0.3, 0.3, 0.3, 1.0)
