@@ -85,12 +85,11 @@ func _apply_saved_classes(saved_choices: Dictionary) -> void:
 
 
 func _auto_join_connected_controllers() -> void:
-	## Auto-join all connected controllers + keyboard
-	# Keyboard player
-	_auto_join_device(-1)
-	# Connected joypads
+	## Auto-join only connected joypads (not keyboard)
 	for dev_id in Input.get_connected_joypads():
 		_auto_join_device(dev_id)
+	# Listen for controllers connecting/disconnecting
+	Input.joy_connection_changed.connect(_on_joy_connection_changed)
 
 
 func _auto_join_device(device_id: int) -> void:
@@ -117,7 +116,7 @@ func _auto_join_device(device_id: int) -> void:
 
 func _setup_camera() -> void:
 	var cam := Camera2D.new()
-	cam.position = Vector2(960, 505)  # Shift up 35px for HUD buffer
+	cam.position = Vector2(960, 495)  # Shift up 45px for HUD buffer
 	add_child(cam)
 
 
@@ -202,6 +201,21 @@ func _on_name_confirmed(player_name: String) -> void:
 
 func _on_name_cancelled() -> void:
 	_pending_device_id = -99
+
+
+# -- Controller Connect/Disconnect --------------------------------------------
+
+func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
+	if connected:
+		_auto_join_device(device_id)
+	else:
+		# Remove the player associated with this device
+		var pi := _get_player_index_for_device(device_id)
+		if pi >= 0:
+			_remove_lobby_player(pi)
+			_ghost_players.erase(pi)
+			PlayerManager.remove_player(pi)
+			ProfileManager.unbind_device(device_id)
 
 
 # -- Class Change with Portal/Ghost/Poof Sequence -----------------------------

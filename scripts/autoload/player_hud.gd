@@ -34,6 +34,21 @@ const CLASS_COLORS := {
 	PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
 }
 
+const CLASS_SPRITE_PATHS := {
+	PlayerManager.CharacterClass.MELEE: "res://assets/sprites/characters/melee_side.png",
+	PlayerManager.CharacterClass.RANGED: "res://assets/sprites/characters/ranged_side.png",
+	PlayerManager.CharacterClass.MAGE: "res://assets/sprites/characters/mage_side.png",
+	PlayerManager.CharacterClass.SUMMONER: "res://assets/sprites/characters/summoner_side.png",
+	PlayerManager.CharacterClass.ROGUE: "res://assets/sprites/characters/rogue_side.png",
+	PlayerManager.CharacterClass.DEMOLITIONIST: "res://assets/sprites/characters/demolitionist_side.png",
+	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
+	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
+	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_side.png",
+	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_side.png",
+	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_side.png",
+	PlayerManager.CharacterClass.WEREWOLF: "res://assets/sprites/characters/werewolf_side.png",
+}
+
 const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.MELEE,
 	PlayerManager.CharacterClass.RANGED,
@@ -49,7 +64,8 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.WEREWOLF,
 ]
 
-const HUD_HEIGHT := 70
+const HUD_HEIGHT := 80
+const HUD_BOTTOM_MARGIN := 10
 const HUD_PANEL_WIDTH := 220
 const HUD_PANEL_SPACING := 16
 
@@ -85,7 +101,7 @@ func _build_hud() -> void:
 	_backing.anchor_right = 1.0
 	_backing.anchor_top = 1.0
 	_backing.anchor_bottom = 1.0
-	_backing.offset_top = -HUD_HEIGHT
+	_backing.offset_top = -(HUD_HEIGHT + HUD_BOTTOM_MARGIN)
 	_backing.offset_bottom = 0
 	_canvas.add_child(_backing)
 
@@ -100,8 +116,8 @@ func _build_hud() -> void:
 	var total_width: float = HUD_PANEL_WIDTH * 4 + HUD_PANEL_SPACING * 3
 	_hud_container.offset_left = -total_width / 2.0
 	_hud_container.offset_right = total_width / 2.0
-	_hud_container.offset_top = -HUD_HEIGHT
-	_hud_container.offset_bottom = 0
+	_hud_container.offset_top = -(HUD_HEIGHT + HUD_BOTTOM_MARGIN)
+	_hud_container.offset_bottom = -HUD_BOTTOM_MARGIN
 	_canvas.add_child(_hud_container)
 
 	# Muffin counter - top center
@@ -136,11 +152,17 @@ func _create_panel(player_index: int) -> void:
 	hbox.add_theme_constant_override("separation", 6)
 	panel.add_child(hbox)
 
-	# Class color icon
-	var icon := ColorRect.new()
-	icon.custom_minimum_size = Vector2(8, 50)
-	icon.color = Color(0.3, 0.3, 0.3)
-	hbox.add_child(icon)
+	# Class sprite icon (first frame of the 192x32 spritesheet, 32x32)
+	var icon_container := Control.new()
+	icon_container.custom_minimum_size = Vector2(48, 48)
+	icon_container.clip_contents = true
+	hbox.add_child(icon_container)
+
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(48, 48)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	icon_container.add_child(icon)
 
 	# Info vbox
 	var vbox := VBoxContainer.new()
@@ -213,6 +235,7 @@ func _create_panel(player_index: int) -> void:
 		"mana_bar": mana_bar,
 		"hint_label": hint_lbl,
 		"style": style,
+		"current_class": -1,  # Track to avoid re-loading sprite every frame
 	}
 
 
@@ -286,9 +309,18 @@ func _update_panel(player_index: int) -> void:
 	var class_lbl: Label = ui["class_label"]
 	class_lbl.text = CLASS_NAMES.get(char_class, "???")
 
-	# Icon color
-	var icon: ColorRect = ui["icon"]
-	icon.color = CLASS_COLORS.get(char_class, Color(0.3, 0.3, 0.3))
+	# Class sprite icon (only update when class changes)
+	if ui["current_class"] != char_class:
+		ui["current_class"] = char_class
+		var icon: TextureRect = ui["icon"]
+		var sprite_path: String = CLASS_SPRITE_PATHS.get(char_class, "")
+		if not sprite_path.is_empty():
+			var sheet: Texture2D = load(sprite_path)
+			if sheet:
+				var atlas := AtlasTexture.new()
+				atlas.atlas = sheet
+				atlas.region = Rect2(0, 0, 32, 32)  # First frame
+				icon.texture = atlas
 
 	# Border color matches class
 	var style: StyleBoxFlat = ui["style"]

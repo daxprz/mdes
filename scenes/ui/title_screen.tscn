@@ -20,7 +20,7 @@ z_index = -10
 
 ; -- Floor --
 [node name="Floor" type="StaticBody2D" parent="."]
-position = Vector2(960, 970)
+position = Vector2(960, 940)
 
 [node name="FloorShape" type="CollisionShape2D" parent="Floor"]
 shape = SubResource("floor_shape")
@@ -54,11 +54,11 @@ position = Vector2(960, -10)
 shape = SubResource("floor_shape")
 
 ; -- PLATFORM LAYOUT (jump height ~168px, each gap ≤150px) --
-; Floor=970 → Low=830 (140px) → Mid=710 (120px) → Top=610 (100px)
+; Floor=940 → Low=800 (140px) → Mid=680 (120px) → Top=580 (100px)
 
 ; -- Platform low-left --
 [node name="PlatLeft" type="StaticBody2D" parent="."]
-position = Vector2(540, 830)
+position = Vector2(540, 800)
 
 [node name="PlatLeftShape" type="CollisionShape2D" parent="PlatLeft"]
 shape = SubResource("floor_shape")
@@ -73,7 +73,7 @@ color = Color(0.4, 0.3, 0.22, 1)
 
 ; -- Platform low-right --
 [node name="PlatRight" type="StaticBody2D" parent="."]
-position = Vector2(1380, 830)
+position = Vector2(1380, 800)
 
 [node name="PlatRightShape" type="CollisionShape2D" parent="PlatRight"]
 shape = SubResource("floor_shape")
@@ -88,7 +88,7 @@ color = Color(0.4, 0.3, 0.22, 1)
 
 ; -- Platform mid-center --
 [node name="PlatCenter" type="StaticBody2D" parent="."]
-position = Vector2(960, 710)
+position = Vector2(960, 680)
 
 [node name="PlatCenterShape" type="CollisionShape2D" parent="PlatCenter"]
 shape = SubResource("floor_shape")
@@ -103,7 +103,7 @@ color = Color(0.45, 0.33, 0.22, 1)
 
 ; -- Platform top-left --
 [node name="PlatTopLeft" type="StaticBody2D" parent="."]
-position = Vector2(670, 610)
+position = Vector2(670, 580)
 
 [node name="PlatTopLeftShape" type="CollisionShape2D" parent="PlatTopLeft"]
 shape = SubResource("floor_shape")
@@ -118,7 +118,7 @@ color = Color(0.5, 0.38, 0.25, 1)
 
 ; -- Platform top-right --
 [node name="PlatTopRight" type="StaticBody2D" parent="."]
-position = Vector2(1250, 610)
+position = Vector2(1250, 580)
 
 [node name="PlatTopRightShape" type="CollisionShape2D" parent="PlatTopRight"]
 shape = SubResource("floor_shape")
@@ -133,7 +133,7 @@ color = Color(0.5, 0.38, 0.25, 1)
 
 ; -- Spawn point for players --
 [node name="PlaygroundSpawn" type="Marker2D" parent="."]
-position = Vector2(960, 910)
+position = Vector2(960, 880)
 
 ; -- Container for spawned player nodes --
 [node name="Players" type="Node2D" parent="."]
@@ -173,9 +173,9 @@ anchor_right = 0.5
 anchor_top = 1.0
 anchor_bottom = 1.0
 offset_left = -200.0
-offset_top = -120.0
+offset_top = -130.0
 offset_right = 200.0
-offset_bottom = -90.0
+offset_bottom = -100.0
 theme_override_font_sizes/font_size = 22
 horizontal_alignment = 1
 text = "Press START to begin!"
