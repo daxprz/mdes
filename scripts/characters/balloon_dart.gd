@@ -151,12 +151,36 @@ func _update_balloon(delta: float) -> void:
 	var inflate_ratio: float = clampf(_balloon_timer / BALLOON_INFLATE_TIME, 0.0, 1.0)
 	_balloon_radius = lerpf(2.0, BALLOON_MAX_RADIUS, inflate_ratio * inflate_ratio)
 
-	# Balloon lifetime
-	if _balloon_timer > BALLOON_INFLATE_TIME + BALLOON_LIFETIME:
-		# Pop!
-		AudioManager.play("explosion", -6.0, 2.0)
-		_spawn_pop_particles()
-		_detach_and_free()
+	# Balloons last forever until popped by a projectile
+	# Check if any projectile is near the balloon
+	for proj in get_tree().get_nodes_in_group("loose_items"):
+		if not proj is Node2D:
+			continue
+		var dist: float = _balloon_pos.distance_to(proj.global_position)
+		if dist < _balloon_radius + 8.0:
+			# Check if it's a fire/flame projectile
+			var is_flame: bool = false
+			if "projectile_type" in proj:
+				var ptype: String = str(proj.projectile_type).to_lower()
+				if "fire" in ptype or "flame" in ptype or "napalm" in ptype or "muffin_grenade" in ptype:
+					is_flame = true
+			# Also check demo fire aspect
+			if proj.has_meta("aspect") and str(proj.get_meta("aspect")) == "fire":
+				is_flame = true
+
+			if is_flame:
+				# HYDROGEN EXPLOSION!
+				AudioManager.play("explosion", 2.0, 0.6)
+				AudioManager.play("rocket_crash", -2.0, 1.5)
+				_spawn_hydrogen_explosion()
+			else:
+				# Normal pop
+				AudioManager.play("explosion", -6.0, 2.0)
+				_spawn_pop_particles()
+
+			proj.queue_free()
+			_detach_and_free()
+			return
 
 
 func _update_string_physics(delta: float) -> void:
@@ -269,6 +293,77 @@ func _detect_wind() -> void:
 			_wind_dir = node.get("push_direction") as Vector2
 			_wind_force = node.get("force") as float
 			break
+
+
+func _spawn_hydrogen_explosion() -> void:
+	var pos: Vector2 = _balloon_pos
+	var blast_radius: float = 80.0
+
+	# Screen shake
+	var cam := get_viewport().get_camera_2d()
+	if cam:
+		var orig: Vector2 = cam.offset
+		for i in range(8):
+			cam.offset = orig + Vector2(randf_range(-6, 6), randf_range(-6, 6))
+			await get_tree().create_timer(0.03).timeout
+		if is_instance_valid(cam):
+			cam.offset = orig
+
+	# Big fire burst - white flash + orange/red expanding rings
+	for ring_i in range(3):
+		var ring := ColorRect.new()
+		var ring_colors: Array[Color] = [
+			Color(1.0, 1.0, 0.8, 0.8),
+			Color(1.0, 0.5, 0.1, 0.6),
+			Color(1.0, 0.2, 0.0, 0.4),
+		]
+		ring.color = ring_colors[ring_i]
+		var rs: float = 16.0 + ring_i * 10.0
+		ring.size = Vector2(rs, rs)
+		ring.position = pos - Vector2(rs / 2.0, rs / 2.0)
+		ring.pivot_offset = Vector2(rs / 2.0, rs / 2.0)
+		ring.z_index = 12
+		get_parent().add_child(ring)
+		var scale_target: float = blast_radius * 2.0 / rs
+		var rt := ring.create_tween()
+		rt.set_parallel(true)
+		rt.tween_property(ring, "scale", Vector2(scale_target, scale_target), 0.2 + ring_i * 0.05)
+		rt.tween_property(ring, "modulate:a", 0.0, 0.25 + ring_i * 0.05)
+		rt.chain().tween_callback(ring.queue_free)
+
+	# Fire particles flying outward
+	for i in range(20):
+		var p := ColorRect.new()
+		var fire_colors: Array[Color] = [
+			Color(1.0, 0.9, 0.3, 0.9),
+			Color(1.0, 0.5, 0.0, 0.8),
+			Color(1.0, 0.2, 0.0, 0.7),
+		]
+		p.color = fire_colors[i % fire_colors.size()]
+		p.size = Vector2(randf_range(3, 7), randf_range(3, 7))
+		p.position = pos + Vector2(randf_range(-5, 5), randf_range(-5, 5))
+		p.z_index = 11
+		get_parent().add_child(p)
+		var vel: Vector2 = Vector2(randf_range(-120, 120), randf_range(-150, 50))
+		var pt := p.create_tween()
+		pt.tween_property(p, "position", p.position + vel * 0.3, 0.3)
+		pt.parallel().tween_property(p, "modulate:a", 0.0, 0.35)
+		pt.tween_callback(p.queue_free)
+
+	# Damage everything in blast radius
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < blast_radius and body.has_method("take_damage"):
+				body.take_damage(40, owner_index)
+				if body.has_method("apply_knockback"):
+					var kb: Vector2 = (body.global_position - pos).normalized() * 350.0
+					body.apply_knockback(kb)
+	for body in get_tree().get_nodes_in_group("players"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < blast_radius and body.has_method("take_damage"):
+				body.take_damage(15, -1)  # Friendly fire from explosion
 
 
 func _spawn_pop_particles() -> void:
