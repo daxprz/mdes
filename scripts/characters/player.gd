@@ -286,6 +286,31 @@ func _perform_attack() -> void:
 		_attack_werewolf_topdown()
 		return
 
+	# Mage fires fireball
+	if character_class == PlayerManager.CharacterClass.MAGE:
+		_attack_mage_topdown()
+		return
+
+	# Summoner fires homing mark orb
+	if character_class == PlayerManager.CharacterClass.SUMMONER:
+		_attack_summoner_topdown()
+		return
+
+	# Tank heavy mace slam
+	if character_class == PlayerManager.CharacterClass.TANK:
+		_attack_tank_topdown()
+		return
+
+	# Ninja momentum kick
+	if character_class == PlayerManager.CharacterClass.NINJA:
+		_attack_ninja_topdown()
+		return
+
+	# Balloonist fires balloon dart
+	if character_class == PlayerManager.CharacterClass.BALLOONIST:
+		_attack_balloonist_topdown()
+		return
+
 	# Position the attack area based on facing direction
 	var offset := Vector2.ZERO
 	match _direction:
@@ -1784,3 +1809,198 @@ func _handle_werewolf_frenzy_topdown(delta: float) -> void:
 			_werewolf_frenzy_cooldown_td = WEREWOLF_FRENZY_COOLDOWN_TD
 			modulate = Color.WHITE
 			AudioManager.play("player_hurt", -4.0, 0.8)
+
+
+# -- Mage Fireball (top-down) -------------------------------------------------
+
+func _attack_mage_topdown() -> void:
+	if not PlayerManager.use_mana(player_index, 5):
+		return
+	AudioManager.play("explosion", -6.0, 1.5)
+	_attack_cooldown = 0.6
+	var aim: Vector2 = _get_aim_direction()
+	# Spawn fireball projectile
+	var proj := load("res://scenes/characters/projectile.tscn") as PackedScene
+	if proj:
+		var p := proj.instantiate()
+		p.damage = 18
+		p.speed = 200.0
+		p.direction = aim
+		p.projectile_type = "fire"
+		p.owner_index = player_index
+		p.global_position = global_position + aim * 12.0
+		get_parent().add_child(p)
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+
+# -- Summoner Homing Mark (top-down) ------------------------------------------
+
+func _attack_summoner_topdown() -> void:
+	# Homing mark spell - slow projectile that seeks nearest enemy
+	# When it hits, marks the target so donut buddies deal bonus damage
+	AudioManager.play("summon", -4.0, 1.6)
+	_attack_cooldown = 0.8
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	# Spawn homing orb
+	var orb := ColorRect.new()
+	orb.color = Color(1.0, 0.6, 0.2, 0.9)
+	orb.size = Vector2(6, 6)
+	orb.position = global_position
+	orb.z_index = 6
+	get_parent().add_child(orb)
+
+	# Homing flight
+	var orb_speed: float = 120.0
+	var orb_age: float = 0.0
+	var orb_max_age: float = 3.0
+	var hit: bool = false
+
+	while orb_age < orb_max_age and is_instance_valid(orb) and is_inside_tree():
+		var dt: float = get_process_delta_time()
+		orb_age += dt
+
+		# Re-acquire nearest enemy each frame for true homing
+		var current_target: Node2D = null
+		var best_dist: float = 250.0
+		for body in get_tree().get_nodes_in_group("enemies"):
+			if body is Node2D:
+				var d: float = orb.position.distance_to(body.global_position)
+				if d < best_dist:
+					best_dist = d
+					current_target = body
+
+		if current_target:
+			var to_target: Vector2 = (current_target.global_position - orb.position).normalized()
+			orb.position += to_target * orb_speed * dt
+
+			# Trail particle
+			if randi() % 3 == 0:
+				var trail := ColorRect.new()
+				trail.color = Color(1.0, 0.7, 0.3, 0.5)
+				trail.size = Vector2(3, 3)
+				trail.position = orb.position + Vector2(randf_range(-2, 2), randf_range(-2, 2))
+				trail.z_index = 5
+				get_parent().add_child(trail)
+				var tt := trail.create_tween()
+				tt.tween_property(trail, "modulate:a", 0.0, 0.3)
+				tt.tween_callback(trail.queue_free)
+
+			# Check if hit
+			if orb.position.distance_to(current_target.global_position) < 12.0:
+				# HIT - deal small damage and MARK the enemy
+				var scaled_dmg: int = int(5 * PlayerManager.get_skill_bonus(player_index, "attack"))
+				if current_target.has_method("take_damage"):
+					current_target.take_damage(scaled_dmg, player_index)
+				# Mark the enemy for bonus donut buddy damage
+				current_target.set_meta("summoner_marked", true)
+				current_target.set_meta("summoner_mark_owner", player_index)
+				# Visual mark - orange glow
+				current_target.modulate = Color(1.2, 0.9, 0.6)
+				# Mark expires after 6 seconds
+				_expire_mark_after_td(current_target, 6.0)
+				AudioManager.play("mark_target")
+				_spawn_vfx(Color(1.0, 0.6, 0.2, 0.6), Vector2(20, 20))
+				hit = true
+				break
+		else:
+			# No target - drift in aimed direction
+			var aim: Vector2 = _get_aim_direction()
+			orb.position += aim * orb_speed * dt
+
+		await get_tree().process_frame
+
+	if is_instance_valid(orb):
+		orb.queue_free()
+
+
+func _expire_mark_after_td(enemy: Node2D, duration: float) -> void:
+	await get_tree().create_timer(duration).timeout
+	if is_instance_valid(enemy):
+		enemy.remove_meta("summoner_marked")
+		enemy.remove_meta("summoner_mark_owner")
+		enemy.modulate = Color.WHITE
+
+
+# -- Tank Mace Slam (top-down) ------------------------------------------------
+
+func _attack_tank_topdown() -> void:
+	# Heavy mace slam - slow, wide, powerful
+	AudioManager.play("sword_slash", 2.0, 0.5)
+	_attack_cooldown = 1.2
+	var aim: Vector2 = _get_aim_direction()
+	var base_dmg: int = int(45 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	if _tank_fortify:
+		base_dmg = int(base_dmg * 0.5)  # Less damage while fortified (tradeoff)
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	# Wide attack area
+	attack_area.position = aim * 20.0
+	attack_area.monitoring = true
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+
+	# VFX: ground slam impact
+	_spawn_vfx(Color(0.7, 0.6, 0.4, 0.6), Vector2(40, 20))
+
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(base_dmg, player_index)
+			_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			var kb: Vector2 = aim * 250.0
+			body.apply_knockback(kb)
+	await get_tree().create_timer(0.15).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+
+# -- Ninja Momentum Kick (top-down) -------------------------------------------
+
+func _attack_ninja_topdown() -> void:
+	# Momentum kick - damage scales with movement speed
+	AudioManager.play("sword_slash", -2.0, 1.4)
+	_attack_cooldown = 0.35
+	var aim: Vector2 = _get_aim_direction()
+	var speed_ratio: float = clampf(velocity.length() / 200.0, 0.0, 1.0)
+	var base_dmg: int = int(lerpf(8.0, 35.0, speed_ratio) * PlayerManager.get_skill_bonus(player_index, "attack"))
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	attack_area.position = aim * 18.0
+	attack_area.monitoring = true
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+
+	# Kick VFX - cyan arc
+	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.5 + speed_ratio * 0.3), Vector2(20 + speed_ratio * 15, 12))
+
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(base_dmg, player_index)
+			if speed_ratio > 0.5:
+				_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			body.apply_knockback(aim * (150.0 + speed_ratio * 250.0))
+	await get_tree().create_timer(0.1).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+
+
+# -- Balloonist Dart (top-down) ------------------------------------------------
+
+func _attack_balloonist_topdown() -> void:
+	# Shoot a dart with string + balloon attached
+	AudioManager.play("crossbow_shoot", -3.0, 1.5)
+	_attack_cooldown = 0.8
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	var aim: Vector2 = _get_aim_direction()
+	var dart_script := load("res://scripts/characters/balloon_dart.gd")
+	var dart := Node2D.new()
+	dart.set_script(dart_script)
+	dart.dart_direction = aim
+	dart.owner_index = player_index
+	dart.global_position = global_position + aim * 12.0
+	get_parent().add_child(dart)
