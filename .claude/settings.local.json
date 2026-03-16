@@ -29,7 +29,8 @@
       "Bash(done)",
       "Bash(sed:*)",
       "Bash(/Users/jeremy/dev/dax/test123/.venv/bin/python /Users/jeremy/dev/dax/test123/generate_character_sprites.py)",
-      "Bash(.venv/bin/python3 -c \"\nfrom PIL import Image\nclasses = ['ranged', 'mage', 'summoner', 'rogue', 'demolitionist', 'healer']\nfor cls in classes:\n    img = Image.open\\(f'assets/sprites/characters/{cls}_side.png'\\)\n    frame = img.crop\\(\\(0, 0, 32, 32\\)\\)\n    left_pixels = 0\n    right_pixels = 0\n    for y in range\\(32\\):\n        for x in range\\(16\\):\n            r, g, b, a = frame.getpixel\\(\\(x, y\\)\\)\n            if a > 0:\n                left_pixels += 1\n        for x in range\\(16, 32\\):\n            r, g, b, a = frame.getpixel\\(\\(x, y\\)\\)\n            if a > 0:\n                right_pixels += 1\n    direction = 'RIGHT' if right_pixels > left_pixels else 'LEFT'\n    print\\(f'{cls}: left={left_pixels} right={right_pixels} → faces {direction}'\\)\n\")"
+      "Bash(.venv/bin/python3 -c \"\nfrom PIL import Image\nclasses = ['ranged', 'mage', 'summoner', 'rogue', 'demolitionist', 'healer']\nfor cls in classes:\n    img = Image.open\\(f'assets/sprites/characters/{cls}_side.png'\\)\n    frame = img.crop\\(\\(0, 0, 32, 32\\)\\)\n    left_pixels = 0\n    right_pixels = 0\n    for y in range\\(32\\):\n        for x in range\\(16\\):\n            r, g, b, a = frame.getpixel\\(\\(x, y\\)\\)\n            if a > 0:\n                left_pixels += 1\n        for x in range\\(16, 32\\):\n            r, g, b, a = frame.getpixel\\(\\(x, y\\)\\)\n            if a > 0:\n                right_pixels += 1\n    direction = 'RIGHT' if right_pixels > left_pixels else 'LEFT'\n    print\\(f'{cls}: left={left_pixels} right={right_pixels} → faces {direction}'\\)\n\")",
+      "Bash(cat:*)"
     ]
   }
 }

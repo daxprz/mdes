@@ -14,6 +14,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_side.png",
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_side.png",
 	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_side.png",
+	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -330,6 +331,7 @@ func _physics_process(delta: float) -> void:
 	_handle_demo_refuel()
 	_handle_healer_wind_gust()
 	_handle_tank_fortify(delta)
+	_handle_balloonist_float(delta)
 	_handle_jumper_dash()
 	_handle_jumper_momentum(delta)
 	_handle_melee_enrage(delta)
@@ -375,7 +377,9 @@ func _update_cooldowns(delta: float) -> void:
 
 func _apply_gravity(delta: float) -> void:
 	if _mage_airwalk:
-		return  # No gravity while air-walking
+		return
+	if _balloonist_floating:
+		return  # Balloon carries us up
 	if not is_on_floor():
 		velocity.y += GRAVITY * delta
 		velocity.y = min(velocity.y, 600.0)
@@ -889,6 +893,8 @@ func _perform_attack() -> void:
 			_attack_tank()
 		PlayerManager.CharacterClass.NINJA:
 			_attack_jumper()
+		PlayerManager.CharacterClass.BALLOONIST:
+			_attack_balloonist()
 
 
 func _attack_melee() -> void:
@@ -1393,6 +1399,8 @@ func _perform_special() -> void:
 			_special_tank_slam()
 		PlayerManager.CharacterClass.NINJA:
 			_special_jumper_dive()
+		PlayerManager.CharacterClass.BALLOONIST:
+			_special_balloonist_burst()
 
 
 var _shield_charging: bool = false
@@ -1741,6 +1749,123 @@ func _handle_demo_refuel() -> void:
 		var tt := fuel_text.create_tween()
 		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
 		tt.tween_callback(fuel_text.queue_free)
+
+
+# -- Balloonist Abilities ------------------------------------------------------
+
+var _balloonist_pop_cooldown: float = 0.0
+var _balloonist_floating: bool = false
+var _balloonist_float_timer: float = 0.0
+const BALLOONIST_FLOAT_DURATION := 6.0
+const BALLOONIST_FLOAT_COOLDOWN := 12.0
+var _balloonist_float_cooldown: float = 0.0
+
+
+func _handle_balloonist_float(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.BALLOONIST:
+		return
+	if _balloonist_float_cooldown > 0.0:
+		_balloonist_float_cooldown -= delta
+
+	if _is_device_action_just_pressed("interact"):
+		if _balloonist_floating:
+			return
+		if _balloonist_float_cooldown > 0.0:
+			_spawn_fail_flash()
+			return
+		# Tie a balloon to self - float upward!
+		_balloonist_floating = true
+		_balloonist_float_timer = BALLOONIST_FLOAT_DURATION
+		AudioManager.play("summon", -2.0, 1.4)
+
+	if _balloonist_floating:
+		_balloonist_float_timer -= delta
+		# Float upward gently
+		velocity.y = lerpf(velocity.y, -80.0, delta * 3.0)
+		# Can still move left/right but slowly
+		# Pink balloon visual drawn above head
+		if randi() % 8 == 0:
+			_spawn_vfx(Color(0.9, 0.4, 0.7, 0.3), Vector2(6, 6))
+		# Warning
+		if _balloonist_float_timer <= 2.0:
+			if fmod(_balloonist_float_timer, 0.3) < 0.15:
+				modulate = Color(0.9, 0.5, 0.7)
+			else:
+				modulate = Color.WHITE
+		else:
+			modulate = Color(0.95, 0.8, 0.9)
+		if _balloonist_float_timer <= 0.0:
+			_balloonist_floating = false
+			_balloonist_float_cooldown = BALLOONIST_FLOAT_COOLDOWN
+			modulate = Color.WHITE
+			AudioManager.play("explosion", -8.0, 2.0)  # Pop
+
+func _attack_balloonist() -> void:
+	# Shoot a dart with string + balloon attached
+	AudioManager.play("crossbow_shoot", -3.0, 1.5)
+	_attack_cooldown = 0.8
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+
+	var aim: Vector2 = _get_aim_direction()
+	var dart_script := load("res://scripts/characters/balloon_dart.gd")
+	var dart := Node2D.new()
+	dart.set_script(dart_script)
+	dart.dart_direction = aim
+	dart.owner_index = player_index
+	dart.global_position = global_position + aim * 12.0
+	get_parent().add_child(dart)
+
+
+func _special_balloonist_burst() -> void:
+	# Pop all active balloons for AoE damage around each
+	AudioManager.play("explosion", -2.0, 1.8)
+	PlayerManager.add_skill_xp(player_index, "special", 7)
+
+	var popped: int = 0
+	for dart in get_tree().get_nodes_in_group("balloon_darts"):
+		if dart is Node2D and dart.has_method("_detach_and_free"):
+			# Damage enemies near the balloon
+			var balloon_pos: Vector2 = dart.get("_balloon_pos") if "_balloon_pos" in dart else dart.global_position
+			for body in get_tree().get_nodes_in_group("enemies"):
+				if body is Node2D:
+					var dist: float = balloon_pos.distance_to(body.global_position)
+					if dist < 60.0 and body.has_method("take_damage"):
+						body.take_damage(20, player_index)
+						if body.has_method("apply_knockback"):
+							var kb: Vector2 = (body.global_position - balloon_pos).normalized() * 200.0
+							body.apply_knockback(kb)
+			dart._spawn_pop_particles()
+			dart._detach_and_free()
+			popped += 1
+
+	if popped > 0:
+		_spawn_vfx(Color(0.9, 0.4, 0.7, 0.5), Vector2(30, 30))
+	else:
+		_spawn_fail_flash()
+		_special_cooldown = 0.0
+
+
+func _charged_balloonist_barrage(charge_ratio: float) -> void:
+	# Shoot multiple balloon darts in a spread
+	var count: int = int(lerpf(3.0, 8.0, charge_ratio))
+	var spread: float = lerpf(0.3, 1.0, charge_ratio)
+	var aim: Vector2 = _get_aim_direction()
+
+	AudioManager.play("crossbow_shoot", 0.0, 1.2)
+	PlayerManager.add_skill_xp(player_index, "charge", 5)
+
+	for i in range(count):
+		var t: float = float(i) / maxf(float(count - 1), 1.0)
+		var angle: float = lerpf(-spread / 2.0, spread / 2.0, t)
+		var dir: Vector2 = aim.rotated(angle)
+
+		var dart_script := load("res://scripts/characters/balloon_dart.gd")
+		var dart := Node2D.new()
+		dart.set_script(dart_script)
+		dart.dart_direction = dir
+		dart.owner_index = player_index
+		dart.global_position = global_position + dir * 12.0
+		get_parent().add_child(dart)
 
 
 # -- Jumper Abilities ----------------------------------------------------------
@@ -3287,6 +3412,8 @@ func _perform_charged_attack() -> void:
 			_charged_tank_shockwave(charge_ratio)
 		PlayerManager.CharacterClass.NINJA:
 			_charged_jumper_meteor(charge_ratio)
+		PlayerManager.CharacterClass.BALLOONIST:
+			_charged_balloonist_barrage(charge_ratio)
 
 
 func _charged_tank_shockwave(charge_ratio: float) -> void:

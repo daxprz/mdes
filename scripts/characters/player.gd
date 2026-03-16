@@ -13,6 +13,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.HEALER: "res://assets/sprites/characters/healer_topdown.png",
 	PlayerManager.CharacterClass.TANK: "res://assets/sprites/characters/tank_topdown.png",
 	PlayerManager.CharacterClass.NINJA: "res://assets/sprites/characters/ninja_topdown.png",
+	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -337,6 +338,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.HEALER: return 10
 		PlayerManager.CharacterClass.TANK: return 45
 		PlayerManager.CharacterClass.NINJA: return 15
+		PlayerManager.CharacterClass.BALLOONIST: return 8
 	return 10
 
 
@@ -372,6 +374,8 @@ func _perform_special() -> void:
 			_special_tank_slam()
 		PlayerManager.CharacterClass.NINJA:
 			_special_jumper_dash_attack()
+		PlayerManager.CharacterClass.BALLOONIST:
+			_special_balloonist_burst_topdown()
 
 
 func _special_melee() -> void:
@@ -722,6 +726,8 @@ func _handle_circle_abilities(delta: float) -> void:
 			_handle_tank_fortify(delta)
 		PlayerManager.CharacterClass.NINJA:
 			_handle_jumper_dash()
+		PlayerManager.CharacterClass.BALLOONIST:
+			pass  # No Circle ability in top-down
 
 
 # -- Melee Enrage (Circle) ----------------------------------------------------
@@ -1310,3 +1316,15 @@ func _handle_jumper_dash() -> void:
 	velocity = aim * NINJA_DASH_SPEED_TD
 	AudioManager.play("shadow_dash", -2.0, 1.5)
 	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.4), Vector2(10, 10))
+
+
+# -- Balloonist Abilities (top-down) -------------------------------------------
+
+func _special_balloonist_burst_topdown() -> void:
+	AudioManager.play("explosion", -2.0, 1.8)
+	_spawn_vfx(Color(0.9, 0.4, 0.7, 0.5), Vector2(40, 40))
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = global_position.distance_to(body.global_position)
+			if dist < 60.0 and body.has_method("take_damage"):
+				body.take_damage(20, player_index)
