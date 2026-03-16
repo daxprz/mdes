@@ -1,0 +1,111 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GODOT_VERSION: "4.4.1"
+  PROJECT_NAME: "TheUltimateMuffin"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: "Linux"
+            export_name: "TheUltimateMuffin.x86_64"
+            artifact_name: "TheUltimateMuffin-Linux"
+            archive_ext: "tar.gz"
+          - platform: "Windows Desktop"
+            export_name: "TheUltimateMuffin.exe"
+            artifact_name: "TheUltimateMuffin-Windows"
+            archive_ext: "zip"
+          - platform: "macOS"
+            export_name: "TheUltimateMuffin.zip"
+            artifact_name: "TheUltimateMuffin-macOS"
+            archive_ext: "zip"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Godot
+        run: |
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 /usr/local/bin/godot
+          chmod +x /usr/local/bin/godot
+
+      - name: Install Export Templates
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          mv templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
+
+      - name: Import Project
+        run: |
+          godot --headless --import 2>&1 || true
+          sleep 2
+
+      - name: Build
+        run: |
+          mkdir -p build/output
+          godot --headless --export-release "${{ matrix.platform }}" build/output/${{ matrix.export_name }}
+
+      - name: Archive (Linux)
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          cd build/output
+          tar czf ../../${{ matrix.artifact_name }}.tar.gz *
+
+      - name: Archive (Windows/macOS)
+        if: matrix.archive_ext == 'zip'
+        run: |
+          cd build/output
+          zip -r ../../${{ matrix.artifact_name }}.zip *
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "The Ultimate Muffin ${{ github.ref_name }}"
+          body: |
+            ## The Ultimate Muffin ${{ github.ref_name }}
+
+            4-player local co-op PVE action game.
+
+            ### Downloads
+            - **Windows:** `TheUltimateMuffin-Windows.zip`
+            - **macOS:** `TheUltimateMuffin-macOS.zip`
+            - **Linux:** `TheUltimateMuffin-Linux.tar.gz`
+
+            ### Requirements
+            - 1-4 controllers (PS5, Xbox, etc.)
+            - Keyboard supported for single player
+          files: |
+            artifacts/TheUltimateMuffin-Windows/TheUltimateMuffin-Windows.zip
+            artifacts/TheUltimateMuffin-macOS/TheUltimateMuffin-macOS.zip
+            artifacts/TheUltimateMuffin-Linux/TheUltimateMuffin-Linux.tar.gz
+          draft: false
+          prerelease: true
