@@ -381,8 +381,19 @@ func _apply_gravity(delta: float) -> void:
 	if _balloonist_floating:
 		return  # Balloon carries us up
 	if not is_on_floor():
-		velocity.y += GRAVITY * delta
-		velocity.y = min(velocity.y, 600.0)
+		# Count attached balloons - reduce gravity per balloon
+		var balloon_count: int = 0
+		for dart in get_tree().get_nodes_in_group("balloon_darts"):
+			if dart.has_method("_get_entity_weight") and dart.get("_attached_to") == self:
+				balloon_count += 1
+		if balloon_count > 0:
+			# Each balloon reduces gravity by 30%, fall slower
+			var gravity_mult: float = maxf(0.1, 1.0 - balloon_count * 0.3)
+			velocity.y += GRAVITY * delta * gravity_mult
+			velocity.y = min(velocity.y, 600.0 * gravity_mult)
+		else:
+			velocity.y += GRAVITY * delta
+			velocity.y = min(velocity.y, 600.0)
 
 
 func _handle_movement() -> void:
