@@ -423,6 +423,7 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	_apply_gravity(delta)
+	_check_out_of_bounds()
 
 	if _is_dead:
 		_check_revive(delta)
@@ -3397,6 +3398,54 @@ func _exit_delegate_mode() -> void:
 		_delegate_countdown_label = null
 
 	_update_buddy_target()
+
+
+func _check_out_of_bounds() -> void:
+	## Teleport player back in-bounds if they escape the playable area
+	var cam := get_viewport().get_camera_2d()
+	if not cam:
+		return
+
+	var vp_size: Vector2 = get_viewport_rect().size
+	var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE
+	var half_view: Vector2 = vp_size / (2.0 * zoom)
+	var cam_pos: Vector2 = cam.global_position
+
+	# OOB margin: 2x the visible area in any direction
+	var margin: float = 2.0
+	var min_bound: Vector2 = cam_pos - half_view * margin
+	var max_bound: Vector2 = cam_pos + half_view * margin
+
+	if global_position.x >= min_bound.x and global_position.x <= max_bound.x \
+		and global_position.y >= min_bound.y and global_position.y <= max_bound.y:
+		return  # In bounds
+
+	# Out of bounds — find teleport target
+	var target_pos: Vector2 = cam_pos  # Default: center of screen
+
+	# Try to find nearest other player
+	var best_dist: float = INF
+	for node in get_tree().get_nodes_in_group("players"):
+		if node == self or not node is Node2D:
+			continue
+		if not is_instance_valid(node):
+			continue
+		var dist: float = cam_pos.distance_to(node.global_position)
+		if dist < best_dist:
+			best_dist = dist
+			target_pos = node.global_position
+
+	# Spawn purple rift at origin (where we were)
+	_spawn_aether_rift(global_position)
+
+	# Teleport
+	global_position = target_pos + Vector2(randf_range(-20, 20), -10)
+	velocity = Vector2.ZERO
+
+	# Spawn purple rift at destination
+	_spawn_aether_rift(global_position)
+
+	AudioManager.play("summon", -2.0, 1.2)
 
 
 func _spawn_aether_rift(pos: Vector2) -> void:
