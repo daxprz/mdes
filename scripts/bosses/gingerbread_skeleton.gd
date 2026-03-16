@@ -33,7 +33,7 @@ func _setup_boss() -> void:
 
 	# Try to load mini skeleton enemy scene
 	if ResourceLoader.exists("res://scenes/enemies/skeleton_basic.tscn"):
-		_mini_skeleton_scene = load("res://scenes/enemies/skeleton_basic.tscn")
+		_mini_skeleton_scene = load("res://scenes/enemies/skeleton.tscn")
 
 	add_to_group("bosses")
 

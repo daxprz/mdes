@@ -260,6 +260,7 @@ func _pants_cutscene() -> void:
 	pants_tween.tween_property(pants, "position:y", pants.position.y + 80, 0.6).set_ease(Tween.EASE_IN)
 	pants_tween.parallel().tween_property(pants, "rotation", 0.3, 0.6)
 	pants_tween.tween_property(pants, "modulate:a", 0.3, 1.0)
+	pants_tween.tween_callback(pants.queue_free)
 
 	# --- SHOCK FACE ---
 	# Muffin goes wide-eyed - flash white then red
