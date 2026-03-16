@@ -203,6 +203,7 @@ func _ready() -> void:
 	_demo_napalm = PlayerManager.demo_napalm
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
+	ProfileManager.profile_loaded.connect(_on_profile_changed)
 	PlayerManager.apply_level_bonuses(player_index)
 
 
@@ -241,6 +242,10 @@ func _update_player_label() -> void:
 			player_label.text = "P" + str(player_index + 1) + " Lv." + str(overall_lv)
 		else:
 			player_label.text = "P" + str(player_index + 1)
+
+
+func _on_profile_changed(_profile_id: String) -> void:
+	_update_player_label()
 
 
 func _on_skill_leveled_up(p_index: int, skill: String, new_level: int) -> void:
