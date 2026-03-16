@@ -19,6 +19,7 @@ var _age: float = 0.0
 
 
 func _ready() -> void:
+	add_to_group("loose_items")
 	body_entered.connect(_on_body_entered)
 	area_entered.connect(_on_area_entered)
 	# Flip sprite if going left

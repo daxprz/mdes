@@ -18,6 +18,8 @@ var _time_alive := 0.0
 
 
 func _ready() -> void:
+	add_to_group("boss_projectiles")
+	add_to_group("loose_items")
 	# Build visual
 	var rect := ColorRect.new()
 	rect.size = Vector2(projectile_size * 2, projectile_size * 2)

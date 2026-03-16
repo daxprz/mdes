@@ -66,9 +66,9 @@ var _jumper_dive_active: bool = false
 var _jumper_dash_cooldown: float = 0.0
 const JUMPER_DASH_COOLDOWN := 0.8
 const JUMPER_DASH_SPEED := 500.0
-var _jumper_stolen_ability: String = ""  # What ability was picked up
-var _jumper_steal_cooldown: float = 0.0
-const JUMPER_STEAL_RANGE := 60.0
+var _jumper_held_item: Node2D = null  # Physical item being carried
+var _jumper_pickup_cooldown: float = 0.0
+const JUMPER_PICKUP_RANGE := 50.0
 
 # Melee enrage
 var _melee_enraged: bool = false
@@ -1807,31 +1807,44 @@ func _handle_jumper_dash() -> void:
 	if not _is_device_action_just_pressed("interact"):
 		return
 
-	# If we have a stolen ability, USE IT
-	if not _jumper_stolen_ability.is_empty():
-		_use_stolen_ability()
+	# If holding an item, THROW IT in aimed direction
+	if is_instance_valid(_jumper_held_item):
+		_throw_held_item()
 		return
 
-	# Try to PICK UP an ability from nearby ally
-	if _jumper_steal_cooldown <= 0.0:
-		var nearest_ally: Node2D = null
-		var nearest_dist: float = JUMPER_STEAL_RANGE
-		var nearest_class: int = -1
-		for p in get_tree().get_nodes_in_group("players"):
-			if p == self or not (p is CharacterBody2D):
-				continue
-			var dist: float = global_position.distance_to(p.global_position)
-			if dist < nearest_dist and "character_class" in p:
-				nearest_dist = dist
-				nearest_ally = p
-				nearest_class = int(p.character_class)
+	# Try to PICK UP a loose item nearby (bombs, muffins, rocks, enemy projectiles)
+	if _jumper_pickup_cooldown <= 0.0:
+		var nearest_item: Node2D = null
+		var nearest_dist: float = JUMPER_PICKUP_RANGE
 
-		if nearest_ally:
-			_steal_ability_from(nearest_class)
-			_jumper_steal_cooldown = 3.0
+		# Check for loose projectiles (bombs, arrows, bolts)
+		for node in get_tree().get_nodes_in_group("loose_items"):
+			if node is Node2D:
+				var dist: float = global_position.distance_to(node.global_position)
+				if dist < nearest_dist:
+					nearest_dist = dist
+					nearest_item = node
+
+		# Also check for boss projectiles we can catch!
+		if not nearest_item:
+			for node in get_tree().get_nodes_in_group("boss_projectiles"):
+				if node is Node2D:
+					var dist: float = global_position.distance_to(node.global_position)
+					if dist < nearest_dist:
+						nearest_dist = dist
+						nearest_item = node
+
+		# Check for enemy projectiles (arrows from cookie archers etc)
+		if not nearest_item:
+			for node in get_children():
+				pass  # Projectiles aren't in a group by default
+
+		if nearest_item:
+			_pickup_item(nearest_item)
+			_jumper_pickup_cooldown = 0.5
 			return
 
-	# No ally nearby and no stolen ability: AIR DASH
+	# Nothing to pick up: AIR DASH
 	if _jumper_dash_cooldown > 0.0:
 		_spawn_fail_flash()
 		return
@@ -1853,128 +1866,77 @@ func _handle_jumper_dash() -> void:
 		tt.tween_callback(trail.queue_free)
 
 
-func _steal_ability_from(ally_class: int) -> void:
-	# Pick up one ability based on ally's class
-	var ability_names: Dictionary = {
-		0: "bomb",       # Melee → borrow shield charge energy as a shockwave
-		1: "arrow",      # Ranged → borrow a grapple shot
-		2: "bolt",       # Mage → borrow a magic bolt burst
-		3: "donut",      # Summoner → borrow a donut buddy
-		4: "knives",     # Rogue → borrow knife fan
-		5: "bomb",       # Demolitionist → borrow a bomb!
-		6: "heal",       # Healer → borrow a healing burst
-		7: "slam",       # Tank → borrow a ground slam
-	}
-	_jumper_stolen_ability = ability_names.get(ally_class, "bomb")
+func _pickup_item(item: Node2D) -> void:
+	# Grab a loose physical item and carry it
+	_jumper_held_item = item
 	AudioManager.play("muffin_collect", 0.0, 0.8)
 
-	# "PICKED UP: BOMB!" text
+	# Stop the item's physics/movement
+	if item.has_method("set_physics_process"):
+		item.set_physics_process(false)
+	if item.has_method("set_process"):
+		item.set_process(false)
+	if "velocity" in item:
+		item.velocity = Vector2.ZERO
+
+	# Reparent to player so it follows
+	var old_pos: Vector2 = item.global_position
+	if item.get_parent():
+		item.get_parent().remove_child(item)
+	add_child(item)
+	item.position = Vector2(0, -20)  # Float above head
+
+	# "PICKED UP!" text
 	var pickup_text := Label.new()
-	pickup_text.text = "PICKED UP: " + _jumper_stolen_ability.to_upper() + "!"
+	pickup_text.text = "GRABBED!"
 	pickup_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	pickup_text.add_theme_font_size_override("font_size", 10)
 	pickup_text.modulate = Color(0.3, 1.0, 1.0)
-	pickup_text.position = global_position + Vector2(-30, -40)
+	pickup_text.position = global_position + Vector2(-20, -40)
 	pickup_text.z_index = 15
 	get_parent().add_child(pickup_text)
 	var tt := pickup_text.create_tween()
-	tt.tween_property(pickup_text, "position:y", pickup_text.position.y - 15, 0.6)
-	tt.parallel().tween_property(pickup_text, "modulate:a", 0.0, 0.6)
+	tt.tween_property(pickup_text, "position:y", pickup_text.position.y - 15, 0.5)
+	tt.parallel().tween_property(pickup_text, "modulate:a", 0.0, 0.5)
 	tt.tween_callback(pickup_text.queue_free)
 
 
-func _use_stolen_ability() -> void:
-	var ability: String = _jumper_stolen_ability
-	_jumper_stolen_ability = ""  # One use only!
-	AudioManager.play("summon", 0.0, 1.2)
+func _throw_held_item() -> void:
+	if not is_instance_valid(_jumper_held_item):
+		_jumper_held_item = null
+		return
+
+	var item: Node2D = _jumper_held_item
+	_jumper_held_item = null
 
 	var aim: Vector2 = _get_aim_direction()
+	AudioManager.play("crossbow_shoot", 0.0, 0.9)
 
-	match ability:
-		"bomb":
-			# Throw a bomb
-			AudioManager.play("explosion", -4.0, 1.3)
-			_spawn_vfx(Color(1.0, 0.5, 0.0, 0.6), Vector2(20, 20))
-			var bomb_proj := load("res://scenes/characters/projectile.tscn") as PackedScene
-			if bomb_proj:
-				var proj := bomb_proj.instantiate()
-				proj.damage = 30
-				proj.speed = 250.0
-				proj.direction = aim
-				proj.projectile_type = "muffin_grenade"
-				proj.owner_index = player_index
-				proj.global_position = global_position + aim * 12.0
-				get_parent().add_child(proj)
-		"arrow":
-			# Grapple shot
-			_special_grappling_hook()
-		"bolt":
-			# Burst of 5 magic bolts
-			for i in range(5):
-				var angle: float = randf_range(-0.3, 0.3)
-				var dir: Vector2 = aim.rotated(angle)
-				var bolt := load("res://scenes/characters/projectile.tscn") as PackedScene
-				if bolt:
-					var p := bolt.instantiate()
-					p.damage = 10
-					p.speed = 400.0
-					p.direction = dir
-					p.projectile_type = "magic_bolt"
-					p.owner_index = player_index
-					p.global_position = global_position + aim * 8.0
-					get_parent().add_child(p)
-			AudioManager.play("magic_bolt", 0.0, 0.8)
-		"donut":
-			# Summon a temporary donut buddy
-			var buddy_scene := load("res://scenes/characters/donut_buddy.tscn") as PackedScene
-			if buddy_scene:
-				var buddy := buddy_scene.instantiate()
-				buddy.owner_index = player_index
-				buddy.global_position = global_position + aim * 20.0
-				get_parent().add_child(buddy)
-			AudioManager.play("summon")
-		"knives":
-			# Fan of 5 knives
-			for i in range(5):
-				var t: float = float(i) / 4.0
-				var angle: float = lerpf(-0.4, 0.4, t)
-				var dir: Vector2 = aim.rotated(angle)
-				var knife := load("res://scenes/characters/projectile.tscn") as PackedScene
-				if knife:
-					var p := knife.instantiate()
-					p.damage = 15
-					p.speed = 450.0
-					p.direction = dir
-					p.projectile_type = "knife"
-					p.owner_index = player_index
-					p.global_position = global_position + aim * 10.0
-					get_parent().add_child(p)
-			AudioManager.play("dagger_stab")
-		"heal":
-			# Heal self and nearby allies
-			PlayerManager.heal_player(player_index, 30)
-			for p in get_tree().get_nodes_in_group("players"):
-				if p is Node2D:
-					var dist: float = global_position.distance_to(p.global_position)
-					if dist < 80.0 and "player_index" in p:
-						PlayerManager.heal_player(p.player_index, 20)
-			AudioManager.play("player_revive")
-			_spawn_vfx(Color(0.3, 0.9, 0.4, 0.5), Vector2(40, 40))
-		"slam":
-			# Ground slam AoE
-			AudioManager.play("explosion", 0.0, 0.7)
-			_spawn_vfx(Color(0.6, 0.5, 0.3, 0.7), Vector2(60, 60))
-			for body in get_tree().get_nodes_in_group("enemies"):
-				if body is Node2D:
-					var dist: float = global_position.distance_to(body.global_position)
-					if dist < 60.0 and body.has_method("take_damage"):
-						body.take_damage(25, player_index)
-						if body.has_method("apply_knockback"):
-							var kb: Vector2 = (body.global_position - global_position).normalized() * 200.0
-							body.apply_knockback(kb)
+	# Reparent back to the scene
+	var throw_pos: Vector2 = global_position + aim * 16.0
+	remove_child(item)
+	get_parent().add_child(item)
+	item.global_position = throw_pos
 
-	# "USED!" flash
-	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.4), Vector2(16, 16))
+	# Re-enable physics and launch it
+	if item.has_method("set_physics_process"):
+		item.set_physics_process(true)
+	if item.has_method("set_process"):
+		item.set_process(true)
+	if "velocity" in item:
+		item.velocity = aim * 400.0
+	if "direction" in item:
+		item.direction = aim
+	if "speed" in item:
+		item.speed = 400.0
+
+	# Make it damage enemies on contact if it doesn't already
+	if item.has_method("take_damage"):
+		pass  # It's an enemy projectile, already does damage
+	elif "damage" in item:
+		item.damage = maxi(item.damage, 20)  # At least 20 damage
+
+	_spawn_vfx(Color(0.3, 1.0, 1.0, 0.4), Vector2(12, 12))
 
 
 func _handle_jumper_momentum(delta: float) -> void:
