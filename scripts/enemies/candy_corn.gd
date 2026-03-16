@@ -21,6 +21,7 @@ const CONTACT_DAMAGE := 5
 enum State { PATROL, CHASE, WINDUP, SPINNING, DIZZY, HURT, DEAD }
 
 var health := MAX_HEALTH
+var mass := 25.0
 var patrol_direction := 1.0
 var _patrol_distance := 100.0
 var _start_x := 0.0

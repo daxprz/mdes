@@ -14,6 +14,7 @@ const BASE_CONTACT_DAMAGE := 10
 const DAMAGE_PER_SPEED := 0.05  # +1 damage per 20 speed
 
 var health := MAX_HEALTH
+var mass := 25.0
 var patrol_direction := 1.0
 var _patrol_distance := 100.0
 var _start_x := 0.0

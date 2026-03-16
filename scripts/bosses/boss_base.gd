@@ -12,6 +12,7 @@ signal phase_changed(phase: int)
 @export var move_speed: float = 80.0
 
 var health: int
+var mass := 300.0
 var current_phase: int = 1  # 1 = full, 2 = below 50%, 3 = below 25%
 var is_dead := false
 var facing_left := true

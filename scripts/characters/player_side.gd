@@ -24,6 +24,7 @@ enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 
 @export var player_index: int = 0
 @export var device_id: int = -1
 @export var character_class: PlayerManager.CharacterClass = PlayerManager.CharacterClass.MELEE
+var mass := 70.0
 
 # Jump height = v^2 / (2*g). With v=550, g=900: max height ~168px
 const GRAVITY := 900.0
@@ -155,6 +156,48 @@ const RANGER_RELOAD_TIME := 1.5
 var _ranger_reload_timer: float = 0.0
 var _ranger_reloading: bool = false
 
+# Physics grappling hook
+const GRAPPLE_SWING_RADIUS := 40.0
+const GRAPPLE_BASE_ANGULAR_VEL := 4.0  # rad/s
+const GRAPPLE_ANGULAR_ACCEL := 3.0  # rad/s²
+const GRAPPLE_MAX_ANGULAR_VEL := 12.0  # rad/s
+const GRAPPLE_MIN_HOLD := 0.3  # seconds before throw is valid
+const GRAPPLE_BASE_THROW_SPEED := 200.0
+const GRAPPLE_THROW_SPEED_PER_SEC := 150.0
+const GRAPPLE_MAX_THROW_SPEED := 500.0
+const GRAPPLE_HOOK_GRAVITY := 400.0
+const GRAPPLE_HOOK_DRAG := 0.98
+const GRAPPLE_ROPE_SEGMENTS := 20
+const GRAPPLE_ROPE_SEGMENT_LEN := 12.0
+const GRAPPLE_LAUNCH_SPEED_RATIO := 0.5  # 50% of JUMP_VELOCITY
+const GRAPPLE_PENDULUM_GRAVITY := 600.0
+const GRAPPLE_SWING_DAMPING := 0.02
+const GRAPPLE_INPUT_BOOST := 1.5  # rad/s² when pushing with swing
+const GRAPPLE_INPUT_BRAKE := 1.0
+const GRAPPLE_ROPE_ADJUST_SPEED := 80.0
+const GRAPPLE_MIN_ROPE_LEN := 30.0
+const GRAPPLE_MAX_ROPE_LEN := 300.0
+const GRAPPLE_TUG_FORCE := 8000.0
+const GRAPPLE_TUG_DURATION := 0.15
+const GRAPPLE_HOOK_DAMAGE := 10
+const GRAPPLE_TUG_DAMAGE := 10
+const PLAYER_MASS := 70.0
+
+enum GrappleState { IDLE, WINDUP, THROWN, CONNECTED, SWINGING, TUG, RETRACTING }
+var _grapple_state: GrappleState = GrappleState.IDLE
+var _grapple_hold_time: float = 0.0
+var _grapple_angle: float = 0.0  # Current windup angle
+var _grapple_angular_vel: float = 0.0
+var _grapple_hook_pos: Vector2 = Vector2.ZERO  # Hook world position
+var _grapple_hook_vel: Vector2 = Vector2.ZERO  # Hook velocity during throw
+var _grapple_anchor: Vector2 = Vector2.ZERO  # Anchor point (wall/enemy contact)
+var _grapple_anchor_entity: Node2D = null  # If anchored to an enemy
+var _grapple_rope_len: float = 100.0  # Current rope length
+var _grapple_swing_angle: float = 0.0  # Pendulum angle from vertical
+var _grapple_swing_vel: float = 0.0  # Pendulum angular velocity
+var _grapple_rope_points: Array[Vector2] = []  # Verlet rope segments
+var _grapple_retract_timer: float = 0.0
+
 # Mage air-walk
 var _mage_airwalk: bool = false
 var _mage_airwalk_timer: float = 0.0
@@ -215,6 +258,10 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 	if is_inside_tree():
 		_apply_class_sprite()
 		_update_player_label()
+
+
+func _draw() -> void:
+	_draw_grapple()
 
 
 func _apply_class_sprite() -> void:
@@ -404,6 +451,13 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
+	# While swinging on grapple, skip normal movement/gravity
+	if _grapple_state == GrappleState.SWINGING:
+		_update_health_bar()
+		_update_animation(delta)
+		_controller_just_pressed.clear()
+		queue_redraw()
+		return
 	_handle_demo_refuel()
 	_handle_healer_wind_gust()
 	_handle_tank_fortify(delta)
@@ -1804,108 +1858,20 @@ func _special_shield_charge() -> void:
 
 
 func _special_grappling_hook() -> void:
-	# Fire a grappling hook in the aimed direction
-	# If it hits a wall/platform: pull the player to that point
-	# If it hits an enemy: pull the player TO the enemy and deal damage
-	var aim: Vector2 = _get_aim_direction()
-	var hook_range: float = 250.0
-
-	AudioManager.play("grapple_launch")
-
-	# Raycast to find what the hook hits
-	var space := get_world_2d().direct_space_state
-	var query := PhysicsRayQueryParameters2D.create(
-		global_position,
-		global_position + aim * hook_range,
-		1 | 8  # Mask: world (1) + enemies (8)
-	)
-	query.exclude = [get_rid()]
-	var result: Dictionary = space.intersect_ray(query)
-
-	var hook_target: Vector2
-	var hit_enemy: Node2D = null
-
-	if result:
-		hook_target = result["position"]
-		var collider: Node = result["collider"]
-		if collider.is_in_group("enemies"):
-			hit_enemy = collider as Node2D
-	else:
-		# No hit - hook goes to max range and does nothing (visual only)
-		hook_target = global_position + aim * hook_range
-
-	# --- Visual: draw the hook line extending outward ---
-	var hook_line := ColorRect.new()
-	hook_line.color = Color(0.5, 0.4, 0.3, 0.8)
-	var line_vec: Vector2 = hook_target - global_position
-	var line_len: float = line_vec.length()
-	hook_line.size = Vector2(line_len, 2)
-	hook_line.position = global_position
-	hook_line.rotation = line_vec.angle()
-	hook_line.z_index = 6
-	get_parent().add_child(hook_line)
-
-	# Hook head (small square at the tip)
-	var hook_head := ColorRect.new()
-	hook_head.color = Color(0.6, 0.5, 0.35)
-	hook_head.size = Vector2(6, 6)
-	hook_head.position = hook_target - Vector2(3, 3)
-	hook_head.z_index = 7
-	get_parent().add_child(hook_head)
-
-	if not result:
-		# Miss - retract and fade
-		var miss_tween := hook_line.create_tween()
-		miss_tween.tween_property(hook_line, "modulate:a", 0.0, 0.2)
-		miss_tween.tween_callback(hook_line.queue_free)
-		var miss_head := hook_head.create_tween()
-		miss_head.tween_property(hook_head, "modulate:a", 0.0, 0.2)
-		miss_head.tween_callback(hook_head.queue_free)
-		return
-
-	# --- Pull player to the hook point ---
-	AudioManager.play("grapple_hit")
-
-	# Disable physics during pull
-	set_physics_process(false)
-	collision_layer = 0  # Invincible during grapple
-
-	# Stop at hook point (or slightly before for walls)
-	var pull_target: Vector2
-	if hit_enemy:
-		pull_target = hit_enemy.global_position + (-aim * 16.0)
-	else:
-		pull_target = hook_target + (-aim * 8.0)  # Stop slightly before wall
-
-	# Tween player position to target
-	var pull_speed: float = 600.0
-	var pull_time: float = clampf(line_len / pull_speed, 0.08, 0.4)
-
-	var pull_tween := create_tween()
-	pull_tween.tween_property(self, "global_position", pull_target, pull_time).set_ease(Tween.EASE_IN)
-	await pull_tween.finished
-
-	# Clean up hook visuals
-	if is_instance_valid(hook_line):
-		hook_line.queue_free()
-	if is_instance_valid(hook_head):
-		hook_head.queue_free()
-
-	# Re-enable physics
-	if is_inside_tree():
-		set_physics_process(true)
-		collision_layer = 2
-		velocity = aim * 100.0  # Small momentum on arrival
-
-		# If hit an enemy: deal damage + small AoE
-		if hit_enemy and is_instance_valid(hit_enemy):
-			if hit_enemy.has_method("take_damage"):
-				var hook_dmg: int = int(20 * PlayerManager.get_skill_bonus(player_index, "attack"))
-				hit_enemy.take_damage(hook_dmg, player_index)
-				PlayerManager.add_skill_xp(player_index, "special", 7)
-				_spawn_blood_particles(hit_enemy.global_position)
-			AudioManager.play("sword_slash", 0.0, 0.9)
-			_spawn_vfx(Color(0.3, 0.8, 0.3, 0.6), Vector2(24, 24))
+	# Start windup when special is pressed (if not already grappling)
+	if _grapple_state == GrappleState.IDLE:
+		_grapple_state = GrappleState.WINDUP
+		_grapple_hold_time = 0.0
+		_grapple_angle = 0.0
+		_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
+	elif _grapple_state == GrappleState.SWINGING:
+		# Press grapple again while swinging = release or tug
+		if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
+			_grapple_tug()
+		else:
+			_grapple_release()
+	elif _grapple_state == GrappleState.CONNECTED:
+		_grapple_release()
 
 
 func _special_frosting_freeze() -> void:
@@ -2727,8 +2693,310 @@ func _ranger_fire_crossbow() -> void:
 # -- Ranger Grapple (Circle) ---------------------------------------------------
 
 func _handle_ranger_grapple() -> void:
-	# This slot now unused - grapple moved to Triangle (special)
-	pass
+	if character_class != PlayerManager.CharacterClass.RANGED:
+		return
+	if _grapple_state == GrappleState.IDLE:
+		return
+
+	var delta: float = get_process_delta_time()
+
+	match _grapple_state:
+		GrappleState.WINDUP:
+			_grapple_tick_windup(delta)
+		GrappleState.THROWN:
+			_grapple_tick_thrown(delta)
+		GrappleState.CONNECTED:
+			_grapple_tick_connected(delta)
+		GrappleState.SWINGING:
+			_grapple_tick_swinging(delta)
+		GrappleState.RETRACTING:
+			_grapple_tick_retracting(delta)
+
+	queue_redraw()
+
+
+func _grapple_tick_windup(delta: float) -> void:
+	_grapple_hold_time += delta
+	_grapple_angular_vel = minf(
+		GRAPPLE_BASE_ANGULAR_VEL + _grapple_hold_time * GRAPPLE_ANGULAR_ACCEL,
+		GRAPPLE_MAX_ANGULAR_VEL
+	)
+	_grapple_angle += _grapple_angular_vel * delta
+
+	# Hook orbits player
+	_grapple_hook_pos = global_position + Vector2(
+		cos(_grapple_angle) * GRAPPLE_SWING_RADIUS,
+		sin(_grapple_angle) * GRAPPLE_SWING_RADIUS
+	)
+
+	# Release check: special button released
+	if not _is_device_action_pressed("special"):
+		if _grapple_hold_time >= GRAPPLE_MIN_HOLD:
+			_grapple_throw()
+		else:
+			_grapple_state = GrappleState.IDLE
+
+
+func _grapple_throw() -> void:
+	var aim: Vector2 = _get_aim_direction()
+	var throw_speed: float = clampf(
+		GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
+		GRAPPLE_BASE_THROW_SPEED,
+		GRAPPLE_MAX_THROW_SPEED
+	)
+	_grapple_hook_vel = aim * throw_speed
+	_grapple_hook_pos = global_position
+	_grapple_state = GrappleState.THROWN
+	_grapple_anchor_entity = null
+	AudioManager.play("grapple_launch")
+
+	# Initialize rope points
+	_grapple_rope_points.clear()
+	for i in range(GRAPPLE_ROPE_SEGMENTS):
+		_grapple_rope_points.append(global_position)
+
+
+func _grapple_tick_thrown(delta: float) -> void:
+	# Apply gravity and drag to hook
+	_grapple_hook_vel.y += GRAPPLE_HOOK_GRAVITY * delta
+	_grapple_hook_vel *= GRAPPLE_HOOK_DRAG
+	var prev_pos: Vector2 = _grapple_hook_pos
+	_grapple_hook_pos += _grapple_hook_vel * delta
+
+	# Raycast along movement for collision
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(
+		prev_pos, _grapple_hook_pos,
+		1 | 8  # world + enemies
+	)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+
+	if result:
+		_grapple_hook_pos = result["position"]
+		_grapple_anchor = result["position"]
+		var collider: Node = result["collider"]
+		if collider.is_in_group("enemies"):
+			_grapple_anchor_entity = collider as Node2D
+			if collider.has_method("take_damage"):
+				collider.take_damage(GRAPPLE_HOOK_DAMAGE, player_index)
+				PlayerManager.add_skill_xp(player_index, "special", 5)
+		AudioManager.play("grapple_hit")
+		_grapple_state = GrappleState.CONNECTED
+		_grapple_rope_len = global_position.distance_to(_grapple_anchor)
+
+		# Launch player toward anchor
+		var launch_dir: Vector2 = (_grapple_anchor - global_position).normalized()
+		velocity = launch_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+		return
+
+	# Update rope points (trail behind hook)
+	_grapple_update_rope_thrown()
+
+	# Max range check - if hook is too far, retract
+	if global_position.distance_to(_grapple_hook_pos) > GRAPPLE_MAX_ROPE_LEN * 1.5:
+		_grapple_start_retract()
+
+
+func _grapple_update_rope_thrown() -> void:
+	if _grapple_rope_points.is_empty():
+		return
+	# First point = player, last = hook
+	_grapple_rope_points[0] = global_position
+	_grapple_rope_points[GRAPPLE_ROPE_SEGMENTS - 1] = _grapple_hook_pos
+	# Interpolate middle points with slight sag
+	for i in range(1, GRAPPLE_ROPE_SEGMENTS - 1):
+		var t: float = float(i) / float(GRAPPLE_ROPE_SEGMENTS - 1)
+		var lerped: Vector2 = global_position.lerp(_grapple_hook_pos, t)
+		var sag: float = sin(t * PI) * 15.0  # Gravity sag
+		_grapple_rope_points[i] = lerped + Vector2(0, sag)
+
+
+func _grapple_tick_connected(delta: float) -> void:
+	# Player is launching toward anchor — check if at apex (velocity.y flips)
+	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
+		_grapple_anchor = _grapple_anchor_entity.global_position
+
+	# Normal gravity still applies during launch
+	# Transition to swing when rope goes taut (player within rope length)
+	var dist: float = global_position.distance_to(_grapple_anchor)
+	if dist <= _grapple_rope_len or velocity.y >= 0:
+		_grapple_rope_len = dist
+		# Calculate initial swing angle
+		var diff: Vector2 = global_position - _grapple_anchor
+		_grapple_swing_angle = atan2(diff.x, diff.y)  # angle from vertical
+		# Convert current velocity to angular velocity
+		var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
+		_grapple_swing_vel = velocity.dot(tangent) / maxf(_grapple_rope_len, 1.0)
+		_grapple_state = GrappleState.SWINGING
+
+
+func _grapple_tick_swinging(delta: float) -> void:
+	# Update anchor if attached to enemy
+	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
+		_grapple_anchor = _grapple_anchor_entity.global_position
+	elif _grapple_anchor_entity:
+		# Enemy died — release
+		_grapple_release()
+		return
+
+	# Pendulum physics: α = -(g/L) * sin(θ)
+	var alpha: float = -(GRAPPLE_PENDULUM_GRAVITY / maxf(_grapple_rope_len, 1.0)) * sin(_grapple_swing_angle)
+	# Damping
+	alpha -= _grapple_swing_vel * GRAPPLE_SWING_DAMPING
+
+	# Player input
+	var input_h: float = 0.0
+	var input_v: float = 0.0
+	if _is_device_action_pressed("move_left"):
+		input_h -= 1.0
+	if _is_device_action_pressed("move_right"):
+		input_h += 1.0
+	if _is_device_action_pressed("move_up"):
+		input_v -= 1.0
+	if _is_device_action_pressed("move_down"):
+		input_v += 1.0
+
+	# Horizontal input: boost or brake swing
+	if input_h != 0.0:
+		if signf(input_h) == signf(_grapple_swing_vel):
+			alpha += input_h * GRAPPLE_INPUT_BOOST
+		else:
+			alpha += input_h * GRAPPLE_INPUT_BRAKE
+
+	# Vertical input: adjust rope length
+	if input_v != 0.0:
+		_grapple_rope_len = clampf(
+			_grapple_rope_len + input_v * GRAPPLE_ROPE_ADJUST_SPEED * delta,
+			GRAPPLE_MIN_ROPE_LEN,
+			GRAPPLE_MAX_ROPE_LEN
+		)
+
+	# Integrate pendulum
+	_grapple_swing_vel += alpha * delta
+	_grapple_swing_angle += _grapple_swing_vel * delta
+
+	# Position player on the pendulum arc
+	var new_pos := Vector2(
+		_grapple_anchor.x + _grapple_rope_len * sin(_grapple_swing_angle),
+		_grapple_anchor.y + _grapple_rope_len * cos(_grapple_swing_angle)
+	)
+	global_position = new_pos
+
+	# Update velocity to match pendulum motion (for momentum on release)
+	var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
+	velocity = tangent * _grapple_swing_vel * _grapple_rope_len
+
+	# Override gravity while swinging
+	# (handled by setting position directly)
+
+
+func _grapple_tug() -> void:
+	## Newtonian tug when releasing from an enemy
+	if not _grapple_anchor_entity or not is_instance_valid(_grapple_anchor_entity):
+		_grapple_release()
+		return
+
+	_grapple_state = GrappleState.TUG
+
+	# Deal tug damage
+	if _grapple_anchor_entity.has_method("take_damage"):
+		_grapple_anchor_entity.take_damage(GRAPPLE_TUG_DAMAGE, player_index)
+		PlayerManager.add_skill_xp(player_index, "special", 7)
+
+	# Get enemy mass
+	var enemy_mass: float = 70.0  # default
+	if "mass" in _grapple_anchor_entity:
+		enemy_mass = _grapple_anchor_entity.mass
+
+	# F = ma → a = F/m, applied as impulse over TUG_DURATION
+	var dir_to_enemy: Vector2 = (_grapple_anchor_entity.global_position - global_position).normalized()
+	var player_accel: float = GRAPPLE_TUG_FORCE / PLAYER_MASS
+	var enemy_accel: float = GRAPPLE_TUG_FORCE / enemy_mass
+
+	# Apply impulses
+	velocity = dir_to_enemy * player_accel * GRAPPLE_TUG_DURATION
+	if _grapple_anchor_entity is CharacterBody2D:
+		_grapple_anchor_entity.velocity = -dir_to_enemy * enemy_accel * GRAPPLE_TUG_DURATION
+
+	# Apply knockback if the enemy has the method
+	if _grapple_anchor_entity.has_method("apply_knockback"):
+		_grapple_anchor_entity.apply_knockback(-dir_to_enemy * enemy_accel * GRAPPLE_TUG_DURATION)
+
+	AudioManager.play("grapple_hit", 0.0, 0.8)
+	_spawn_blood_particles(_grapple_anchor_entity.global_position)
+	_grapple_start_retract()
+
+
+func _grapple_release() -> void:
+	## Release from wall — keep swing momentum
+	_grapple_state = GrappleState.RETRACTING
+	_grapple_retract_timer = 0.2
+	_grapple_anchor_entity = null
+	# velocity is already set from swing
+
+
+func _grapple_start_retract() -> void:
+	_grapple_state = GrappleState.RETRACTING
+	_grapple_retract_timer = 0.2
+	_grapple_anchor_entity = null
+
+
+func _grapple_tick_retracting(delta: float) -> void:
+	_grapple_retract_timer -= delta
+	# Animate hook back to player
+	_grapple_hook_pos = _grapple_hook_pos.lerp(global_position, delta * 10.0)
+	if _grapple_retract_timer <= 0.0:
+		_grapple_state = GrappleState.IDLE
+		_grapple_rope_points.clear()
+
+
+# -- Grapple Drawing -----------------------------------------------------------
+
+func _draw_grapple() -> void:
+	if _grapple_state == GrappleState.IDLE:
+		return
+
+	var rope_color := Color(0.5, 0.4, 0.3, 0.8)
+	var hook_color := Color(0.6, 0.5, 0.35)
+
+	match _grapple_state:
+		GrappleState.WINDUP:
+			# Draw hook orbiting
+			var hook_local: Vector2 = _grapple_hook_pos - global_position
+			draw_line(Vector2.ZERO, hook_local, rope_color, 2.0)
+			draw_circle(hook_local, 4.0, hook_color)
+
+		GrappleState.THROWN:
+			# Draw rope trailing behind hook
+			if _grapple_rope_points.size() >= 2:
+				for i in range(_grapple_rope_points.size() - 1):
+					var a: Vector2 = _grapple_rope_points[i] - global_position
+					var b: Vector2 = _grapple_rope_points[i + 1] - global_position
+					draw_line(a, b, rope_color, 2.0)
+			var hook_local: Vector2 = _grapple_hook_pos - global_position
+			draw_circle(hook_local, 4.0, hook_color)
+
+		GrappleState.CONNECTED, GrappleState.SWINGING:
+			# Draw rope from player to anchor
+			var anchor_local: Vector2 = _grapple_anchor - global_position
+			# Simple rope with sag
+			var seg_count: int = maxi(int(_grapple_rope_len / GRAPPLE_ROPE_SEGMENT_LEN), 3)
+			var prev_pt: Vector2 = Vector2.ZERO
+			for i in range(1, seg_count + 1):
+				var t: float = float(i) / float(seg_count)
+				var pt: Vector2 = Vector2.ZERO.lerp(anchor_local, t)
+				# Add slight sag
+				var sag: float = sin(t * PI) * minf(_grapple_rope_len * 0.05, 10.0)
+				pt.y += sag
+				draw_line(prev_pt, pt, rope_color, 2.0)
+				prev_pt = pt
+			draw_circle(anchor_local, 5.0, hook_color)
+
+		GrappleState.RETRACTING:
+			var hook_local: Vector2 = _grapple_hook_pos - global_position
+			draw_line(Vector2.ZERO, hook_local, rope_color * Color(1, 1, 1, 0.5), 1.5)
+			draw_circle(hook_local, 3.0, hook_color * Color(1, 1, 1, 0.5))
 
 
 # -- Ranger Reload -------------------------------------------------------------

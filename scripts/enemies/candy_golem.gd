@@ -18,6 +18,7 @@ const PROJECTILE_ARMOR := 0.5  # 50% reduced projectile damage
 enum State { PATROL, CHASE, ATTACK_JUMP, ATTACK_SLAM, HURT, DEAD }
 
 var health := MAX_HEALTH
+var mass := 150.0
 var patrol_direction := 1.0
 var _patrol_distance := 100.0
 var _start_x := 0.0

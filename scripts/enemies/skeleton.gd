@@ -18,6 +18,7 @@ const ATTACK_COOLDOWN := 2.0
 enum State { PATROL, CHASE, ATTACK, HURT, DEAD }
 
 var health := MAX_HEALTH
+var mass := 30.0
 var patrol_direction := 1.0
 var _patrol_distance := 100.0
 var _start_x := 0.0

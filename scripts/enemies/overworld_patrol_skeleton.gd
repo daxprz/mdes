@@ -15,6 +15,7 @@ const MAX_HEALTH := 20
 enum State { PATROL, CHASE, DEAD }
 
 var health: int = MAX_HEALTH
+var mass := 30.0
 var patrol_direction: float = 1.0
 var _patrol_distance: float = 80.0
 var _start_pos := Vector2.ZERO

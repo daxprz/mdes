@@ -21,6 +21,7 @@ const MINI_TORNADO_HP := 15
 const MINI_TORNADO_PULL := 40.0
 
 var health := MAX_HEALTH
+var mass := 120.0
 var is_dead := false
 var current_phase := 1
 var _ring_timer := RING_INTERVAL

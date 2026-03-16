@@ -18,6 +18,7 @@ const CONTACT_DAMAGE := 3
 enum State { IDLE, WARNING, SHOOTING, HURT, DEAD }
 
 var health := MAX_HEALTH
+var mass := 30.0
 var patrol_direction := 1.0
 var _patrol_distance := 100.0
 var _state: State = State.IDLE

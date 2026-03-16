@@ -16,6 +16,7 @@ const PAUSE_DURATION := 1.0
 const DOUBLE_DAMAGE_MULTIPLIER := 2
 
 var health := MAX_HEALTH
+var mass := 120.0
 var is_dead := false
 var current_phase := 1
 var _nozzle_angle := 0.0

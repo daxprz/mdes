@@ -18,6 +18,7 @@ const HOVER_Y_OFFSET := -80.0  # How far above arena center the boss hovers
 enum State { HOVER, TELEGRAPH, SLAM, STUCK, RISE, SWEEP }
 
 var health := MAX_HEALTH
+var mass := 120.0
 var is_dead := false
 var _state: State = State.HOVER
 var _attack_timer := ATTACK_COOLDOWN

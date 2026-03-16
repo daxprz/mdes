@@ -20,6 +20,7 @@ const TIER_SCALE := [1.0, 0.6, 0.35]
 @export var size_tier: int = 0  # 0=large, 1=medium, 2=small
 
 var health := 20
+var mass := 50.0
 var max_health := 20
 var patrol_direction := 1.0
 var _patrol_distance := 100.0

@@ -24,6 +24,7 @@ const SHIELD_SPEED := 20.0
 enum Form { BLOB, SPIKE, WAVE, SHIELD }
 
 var health := MAX_HEALTH
+var mass := 120.0
 var is_dead := false
 var _current_form: Form = Form.BLOB
 var _form_timer := FORM_DURATION
