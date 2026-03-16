@@ -176,7 +176,7 @@ const GRAPPLE_INPUT_BOOST := 1.5  # rad/s² when pushing with swing
 const GRAPPLE_INPUT_BRAKE := 1.0
 const GRAPPLE_ROPE_ADJUST_SPEED := 80.0
 const GRAPPLE_MIN_ROPE_LEN := 30.0
-const GRAPPLE_MAX_ROPE_LEN := 300.0
+const GRAPPLE_MAX_ROPE_LEN := 900.0
 const GRAPPLE_TUG_FORCE := 8000.0
 const GRAPPLE_TUG_DURATION := 0.15
 const GRAPPLE_HOOK_DAMAGE := 10
@@ -452,11 +452,12 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
-	# While winding up or swinging on grapple, skip normal movement/gravity
+	# While winding up: gravity applies, horizontal input goes to grapple aim only
 	if _grapple_state == GrappleState.WINDUP:
-		velocity = Vector2.ZERO
+		# Keep gravity and existing horizontal momentum, but no new movement input
 		_update_health_bar()
 		_update_animation(delta)
+		move_and_slide()
 		_controller_just_pressed.clear()
 		queue_redraw()
 		return
@@ -2754,8 +2755,8 @@ func _grapple_tick_windup(delta: float) -> void:
 	)
 	_grapple_angle += _grapple_angular_vel * delta
 
-	# Lock feet to ground — zero out velocity during windup
-	velocity = Vector2.ZERO
+	# No horizontal input during windup — only gravity affects movement
+	velocity.x = move_toward(velocity.x, 0.0, 200.0 * delta)
 
 	# Hook orbits player
 	_grapple_hook_pos = global_position + Vector2(
@@ -3030,7 +3031,9 @@ func _draw_grapple() -> void:
 				GRAPPLE_BASE_THROW_SPEED + _grapple_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
 				GRAPPLE_BASE_THROW_SPEED, GRAPPLE_MAX_THROW_SPEED
 			)
-			var indicator_len: float = throw_speed * 0.3  # Visual preview length
+			var vp_size: Vector2 = get_viewport_rect().size
+			var max_indicator: float = minf(vp_size.x, vp_size.y) * 0.3
+			var indicator_len: float = minf(throw_speed * 0.06, max_indicator)
 			var aim_color := Color(1.0, 0.8, 0.2, 0.4)
 			# Dotted line: draw segments with gaps
 			var dash_len: float = 8.0
