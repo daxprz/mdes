@@ -3544,29 +3544,35 @@ func _archer_solve_arc() -> void:
 	## Solve for launch angle to hit reticle with a parabolic arc.
 	## All math in Godot coordinates (y-down, gravity positive).
 	##
-	## Projectile: x(t) = vx*t, y(t) = vy*t + 0.5*g*t²
-	## At target: dx = vx*T, dy = vy*T + 0.5*g*T²
-	## Eliminate T = dx/vx: dy = (vy/vx)*dx + 0.5*g*(dx/vx)²
-	## Let m = vy/vx (slope): dy = m*dx + 0.5*g*dx²/(v²/(1+m²))
-	## Quadratic in m: g*dx²*m² - 2*v²*dx*m + (2*v²*dy + g*dx²) = 0
+	## Solve for launch angle θ given speed v, gravity g, target (dx, dy).
+	## Godot coords: y-down, g positive = pulls down.
+	##
+	## x(t) = v·cos(θ)·t
+	## y(t) = v·sin(θ)·t + ½g·t²
+	## At target (dx, dy): T = dx / (v·cos(θ))
+	## dy = v·sin(θ)·T + ½g·T²
+	## dy = dx·tan(θ) + g·dx² / (2·v²·cos²(θ))
+	## Using cos²(θ) = 1/(1+tan²(θ)), let u = tan(θ):
+	## dy = dx·u + g·dx²·(1+u²) / (2v²)
+	## Rearranging: (g·dx²)·u² + (2v²·dx)·u + (g·dx² - 2v²·dy) = 0
+	##              ─── a ───    ─── b ───    ────── c ──────
 	var target: Vector2 = _archer_reticle_pos - global_position
 	var dx: float = target.x
-	var dy: float = target.y  # Positive = below, negative = above (Godot y-down)
+	var dy: float = target.y  # Positive = below player (y-down)
 	var v: float = _archer_arrow_speed
-	var g: float = ARCHER_ARROW_GRAVITY  # Positive = pulls down (Godot y-down)
+	var g: float = ARCHER_ARROW_GRAVITY
 
 	_archer_has_solution = false
 	_archer_arc_points.clear()
-	var reticle_radius: float = 12.0
+	var reticle_radius: float = 16.0
 
-	# Always compute a fallback: aim directly at target with current speed
+	# Fallback: aim directly at target
 	var aim_dir: Vector2 = target.normalized() if target.length() > 1.0 else Vector2(1.0 if dx >= 0 else -1.0, 0.0)
 	_archer_solved_vx = aim_dir.x * v
 	_archer_solved_vy = aim_dir.y * v
 	_build_arc_points_from_vel(_archer_solved_vx, _archer_solved_vy)
 
 	if absf(dx) < 1.0:
-		# Vertical shot
 		_archer_solved_vx = 0.0
 		_archer_solved_vy = -v
 		_build_arc_points_from_vel(0.0, -v)
@@ -3574,57 +3580,52 @@ func _archer_solve_arc() -> void:
 			_archer_has_solution = true
 		return
 
-	# Quadratic in m = vy/vx: a*m² + b*m + c = 0
+	# Quadratic in u = tan(θ): a·u² + b·u + c = 0
 	var a: float = g * dx * dx
-	var b: float = -2.0 * v * v * dx
-	var c: float = 2.0 * v * v * dy + g * dx * dx
+	var b: float = 2.0 * v * v * dx
+	var c: float = g * dx * dx - 2.0 * v * v * dy
 
 	var discriminant: float = b * b - 4.0 * a * c
 	if discriminant < 0:
-		# No quadratic solution — keep fallback arc for debug rendering
+		# No solution at this power — keep fallback
 		return
 
 	var sqrt_disc: float = sqrt(discriminant)
-	var m1: float = (-b + sqrt_disc) / (2.0 * a)
-	var m2: float = (-b - sqrt_disc) / (2.0 * a)
+	var u1: float = (-b + sqrt_disc) / (2.0 * a)
+	var u2: float = (-b - sqrt_disc) / (2.0 * a)
 
-	# Try both solutions — keep the best (closest to target), mark as solution if within radius
+	# u = tan(θ) where θ is measured from horizontal in Godot y-down.
+	# vx = v·cos(θ) = v / √(1+u²), vy = v·sin(θ) = v·u / √(1+u²)
+	# vx must have same sign as dx.
+
 	var best_vx: float = _archer_solved_vx
 	var best_vy: float = _archer_solved_vy
-	var best_dist: float = INF
+	var best_dist: float = _arc_closest_distance_to_target()
 	var best_hits: bool = false
 
-	var candidates: Array = [m1, m2]
-	for m_val in candidates:
-		var cvx: float = v / sqrt(1.0 + m_val * m_val)
+	for u_val in [u1, u2]:
+		var denom: float = sqrt(1.0 + u_val * u_val)
+		var cvx: float = v / denom
+		var cvy: float = v * u_val / denom
+		# Ensure horizontal direction matches target
 		if signf(cvx) != signf(dx):
 			cvx = -cvx
-		var cvy: float = m_val * cvx
+			cvy = -cvy
 
-		var t_check: float = dx / cvx if absf(cvx) > 0.01 else -1.0
-		if t_check < 0:
+		# Verify positive flight time
+		var flight_time: float = dx / cvx if absf(cvx) > 0.01 else -1.0
+		if flight_time < 0:
 			continue
 
 		_build_arc_points_from_vel(cvx, cvy)
 		var hits: bool = _verify_arc_hits_target(reticle_radius)
 		var closest: float = _arc_closest_distance_to_target()
 
-		if hits and not best_hits:
-			# First solution that hits — use it
+		if (hits and not best_hits) or (hits and closest < best_dist) or (not best_hits and closest < best_dist):
 			best_vx = cvx
 			best_vy = cvy
 			best_dist = closest
-			best_hits = true
-		elif hits and closest < best_dist:
-			# Better hitting solution
-			best_vx = cvx
-			best_vy = cvy
-			best_dist = closest
-		elif not best_hits and closest < best_dist:
-			# No hit yet — pick closest miss for debug rendering
-			best_vx = cvx
-			best_vy = cvy
-			best_dist = closest
+			best_hits = hits
 
 	_archer_solved_vx = best_vx
 	_archer_solved_vy = best_vy
