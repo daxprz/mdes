@@ -204,6 +204,20 @@ var _grapple_launch_immunity: float = 0.0  # Seconds where _handle_movement won'
 var _debug_mode: bool = false  # Toggle with SELECT button
 var _debug_tracers: Array = []  # [{pos, vel, predicted, time}]
 
+# Archer aimed shot
+const ARCHER_AIM_RETICLE_SPEED := 400.0  # Pixels/s reticle movement
+const ARCHER_ARROW_SPEED := 450.0  # Initial arrow speed (magnitude)
+const ARCHER_ARROW_GRAVITY := 500.0  # Arrow gravity during flight
+const ARCHER_AIM_LOCK_COOLDOWN := 0.25  # Seconds between target-lock recalculations
+const ARCHER_AIM_MAX_RANGE := 600.0  # Max reticle distance from player
+var _archer_aiming: bool = false
+var _archer_reticle_pos: Vector2 = Vector2.ZERO  # World position of reticle
+var _archer_has_solution: bool = false
+var _archer_launch_angle: float = 0.0  # Solved launch angle
+var _archer_arc_points: Array[Vector2] = []  # Points along the solved arc
+var _archer_lock_timer: float = 0.0  # Cooldown between lock recalculations
+var _archer_gleam_timer: float = 0.0  # For sparkle animation
+
 # Mage air-walk
 var _mage_airwalk: bool = false
 var _mage_airwalk_timer: float = 0.0
@@ -269,6 +283,7 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 
 func _draw() -> void:
 	_draw_grapple()
+	_draw_archer_aim()
 	_draw_debug()
 
 
@@ -518,6 +533,7 @@ func _physics_process(delta: float) -> void:
 	_handle_rogue_stealth_toggle()
 	_handle_rogue_stealth(delta)
 	_handle_ranger_reload(delta)
+	_handle_archer_aim(delta)
 	_handle_block()
 	if _delegate_active:
 		# Summoner is frozen in delegate mode - skip normal input
@@ -3415,6 +3431,232 @@ func _handle_ranger_reload(delta: float) -> void:
 			_ranger_reload_timer = RANGER_RELOAD_TIME
 		else:
 			_ranger_reloading = false
+
+
+# -- Archer Aimed Shot ---------------------------------------------------------
+
+func _handle_archer_aim(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.RANGED:
+		_archer_aiming = false
+		return
+
+	# L2 analog trigger: axis 4 (left trigger)
+	var l2_pressed: bool = false
+	var r2_pressed: bool = false
+	if device_id >= 0:
+		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.3
+		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.3
+	else:
+		# Keyboard: hold Tab to aim, click to fire (or use another key)
+		l2_pressed = Input.is_key_pressed(KEY_TAB)
+		r2_pressed = Input.is_key_pressed(KEY_ENTER)
+
+	if l2_pressed:
+		if not _archer_aiming:
+			# Start aiming: place reticle in front of player
+			_archer_aiming = true
+			_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
+			_archer_has_solution = false
+			_archer_arc_points.clear()
+			_archer_lock_timer = 0.0
+
+		# Move reticle with right stick
+		var reticle_input := Vector2.ZERO
+		if device_id >= 0:
+			reticle_input = Vector2(
+				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+			)
+			if reticle_input.length() < 0.15:
+				reticle_input = Vector2.ZERO
+		else:
+			if Input.is_key_pressed(KEY_LEFT):
+				reticle_input.x -= 1.0
+			if Input.is_key_pressed(KEY_RIGHT):
+				reticle_input.x += 1.0
+			if Input.is_key_pressed(KEY_UP):
+				reticle_input.y -= 1.0
+			if Input.is_key_pressed(KEY_DOWN):
+				reticle_input.y += 1.0
+
+		_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
+
+		# Clamp reticle range
+		var offset: Vector2 = _archer_reticle_pos - global_position
+		if offset.length() > ARCHER_AIM_MAX_RANGE:
+			_archer_reticle_pos = global_position + offset.normalized() * ARCHER_AIM_MAX_RANGE
+
+		# Solve arc with cooldown
+		_archer_lock_timer -= delta
+		if _archer_lock_timer <= 0.0:
+			_archer_lock_timer = ARCHER_AIM_LOCK_COOLDOWN
+			_archer_solve_arc()
+
+		_archer_gleam_timer += delta
+		queue_redraw()
+
+		# R2 fires
+		if r2_pressed and _archer_has_solution:
+			_archer_fire_aimed()
+			_archer_aiming = false
+
+	elif _archer_aiming:
+		# Released L2 — cancel aim
+		_archer_aiming = false
+		_archer_arc_points.clear()
+		queue_redraw()
+
+
+func _archer_solve_arc() -> void:
+	## Solve for launch angle to hit reticle with a parabolic arc.
+	## Uses the projectile trajectory equation:
+	## g*dx² * tan²(θ) - 2v²*dx * tan(θ) + (2v²*dy + g*dx²) = 0
+	var target: Vector2 = _archer_reticle_pos - global_position
+	var dx: float = target.x
+	var dy: float = target.y
+	var v: float = ARCHER_ARROW_SPEED
+	var g: float = ARCHER_ARROW_GRAVITY
+
+	_archer_has_solution = false
+	_archer_arc_points.clear()
+
+	# Handle straight-up/down edge case
+	if absf(dx) < 1.0:
+		# Can only hit if target is directly above and within reach
+		if dy < 0 and absf(dy) < (v * v) / (2.0 * g):
+			_archer_has_solution = true
+			_archer_launch_angle = -PI / 2.0 if dx >= 0 else PI / 2.0
+			_build_arc_points()
+		return
+
+	# Quadratic in tan(θ): a*t² + b*t + c = 0
+	var a: float = g * dx * dx
+	var b: float = -2.0 * v * v * dx
+	var c: float = 2.0 * v * v * dy + g * dx * dx
+
+	var discriminant: float = b * b - 4.0 * a * c
+
+	if discriminant < 0:
+		return  # No solution
+
+	var sqrt_disc: float = sqrt(discriminant)
+	var tan1: float = (-b + sqrt_disc) / (2.0 * a)
+	var tan2: float = (-b - sqrt_disc) / (2.0 * a)
+
+	# Pick the flatter arc (lower angle) for more natural trajectory
+	var angle1: float = atan(tan1)
+	var angle2: float = atan(tan2)
+
+	# Choose the angle that sends the arrow in the right horizontal direction
+	var best_angle: float = angle1
+	if absf(angle2) < absf(angle1):
+		best_angle = angle2
+
+	# Verify direction: cos(angle) should match sign of dx
+	var launch_dir_x: float = cos(best_angle)
+	if signf(launch_dir_x) != signf(dx):
+		# Try the other angle
+		best_angle = angle1 if best_angle == angle2 else angle2
+		launch_dir_x = cos(best_angle)
+		if signf(launch_dir_x) != signf(dx):
+			return  # Neither solution works
+
+	_archer_launch_angle = best_angle
+	_archer_has_solution = true
+	_build_arc_points()
+
+
+func _build_arc_points() -> void:
+	## Build the trajectory arc as a series of points for rendering
+	_archer_arc_points.clear()
+	var vx: float = ARCHER_ARROW_SPEED * cos(_archer_launch_angle)
+	var vy: float = ARCHER_ARROW_SPEED * -sin(_archer_launch_angle)  # Negative because y-down
+	var dt: float = 0.02  # Time step for arc sampling
+	var pos := Vector2.ZERO
+
+	for i in range(150):
+		_archer_arc_points.append(pos)
+		pos.x += vx * dt
+		pos.y += vy * dt
+		vy += ARCHER_ARROW_GRAVITY * dt
+
+		# Stop if we've passed the target
+		var to_target: Vector2 = (_archer_reticle_pos - global_position)
+		if pos.length() > to_target.length() * 1.2:
+			break
+
+	_archer_arc_points.append(pos)
+
+
+func _archer_fire_aimed() -> void:
+	## Fire an arrow along the solved parabolic arc
+	if _ranger_arrows <= 0:
+		_spawn_fail_flash()
+		AudioManager.play("reload_click", -4.0)
+		return
+
+	_ranger_arrows -= 1
+	_attack_cooldown = 0.6
+	AudioManager.play("crossbow_shoot", 0.0, 0.8)
+	_rumble(0.4, 0.6, 0.15)
+	PlayerManager.add_skill_xp(player_index, "attack", 3)
+
+	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
+
+	# Spawn a physics arrow that follows a parabolic arc
+	var vx: float = ARCHER_ARROW_SPEED * cos(_archer_launch_angle)
+	var vy: float = ARCHER_ARROW_SPEED * -sin(_archer_launch_angle)
+
+	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
+	if not projectile_scene:
+		return
+	var proj := projectile_scene.instantiate()
+	proj.damage = scaled_dmg
+	proj.speed = 0.0
+	proj.direction = Vector2.ZERO
+	proj.projectile_type = "crossbow_bolt"
+	proj.owner_index = player_index
+	proj.global_position = global_position
+	# Set arc physics properties
+	proj._is_arc = true
+	proj._arc_vel = Vector2(vx, vy)
+	proj._arc_gravity = ARCHER_ARROW_GRAVITY
+	get_parent().add_child(proj)
+
+
+func _draw_archer_aim() -> void:
+	if not _archer_aiming:
+		return
+
+	var reticle_local: Vector2 = _archer_reticle_pos - global_position
+	var reticle_alpha: float = 1.0 if _archer_has_solution else 0.5
+
+	# Draw reticle crosshair
+	var ret_color := Color(1.0, 0.3, 0.2, reticle_alpha)
+	draw_line(reticle_local + Vector2(-10, 0), reticle_local + Vector2(10, 0), ret_color, 2.0)
+	draw_line(reticle_local + Vector2(0, -10), reticle_local + Vector2(0, 10), ret_color, 2.0)
+	draw_circle(reticle_local, 8.0, Color(1.0, 0.3, 0.2, reticle_alpha * 0.3))
+
+	# Gleam/sparkle when solution found
+	if _archer_has_solution:
+		var sparkle_count := 4
+		for i in range(sparkle_count):
+			var angle: float = _archer_gleam_timer * 3.0 + i * TAU / sparkle_count
+			var sparkle_pos: Vector2 = reticle_local + Vector2(cos(angle), sin(angle)) * 12.0
+			var sparkle_alpha: float = 0.5 + 0.5 * sin(_archer_gleam_timer * 8.0 + i * 1.5)
+			draw_circle(sparkle_pos, 2.0, Color(1.0, 0.9, 0.3, sparkle_alpha))
+
+	# Draw arc (debug or always-on dotted line)
+	if _archer_has_solution and _archer_arc_points.size() >= 2:
+		var arc_alpha: float = 0.5 if _debug_mode else 0.0
+		if _debug_mode:
+			# Dotted arc line
+			for i in range(_archer_arc_points.size() - 1):
+				if i % 3 == 0:  # Skip every 3rd segment for dotted effect
+					continue
+				var a: Vector2 = _archer_arc_points[i]
+				var b: Vector2 = _archer_arc_points[i + 1]
+				draw_line(a, b, Color(1.0, 0.6, 0.2, arc_alpha), 1.5)
 
 
 # -- Rogue Stealth -------------------------------------------------------------

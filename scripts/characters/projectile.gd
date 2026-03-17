@@ -27,13 +27,24 @@ func _ready() -> void:
 		sprite.flip_h = true
 
 
+var _arc_vel := Vector2.ZERO
+var _arc_gravity: float = 0.0
+var _is_arc: bool = false
+
+
 func _physics_process(delta: float) -> void:
 	_age += delta
 	if _age >= lifetime:
 		queue_free()
 		return
 
-	position += direction * speed * delta
+	if _is_arc:
+		# Physics-based parabolic arc
+		_arc_vel.y += _arc_gravity * delta
+		position += _arc_vel * delta
+		rotation = _arc_vel.angle()
+	else:
+		position += direction * speed * delta
 
 
 func _on_body_entered(body: Node2D) -> void:
