@@ -3492,7 +3492,7 @@ func _handle_archer_aim(delta: float) -> void:
 	if offset.length() > ARCHER_AIM_MAX_RANGE:
 		_archer_reticle_pos = global_position + offset.normalized() * ARCHER_AIM_MAX_RANGE
 
-	# Pull strength: builds while L2 held, resets when released
+	# Pull strength: builds while L2 held. Release L2 = cancel aim.
 	if l2_pressed:
 		_archer_aim_hold_time += delta
 		_archer_arrow_speed = clampf(
@@ -3501,8 +3501,11 @@ func _handle_archer_aim(delta: float) -> void:
 			ARCHER_ARROW_MAX_SPEED
 		)
 	else:
-		_archer_aim_hold_time = 0.0
-		_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
+		# L2 released — cancel aim, hide reticle
+		_archer_aiming = false
+		_archer_arc_points.clear()
+		queue_redraw()
+		return
 
 	# Solve arc with cooldown
 	_archer_lock_timer -= delta
@@ -3625,13 +3628,7 @@ func _build_arc_points_from_vel(vx: float, vy: float) -> void:
 
 
 func _archer_fire_aimed() -> void:
-	## Fire an arrow along the solved parabolic arc
-	if _ranger_arrows <= 0:
-		_spawn_fail_flash()
-		AudioManager.play("reload_click", -4.0)
-		return
-
-	_ranger_arrows -= 1
+	## Fire an arrow along the solved parabolic arc (does not consume ammo)
 	_attack_cooldown = 0.5
 	AudioManager.play("crossbow_shoot", 0.0, 0.8)
 	_rumble(0.4, 0.6, 0.15)
