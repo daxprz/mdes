@@ -198,6 +198,7 @@ var _grapple_swing_vel: float = 0.0  # Pendulum angular velocity
 var _grapple_rope_points: Array[Vector2] = []  # Verlet rope segments
 var _grapple_retract_timer: float = 0.0
 var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
+var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -453,7 +454,9 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
-	if _grapple_state == GrappleState.SWINGING:
+	# While swinging taut on grapple, skip normal movement (pendulum handles it)
+	# But if rope is slack, allow normal movement/gravity
+	if _grapple_state == GrappleState.SWINGING and not _grapple_rope_slack:
 		_update_health_bar()
 		_update_animation(delta)
 		_controller_just_pressed.clear()
@@ -2859,22 +2862,29 @@ func _grapple_update_rope_thrown() -> void:
 
 
 func _grapple_tick_connected(delta: float) -> void:
-	# Player is launching toward anchor — check if at apex (velocity.y flips)
+	# Player is launching toward anchor
 	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 		_grapple_anchor = _grapple_anchor_entity.global_position
 
-	# Normal gravity still applies during launch
-	# Transition to swing when rope goes taut (player within rope length)
 	var dist: float = global_position.distance_to(_grapple_anchor)
-	if dist <= _grapple_rope_len or velocity.y >= 0:
+
+	# If player is moving away from anchor and exceeds rope length, transition to swing
+	if dist >= _grapple_rope_len:
 		_grapple_rope_len = dist
-		# Calculate initial swing angle
-		var diff: Vector2 = global_position - _grapple_anchor
-		_grapple_swing_angle = atan2(diff.x, diff.y)  # angle from vertical
-		# Convert current velocity to angular velocity
-		var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
-		_grapple_swing_vel = velocity.dot(tangent) / maxf(_grapple_rope_len, 1.0)
-		_grapple_state = GrappleState.SWINGING
+		_grapple_rope_slack = false
+		_enter_swing_from_velocity()
+	# If player is closer than rope length, rope is slack — keep moving freely
+	# Gravity and movement continue normally via _physics_process
+
+
+func _enter_swing_from_velocity() -> void:
+	## Convert current velocity into pendulum angular velocity
+	var diff: Vector2 = global_position - _grapple_anchor
+	_grapple_swing_angle = atan2(diff.x, diff.y)
+	var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
+	_grapple_swing_vel = velocity.dot(tangent) / maxf(_grapple_rope_len, 1.0)
+	_grapple_state = GrappleState.SWINGING
+	_grapple_rope_slack = false
 
 
 func _grapple_tick_swinging(delta: float) -> void:
@@ -2882,13 +2892,37 @@ func _grapple_tick_swinging(delta: float) -> void:
 	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 		_grapple_anchor = _grapple_anchor_entity.global_position
 	elif _grapple_anchor_entity:
-		# Enemy died — release
 		_grapple_release()
 		return
 
-	# Pendulum physics: α = -(g/L) * sin(θ)
+	var dist: float = global_position.distance_to(_grapple_anchor)
+
+	# Check for slack: player is closer to anchor than rope length
+	if dist < _grapple_rope_len * 0.95:
+		_grapple_rope_slack = true
+
+	if _grapple_rope_slack:
+		# Rope is slack — player moves freely with normal gravity
+		# Velocity is preserved from last frame, gravity applied by _apply_gravity
+		# Check if player has fallen back to rope length (bounce)
+		if dist >= _grapple_rope_len:
+			_grapple_rope_slack = false
+			# Bounce: reflect velocity component along the rope direction
+			var rope_dir: Vector2 = (global_position - _grapple_anchor).normalized()
+			var vel_along_rope: float = velocity.dot(rope_dir)
+			if vel_along_rope > 0:
+				# Moving away from anchor — reflect with damping
+				velocity -= rope_dir * vel_along_rope * 1.5  # 1.5 = slight bounce
+			# Snap to rope length
+			global_position = _grapple_anchor + rope_dir * _grapple_rope_len
+			# Re-enter pendulum from current velocity
+			_enter_swing_from_velocity()
+		return
+
+	# --- Taut rope: pendulum physics ---
+
+	# Pendulum: α = -(g/L) * sin(θ)
 	var alpha: float = -(GRAPPLE_PENDULUM_GRAVITY / maxf(_grapple_rope_len, 1.0)) * sin(_grapple_swing_angle)
-	# Damping
 	alpha -= _grapple_swing_vel * GRAPPLE_SWING_DAMPING
 
 	# Player input
@@ -2922,19 +2956,23 @@ func _grapple_tick_swinging(delta: float) -> void:
 	_grapple_swing_vel += alpha * delta
 	_grapple_swing_angle += _grapple_swing_vel * delta
 
-	# Position player on the pendulum arc
+	# Check if player would go above anchor (rope would go slack)
 	var new_pos := Vector2(
 		_grapple_anchor.x + _grapple_rope_len * sin(_grapple_swing_angle),
 		_grapple_anchor.y + _grapple_rope_len * cos(_grapple_swing_angle)
 	)
+	if new_pos.y < _grapple_anchor.y:
+		# Player swung above anchor — go slack, preserve velocity
+		var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
+		velocity = tangent * _grapple_swing_vel * _grapple_rope_len
+		_grapple_rope_slack = true
+		return
+
 	global_position = new_pos
 
 	# Update velocity to match pendulum motion (for momentum on release)
 	var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
 	velocity = tangent * _grapple_swing_vel * _grapple_rope_len
-
-	# Override gravity while swinging
-	# (handled by setting position directly)
 
 
 func _grapple_tug() -> void:
