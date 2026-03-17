@@ -206,11 +206,15 @@ var _debug_tracers: Array = []  # [{pos, vel, predicted, time}]
 
 # Archer aimed shot
 const ARCHER_AIM_RETICLE_SPEED := 400.0  # Pixels/s reticle movement
-const ARCHER_ARROW_SPEED := 450.0  # Initial arrow speed (magnitude)
+const ARCHER_ARROW_MIN_SPEED := 300.0  # Arrow speed at min pull
+const ARCHER_ARROW_MAX_SPEED := 1800.0  # Arrow speed at max pull
+const ARCHER_ARROW_SPEED_RATE := 1200.0  # Speed increase per second of hold
 const ARCHER_ARROW_GRAVITY := 500.0  # Arrow gravity during flight
 const ARCHER_AIM_LOCK_COOLDOWN := 0.25  # Seconds between target-lock recalculations
 const ARCHER_AIM_MAX_RANGE := 600.0  # Max reticle distance from player
 var _archer_aiming: bool = false
+var _archer_aim_hold_time: float = 0.0  # How long L2 has been held (determines pull strength)
+var _archer_arrow_speed: float = ARCHER_ARROW_MIN_SPEED  # Current arrow speed based on pull
 var _archer_reticle_pos: Vector2 = Vector2.ZERO  # World position of reticle
 var _archer_has_solution: bool = false
 var _archer_launch_angle: float = 0.0  # Solved launch angle
@@ -3455,10 +3459,19 @@ func _handle_archer_aim(delta: float) -> void:
 		if not _archer_aiming:
 			# Start aiming: place reticle in front of player
 			_archer_aiming = true
+			_archer_aim_hold_time = 0.0
 			_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
 			_archer_has_solution = false
 			_archer_arc_points.clear()
 			_archer_lock_timer = 0.0
+
+		# Build pull strength over time
+		_archer_aim_hold_time += delta
+		_archer_arrow_speed = clampf(
+			ARCHER_ARROW_MIN_SPEED + _archer_aim_hold_time * ARCHER_ARROW_SPEED_RATE,
+			ARCHER_ARROW_MIN_SPEED,
+			ARCHER_ARROW_MAX_SPEED
+		)
 
 		# Move reticle with right stick
 		var reticle_input := Vector2.ZERO
@@ -3514,7 +3527,7 @@ func _archer_solve_arc() -> void:
 	var target: Vector2 = _archer_reticle_pos - global_position
 	var dx: float = target.x
 	var dy: float = target.y
-	var v: float = ARCHER_ARROW_SPEED
+	var v: float = _archer_arrow_speed
 	var g: float = ARCHER_ARROW_GRAVITY
 
 	_archer_has_solution = false
@@ -3569,8 +3582,8 @@ func _archer_solve_arc() -> void:
 func _build_arc_points() -> void:
 	## Build the trajectory arc as a series of points for rendering
 	_archer_arc_points.clear()
-	var vx: float = ARCHER_ARROW_SPEED * cos(_archer_launch_angle)
-	var vy: float = ARCHER_ARROW_SPEED * -sin(_archer_launch_angle)  # Negative because y-down
+	var vx: float = _archer_arrow_speed * cos(_archer_launch_angle)
+	var vy: float = _archer_arrow_speed * -sin(_archer_launch_angle)  # Negative because y-down
 	var dt: float = 0.02  # Time step for arc sampling
 	var pos := Vector2.ZERO
 
@@ -3604,8 +3617,8 @@ func _archer_fire_aimed() -> void:
 	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
 
 	# Spawn a physics arrow that follows a parabolic arc
-	var vx: float = ARCHER_ARROW_SPEED * cos(_archer_launch_angle)
-	var vy: float = ARCHER_ARROW_SPEED * -sin(_archer_launch_angle)
+	var vx: float = _archer_arrow_speed * cos(_archer_launch_angle)
+	var vy: float = _archer_arrow_speed * -sin(_archer_launch_angle)
 
 	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
 	if not projectile_scene:
@@ -3630,6 +3643,15 @@ func _draw_archer_aim() -> void:
 
 	var reticle_local: Vector2 = _archer_reticle_pos - global_position
 	var reticle_alpha: float = 1.0 if _archer_has_solution else 0.5
+
+	# Pull strength indicator (small bar near player)
+	var pull_ratio: float = (_archer_arrow_speed - ARCHER_ARROW_MIN_SPEED) / (ARCHER_ARROW_MAX_SPEED - ARCHER_ARROW_MIN_SPEED)
+	var bar_width: float = 24.0
+	var bar_height: float = 3.0
+	var bar_pos := Vector2(-bar_width / 2.0, 18.0)
+	draw_rect(Rect2(bar_pos, Vector2(bar_width, bar_height)), Color(0.3, 0.3, 0.3, 0.6))
+	var fill_color := Color(0.3, 0.8, 0.3).lerp(Color(1.0, 0.3, 0.1), pull_ratio)
+	draw_rect(Rect2(bar_pos, Vector2(bar_width * pull_ratio, bar_height)), fill_color)
 
 	# Draw reticle crosshair
 	var ret_color := Color(1.0, 0.3, 0.2, reticle_alpha)
