@@ -313,6 +313,9 @@ func _on_class_changed_inline(p_index: int, new_class: PlayerManager.CharacterCl
 	_spawn_class_change_vfx()
 
 
+var _class_change_ghost: bool = false  # True while waiting for player to materialize
+
+
 func _spawn_class_change_vfx() -> void:
 	# Red portal
 	var portal := ColorRect.new()
@@ -340,12 +343,40 @@ func _spawn_class_change_vfx() -> void:
 	poof_tween.parallel().tween_property(poof, "modulate:a", 0.0, 0.4)
 	poof_tween.tween_callback(poof.queue_free)
 
-	# Ghost effect: fade out then back in
+	# Ghost state: semi-transparent until player presses a non-movement button
 	modulate = Color(1, 1, 1, 0.4)
-	var restore_tween := create_tween()
-	restore_tween.tween_property(self, "modulate:a", 1.0, 0.5)
+	_class_change_ghost = true
+	PlayerHUD.class_change_locked[player_index] = true
 
-	# Spawn rift tentacle (counts toward global limit)
+
+func _check_class_change_ghost() -> void:
+	if not _class_change_ghost:
+		return
+
+	var pressed := false
+	if device_id == -1:
+		pressed = _is_device_action_just_pressed("attack") or \
+				  _is_device_action_just_pressed("special") or \
+				  _is_device_action_just_pressed("jump") or \
+				  _is_device_action_just_pressed("block") or \
+				  _is_device_action_just_pressed("interact")
+	else:
+		pressed = _is_device_action_just_pressed("attack") or \
+				  _is_device_action_just_pressed("special") or \
+				  _is_device_action_just_pressed("jump") or \
+				  _is_device_action_just_pressed("block") or \
+				  _is_device_action_just_pressed("interact") or \
+				  _is_device_action_just_pressed("grapple")
+
+	if not pressed:
+		return
+
+	# Materialize: restore opacity
+	_class_change_ghost = false
+	var restore_tween := create_tween()
+	restore_tween.tween_property(self, "modulate:a", 1.0, 0.2)
+
+	# NOW spawn the rift tentacle
 	PlayerHUD.active_tentacle_count += 1
 	var rift_script := load("res://scripts/effects/rift_tentacle.gd")
 	var rift := Node2D.new()
@@ -354,11 +385,9 @@ func _spawn_class_change_vfx() -> void:
 	rift.setup(player_index)
 	get_parent().add_child(rift)
 
-	# Lock class changes for this player
-	PlayerHUD.class_change_locked[player_index] = true
-	# Unlock after rift duration (15s) via a timer — unless tentacle attached permanently
-	var unlock_timer := get_tree().create_timer(15.0)
+	# Unlock after rift duration (15s)
 	var pi_capture: int = player_index
+	var unlock_timer := get_tree().create_timer(15.0)
 	unlock_timer.timeout.connect(func() -> void:
 		if not PlayerHUD.tentacle_lost.has(pi_capture):
 			PlayerHUD.class_change_locked.erase(pi_capture)
@@ -425,6 +454,7 @@ func _input(event: InputEvent) -> void:
 func _physics_process(delta: float) -> void:
 	_apply_gravity(delta)
 	_check_out_of_bounds()
+	_check_class_change_ghost()
 
 	if _is_dead:
 		_check_revive(delta)
