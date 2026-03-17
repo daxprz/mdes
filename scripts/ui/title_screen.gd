@@ -154,7 +154,7 @@ func _setup_portal_doorway() -> void:
 	var doorway := Node2D.new()
 	doorway.set_script(doorway_script)
 	# Place on the floor, center of the arena (raised above floor line)
-	doorway.global_position = Vector2(960, 920)
+	doorway.global_position = Vector2(960, 880)
 	doorway.z_index = 2  # Behind players but above background
 	add_child(doorway)
 	doorway.all_players_entered.connect(_start_game)
@@ -359,10 +359,10 @@ func _on_player_left(player_index: int) -> void:
 # -- Lobby Player Spawning -----------------------------------------------------
 
 const SPAWN_POSITIONS := [
-	Vector2(670, 560),   # P1: upper-left platform
-	Vector2(1250, 560),  # P2: upper-right platform
-	Vector2(540, 780),   # P3: lower-left platform
-	Vector2(1380, 780),  # P4: lower-right platform
+	Vector2(670, 520),   # P1: upper-left platform
+	Vector2(1250, 520),  # P2: upper-right platform
+	Vector2(540, 740),   # P3: lower-left platform
+	Vector2(1380, 740),  # P4: lower-right platform
 ]
 
 func _spawn_lobby_player(player_index: int) -> void:

@@ -20,7 +20,7 @@ z_index = -10
 
 ; -- Floor --
 [node name="Floor" type="StaticBody2D" parent="."]
-position = Vector2(960, 940)
+position = Vector2(960, 900)
 
 [node name="FloorShape" type="CollisionShape2D" parent="Floor"]
 shape = SubResource("floor_shape")
@@ -58,7 +58,7 @@ shape = SubResource("floor_shape")
 
 ; -- Platform low-left --
 [node name="PlatLeft" type="StaticBody2D" parent="."]
-position = Vector2(540, 800)
+position = Vector2(540, 760)
 
 [node name="PlatLeftShape" type="CollisionShape2D" parent="PlatLeft"]
 shape = SubResource("floor_shape")
@@ -73,7 +73,7 @@ color = Color(0.4, 0.3, 0.22, 1)
 
 ; -- Platform low-right --
 [node name="PlatRight" type="StaticBody2D" parent="."]
-position = Vector2(1380, 800)
+position = Vector2(1380, 760)
 
 [node name="PlatRightShape" type="CollisionShape2D" parent="PlatRight"]
 shape = SubResource("floor_shape")
@@ -88,7 +88,7 @@ color = Color(0.4, 0.3, 0.22, 1)
 
 ; -- Platform top-left --
 [node name="PlatTopLeft" type="StaticBody2D" parent="."]
-position = Vector2(670, 580)
+position = Vector2(670, 540)
 
 [node name="PlatTopLeftShape" type="CollisionShape2D" parent="PlatTopLeft"]
 shape = SubResource("floor_shape")
@@ -103,7 +103,7 @@ color = Color(0.5, 0.38, 0.25, 1)
 
 ; -- Platform top-right --
 [node name="PlatTopRight" type="StaticBody2D" parent="."]
-position = Vector2(1250, 580)
+position = Vector2(1250, 540)
 
 [node name="PlatTopRightShape" type="CollisionShape2D" parent="PlatTopRight"]
 shape = SubResource("floor_shape")
@@ -118,7 +118,7 @@ color = Color(0.5, 0.38, 0.25, 1)
 
 ; -- Spawn point for players --
 [node name="PlaygroundSpawn" type="Marker2D" parent="."]
-position = Vector2(960, 880)
+position = Vector2(960, 840)
 
 ; -- Container for spawned player nodes --
 [node name="Players" type="Node2D" parent="."]
