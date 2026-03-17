@@ -200,7 +200,9 @@ var _grapple_retract_timer: float = 0.0
 var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
 var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
+var _grapple_launch_immunity: float = 0.0  # Seconds where _handle_movement won't override velocity
 var _debug_mode: bool = false  # Toggle with SELECT button
+var _debug_tracers: Array = []  # [{pos, vel, predicted, time}]
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -546,6 +548,8 @@ func _update_cooldowns(delta: float) -> void:
 		_attack_cooldown -= delta
 	if _special_cooldown > 0.0:
 		_special_cooldown -= delta
+	if _grapple_launch_immunity > 0.0:
+		_grapple_launch_immunity -= delta
 
 
 # -- Physics -------------------------------------------------------------------
@@ -572,6 +576,9 @@ func _apply_gravity(delta: float) -> void:
 
 
 func _handle_movement() -> void:
+	# Grapple launch immunity — don't override velocity after grapple jump
+	if _grapple_launch_immunity > 0.0:
+		return
 	# Healer cannot move while channeling
 	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
 		velocity.x = 0.0
@@ -3085,10 +3092,25 @@ func _grapple_pull_to_anchor() -> void:
 
 func _grapple_jump_release() -> void:
 	## Jump while connected: disconnect and add jump velocity to current momentum
-	# Current velocity is already set from pendulum motion
-	# Add full jump speed in thumbstick direction, on top of existing velocity
+	var pre_vel: Vector2 = velocity  # Velocity from pendulum
 	var aim: Vector2 = _get_aim_direction_analog()
-	velocity += aim * abs(JUMP_VELOCITY)
+	var jump_impulse: Vector2 = aim * abs(JUMP_VELOCITY)
+	velocity += jump_impulse
+	var post_vel: Vector2 = velocity
+
+	# Prevent _handle_movement from overriding velocity for 0.5s
+	_grapple_launch_immunity = 0.5
+
+	# Debug tracers: snapshot all vectors at this moment
+	if _debug_mode:
+		_debug_tracers.append({
+			"pos": global_position,
+			"pre_vel": pre_vel,
+			"impulse": jump_impulse,
+			"post_vel": post_vel,
+			"time": 10.0,
+		})
+
 	AudioManager.play("jump")
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
@@ -3123,7 +3145,60 @@ func _grapple_tick_retracting(delta: float) -> void:
 
 func _draw_debug() -> void:
 	if not _debug_mode:
+		# Still tick down tracers even when debug off
+		var dt: float = get_process_delta_time()
+		var i: int = _debug_tracers.size() - 1
+		while i >= 0:
+			_debug_tracers[i]["time"] -= dt
+			if _debug_tracers[i]["time"] <= 0.0:
+				_debug_tracers.remove_at(i)
+			i -= 1
 		return
+
+	# Tick down and draw tracer arrows (lingering snapshots from jump releases)
+	var dt: float = get_process_delta_time()
+	var i: int = _debug_tracers.size() - 1
+	while i >= 0:
+		_debug_tracers[i]["time"] -= dt
+		if _debug_tracers[i]["time"] <= 0.0:
+			_debug_tracers.remove_at(i)
+			i -= 1
+			continue
+
+		var tracer: Dictionary = _debug_tracers[i]
+		var tpos: Vector2 = tracer["pos"] - global_position  # Relative to current player pos
+		var fade: float = clampf(tracer["time"] / 3.0, 0.1, 1.0)  # Fade over last 3 seconds
+		var scale_f: float = 0.12
+
+		# Pre-velocity (green, dashed)
+		var pre: Vector2 = tracer["pre_vel"]
+		if pre.length() > 5.0:
+			var pend: Vector2 = tpos + pre.normalized() * clampf(pre.length() * scale_f, 5.0, 80.0)
+			draw_line(tpos, pend, Color(0.2, 0.8, 0.2, 0.5 * fade), 1.5)
+
+		# Jump impulse (yellow)
+		var imp: Vector2 = tracer["impulse"]
+		if imp.length() > 5.0:
+			var iend: Vector2 = tpos + imp.normalized() * clampf(imp.length() * scale_f, 5.0, 80.0)
+			draw_line(tpos, iend, Color(1.0, 1.0, 0.2, 0.7 * fade), 2.0)
+
+		# Post-velocity / actual result (cyan, thick)
+		var post: Vector2 = tracer["post_vel"]
+		if post.length() > 5.0:
+			var oend: Vector2 = tpos + post.normalized() * clampf(post.length() * scale_f, 5.0, 100.0)
+			draw_line(tpos, oend, Color(0.2, 0.9, 1.0, 0.8 * fade), 3.0)
+			# Arrowhead
+			var odir: Vector2 = post.normalized()
+			var operp: Vector2 = Vector2(-odir.y, odir.x)
+			draw_line(oend, oend - odir * 8.0 + operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
+			draw_line(oend, oend - odir * 8.0 - operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
+
+		# Speed label
+		draw_string(ThemeDB.fallback_font, tpos + Vector2(5, -10),
+			"v:%d +j:%d = %d" % [int(pre.length()), int(imp.length()), int(post.length())],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 1.0, 1.0, 0.7 * fade))
+
+		i -= 1
 
 	# Current velocity arrow (green)
 	if velocity.length() > 5.0:
