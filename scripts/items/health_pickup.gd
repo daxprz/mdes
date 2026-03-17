@@ -87,7 +87,7 @@ func _spawn_sparkle() -> void:
 	sparkle.position = global_position + Vector2(randf_range(-8, 8), randf_range(-8, 8)) - Vector2(1.5, 1.5)
 	get_parent().add_child(sparkle)
 
-	var tween := create_tween()
+	var tween := sparkle.create_tween()  # Tween owned by sparkle, not pickup
 	tween.set_parallel(true)
 	tween.tween_property(sparkle, "position:y", sparkle.position.y - 15, 0.5)
 	tween.tween_property(sparkle, "modulate:a", 0.0, 0.5)

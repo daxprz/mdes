@@ -192,6 +192,8 @@ var _grapple_hook_pos: Vector2 = Vector2.ZERO  # Hook world position
 var _grapple_hook_vel: Vector2 = Vector2.ZERO  # Hook velocity during throw
 var _grapple_anchor: Vector2 = Vector2.ZERO  # Anchor point (wall/enemy contact)
 var _grapple_anchor_entity: Node2D = null  # If anchored to an enemy
+var _grapple_anchor_body: Node2D = null  # The body the hook connected to (for moving platforms)
+var _grapple_anchor_offset: Vector2 = Vector2.ZERO  # Local offset from anchor body
 var _grapple_rope_len: float = 100.0  # Current rope length
 var _grapple_swing_angle: float = 0.0  # Pendulum angle from vertical
 var _grapple_swing_vel: float = 0.0  # Pendulum angular velocity
@@ -2965,11 +2967,17 @@ func _grapple_tick_thrown(delta: float) -> void:
 		var collider: Node = result["collider"]
 		if collider.is_in_group("enemies"):
 			_grapple_anchor_entity = collider as Node2D
+			_grapple_anchor_body = null
 			if collider.has_method("take_damage"):
 				collider.take_damage(GRAPPLE_HOOK_DAMAGE, player_index)
 				PlayerManager.add_skill_xp(player_index, "special", 5)
+		elif collider is Node2D:
+			# Wall/platform — track for moving platform support
+			_grapple_anchor_body = collider as Node2D
+			_grapple_anchor_offset = result["position"] - collider.global_position
+			_grapple_anchor_entity = null
 		AudioManager.play("grapple_hit")
-		_rumble(0.6, 0.9, 0.2)  # Strong impact on connection
+		_rumble(0.6, 0.9, 0.2)
 		_grapple_state = GrappleState.CONNECTED
 		_grapple_rope_len = global_position.distance_to(_grapple_anchor)
 
@@ -3002,9 +3010,16 @@ func _grapple_update_rope_thrown() -> void:
 		_grapple_rope_points[i] = lerped + Vector2(0, sag)
 
 
-func _grapple_tick_connected(delta: float) -> void:
+func _update_grapple_anchor() -> void:
+	## Update anchor position for moving platforms/enemies
 	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 		_grapple_anchor = _grapple_anchor_entity.global_position
+	elif _grapple_anchor_body and is_instance_valid(_grapple_anchor_body):
+		_grapple_anchor = _grapple_anchor_body.global_position + _grapple_anchor_offset
+
+
+func _grapple_tick_connected(delta: float) -> void:
+	_update_grapple_anchor()
 
 	# If pulling, actively reel player toward anchor
 	if _grapple_pulling:
@@ -3042,10 +3057,8 @@ func _enter_swing_from_velocity() -> void:
 
 
 func _grapple_tick_swinging(delta: float) -> void:
-	# Update anchor if attached to enemy
-	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
-		_grapple_anchor = _grapple_anchor_entity.global_position
-	elif _grapple_anchor_entity:
+	_update_grapple_anchor()
+	if _grapple_anchor_entity and not is_instance_valid(_grapple_anchor_entity):
 		_grapple_release()
 		return
 
@@ -3220,8 +3233,9 @@ func _grapple_release() -> void:
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
+	_grapple_anchor_body = null
 	_grapple_pulling = false
-	_grapple_launch_immunity = 0.5  # Preserve velocity after release
+	_grapple_launch_immunity = 0.5
 	_stop_rumble()
 	# velocity is already set from swing
 
@@ -3230,7 +3244,8 @@ func _grapple_start_retract() -> void:
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
-	_grapple_launch_immunity = 0.5  # Preserve velocity after retract
+	_grapple_anchor_body = null
+	_grapple_launch_immunity = 0.5
 
 
 func _grapple_tick_retracting(delta: float) -> void:
