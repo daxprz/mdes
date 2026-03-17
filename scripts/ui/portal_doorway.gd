@@ -18,7 +18,7 @@ const DOOR_PLANK := Color(0.5, 0.35, 0.18)
 const HANDLE_COLOR := Color(0.6, 0.55, 0.45)
 const ACTIVATION_RANGE := 100.0
 const ALL_PRESENT_TIME := 5.0  # Seconds all players must be present before pull-in
-const SPIRAL_SPEED := 3.0
+const SPIRAL_SPEED := 0.4  # Very slow, mysterious rotation
 
 var _timer: float = 0.0
 var _players_near: int = 0
@@ -58,14 +58,14 @@ func _process(delta: float) -> void:
 	if _activated and not _doors_open:
 		_doors_open = true
 		AudioManager.play("enemy_hit", -6.0, 0.4)  # Creak sound
-		AudioManager.play("boss_roar", -8.0, 0.25)  # Deep ominous drone
+		AudioManager.play("beam_fire", -6.0, 0.15)  # Deep ominous drone (very low pitch)
 
 	# Repeating ominous hum while doors open
 	if _doors_open:
 		_hum_timer -= delta
 		if _hum_timer <= 0.0:
-			_hum_timer = 4.0  # Repeat every 4 seconds
-			AudioManager.play("boss_roar", -12.0, 0.2)  # Very deep, quiet drone
+			_hum_timer = 3.0  # Repeat every 3 seconds
+			AudioManager.play("beam_fire", -10.0, 0.12)  # Deep bass drone, very low pitch
 
 	# Animate door opening
 	if _doors_open and _door_open_amount < 1.0:
@@ -76,12 +76,11 @@ func _process(delta: float) -> void:
 		_fog_timer = 0.0
 		_spawn_fog_particle()
 
-	# Vortex particles when doors are open
-	if _doors_open and _particle_timer >= 0.04:
+	# Vortex particles when doors are open — sparse for mystery
+	if _doors_open and _particle_timer >= 0.15:
 		_particle_timer = 0.0
 		_spawn_spiral_particle()
 		if _all_present:
-			_spawn_spiral_particle()  # Double particles when all present
 			_spawn_spiral_particle()
 
 	# Track all-present timer
@@ -285,36 +284,41 @@ func _draw_vortex() -> void:
 	var center := Vector2(0, -DOORWAY_HEIGHT / 2.0)
 	var vortex_scale: float = 1.25  # 25% larger
 
-	# Base glow (always present when doors open)
-	var base_glow: float = 0.08 + 0.04 * sin(_timer * 3.0)
+	# Base glow (always present when doors open) — slow, ominous pulse
+	var base_glow: float = 0.08 + 0.04 * sin(_timer * 0.8)
 	draw_circle(center, 62.0 * vortex_scale, Color(0.2, 0.3, 0.8, base_glow))
 	draw_circle(center, 38.0 * vortex_scale, Color(0.3, 0.5, 1.0, base_glow * 1.5))
 	draw_circle(center, 18.0 * vortex_scale, Color(0.5, 0.7, 1.0, base_glow * 2.0))
 
-	# Spiral particles — outer edge slow, inner fast
+	# Spiral particles — very slow outer, slightly faster middle, fading to center
 	for p in _spiral_particles:
 		if p["type"] != "spiral":
 			continue
 		var age_ratio: float = 1.0 - clampf(p["time"] / 2.5, 0.0, 1.0)
-		var current_dist: float = p["dist"] * (1.0 - age_ratio * 0.7) * vortex_scale
-		# Speed inversely proportional to distance: closer = faster spin
+		# Particles drift inward slowly over their lifetime
+		var current_dist: float = p["dist"] * (1.0 - age_ratio * 0.8) * vortex_scale
+		# Gentle speed gradient: outer=very slow, inner=slightly faster
 		var dist_ratio: float = clampf(current_dist / (55.0 * vortex_scale), 0.0, 1.0)
-		var spin_speed: float = lerpf(SPIRAL_SPEED * 3.0, SPIRAL_SPEED * 0.5, dist_ratio)
-		var current_angle: float = p["angle"] + _timer * spin_speed + age_ratio * 3.0
+		var spin_speed: float = lerpf(SPIRAL_SPEED * 2.5, SPIRAL_SPEED, dist_ratio)
+		var current_angle: float = p["angle"] + _timer * spin_speed + age_ratio * 1.5
 		var pos: Vector2 = center + Vector2(cos(current_angle) * current_dist, sin(current_angle) * current_dist)
-		var alpha: float = p["brightness"] * (1.0 - age_ratio)
-		var size: float = p["size"] * (1.0 - age_ratio * 0.5)
+		# Fade out as they approach center (disappearing into the void)
+		var center_fade: float = clampf(current_dist / (20.0 * vortex_scale), 0.0, 1.0)
+		var alpha: float = p["brightness"] * (1.0 - age_ratio) * center_fade
+		var size: float = p["size"] * (1.0 - age_ratio * 0.5) * center_fade
 
-		# Outer glow
-		draw_circle(pos, size * 2.0, Color(0.2, 0.4, 1.0, alpha * 0.2))
+		if alpha < 0.02:
+			continue
+		# Soft outer glow
+		draw_circle(pos, size * 2.5, Color(0.15, 0.25, 0.7, alpha * 0.15))
 		# Core sparkle
-		draw_circle(pos, size, Color(0.3, 0.5, 1.0, alpha))
-		draw_circle(pos, size * 0.4, Color(0.7, 0.85, 1.0, alpha))
+		draw_circle(pos, size, Color(0.25, 0.4, 0.9, alpha * 0.8))
+		draw_circle(pos, size * 0.3, Color(0.5, 0.7, 1.0, alpha * 0.6))
 
 	# Brighter glow when all present (scales with timer)
 	if _all_present_timer > 0.0:
 		var intensity: float = clampf(_all_present_timer / ALL_PRESENT_TIME, 0.0, 1.0)
-		var pulse: float = 1.0 + 0.15 * sin(_timer * 5.0)
+		var pulse: float = 1.0 + 0.1 * sin(_timer * 1.5)
 		var glow_size: float = lerpf(40.0, 80.0, intensity) * pulse
 		draw_circle(center, glow_size, Color(0.4, 0.6, 1.0, intensity * 0.3))
 		draw_circle(center, glow_size * 0.6, Color(0.5, 0.7, 1.0, intensity * 0.4))
@@ -380,10 +384,10 @@ func _draw_front_layer() -> void:
 		prev_outer = outer_pt
 		prev_inner = inner_pt
 
-	# Large trapezoidal keystone centered at arch peak
-	var ks_top_w: float = 14.0  # Half-width at top (narrower)
-	var ks_bot_w: float = 22.0  # Half-width at bottom (wider)
-	var ks_h: float = stone_w + 8.0  # Tall enough to span the arch thickness
+	# Large trapezoidal keystone — wider on TOP, narrower on BOTTOM (capstone)
+	var ks_top_w: float = 24.0  # Half-width at top (wider)
+	var ks_bot_w: float = 14.0  # Half-width at bottom (narrower)
+	var ks_h: float = stone_w + 10.0
 	var ks_cy: float = -DOORWAY_HEIGHT - half_w  # Center of the arch peak
 	var ks_top: float = ks_cy - ks_h / 2.0
 	var ks_bot: float = ks_cy + ks_h / 2.0
@@ -396,12 +400,10 @@ func _draw_front_layer() -> void:
 		]),
 		PackedColorArray([KEYSTONE_COLOR, KEYSTONE_COLOR, KEYSTONE_COLOR, KEYSTONE_COLOR])
 	)
-	# Keystone border lines
 	draw_line(Vector2(-ks_top_w, ks_top), Vector2(ks_top_w, ks_top), STONE_LIGHT, 1.5)
 	draw_line(Vector2(-ks_top_w, ks_top), Vector2(-ks_bot_w, ks_bot), STONE_LIGHT * Color(1, 1, 1, 0.5), 1.0)
 	draw_line(Vector2(ks_top_w, ks_top), Vector2(ks_bot_w, ks_bot), STONE_LIGHT * Color(1, 1, 1, 0.5), 1.0)
-	# Keystone symbol
-	draw_circle(Vector2(0, ks_cy), 4.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
+	draw_circle(Vector2(0, ks_cy), 5.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
 
 	# Base stones
 	draw_rect(Rect2(-half_w - stone_w - 8, -6, stone_w + 8, 10), STONE_DARK)
@@ -409,23 +411,29 @@ func _draw_front_layer() -> void:
 
 
 func _draw_wooden_transom() -> void:
-	## Wooden slats and beam fill the entire archway, drawn BEHIND the stone arch
+	## Wooden slats follow the arch curve, drawn BEHIND the stone arch
 	var half_w: float = DOORWAY_WIDTH / 2.0
-	var door_top: float = -DOORWAY_HEIGHT + 10.0  # Top of the door panels
-	var arch_peak: float = -DOORWAY_HEIGHT - half_w - 10.0  # Above arch curve peak
+	var door_top: float = -DOORWAY_HEIGHT + 10.0
+	var arch_center_y: float = -DOORWAY_HEIGHT
+	var arch_mid_r: float = half_w + 10.0  # Center-line radius of the arch
 
-	# Slats fill from arch peak down to just above doors
-	var slat_region_top: float = arch_peak
-	var slat_region_bottom: float = door_top
-
-	# Wooden background panel — extends into the arch curve (arch stone covers edges)
-	draw_rect(Rect2(-half_w - 5, slat_region_top, DOORWAY_WIDTH + 10, slat_region_bottom - slat_region_top), DOOR_COLOR * Color(0.85, 0.85, 0.85))
-
-	# Vertical slats
-	var slat_count := 12
+	# Draw slats that follow the arch curve — each slat is a vertical line
+	# from the arch center-line down to the beam
+	var slat_count := 14
 	for i in range(slat_count + 1):
 		var sx: float = -half_w + (DOORWAY_WIDTH / float(slat_count)) * i
-		draw_line(Vector2(sx, slat_region_top), Vector2(sx, slat_region_bottom), DOOR_DARK, 1.0)
+		# Find the arch height at this x position
+		var dx: float = sx  # Distance from center
+		var slat_top: float = arch_center_y
+		if absf(dx) < arch_mid_r:
+			# Point on the arch semicircle
+			slat_top = arch_center_y - sqrt(arch_mid_r * arch_mid_r - dx * dx)
+		# Background fill for this slat column
+		var col_w: float = DOORWAY_WIDTH / float(slat_count)
+		var col_left: float = sx - col_w / 2.0
+		draw_rect(Rect2(col_left, slat_top, col_w, door_top - slat_top), DOOR_COLOR * Color(0.85, 0.85, 0.85))
+		# Slat line
+		draw_line(Vector2(sx, slat_top), Vector2(sx, door_top), DOOR_DARK, 1.0)
 
 	# Horizontal beam just above the doors
 	var beam_h: float = 7.0
@@ -433,9 +441,9 @@ func _draw_wooden_transom() -> void:
 	draw_line(Vector2(-half_w, door_top - beam_h), Vector2(half_w, door_top - beam_h), DOOR_PLANK, 1.0)
 	draw_line(Vector2(-half_w, door_top), Vector2(half_w, door_top), DOOR_DARK * Color(0.7, 0.7, 0.7), 1.0)
 
-	# Mysterious muffin symbol centered in the slat area
+	# Mysterious muffin symbol centered in the transom area
 	var sym_cx: float = 0.0
-	var sym_cy: float = (slat_region_top + slat_region_bottom) / 2.0 - 5.0
+	var sym_cy: float = arch_center_y - arch_mid_r * 0.4
 	var sym_color := Color(0.7, 0.6, 0.35, 0.85)
 	var sym_glow := Color(0.8, 0.7, 0.4, 0.3)
 
