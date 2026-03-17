@@ -377,6 +377,10 @@ func _update_debug_labels() -> void:
 			var ly: float = Input.get_joy_axis(dev_id, JOY_AXIS_LEFT_Y)
 			if absf(lx) > 0.15 or absf(ly) > 0.15:
 				btn_text += "L(%.1f,%.1f) " % [lx, ly]
+			var rx: float = Input.get_joy_axis(dev_id, JOY_AXIS_RIGHT_X)
+			var ry: float = Input.get_joy_axis(dev_id, JOY_AXIS_RIGHT_Y)
+			if absf(rx) > 0.15 or absf(ry) > 0.15:
+				btn_text += "R(%.1f,%.1f) " % [rx, ry]
 
 		lbl.text = btn_text
 

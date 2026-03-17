@@ -1665,15 +1665,23 @@ func _attack_rogue() -> void:
 
 
 func _get_aim_direction_analog() -> Vector2:
-	## Returns full analog aim direction from the joystick (not snapped to 8 dirs).
-	## Falls back to _get_aim_direction() for keyboard or if stick is neutral.
+	## Returns full analog aim direction. Right stick takes priority over left.
+	## Falls back to _get_aim_direction() for keyboard or if both sticks are neutral.
 	if device_id >= 0:
-		var stick := Vector2(
+		# Right stick priority
+		var right_stick := Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+		)
+		if right_stick.length() > 0.2:
+			return right_stick.normalized()
+		# Fall back to left stick
+		var left_stick := Vector2(
 			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
 			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
 		)
-		if stick.length() > 0.2:  # Deadzone
-			return stick.normalized()
+		if left_stick.length() > 0.2:
+			return left_stick.normalized()
 	return _get_aim_direction()
 
 
@@ -2849,15 +2857,21 @@ func _grapple_tick_windup(delta: float) -> void:
 		sin(_grapple_angle) * GRAPPLE_SWING_RADIUS
 	)
 
-	# Update locked aim: only change if stick has input, otherwise keep last direction
-	var stick_aim: Vector2 = _get_aim_direction_analog()
+	# Update locked aim: right stick priority, then left stick, then keep last
 	if device_id >= 0:
-		var stick := Vector2(
-			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
-			Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+		var right_stick := Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
 		)
-		if stick.length() > 0.2:
-			_grapple_locked_aim = stick.normalized()
+		if right_stick.length() > 0.2:
+			_grapple_locked_aim = right_stick.normalized()
+		else:
+			var left_stick := Vector2(
+				Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+				Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+			)
+			if left_stick.length() > 0.2:
+				_grapple_locked_aim = left_stick.normalized()
 	else:
 		# Keyboard: only update if actively pressing a direction
 		var kb_aim := Vector2.ZERO
