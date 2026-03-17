@@ -18,7 +18,7 @@ const DOOR_PLANK := Color(0.5, 0.35, 0.18)
 const HANDLE_COLOR := Color(0.6, 0.55, 0.45)
 const ACTIVATION_RANGE := 100.0
 const ALL_PRESENT_TIME := 5.0  # Seconds all players must be present before pull-in
-const SPIRAL_SPEED := 0.4  # Very slow, mysterious rotation
+const SPIRAL_SPEED := 0.12  # Barely noticeable rotation
 
 var _timer: float = 0.0
 var _players_near: int = 0
@@ -290,17 +290,20 @@ func _draw_vortex() -> void:
 	draw_circle(center, 38.0 * vortex_scale, Color(0.3, 0.5, 1.0, base_glow * 1.5))
 	draw_circle(center, 18.0 * vortex_scale, Color(0.5, 0.7, 1.0, base_glow * 2.0))
 
-	# Spiral particles — very slow outer, slightly faster middle, fading to center
+	# Speed multiplier: barely moving normally, slightly faster during pull-in
+	var speed_mult: float = 1.0
+	if _transition_started:
+		speed_mult = 1.0 + _transition_timer * 0.8  # Gradually speeds up during pull
+
+	# Spiral particles — barely rotating outer, slightly faster inner, fading to center
 	for p in _spiral_particles:
 		if p["type"] != "spiral":
 			continue
 		var age_ratio: float = 1.0 - clampf(p["time"] / 2.5, 0.0, 1.0)
-		# Particles drift inward slowly over their lifetime
 		var current_dist: float = p["dist"] * (1.0 - age_ratio * 0.8) * vortex_scale
-		# Gentle speed gradient: outer=very slow, inner=slightly faster
 		var dist_ratio: float = clampf(current_dist / (55.0 * vortex_scale), 0.0, 1.0)
-		var spin_speed: float = lerpf(SPIRAL_SPEED * 2.5, SPIRAL_SPEED, dist_ratio)
-		var current_angle: float = p["angle"] + _timer * spin_speed + age_ratio * 1.5
+		var spin_speed: float = lerpf(SPIRAL_SPEED * 2.0, SPIRAL_SPEED, dist_ratio) * speed_mult
+		var current_angle: float = p["angle"] + _timer * spin_speed + age_ratio * 0.5
 		var pos: Vector2 = center + Vector2(cos(current_angle) * current_dist, sin(current_angle) * current_dist)
 		# Fade out as they approach center (disappearing into the void)
 		var center_fade: float = clampf(current_dist / (20.0 * vortex_scale), 0.0, 1.0)
@@ -388,7 +391,7 @@ func _draw_front_layer() -> void:
 	var ks_top_w: float = 24.0  # Half-width at top (wider)
 	var ks_bot_w: float = 14.0  # Half-width at bottom (narrower)
 	var ks_h: float = stone_w + 10.0
-	var ks_cy: float = -DOORWAY_HEIGHT - half_w  # Center of the arch peak
+	var ks_cy: float = -DOORWAY_HEIGHT - half_w - stone_w / 2.0  # Centered on arch center-line at peak
 	var ks_top: float = ks_cy - ks_h / 2.0
 	var ks_bot: float = ks_cy + ks_h / 2.0
 	draw_polygon(
