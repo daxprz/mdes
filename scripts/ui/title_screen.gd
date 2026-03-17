@@ -21,6 +21,7 @@ var _rift_locks: Dictionary = {}  # player_index -> float (seconds remaining on 
 var _name_entry: Node = null
 var _pending_device_id: int = -99
 var _returning_from_game: bool = false
+var _scenery_items: Array = []  # Procedurally generated background items
 
 
 func _ready() -> void:
@@ -162,6 +163,7 @@ func _setup_background_trees() -> void:
 	left_tree.z_index = -5  # Behind everything
 	add_child(left_tree)
 	left_tree.global_position = Vector2(250, 900)
+	_scenery_items.append(left_tree)
 
 	# Right tree — large, stout, different shape
 	var right_tree := Node2D.new()
@@ -172,6 +174,7 @@ func _setup_background_trees() -> void:
 	right_tree.z_index = -5
 	add_child(right_tree)
 	right_tree.global_position = Vector2(1670, 900)
+	_scenery_items.append(right_tree)
 
 
 func _setup_portal_doorway() -> void:
@@ -233,9 +236,36 @@ func _check_non_movement_press(device_id: int) -> bool:
 
 # -- Input ---------------------------------------------------------------------
 
-func _input(_event: InputEvent) -> void:
-	# Game start is now handled by the portal doorway
-	pass
+func _input(event: InputEvent) -> void:
+	# Debug: G key regenerates nearest scenery item to P1
+	if event is InputEventKey and event.pressed and event.keycode == KEY_G:
+		if PlayerHUD._debug_mode:
+			_debug_regenerate_nearest_scenery()
+
+
+func _debug_regenerate_nearest_scenery() -> void:
+	# Find P1's position
+	var p1_pos := Vector2(960, 500)  # Default if no player
+	for node in get_tree().get_nodes_in_group("players"):
+		if node is CharacterBody2D and node.get("player_index") == 0:
+			p1_pos = node.global_position
+			break
+
+	# Find closest scenery item
+	var best_item: Node2D = null
+	var best_dist: float = INF
+	for item in _scenery_items:
+		if not is_instance_valid(item):
+			continue
+		var dist: float = p1_pos.distance_to(item.global_position)
+		if dist < best_dist:
+			best_dist = dist
+			best_item = item
+
+	if best_item and best_item.has_method("regenerate"):
+		var new_seed: int = randi()
+		best_item.regenerate(new_seed)
+		print("Regenerated scenery with seed: ", new_seed)
 
 
 # -- Profile Creation ----------------------------------------------------------

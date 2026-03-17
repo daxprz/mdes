@@ -19,6 +19,18 @@ var _leaves: Array = []  # [{pos, size, color, layer}]
 
 
 func _ready() -> void:
+	_generate()
+
+
+func regenerate(new_seed: int) -> void:
+	seed_value = new_seed
+	_branches.clear()
+	_leaves.clear()
+	_generate()
+	queue_redraw()
+
+
+func _generate() -> void:
 	if seed_value >= 0:
 		seed(seed_value)
 	_grow(Vector2.ZERO, -PI / 2.0, trunk_weight, trunk_length, 0)
