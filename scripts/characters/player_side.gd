@@ -3508,8 +3508,8 @@ func _handle_archer_aim(delta: float) -> void:
 		_archer_gleam_timer += delta
 		queue_redraw()
 
-		# R2 fires
-		if r2_pressed and _archer_has_solution:
+		# R2 fires (respects attack cooldown — max 1 arrow per 0.5s)
+		if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0:
 			_archer_fire_aimed()
 			_archer_aiming = false
 
@@ -3609,7 +3609,7 @@ func _archer_fire_aimed() -> void:
 		return
 
 	_ranger_arrows -= 1
-	_attack_cooldown = 0.6
+	_attack_cooldown = 0.5
 	AudioManager.play("crossbow_shoot", 0.0, 0.8)
 	_rumble(0.4, 0.6, 0.15)
 	PlayerManager.add_skill_xp(player_index, "attack", 3)
