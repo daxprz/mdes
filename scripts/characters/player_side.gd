@@ -199,6 +199,7 @@ var _grapple_rope_points: Array[Vector2] = []  # Verlet rope segments
 var _grapple_retract_timer: float = 0.0
 var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
+var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -2739,12 +2740,17 @@ func _handle_ranger_grapple() -> void:
 			_grapple_angle = 0.0
 			_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
 			_grapple_locked_aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
+			_grapple_pulling = false
 		elif _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
-			# L1 again = launch toward hook point (or tug if enemy)
 			if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
+				# Enemy: tug on first press
 				_grapple_tug()
+			elif _grapple_pulling:
+				# Second L1 press: disconnect
+				_grapple_release()
 			else:
-				_grapple_launch_to_anchor()
+				# First L1 press: pull toward anchor, stay connected
+				_grapple_pull_to_anchor()
 
 	# Jump while connected = disconnect with jump boost
 	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
@@ -3044,14 +3050,12 @@ func _grapple_tug() -> void:
 	_grapple_start_retract()
 
 
-func _grapple_launch_to_anchor() -> void:
-	## L1 while connected to wall: launch player toward the hook point
+func _grapple_pull_to_anchor() -> void:
+	## First L1: pull player straight toward anchor, stay connected
 	var to_anchor: Vector2 = (_grapple_anchor - global_position).normalized()
-	var travel_dir: Vector2 = velocity.normalized() if velocity.length() > 1.0 else to_anchor
-	var blended_dir: Vector2 = (to_anchor + travel_dir).normalized()
-	velocity = blended_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+	velocity = to_anchor * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+	_grapple_pulling = true
 	AudioManager.play("grapple_hit", 0.0, 1.2)
-	_grapple_start_retract()
 
 
 func _grapple_jump_release() -> void:
@@ -3070,6 +3074,7 @@ func _grapple_release() -> void:
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
+	_grapple_pulling = false
 	# velocity is already set from swing
 
 
