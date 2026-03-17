@@ -2707,10 +2707,16 @@ func _handle_ranger_grapple() -> void:
 			_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
 			_grapple_locked_aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
 		elif _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+			# L1 again = launch toward hook point (or tug if enemy)
 			if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 				_grapple_tug()
 			else:
-				_grapple_release()
+				_grapple_launch_to_anchor()
+
+	# Jump while connected = disconnect with jump boost
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		if _is_device_action_just_pressed("jump"):
+			_grapple_jump_release()
 
 	if _grapple_state == GrappleState.IDLE:
 		return
@@ -2966,6 +2972,25 @@ func _grapple_tug() -> void:
 	AudioManager.play("grapple_hit", 0.0, 0.8)
 	_spawn_blood_particles(_grapple_anchor_entity.global_position)
 	_grapple_start_retract()
+
+
+func _grapple_launch_to_anchor() -> void:
+	## L1 while connected to wall: launch player toward the hook point
+	var launch_dir: Vector2 = (_grapple_anchor - global_position).normalized()
+	velocity = launch_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+	AudioManager.play("grapple_hit", 0.0, 1.2)
+	_grapple_start_retract()
+
+
+func _grapple_jump_release() -> void:
+	## Jump while connected: disconnect and add jump velocity to current momentum
+	# Current velocity is already set from pendulum motion
+	# Add a full jump impulse on top of existing velocity
+	velocity.y += JUMP_VELOCITY  # Additive — stacks with swing momentum
+	AudioManager.play("jump")
+	_grapple_state = GrappleState.RETRACTING
+	_grapple_retract_timer = 0.2
+	_grapple_anchor_entity = null
 
 
 func _grapple_release() -> void:
