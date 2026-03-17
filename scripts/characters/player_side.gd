@@ -3444,158 +3444,181 @@ func _handle_archer_aim(delta: float) -> void:
 		_archer_aiming = false
 		return
 
-	# L2 analog trigger: axis 4 (left trigger)
+	# L2 analog trigger
 	var l2_pressed: bool = false
 	var r2_pressed: bool = false
 	if device_id >= 0:
 		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.3
 		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.3
 	else:
-		# Keyboard: hold Tab to aim, click to fire (or use another key)
 		l2_pressed = Input.is_key_pressed(KEY_TAB)
 		r2_pressed = Input.is_key_pressed(KEY_ENTER)
 
-	if l2_pressed:
-		if not _archer_aiming:
-			# Start aiming: place reticle in front of player
-			_archer_aiming = true
-			_archer_aim_hold_time = 0.0
-			_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
-			_archer_has_solution = false
-			_archer_arc_points.clear()
-			_archer_lock_timer = 0.0
+	# First L2 press initializes reticle position
+	if l2_pressed and not _archer_aiming:
+		_archer_aiming = true
+		_archer_aim_hold_time = 0.0
+		_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
+		_archer_has_solution = false
+		_archer_arc_points.clear()
+		_archer_lock_timer = 0.0
 
-		# Build pull strength over time
+	if not _archer_aiming:
+		return
+
+	# Reticle always movable with right stick (even when L2 released)
+	var reticle_input := Vector2.ZERO
+	if device_id >= 0:
+		reticle_input = Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+		)
+		if reticle_input.length() < 0.15:
+			reticle_input = Vector2.ZERO
+	else:
+		if Input.is_key_pressed(KEY_LEFT):
+			reticle_input.x -= 1.0
+		if Input.is_key_pressed(KEY_RIGHT):
+			reticle_input.x += 1.0
+		if Input.is_key_pressed(KEY_UP):
+			reticle_input.y -= 1.0
+		if Input.is_key_pressed(KEY_DOWN):
+			reticle_input.y += 1.0
+
+	_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
+
+	# Clamp reticle range
+	var offset: Vector2 = _archer_reticle_pos - global_position
+	if offset.length() > ARCHER_AIM_MAX_RANGE:
+		_archer_reticle_pos = global_position + offset.normalized() * ARCHER_AIM_MAX_RANGE
+
+	# Pull strength: builds while L2 held, resets when released
+	if l2_pressed:
 		_archer_aim_hold_time += delta
 		_archer_arrow_speed = clampf(
 			ARCHER_ARROW_MIN_SPEED + _archer_aim_hold_time * ARCHER_ARROW_SPEED_RATE,
 			ARCHER_ARROW_MIN_SPEED,
 			ARCHER_ARROW_MAX_SPEED
 		)
+	else:
+		_archer_aim_hold_time = 0.0
+		_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
 
-		# Move reticle with right stick
-		var reticle_input := Vector2.ZERO
-		if device_id >= 0:
-			reticle_input = Vector2(
-				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
-				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
-			)
-			if reticle_input.length() < 0.15:
-				reticle_input = Vector2.ZERO
-		else:
-			if Input.is_key_pressed(KEY_LEFT):
-				reticle_input.x -= 1.0
-			if Input.is_key_pressed(KEY_RIGHT):
-				reticle_input.x += 1.0
-			if Input.is_key_pressed(KEY_UP):
-				reticle_input.y -= 1.0
-			if Input.is_key_pressed(KEY_DOWN):
-				reticle_input.y += 1.0
+	# Solve arc with cooldown
+	_archer_lock_timer -= delta
+	if _archer_lock_timer <= 0.0:
+		_archer_lock_timer = ARCHER_AIM_LOCK_COOLDOWN
+		_archer_solve_arc()
 
-		_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
+	_archer_gleam_timer += delta
+	queue_redraw()
 
-		# Clamp reticle range
-		var offset: Vector2 = _archer_reticle_pos - global_position
-		if offset.length() > ARCHER_AIM_MAX_RANGE:
-			_archer_reticle_pos = global_position + offset.normalized() * ARCHER_AIM_MAX_RANGE
-
-		# Solve arc with cooldown
-		_archer_lock_timer -= delta
-		if _archer_lock_timer <= 0.0:
-			_archer_lock_timer = ARCHER_AIM_LOCK_COOLDOWN
-			_archer_solve_arc()
-
-		_archer_gleam_timer += delta
-		queue_redraw()
-
-		# R2 fires (respects attack cooldown — max 1 arrow per 0.5s)
-		if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0:
-			_archer_fire_aimed()
-			_archer_aiming = false
-
-	elif _archer_aiming:
-		# Released L2 — cancel aim
-		_archer_aiming = false
-		_archer_arc_points.clear()
-		queue_redraw()
+	# R2 fires (respects attack cooldown — max 1 arrow per 0.5s)
+	if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0:
+		_archer_fire_aimed()
+		_archer_aim_hold_time = 0.0
+		_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
+		_archer_solve_arc()
 
 
 func _archer_solve_arc() -> void:
 	## Solve for launch angle to hit reticle with a parabolic arc.
-	## Uses the projectile trajectory equation:
-	## g*dx² * tan²(θ) - 2v²*dx * tan(θ) + (2v²*dy + g*dx²) = 0
+	## All math in Godot coordinates (y-down, gravity positive).
+	##
+	## Projectile: x(t) = vx*t, y(t) = vy*t + 0.5*g*t²
+	## At target: dx = vx*T, dy = vy*T + 0.5*g*T²
+	## Eliminate T = dx/vx: dy = (vy/vx)*dx + 0.5*g*(dx/vx)²
+	## Let m = vy/vx (slope): dy = m*dx + 0.5*g*dx²/(v²/(1+m²))
+	## Quadratic in m: g*dx²*m² - 2*v²*dx*m + (2*v²*dy + g*dx²) = 0
 	var target: Vector2 = _archer_reticle_pos - global_position
 	var dx: float = target.x
-	var dy: float = target.y
+	var dy: float = target.y  # Positive = below, negative = above (Godot y-down)
 	var v: float = _archer_arrow_speed
-	var g: float = ARCHER_ARROW_GRAVITY
+	var g: float = ARCHER_ARROW_GRAVITY  # Positive = pulls down (Godot y-down)
 
 	_archer_has_solution = false
 	_archer_arc_points.clear()
 
-	# Handle straight-up/down edge case
 	if absf(dx) < 1.0:
-		# Can only hit if target is directly above and within reach
+		# Directly above/below — can only hit above
 		if dy < 0 and absf(dy) < (v * v) / (2.0 * g):
 			_archer_has_solution = true
-			_archer_launch_angle = -PI / 2.0 if dx >= 0 else PI / 2.0
-			_build_arc_points()
+			_archer_launch_angle = 0.0  # Will use special vertical launch
+			_build_arc_points_vertical(dy)
 		return
 
-	# Quadratic in tan(θ): a*t² + b*t + c = 0
+	# Quadratic in m = vy/vx: a*m² + b*m + c = 0
 	var a: float = g * dx * dx
 	var b: float = -2.0 * v * v * dx
 	var c: float = 2.0 * v * v * dy + g * dx * dx
 
 	var discriminant: float = b * b - 4.0 * a * c
-
 	if discriminant < 0:
-		return  # No solution
+		return  # No solution — target out of range
 
 	var sqrt_disc: float = sqrt(discriminant)
-	var tan1: float = (-b + sqrt_disc) / (2.0 * a)
-	var tan2: float = (-b - sqrt_disc) / (2.0 * a)
+	var m1: float = (-b + sqrt_disc) / (2.0 * a)
+	var m2: float = (-b - sqrt_disc) / (2.0 * a)
 
-	# Pick the flatter arc (lower angle) for more natural trajectory
-	var angle1: float = atan(tan1)
-	var angle2: float = atan(tan2)
+	# m = vy/vx. Pick the flatter arc (smaller |m|) for natural trajectory.
+	# vx must have same sign as dx.
+	var best_m: float = m1 if absf(m1) < absf(m2) else m2
 
-	# Choose the angle that sends the arrow in the right horizontal direction
-	var best_angle: float = angle1
-	if absf(angle2) < absf(angle1):
-		best_angle = angle2
+	# Compute vx, vy from m: vx² + vy² = v², vy = m*vx
+	# vx² * (1 + m²) = v² → vx = v / sqrt(1 + m²)
+	var vx: float = v / sqrt(1.0 + best_m * best_m)
+	# vx must go in same direction as dx
+	if signf(vx) != signf(dx):
+		vx = -vx
+	var vy: float = best_m * vx
 
-	# Verify direction: cos(angle) should match sign of dx
-	var launch_dir_x: float = cos(best_angle)
-	if signf(launch_dir_x) != signf(dx):
-		# Try the other angle
-		best_angle = angle1 if best_angle == angle2 else angle2
-		launch_dir_x = cos(best_angle)
-		if signf(launch_dir_x) != signf(dx):
-			return  # Neither solution works
+	# Verify: simulate a few steps to check it actually hits near the target
+	var test_t: float = dx / vx if absf(vx) > 0.01 else 99.0
+	if test_t < 0:
+		# Negative time means wrong direction, try the other solution
+		best_m = m2 if best_m == m1 else m1
+		vx = v / sqrt(1.0 + best_m * best_m)
+		if signf(vx) != signf(dx):
+			vx = -vx
+		vy = best_m * vx
+		test_t = dx / vx if absf(vx) > 0.01 else 99.0
+		if test_t < 0:
+			return
 
-	_archer_launch_angle = best_angle
+	_archer_launch_angle = atan2(vy, vx)  # Store as angle for reference
 	_archer_has_solution = true
-	_build_arc_points()
+	_build_arc_points_from_vel(vx, vy)
 
 
-func _build_arc_points() -> void:
-	## Build the trajectory arc as a series of points for rendering
+func _build_arc_points_vertical(dy: float) -> void:
 	_archer_arc_points.clear()
-	var vx: float = _archer_arrow_speed * cos(_archer_launch_angle)
-	var vy: float = _archer_arrow_speed * -sin(_archer_launch_angle)  # Negative because y-down
-	var dt: float = 0.02  # Time step for arc sampling
+	var vy: float = -_archer_arrow_speed  # Shoot straight up
+	var dt: float = 0.02
 	var pos := Vector2.ZERO
-
 	for i in range(150):
 		_archer_arc_points.append(pos)
-		pos.x += vx * dt
 		pos.y += vy * dt
 		vy += ARCHER_ARROW_GRAVITY * dt
+		if pos.y > 0 and i > 5:
+			break
+	_archer_arc_points.append(pos)
+
+
+func _build_arc_points_from_vel(vx: float, vy: float) -> void:
+	_archer_arc_points.clear()
+	var dt: float = 0.02
+	var pos := Vector2.ZERO
+	var sim_vy: float = vy
+
+	for i in range(200):
+		_archer_arc_points.append(pos)
+		pos.x += vx * dt
+		pos.y += sim_vy * dt
+		sim_vy += ARCHER_ARROW_GRAVITY * dt
 
 		# Stop if we've passed the target
 		var to_target: Vector2 = (_archer_reticle_pos - global_position)
-		if pos.length() > to_target.length() * 1.2:
+		if pos.length() > to_target.length() * 1.3:
 			break
 
 	_archer_arc_points.append(pos)
@@ -3616,9 +3639,15 @@ func _archer_fire_aimed() -> void:
 
 	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
 
-	# Spawn a physics arrow that follows a parabolic arc
-	var vx: float = _archer_arrow_speed * cos(_archer_launch_angle)
-	var vy: float = _archer_arrow_speed * -sin(_archer_launch_angle)
+	# Spawn a physics arrow — recompute velocity from the solved angle
+	# Use same math as _archer_solve_arc to get vx/vy
+	var target: Vector2 = _archer_reticle_pos - global_position
+	var dx: float = target.x
+	var m: float = tan(_archer_launch_angle)
+	var vx: float = _archer_arrow_speed / sqrt(1.0 + m * m)
+	if absf(dx) > 1.0 and signf(vx) != signf(dx):
+		vx = -vx
+	var vy: float = m * vx
 
 	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
 	if not projectile_scene:
