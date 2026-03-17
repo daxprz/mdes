@@ -200,6 +200,7 @@ var _grapple_retract_timer: float = 0.0
 var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
 var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
+var _debug_mode: bool = false  # Toggle with SELECT button
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -265,6 +266,7 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 
 func _draw() -> void:
 	_draw_grapple()
+	_draw_debug()
 
 
 func _apply_class_sprite() -> void:
@@ -444,7 +446,7 @@ func _input(event: InputEvent) -> void:
 	if event.device != device_id:
 		return
 
-	for action in ["move_left", "move_right", "move_up", "move_down", "jump", "attack", "special", "block", "interact", "grapple"]:
+	for action in ["move_left", "move_right", "move_up", "move_down", "jump", "attack", "special", "block", "interact", "grapple", "debug_toggle"]:
 		if event.is_action_pressed(action):
 			_controller_actions[action] = true
 			_controller_just_pressed[action] = true
@@ -453,6 +455,11 @@ func _input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
+	# Debug toggle
+	if _is_device_action_just_pressed("debug_toggle"):
+		_debug_mode = not _debug_mode
+	if _debug_mode:
+		queue_redraw()
 	_apply_gravity(delta)
 	_check_out_of_bounds()
 	_check_class_change_ghost()
@@ -3113,6 +3120,37 @@ func _grapple_tick_retracting(delta: float) -> void:
 
 
 # -- Grapple Drawing -----------------------------------------------------------
+
+func _draw_debug() -> void:
+	if not _debug_mode:
+		return
+
+	# Current velocity arrow (green)
+	if velocity.length() > 5.0:
+		var vel_dir: Vector2 = velocity.normalized()
+		var vel_len: float = clampf(velocity.length() * 0.15, 10.0, 120.0)
+		var vel_end: Vector2 = vel_dir * vel_len
+		draw_line(Vector2.ZERO, vel_end, Color(0.2, 1.0, 0.2, 0.7), 2.0)
+
+	# Predicted jump-release velocity arrow (red) — only while grapple connected
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		var aim: Vector2 = _get_aim_direction_analog()
+		var predicted: Vector2 = velocity + aim * abs(JUMP_VELOCITY)
+		if predicted.length() > 5.0:
+			var pred_dir: Vector2 = predicted.normalized()
+			var pred_len: float = clampf(predicted.length() * 0.15, 10.0, 150.0)
+			var pred_end: Vector2 = pred_dir * pred_len
+			# Red arrow line
+			draw_line(Vector2.ZERO, pred_end, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+			# Arrowhead
+			var perp: Vector2 = Vector2(-pred_dir.y, pred_dir.x)
+			draw_line(pred_end, pred_end - pred_dir * 10.0 + perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+			draw_line(pred_end, pred_end - pred_dir * 10.0 - perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+
+		# Show speed text
+		var speed_text: String = "%d" % int(predicted.length())
+		draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
+
 
 func _draw_grapple() -> void:
 	if _grapple_state == GrappleState.IDLE:
