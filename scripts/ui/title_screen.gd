@@ -43,6 +43,7 @@ func _ready() -> void:
 	_setup_name_entry()
 	_setup_version_label()
 	_setup_background_trees()
+	_setup_rocks()
 	_setup_portal_doorway()
 
 	# Restore saved player choices or auto-join connected controllers
@@ -175,6 +176,31 @@ func _setup_background_trees() -> void:
 	add_child(right_tree)
 	right_tree.global_position = Vector2(1670, 900)
 	_scenery_items.append(right_tree)
+
+
+func _setup_rocks() -> void:
+	var rock_script := load("res://scripts/effects/procedural_rock.gd")
+
+	# Scatter rocks around the arena
+	var rock_configs := [
+		{"pos": Vector2(400, 890), "size": 25.0, "seed": 1001, "hue": "grey"},
+		{"pos": Vector2(750, 895), "size": 18.0, "seed": 1002, "hue": "grey"},
+		{"pos": Vector2(1150, 893), "size": 22.0, "seed": 1003, "hue": "grey"},
+		{"pos": Vector2(1520, 888), "size": 30.0, "seed": 1004, "hue": "red"},
+		{"pos": Vector2(350, 750), "size": 15.0, "seed": 1005, "hue": "grey"},
+		{"pos": Vector2(1600, 755), "size": 16.0, "seed": 1006, "hue": "red"},
+	]
+
+	for cfg in rock_configs:
+		var rock := Node2D.new()
+		rock.set_script(rock_script)
+		rock.rock_size = cfg["size"]
+		rock.seed_value = cfg["seed"]
+		rock.hue = cfg["hue"]
+		rock.z_index = -3
+		add_child(rock)
+		rock.global_position = cfg["pos"]
+		_scenery_items.append(rock)
 
 
 func _setup_portal_doorway() -> void:
