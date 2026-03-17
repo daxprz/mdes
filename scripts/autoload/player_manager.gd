@@ -162,7 +162,7 @@ func _try_join(device_id: int) -> void:
 	if player_index == -1:
 		return
 
-	var chosen_class := _pick_random_class()
+	var chosen_class := _pick_preferred_or_random_class(device_id)
 	var stats: Dictionary = CLASS_STATS[chosen_class]
 
 	var player_data := {
@@ -250,6 +250,24 @@ func _pick_random_class() -> CharacterClass:
 		available = all_classes
 
 	return available[randi() % available.size()]
+
+
+func _pick_preferred_or_random_class(device_id: int) -> CharacterClass:
+	## Use the profile's last_class if available, otherwise pick random
+	var profile: Dictionary = ProfileManager.get_device_profile(device_id)
+	if not profile.is_empty() and profile.has("last_class"):
+		var last_class_int: int = profile["last_class"]
+		if last_class_int >= 0 and last_class_int < CharacterClass.size():
+			var preferred: CharacterClass = last_class_int as CharacterClass
+			# Check if it's not taken by another player
+			var taken := false
+			for p in players.values():
+				if p["character_class"] == preferred:
+					taken = true
+					break
+			if not taken:
+				return preferred
+	return _pick_random_class()
 
 
 # -- Join Effect ---------------------------------------------------------------

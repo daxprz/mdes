@@ -333,6 +333,7 @@ func sync_session_to_profile(player_index: int) -> void:
 	profile["lifetime"]["total_muffins"] = profile["lifetime"].get("total_muffins", 0) + session_muffins + gm_muffins
 
 	profile["last_played"] = _get_date_string()
+	profile["last_class"] = class_enum
 
 
 func auto_save() -> void:

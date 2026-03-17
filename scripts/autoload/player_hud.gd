@@ -537,4 +537,10 @@ func _cycle_class(player_index: int, direction: int) -> void:
 	p_data["speed"] = stats["speed"]
 	p_data["mana_regen"] = stats["mana_regen"]
 
+	# Save last class choice to profile
+	var profile: Dictionary = ProfileManager.get_active_profile(player_index)
+	if not profile.is_empty():
+		profile["last_class"] = int(new_class)
+		ProfileManager.save_profiles()
+
 	class_changed.emit(player_index, new_class)
