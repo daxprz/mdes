@@ -84,6 +84,8 @@ var class_change_locked: Dictionary = {}  # player_index -> true (temporary rift
 var tentacle_lost: Dictionary = {}  # player_index -> true (permanent: tentacle attached to enemy)
 const MAX_ACTIVE_TENTACLES := 4  # Max rift tentacles in-game at once
 var active_tentacle_count: int = 0
+var _debug_mode: bool = false
+var _debug_labels: Dictionary = {}  # player_index -> Label
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -306,6 +308,78 @@ func _process(delta: float) -> void:
 			hint.text = "L/R: change class"
 			hint.modulate = Color(0.4, 0.6, 0.4)
 
+	# Debug: show button states above each HUD panel
+	_update_debug_labels()
+
+
+func _update_debug_labels() -> void:
+	if not _debug_mode:
+		for pi in _debug_labels.keys():
+			if is_instance_valid(_debug_labels[pi]):
+				_debug_labels[pi].visible = false
+		return
+
+	for pi in _panels.keys():
+		var p_data: Dictionary = PlayerManager.get_player(pi)
+		if p_data.is_empty():
+			continue
+
+		var dev_id: int = p_data.get("device_id", -1)
+
+		# Create debug label if needed
+		if not _debug_labels.has(pi) or not is_instance_valid(_debug_labels[pi]):
+			var lbl := Label.new()
+			lbl.add_theme_font_size_override("font_size", 8)
+			lbl.modulate = Color(1.0, 1.0, 0.3, 0.9)
+			lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			_canvas.add_child(lbl)
+			_debug_labels[pi] = lbl
+
+		var lbl: Label = _debug_labels[pi]
+		lbl.visible = true
+
+		# Position above the HUD panel
+		var panel_count: int = _panels.size()
+		var total_width: float = HUD_PANEL_WIDTH * panel_count + HUD_PANEL_SPACING * (panel_count - 1)
+		var panel_idx: int = _panels.keys().find(pi)
+		var panel_x: float = -total_width / 2.0 + panel_idx * (HUD_PANEL_WIDTH + HUD_PANEL_SPACING) + HUD_PANEL_WIDTH / 2.0
+
+		var vp_size: Vector2 = get_viewport().get_visible_rect().size
+		lbl.anchor_left = 0.5
+		lbl.anchor_right = 0.5
+		lbl.anchor_top = 1.0
+		lbl.offset_left = panel_x - HUD_PANEL_WIDTH / 2.0
+		lbl.offset_right = panel_x + HUD_PANEL_WIDTH / 2.0
+		lbl.offset_top = -(HUD_HEIGHT + HUD_BOTTOM_MARGIN + 45)
+		lbl.offset_bottom = -(HUD_HEIGHT + HUD_BOTTOM_MARGIN)
+
+		# Build button state string
+		var btn_text: String = ""
+		if dev_id == -1:
+			# Keyboard
+			btn_text = "KB: "
+			for action in ["attack", "special", "jump", "block", "grapple"]:
+				var pressed: bool = Input.is_action_pressed(action)
+				var short: String = action.substr(0, 3).to_upper()
+				btn_text += short + ("*" if pressed else ".") + " "
+		else:
+			# Controller buttons
+			var button_names := ["A", "B", "X", "Y", "Sel", "??", "Opt", "R3", "L3", "LB", "RB",
+				"DU", "DD", "DL", "DR"]
+			btn_text = "P%d: " % (pi + 1)
+			for bi in range(mini(button_names.size(), 15)):
+				var pressed: bool = Input.is_joy_button_pressed(dev_id, bi)
+				if pressed:
+					btn_text += button_names[bi] + " "
+
+			# Axes
+			var lx: float = Input.get_joy_axis(dev_id, JOY_AXIS_LEFT_X)
+			var ly: float = Input.get_joy_axis(dev_id, JOY_AXIS_LEFT_Y)
+			if absf(lx) > 0.15 or absf(ly) > 0.15:
+				btn_text += "L(%.1f,%.1f) " % [lx, ly]
+
+		lbl.text = btn_text
+
 
 func _update_panel(player_index: int) -> void:
 	if not _panels.has(player_index):
@@ -364,6 +438,10 @@ func _update_panel(player_index: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Debug toggle
+	if event.is_action_pressed("debug_toggle"):
+		_debug_mode = not _debug_mode
+
 	var device_id := _get_device_from_event(event)
 	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
 

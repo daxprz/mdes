@@ -257,7 +257,7 @@ func _pick_preferred_or_random_class(device_id: int) -> CharacterClass:
 	var profile: Dictionary = ProfileManager.get_device_profile(device_id)
 	if not profile.is_empty() and profile.has("last_class"):
 		var last_class_int: int = profile["last_class"]
-		if last_class_int >= 0 and last_class_int < CharacterClass.size():
+		if last_class_int >= 0 and last_class_int < CharacterClass.values().size():
 			var preferred: CharacterClass = last_class_int as CharacterClass
 			# Check if it's not taken by another player
 			var taken := false
