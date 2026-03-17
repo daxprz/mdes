@@ -221,6 +221,10 @@ var _archer_launch_angle: float = 0.0  # Solved launch angle
 var _archer_arc_points: Array[Vector2] = []  # Points along the solved arc
 var _archer_lock_timer: float = 0.0  # Cooldown between lock recalculations
 var _archer_gleam_timer: float = 0.0  # For sparkle animation
+var _archer_fired_this_pull: bool = false  # Must release L2 to re-string
+var _archer_debug_trails: Array = []  # [{points, time, color}] for debug arc/arrow trails
+var _archer_solved_vx: float = 0.0  # Cached solved velocity for firing
+var _archer_solved_vy: float = 0.0
 
 # Mage air-walk
 var _mage_airwalk: bool = false
@@ -3454,74 +3458,86 @@ func _handle_archer_aim(delta: float) -> void:
 		l2_pressed = Input.is_key_pressed(KEY_TAB)
 		r2_pressed = Input.is_key_pressed(KEY_ENTER)
 
-	# First L2 press initializes reticle position
-	if l2_pressed and not _archer_aiming:
-		_archer_aiming = true
-		_archer_aim_hold_time = 0.0
-		_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
-		_archer_has_solution = false
-		_archer_arc_points.clear()
-		_archer_lock_timer = 0.0
+	# Tick debug trails
+	var trail_i: int = _archer_debug_trails.size() - 1
+	while trail_i >= 0:
+		_archer_debug_trails[trail_i]["time"] -= delta
+		if _archer_debug_trails[trail_i]["time"] <= 0.0:
+			_archer_debug_trails.remove_at(trail_i)
+		trail_i -= 1
 
-	if not _archer_aiming:
-		return
-
-	# Reticle always movable with right stick (even when L2 released)
-	var reticle_input := Vector2.ZERO
-	if device_id >= 0:
-		reticle_input = Vector2(
-			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
-			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
-		)
-		if reticle_input.length() < 0.15:
-			reticle_input = Vector2.ZERO
-	else:
-		if Input.is_key_pressed(KEY_LEFT):
-			reticle_input.x -= 1.0
-		if Input.is_key_pressed(KEY_RIGHT):
-			reticle_input.x += 1.0
-		if Input.is_key_pressed(KEY_UP):
-			reticle_input.y -= 1.0
-		if Input.is_key_pressed(KEY_DOWN):
-			reticle_input.y += 1.0
-
-	_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
-
-	# Clamp reticle range
-	var offset: Vector2 = _archer_reticle_pos - global_position
-	if offset.length() > ARCHER_AIM_MAX_RANGE:
-		_archer_reticle_pos = global_position + offset.normalized() * ARCHER_AIM_MAX_RANGE
-
-	# Pull strength: builds while L2 held. Release L2 = cancel aim.
 	if l2_pressed:
+		if not _archer_aiming:
+			# L2 pressed — enter aim mode
+			_archer_aiming = true
+			_archer_aim_hold_time = 0.0
+			_archer_has_solution = false
+			_archer_arc_points.clear()
+			_archer_lock_timer = 0.0
+			_archer_fired_this_pull = false
+
+			# Clamp reticle onto visible screen if it was off-screen
+			var cam := get_viewport().get_camera_2d()
+			if cam:
+				var vp_size: Vector2 = get_viewport_rect().size
+				var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE
+				var half_view: Vector2 = vp_size / (2.0 * zoom)
+				var cam_pos: Vector2 = cam.global_position
+				_archer_reticle_pos.x = clampf(_archer_reticle_pos.x, cam_pos.x - half_view.x, cam_pos.x + half_view.x)
+				_archer_reticle_pos.y = clampf(_archer_reticle_pos.y, cam_pos.y - half_view.y, cam_pos.y + half_view.y)
+			# If reticle was never set (first time), place in front of player
+			if _archer_reticle_pos == Vector2.ZERO:
+				_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
+
+		# Move reticle with right stick (no range clamp — can go anywhere on screen)
+		var reticle_input := Vector2.ZERO
+		if device_id >= 0:
+			reticle_input = Vector2(
+				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+				Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+			)
+			if reticle_input.length() < 0.15:
+				reticle_input = Vector2.ZERO
+		else:
+			if Input.is_key_pressed(KEY_LEFT):
+				reticle_input.x -= 1.0
+			if Input.is_key_pressed(KEY_RIGHT):
+				reticle_input.x += 1.0
+			if Input.is_key_pressed(KEY_UP):
+				reticle_input.y -= 1.0
+			if Input.is_key_pressed(KEY_DOWN):
+				reticle_input.y += 1.0
+		_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
+
+		# Build pull strength
 		_archer_aim_hold_time += delta
 		_archer_arrow_speed = clampf(
 			ARCHER_ARROW_MIN_SPEED + _archer_aim_hold_time * ARCHER_ARROW_SPEED_RATE,
 			ARCHER_ARROW_MIN_SPEED,
 			ARCHER_ARROW_MAX_SPEED
 		)
-	else:
-		# L2 released — cancel aim, hide reticle
-		_archer_aiming = false
-		_archer_arc_points.clear()
+
+		# Solve arc with cooldown
+		_archer_lock_timer -= delta
+		if _archer_lock_timer <= 0.0:
+			_archer_lock_timer = ARCHER_AIM_LOCK_COOLDOWN
+			_archer_solve_arc()
+
+		_archer_gleam_timer += delta
 		queue_redraw()
-		return
 
-	# Solve arc with cooldown
-	_archer_lock_timer -= delta
-	if _archer_lock_timer <= 0.0:
-		_archer_lock_timer = ARCHER_AIM_LOCK_COOLDOWN
-		_archer_solve_arc()
+		# R2 fires — must not have already fired this pull (release L2 to re-string)
+		if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0 and not _archer_fired_this_pull:
+			_archer_fire_aimed()
+			_archer_fired_this_pull = true
 
-	_archer_gleam_timer += delta
-	queue_redraw()
-
-	# R2 fires (respects attack cooldown — max 1 arrow per 0.5s)
-	if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0:
-		_archer_fire_aimed()
-		_archer_aim_hold_time = 0.0
-		_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
-		_archer_solve_arc()
+	else:
+		# L2 released — hide reticle, re-string (allow next shot on next pull)
+		if _archer_aiming:
+			_archer_aiming = false
+			_archer_arc_points.clear()
+			_archer_fired_this_pull = false
+			queue_redraw()
 
 
 func _archer_solve_arc() -> void:
@@ -3541,13 +3557,17 @@ func _archer_solve_arc() -> void:
 
 	_archer_has_solution = false
 	_archer_arc_points.clear()
+	var reticle_radius: float = 12.0  # Must pass within this distance to count as a hit
 
 	if absf(dx) < 1.0:
-		# Directly above/below — can only hit above
 		if dy < 0 and absf(dy) < (v * v) / (2.0 * g):
+			_archer_solved_vx = 0.0
+			_archer_solved_vy = -v
 			_archer_has_solution = true
-			_archer_launch_angle = 0.0  # Will use special vertical launch
-			_build_arc_points_vertical(dy)
+			_build_arc_points_from_vel(0.0, -v)
+			# Verify arc passes near target
+			if not _verify_arc_hits_target(reticle_radius):
+				_archer_has_solution = false
 		return
 
 	# Quadratic in m = vy/vx: a*m² + b*m + c = 0
@@ -3557,40 +3577,44 @@ func _archer_solve_arc() -> void:
 
 	var discriminant: float = b * b - 4.0 * a * c
 	if discriminant < 0:
-		return  # No solution — target out of range
+		return
 
 	var sqrt_disc: float = sqrt(discriminant)
 	var m1: float = (-b + sqrt_disc) / (2.0 * a)
 	var m2: float = (-b - sqrt_disc) / (2.0 * a)
 
-	# m = vy/vx. Pick the flatter arc (smaller |m|) for natural trajectory.
-	# vx must have same sign as dx.
-	var best_m: float = m1 if absf(m1) < absf(m2) else m2
+	# Try both solutions, simulate each, pick the one that hits the target
+	var candidates: Array = [m1, m2]
+	for m_val in candidates:
+		var cvx: float = v / sqrt(1.0 + m_val * m_val)
+		if signf(cvx) != signf(dx):
+			cvx = -cvx
+		var cvy: float = m_val * cvx
 
-	# Compute vx, vy from m: vx² + vy² = v², vy = m*vx
-	# vx² * (1 + m²) = v² → vx = v / sqrt(1 + m²)
-	var vx: float = v / sqrt(1.0 + best_m * best_m)
-	# vx must go in same direction as dx
-	if signf(vx) != signf(dx):
-		vx = -vx
-	var vy: float = best_m * vx
+		# Check time is positive
+		var t_check: float = dx / cvx if absf(cvx) > 0.01 else -1.0
+		if t_check < 0:
+			continue
 
-	# Verify: simulate a few steps to check it actually hits near the target
-	var test_t: float = dx / vx if absf(vx) > 0.01 else 99.0
-	if test_t < 0:
-		# Negative time means wrong direction, try the other solution
-		best_m = m2 if best_m == m1 else m1
-		vx = v / sqrt(1.0 + best_m * best_m)
-		if signf(vx) != signf(dx):
-			vx = -vx
-		vy = best_m * vx
-		test_t = dx / vx if absf(vx) > 0.01 else 99.0
-		if test_t < 0:
+		_build_arc_points_from_vel(cvx, cvy)
+		if _verify_arc_hits_target(reticle_radius):
+			_archer_solved_vx = cvx
+			_archer_solved_vy = cvy
+			_archer_launch_angle = atan2(cvy, cvx)
+			_archer_has_solution = true
 			return
 
-	_archer_launch_angle = atan2(vy, vx)  # Store as angle for reference
-	_archer_has_solution = true
-	_build_arc_points_from_vel(vx, vy)
+	# Neither solution hits — no valid arc
+	_archer_arc_points.clear()
+
+
+func _verify_arc_hits_target(radius: float) -> bool:
+	## Check if any point in the arc passes within radius of the reticle
+	var target_local: Vector2 = _archer_reticle_pos - global_position
+	for pt in _archer_arc_points:
+		if pt.distance_to(target_local) <= radius:
+			return true
+	return false
 
 
 func _build_arc_points_vertical(dy: float) -> void:
@@ -3635,16 +3659,19 @@ func _archer_fire_aimed() -> void:
 	PlayerManager.add_skill_xp(player_index, "attack", 3)
 
 	var scaled_dmg: int = int(60 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	var vx: float = _archer_solved_vx
+	var vy: float = _archer_solved_vy
 
-	# Spawn a physics arrow — recompute velocity from the solved angle
-	# Use same math as _archer_solve_arc to get vx/vy
-	var target: Vector2 = _archer_reticle_pos - global_position
-	var dx: float = target.x
-	var m: float = tan(_archer_launch_angle)
-	var vx: float = _archer_arrow_speed / sqrt(1.0 + m * m)
-	if absf(dx) > 1.0 and signf(vx) != signf(dx):
-		vx = -vx
-	var vy: float = m * vx
+	# Debug: save the solver arc trail
+	if _debug_mode and _archer_arc_points.size() > 1:
+		var solver_trail: Array[Vector2] = []
+		for pt in _archer_arc_points:
+			solver_trail.append(pt + global_position)  # Convert to world pos
+		_archer_debug_trails.append({
+			"points": solver_trail,
+			"time": 10.0,
+			"color": Color(1.0, 0.6, 0.2, 0.5),  # Orange = solver arc
+		})
 
 	var projectile_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
 	if not projectile_scene:
@@ -3656,14 +3683,42 @@ func _archer_fire_aimed() -> void:
 	proj.projectile_type = "crossbow_bolt"
 	proj.owner_index = player_index
 	proj.global_position = global_position
-	# Set arc physics properties
 	proj._is_arc = true
 	proj._arc_vel = Vector2(vx, vy)
 	proj._arc_gravity = ARCHER_ARROW_GRAVITY
 	get_parent().add_child(proj)
 
+	# Debug: track the actual arrow trail over time
+	if _debug_mode:
+		_track_arrow_trail(proj)
+
+
+func _track_arrow_trail(proj: Node2D) -> void:
+	## Record the actual arrow path for debug rendering
+	var trail: Array[Vector2] = []
+	var trail_data := {"points": trail, "time": 10.0, "color": Color(0.2, 0.8, 1.0, 0.5)}
+	_archer_debug_trails.append(trail_data)
+	# Coroutine: sample position each frame until arrow is gone
+	while is_instance_valid(proj) and proj.is_inside_tree():
+		trail_data["points"].append(proj.global_position)
+		await get_tree().process_frame
+	trail_data["time"] = 10.0  # Reset timer once arrow is done
+
 
 func _draw_archer_aim() -> void:
+	# Always draw debug trails even when not aiming
+	if _debug_mode:
+		for trail in _archer_debug_trails:
+			var pts: Array = trail["points"]
+			var fade: float = clampf(trail["time"] / 3.0, 0.05, 1.0)
+			var col: Color = trail["color"]
+			col.a *= fade
+			for j in range(pts.size() - 1):
+				if j % 2 == 0:  # Dotted
+					var a_pt: Vector2 = pts[j] - global_position
+					var b_pt: Vector2 = pts[j + 1] - global_position
+					draw_line(a_pt, b_pt, col, 1.5)
+
 	if not _archer_aiming:
 		return
 
