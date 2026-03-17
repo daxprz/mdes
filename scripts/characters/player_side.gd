@@ -223,6 +223,8 @@ var _archer_lock_timer: float = 0.0  # Cooldown between lock recalculations
 var _archer_gleam_timer: float = 0.0  # For sparkle animation
 var _archer_fired_this_pull: bool = false  # Re-strings after 0.5s cooldown
 var _archer_r2_was_pressed: bool = false  # Track R2 for fresh-press detection
+var _archer_power_locked: bool = false  # True when RB released after power-down
+var _archer_power_reversing: bool = false  # True while RB held (power decreasing)
 var _archer_debug_trails: Array = []  # [{points, time, color}] for debug arc/arrow trails
 var _archer_solved_vx: float = 0.0  # Cached solved velocity for firing
 var _archer_solved_vy: float = 0.0
@@ -3510,13 +3512,39 @@ func _handle_archer_aim(delta: float) -> void:
 				reticle_input.y += 1.0
 		_archer_reticle_pos += reticle_input * ARCHER_AIM_RETICLE_SPEED * delta
 
-		# Build pull strength
-		_archer_aim_hold_time += delta
-		_archer_arrow_speed = clampf(
-			ARCHER_ARROW_MIN_SPEED + _archer_aim_hold_time * ARCHER_ARROW_SPEED_RATE,
-			ARCHER_ARROW_MIN_SPEED,
-			ARCHER_ARROW_MAX_SPEED
-		)
+		# Partial trigger pull = max power cap
+		var l2_amount: float = 1.0
+		if device_id >= 0:
+			l2_amount = clampf(Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT), 0.0, 1.0)
+		var trigger_max: float = lerpf(ARCHER_ARROW_MIN_SPEED, ARCHER_ARROW_MAX_SPEED, l2_amount)
+
+		# RB: power-down while held, lock on release
+		var rb_pressed: bool = false
+		if device_id >= 0:
+			rb_pressed = Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_SHOULDER)
+		else:
+			rb_pressed = Input.is_key_pressed(KEY_SHIFT)
+
+		if not _archer_power_locked:
+			if rb_pressed:
+				# Power decreasing while RB held
+				_archer_power_reversing = true
+				_archer_aim_hold_time -= delta
+				_archer_aim_hold_time = maxf(_archer_aim_hold_time, 0.0)
+			elif _archer_power_reversing:
+				# RB just released — lock power at current level
+				_archer_power_locked = true
+				_archer_power_reversing = false
+			else:
+				# Normal power-up
+				_archer_aim_hold_time += delta
+
+			_archer_arrow_speed = clampf(
+				ARCHER_ARROW_MIN_SPEED + _archer_aim_hold_time * ARCHER_ARROW_SPEED_RATE,
+				ARCHER_ARROW_MIN_SPEED,
+				minf(ARCHER_ARROW_MAX_SPEED, trigger_max)
+			)
+		# When locked, speed stays at current value (capped by trigger)
 
 		# Solve arc with cooldown
 		_archer_lock_timer -= delta
@@ -3532,6 +3560,8 @@ func _handle_archer_aim(delta: float) -> void:
 			_archer_fired_this_pull = false
 			_archer_aim_hold_time = 0.0
 			_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
+			_archer_power_locked = false
+			_archer_power_reversing = false
 
 		# R2 fires — requires fresh press (not held from last shot)
 		if not _archer_fired_this_pull and _attack_cooldown <= 0.0:
@@ -3542,12 +3572,14 @@ func _handle_archer_aim(delta: float) -> void:
 		_archer_r2_was_pressed = r2_pressed
 
 	else:
-		# L2 released — hide reticle
+		# L2 released — hide reticle, reset all state
 		if _archer_aiming:
 			_archer_aiming = false
 			_archer_arc_points.clear()
 			_archer_fired_this_pull = false
 			_archer_r2_was_pressed = false
+			_archer_power_locked = false
+			_archer_power_reversing = false
 			queue_redraw()
 
 
