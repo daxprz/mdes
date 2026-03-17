@@ -67,16 +67,24 @@ func _generate() -> void:
 
 
 func _generate_silhouette() -> void:
-	# Irregular polygon — 7-10 vertices with random radii
-	var n_verts: int = randi_range(7, 10)
+	# Irregular polygon — 8-12 vertices, wider front face, skinnier sides
+	# Viewed from front/top: wider horizontally at front, narrower at sides
+	var n_verts: int = randi_range(8, 12)
 	_silhouette = PackedVector2Array()
 	for i in range(n_verts):
 		var angle: float = (float(i) / float(n_verts)) * TAU
-		# Vary radius for irregularity — rocks aren't round
-		var r: float = rock_size * randf_range(0.6, 1.1)
-		# Flatten bottom slightly (rocks sit on ground)
-		if angle > PI * 0.3 and angle < PI * 0.7:
-			r *= 0.85
+		var r: float = rock_size * randf_range(0.65, 1.15)
+
+		# Front face (bottom, facing viewer) — wider
+		if angle > PI * 0.25 and angle < PI * 0.75:
+			r *= 0.9  # Slight flatten at base for sitting on ground
+		# Top — slightly shorter (perspective foreshortening)
+		elif angle > PI * 1.25 and angle < PI * 1.75:
+			r *= 0.7
+		# Sides — significantly narrower (perspective)
+		elif (angle > PI * 0.75 and angle < PI * 1.25) or (angle < PI * 0.25 or angle > PI * 1.75):
+			r *= 0.6
+
 		_silhouette.append(Vector2(cos(angle) * r, sin(angle) * r))
 
 
@@ -90,13 +98,13 @@ func _generate_facets() -> void:
 		center += pt
 	center /= _silhouette.size()
 
-	# Pick 2-3 internal split points to create facets
-	var n_splits: int = randi_range(2, 3)
+	# Pick 3-5 internal split points for more facets and detail
+	var n_splits: int = randi_range(3, 5)
 	var split_points: Array[Vector2] = []
 	for _i in range(n_splits):
 		split_points.append(Vector2(
-			randf_range(-rock_size * 0.3, rock_size * 0.3),
-			randf_range(-rock_size * 0.3, rock_size * 0.3)
+			randf_range(-rock_size * 0.35, rock_size * 0.35),
+			randf_range(-rock_size * 0.35, rock_size * 0.35)
 		))
 
 	# Create facets by grouping silhouette vertices by which split point they're nearest
@@ -207,11 +215,28 @@ func _draw() -> void:
 			colors.append(_palette[facet["shade"]])
 		draw_polygon(pts, colors)
 
-	# 3. Draw crack lines
+	# 3. Subtle texture lines within facets (surface detail)
+	for facet in _facets:
+		var pts: PackedVector2Array = facet["points"]
+		if pts.size() < 3:
+			continue
+		# Draw 1-2 faint lines across the facet for surface texture
+		var facet_center := Vector2.ZERO
+		for pt in pts:
+			facet_center += pt
+		facet_center /= pts.size()
+		for _d in range(randi_range(1, 2)):
+			var idx_a: int = randi_range(0, pts.size() - 1)
+			var idx_b: int = (idx_a + randi_range(1, 2)) % pts.size()
+			var mid: Vector2 = (pts[idx_a] + pts[idx_b]) * 0.5
+			var detail_col: Color = _palette[facet["shade"]] * Color(0.85, 0.85, 0.85)
+			draw_line(pts[idx_a].lerp(facet_center, 0.2), mid.lerp(facet_center, 0.15), detail_col, 1.0)
+
+	# 4. Draw crack lines
 	for crack in _cracks:
 		draw_line(crack["from"], crack["to"], _palette["shadow"], 1.5)
 
-	# 4. Draw silhouette outline
+	# 5. Draw silhouette outline
 	for i in range(_silhouette.size()):
 		var a: Vector2 = _silhouette[i]
 		var b: Vector2 = _silhouette[(i + 1) % _silhouette.size()]
