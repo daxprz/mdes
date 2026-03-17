@@ -11,7 +11,7 @@ const LEAF_MID := Color(0.18, 0.4, 0.12)      # Middle layer
 const LEAF_BRIGHT := Color(0.28, 0.55, 0.18)  # Foreground, brightest
 
 @export var trunk_weight: float = 20.0
-@export var trunk_length: float = 130.0
+@export var trunk_length: float = 200.0
 @export var seed_value: int = -1
 
 var _branches: Array = []
@@ -23,29 +23,32 @@ func _ready() -> void:
 		seed(seed_value)
 	_grow(Vector2.ZERO, -PI / 2.0, trunk_weight, trunk_length, 0)
 
-	# Add a few ultra-large dark background canopy circles
+	# Canopy centered around the top of the tree
+	var canopy_y: float = -trunk_length * 1.3
+
+	# Ultra-large dark background circles
 	for _i in range(3):
 		_leaves.append({
-			"pos": Vector2(randf_range(-60, 60), -trunk_length + randf_range(-80, -20)),
-			"size": randf_range(60, 90),
+			"pos": Vector2(randf_range(-80, 80), canopy_y + randf_range(-100, 20)),
+			"size": randf_range(70, 110),
 			"color": LEAF_DARK,
 			"layer": 0,
 		})
 
-	# Add mid-layer circles
+	# Mid-layer circles
 	for _i in range(4):
 		_leaves.append({
-			"pos": Vector2(randf_range(-50, 50), -trunk_length + randf_range(-70, 0)),
-			"size": randf_range(40, 65),
+			"pos": Vector2(randf_range(-60, 60), canopy_y + randf_range(-80, 30)),
+			"size": randf_range(50, 75),
 			"color": LEAF_MID,
 			"layer": 1,
 		})
 
-	# Add bright foreground circles
+	# Bright foreground circles
 	for _i in range(4):
 		_leaves.append({
-			"pos": Vector2(randf_range(-40, 40), -trunk_length + randf_range(-60, 10)),
-			"size": randf_range(30, 50),
+			"pos": Vector2(randf_range(-50, 50), canopy_y + randf_range(-60, 40)),
+			"size": randf_range(35, 55),
 			"color": LEAF_BRIGHT,
 			"layer": 2,
 		})
@@ -54,17 +57,26 @@ func _ready() -> void:
 
 
 func _grow(start: Vector2, angle: float, weight: float, length: float, depth: int) -> void:
-	if depth > 3 or weight < 3.0:
+	if depth > 4 or weight < 3.0:
 		return
 
-	var wobble: float = randf_range(-0.2, 0.2)
-	var end: Vector2 = start + Vector2(cos(angle + wobble), sin(angle + wobble)) * length
-	_branches.append({"start": start, "end": end, "weight": weight})
+	# Draw multiple bending segments before splitting
+	var pos: Vector2 = start
+	var cur_angle: float = angle
+	var n_bends: int = randi_range(2, 4)
+	var seg_len: float = length / float(n_bends)
 
-	if depth >= 2:
-		# Terminal — add 1 large leaf circle at the end
+	for i in range(n_bends):
+		var wobble: float = randf_range(-0.25, 0.25)
+		cur_angle += wobble
+		var end: Vector2 = pos + Vector2(cos(cur_angle), sin(cur_angle)) * seg_len
+		_branches.append({"start": pos, "end": end, "weight": weight})
+		pos = end
+
+	if depth >= 3:
+		# Terminal — add 1 large leaf circle
 		_leaves.append({
-			"pos": end + Vector2(randf_range(-10, 10), randf_range(-15, 5)),
+			"pos": pos + Vector2(randf_range(-10, 10), randf_range(-15, 5)),
 			"size": randf_range(30, 50),
 			"color": LEAF_MID if randf() > 0.5 else LEAF_BRIGHT,
 			"layer": 1 if randf() > 0.5 else 2,
@@ -74,10 +86,10 @@ func _grow(start: Vector2, angle: float, weight: float, length: float, depth: in
 	var n_splits: int = randi_range(2, 3)
 	for _b in range(n_splits):
 		var spread: float = PI * 0.3
-		var branch_angle: float = angle + randf_range(-spread, spread)
+		var branch_angle: float = cur_angle + randf_range(-spread, spread)
 		var branch_weight: float = weight * randf_range(0.5, 0.7)
-		var branch_length: float = length * randf_range(0.55, 0.75)
-		_grow(end, branch_angle, branch_weight, branch_length, depth + 1)
+		var branch_length: float = length * randf_range(0.5, 0.7)
+		_grow(pos, branch_angle, branch_weight, branch_length, depth + 1)
 
 
 func _draw() -> void:

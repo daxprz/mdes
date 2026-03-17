@@ -157,7 +157,7 @@ func _setup_background_trees() -> void:
 	var left_tree := Node2D.new()
 	left_tree.set_script(tree_script)
 	left_tree.trunk_weight = 22.0
-	left_tree.trunk_length = 160.0
+	left_tree.trunk_length = 250.0
 	left_tree.seed_value = 42
 	left_tree.z_index = -5  # Behind everything
 	add_child(left_tree)
@@ -167,7 +167,7 @@ func _setup_background_trees() -> void:
 	var right_tree := Node2D.new()
 	right_tree.set_script(tree_script)
 	right_tree.trunk_weight = 20.0
-	right_tree.trunk_length = 150.0
+	right_tree.trunk_length = 230.0
 	right_tree.seed_value = 137
 	right_tree.z_index = -5
 	add_child(right_tree)
