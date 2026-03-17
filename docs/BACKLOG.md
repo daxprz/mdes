@@ -760,42 +760,30 @@ The hook swings, launches, and creates momentum-based traversal.
 Grappled entities react based on true mass physics.
 
 ### Story 30.1: Grapple Windup & Throw
-- [ ] Task: Holding grapple button starts swinging the hook in a circle around the player
-- [ ] Task: Swing speed increases the longer the button is held
-- [ ] Task: On release, hook is thrown in the direction of the thumbstick aim
-- [ ] Task: Throw distance scales with hold duration (longer hold = farther throw)
-- [ ] Task: Hook follows a physics-based arc (gravity + initial velocity)
-- [ ] Task: Visual: rope/chain trails behind the hook during flight
+- [x] Task: L1/LB initiates grapple. Hook swings in a circle (14–35 rad/s)
+- [x] Task: Either thumbstick aims (right priority). Dotted arrow shows direction.
+- [x] Task: Release L1 throws at 4000–10000 px/s with gravity arc. Max range 900px.
+- [x] Task: Full movement during windup (walk, jump, gravity all work)
 
 ### Story 30.2: Grapple Connection & Launch
-- [ ] Task: Hook connects on contact with any wall (StaticBody2D) or entity
-- [ ] Task: On connection, player launches toward the hook point at 50% of jump velocity
-- [ ] Task: At the apex of the launch, the grapple line goes taut
-- [ ] Task: Player transitions to pendulum swing with existing momentum
+- [x] Task: Hook connects on walls or entities (10 damage on hit)
+- [x] Task: Player launched toward anchor at 75% jump velocity, blended with travel direction
+- [x] Task: Rope slack physics: goes slack above anchor, bounces when taut
 
 ### Story 30.3: Pendulum Swing Physics
-- [ ] Task: Player swings as a pendulum from the grapple anchor point
-- [ ] Task: Thumbstick left/right adjusts swing momentum (push in swing direction = accelerate)
-- [ ] Task: Thumbstick up shortens the grapple line (player rises toward anchor)
-- [ ] Task: Thumbstick down lengthens the grapple line (player drops away from anchor)
-- [ ] Task: Rope rendered as verlet chain between player and anchor (like balloon string)
-- [ ] Task: Natural momentum decay over time (friction)
+- [x] Task: Full pendulum physics with momentum/brake input and rope length adjustment
+- [x] Task: Rope rendered with catenary sag proportional to slack
+- [x] Task: Launch immunity preserves momentum through freefall until landing
 
 ### Story 30.4: Grapple Release & Enemy Tug
-- [ ] Task: Pressing grapple button again while connected to a wall releases the line
-- [ ] Task: Line retracts visually back into the player on release
-- [ ] Task: Player retains momentum from the swing on release (fling)
-- [ ] Task: Pressing grapple button again while connected to an enemy tugs based on mass
-- [ ] Task: Tug physics: force = constant, acceleration = force / mass for BOTH entities
-- [ ] Task: Both player and enemy accelerate toward each other proportionally
+- [x] Task: Two-phase disconnect (wall): L1 = pull toward anchor, L1 again = release
+- [x] Task: Jump disconnect: additive 25% jump velocity in thumbstick direction
+- [x] Task: Enemy tug: Newtonian F=ma on both ends based on mass
+- [x] Task: Controller rumble at all grapple events (windup, throw, connect, swing, tug, release)
 
 ### Story 30.5: Entity Mass System
-- [ ] Task: Every entity has a `mass` property relative to their size
-- [ ] Task: Small entities (mass < player): flung toward the player on tug
-- [ ] Task: Medium entities (mass ≈ player): both entities pulled toward each other
-- [ ] Task: Large entities (mass > player): player pulled toward the enemy (reverse tug)
-- [ ] Task: True Newtonian physics: F=ma applied to both ends of the grapple
-- [ ] Task: Mass values for all existing enemies and bosses
+- [x] Task: `mass` property on all 18 enemies, boss_base, and player (70)
+- [x] Task: Mass values from 5 (Sprinkle Swarm) to 300 (Bosses)
 
 | Entity | Mass | Tug Behavior |
 |--------|------|-------------|
@@ -815,6 +803,70 @@ Grappled entities react based on true mass physics.
 | Player | 70 | Reference |
 | Mini-bosses | 120 | Reverse tug (slight) |
 | Bosses | 300 | Reverse tug (strong) |
+
+---
+
+## EPIC 31: Archer Aimed Shot (`mechanics`)
+Physics-based arrow aiming with parabolic arc solver.
+
+### Story 31.1: Aim System
+- [x] Task: L2 hold enters aim mode with movable reticle (right stick)
+- [x] Task: Quadratic arc solver finds launch angle for target position
+- [x] Task: Reticle sparkles when solution found, 50% transparent when not
+- [x] Task: Arrow follows parabolic arc with gravity (500 px/s²)
+- [x] Task: Can fire without solution (best-attempt trajectory)
+
+### Story 31.2: Power Control
+- [x] Task: Pull strength scales with L2 hold time (300–1800 px/s)
+- [x] Task: Partial trigger pull = proportional max power cap
+- [x] Task: RB reverses power direction, release RB locks power level
+- [x] Task: Locked power persists across shots, charges up to lock level
+- [x] Task: Lock indicator (white tick + gold diamond) on charge bar
+
+### Story 31.3: Fire Mechanics
+- [x] Task: R2 fires with edge detection (fresh press required)
+- [x] Task: 0.5s cooldown, auto re-string while L2 held
+- [x] Task: Does not consume regular ammo pool
+- [x] Task: Reticle position persists across L2 pulls
+
+---
+
+## EPIC 32: Debug & Developer Tools (`tools`)
+
+### Story 32.1: Debug Mode
+- [x] Task: SELECT button toggles debug mode
+- [x] Task: Velocity arrows (green=current, red=predicted jump)
+- [x] Task: Debug tracer arrows on grapple jump (green/yellow/cyan, 10s linger)
+- [x] Task: HUD button state display above each player panel
+- [x] Task: Archer debug: solver arc + arrow trail (orange/cyan, 10s linger)
+
+### Story 32.2: Velocity Audit System (documented, not implemented)
+- [ ] Task: See docs/design/velocity_audit_system.md
+
+---
+
+## EPIC 33: Controller Features (`ui`)
+
+### Story 33.1: Haptic Feedback
+- [x] Task: Grapple rumble at all key moments (windup through release)
+- [x] Task: Swing rumble scales with velocity (5–20% weak motor)
+
+### Story 33.2: LED Color
+- [x] Task: Controller LED matches player class color (Godot 4.6 Input.set_joy_light)
+- [x] Task: Updates on spawn and class change
+
+---
+
+## EPIC 34: Quality of Life (`mechanics`)
+
+### Story 34.1: Out-of-Bounds Teleport
+- [x] Task: Teleport OOB players to nearest player with purple aether rift VFX
+
+### Story 34.2: Profile Class Memory
+- [x] Task: Save last_class to profile, auto-select on rejoin if available
+
+### Story 34.3: Class Change Ghost State
+- [x] Task: In-game class change requires button press to materialize before rift spawns
 
 ---
 

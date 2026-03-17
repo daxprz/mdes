@@ -51,24 +51,30 @@
 ## Ranged (Ranger)
 **Color scheme:** Forest green / Leather brown
 
-**Basic Attack - Crossbow Bolt**
+**Basic Attack (Square) - Crossbow Bolt**
 - 60 damage projectile at 400px/s
 - Ammo system: 10 arrows max, must reload
 - Fires in aimed direction (right stick / movement)
 
-**Special - Physics Grappling Hook**
-- Hold button: hook swings in a circle (4–12 rad/s, speeds up over time)
-- Release: thrown in thumbstick direction with gravity arc
-- Longer hold = faster swing = farther throw (200–500 px/s)
-- Connects to walls or entities on contact (10 damage on hit)
-- Wall: player launches toward anchor, then swings as pendulum
-  - Left/right: adjust swing momentum. Up/down: adjust rope length
-  - Press grapple again: release with full swing momentum (fling)
-- Enemy: same swing, but press grapple again to **tug** (Newtonian F=ma)
-  - Light enemies flung toward player, heavy enemies pull player toward them
-  - Equal mass = both pulled together (10 damage on tug)
-- Rope rendered as verlet chain (20 segments)
-- Sound: grapple_launch.wav (throw), grapple_hit.wav (connect)
+**Aimed Shot (L2 + R2) - Physics Arrow**
+- Hold L2: reticle appears, aim with right stick anywhere on screen
+- Pull strength builds over time (300–1800 px/s). Partial trigger = partial max.
+- RB: reverse power direction. Release RB: lock power level.
+- Arc solver finds launch angle for parabolic trajectory to reticle
+- Reticle sparkles when solution found, 50% transparent when not
+- R2: fires arrow along solved arc (or best-attempt). Does not consume ammo.
+- Auto re-strings in 0.5s. Locked power persists across shots.
+- Charge bar + lock indicator shown below player
+
+**Grappling Hook (L1/LB)**
+- Hold L1: hook spins (14–35 rad/s). Aim with either stick (right priority).
+- Release L1: thrown at 4000–10000 px/s with gravity arc. Max range 900px.
+- Connects to walls/enemies (10 damage). Player launched toward anchor.
+- Pendulum swing with rope slack physics. Rope bounces when taut.
+- L1 again (wall): phase 1 = pull toward anchor, phase 2 = disconnect
+- L1 again (enemy): Newtonian tug (F=ma, mass-based)
+- Jump: disconnect + 25% jump velocity in thumbstick direction (additive)
+- Controller rumble at all key moments. Full movement during windup.
 
 **Charge Attack - Piercing Shot**
 - Charged bolt that pierces enemies, bigger projectile

@@ -523,28 +523,36 @@ Enemies have a 25% chance to drop a health pickup on death.
 
 ## 29. Physics-Based Grappling Hook (Ranger)
 
-Full physics simulation replacing the old raycast grapple. See
-`docs/design/grappling_hook_physics.md` for detailed constants and formulas.
+Full physics simulation. Input: Left Bumper (L1/LB). See
+`docs/design/grappling_hook_physics.md` for detailed constants.
 
 **State Machine:** IDLE → WINDUP → THROWN → CONNECTED → SWINGING → RETRACTING
 
-**Windup:** Hold grapple button to swing the hook in a circle. Angular velocity
-increases with hold time (4–12 rad/s). Visual: hook orbiting at 40px radius.
+**Windup (hold L1):** Hook swings in a circle (14–35 rad/s). Player moves
+normally during windup. Aim direction controlled by either thumbstick
+(right stick priority). Dotted arrow shows throw direction. Release L1 to throw.
 
-**Throw:** Release in thumbstick direction. Speed scales with hold time
-(200–500 px/s). Hook follows a gravity arc. Rope trails as verlet chain.
+**Throw:** Hook flies at 4000–10000 px/s (scales with hold time) with gravity arc.
+Rope trails behind. Max range 900px.
 
-**Connection:** Hook anchors to walls (StaticBody2D) or entities. Player
-launches toward anchor at 50% of jump velocity.
+**Connection:** Hook anchors to walls or entities. Player launched toward anchor
+at 75% of jump velocity, blended with current travel direction.
 
-**Pendulum Swing:** At apex, rope goes taut. Player swings as a pendulum
+**Pendulum Swing:** Rope goes taut at full extension. Player swings as pendulum
 (`α = -(g/L)*sin(θ)`). Left/right adjusts momentum, up/down adjusts rope length.
+Rope goes slack when player swings above anchor — normal gravity resumes.
+Player bounces when rope snaps taut again (1.5x velocity reflection).
 
-**Release (Wall):** Player retains swing momentum. Rope retracts visually.
+**Two-Phase Disconnect (Wall):**
+- First L1: pulls player straight toward anchor (stays connected)
+- Second L1: disconnects, player keeps momentum
 
-**Tug (Enemy):** Newtonian physics — constant force applied, both entities
-accelerate proportionally to `F/mass`. Light enemies flung toward player,
-equal mass = mutual pull, heavy enemies = player flung toward them.
+**Jump Disconnect:** Jump button disconnects and adds 25% of JUMP_VELOCITY
+in thumbstick direction, additive to current swing momentum. Launch immunity
+(0.5s, persists while airborne) prevents movement system from overriding velocity.
+
+**Tug (Enemy):** Newtonian F=ma on both ends. Light enemies flung, heavy
+enemies pull the player.
 
 | Tug Result | Mass Ratio (enemy/player) |
 |------------|--------------------------|
@@ -553,6 +561,94 @@ equal mass = mutual pull, heavy enemies = player flung toward them.
 | Both pulled equally | 0.8 – 1.2 |
 | Player pulled | 1.2 – 2.0 |
 | Player flung toward enemy | > 2.0 |
+
+**Controller Rumble:**
+- Windup: weak motor builds with spin speed (0–30%)
+- Throw: medium punch (40%/60%, 0.15s)
+- Connection: strong impact (60%/90%, 0.2s)
+- Swing: 5–20% weak motor scales with velocity
+- Rope bounce: thump (40%/60%, 0.1s)
+- Pull/Tug: medium-heavy (50–100%, 0.15–0.25s)
+- Jump release: short pop (30%/50%, 0.1s)
+
+---
+
+## 30. Archer Aimed Shot System
+
+Physics-based arrow system using L2/R2 triggers.
+
+**Aiming (hold L2):** Reticle appears, movable with right stick anywhere on
+screen. Reticle position persists across L2 pulls (clamped on-screen when
+re-entering aim mode).
+
+**Pull Strength:** Arrow speed builds while L2 held:
+- Min: 300 px/s, Max: 1800 px/s, Rate: +1200 px/s per second
+- Partial trigger pull = proportional max power cap
+- RB during charge: reverses power direction (decreasing)
+- Release RB: locks power at current level (persists across shots)
+- Lock indicator: white tick + gold diamond on charge bar
+
+**Arc Solver:** Quadratic equation in tan(θ) solves for launch angle given
+current speed and target position. Reticle sparkles when solution found
+(arc passes within 16px of target). 50% transparent when no solution.
+Can fire without solution (arrow follows best-attempt trajectory).
+
+**Firing (R2):** Requires fresh press (edge detection). One shot per 0.5s
+cooldown. Auto re-strings while L2 held. Does not consume ammo.
+After shot with locked power, charges back up to lock level.
+
+**Arrow Physics:** Projectile follows parabolic arc with 500 px/s² gravity.
+Sprite rotates to match velocity angle.
+
+**Debug (SELECT on):**
+- Green/red dotted arc: solver trajectory (green=solution, red=miss)
+- Orange dotted trail: solver arc at moment of fire (lingers 10s)
+- Cyan dotted trail: actual arrow flight path (lingers 10s)
+
+---
+
+## 31. Debug System
+
+Toggle with SELECT button (controller button 4) or backtick key.
+
+**Player Debug Arrows:**
+- Green arrow: current velocity direction and magnitude
+- Red arrow + arrowhead: predicted velocity if jump pressed (grapple only)
+- Speed number at arrow tip
+
+**Debug Tracers (grapple jump):**
+- Green: pre-jump swing velocity
+- Yellow: jump impulse direction
+- Cyan (thick): resulting velocity (sum)
+- Speed label: "v:### +j:### = ###"
+- Linger 10 seconds, fade over last 3s
+
+**HUD Button State:** Above each player's HUD panel:
+- Controller: pressed button names + left/right stick axis values
+- Keyboard: action states (ATT, SPE, JUM, BLO, GRA)
+
+---
+
+## 32. Controller LED
+
+Sets DualSense/DualShock LED color to match player's class color using
+Godot 4.6 `Input.set_joy_light()`. Updates on spawn and class change.
+
+---
+
+## 33. Out-of-Bounds Teleport
+
+Every physics frame, checks if player is outside 2× the camera's visible
+area. If OOB: spawns purple aether rift at origin, teleports to nearest
+other player (or screen center), spawns rift at destination, zeroes velocity.
+
+---
+
+## 34. Profile Class Memory
+
+Player profiles save `last_class` to JSON. On rejoin, auto-selects the
+last-played class if available (not taken by another player). Updated on
+class change via D-pad and on session sync.
 
 ---
 
