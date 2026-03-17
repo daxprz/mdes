@@ -3094,7 +3094,7 @@ func _grapple_jump_release() -> void:
 	## Jump while connected: disconnect and add jump velocity to current momentum
 	var pre_vel: Vector2 = velocity  # Velocity from pendulum
 	var aim: Vector2 = _get_aim_direction_analog()
-	var jump_impulse: Vector2 = aim * abs(JUMP_VELOCITY) * 0.5
+	var jump_impulse: Vector2 = aim * abs(JUMP_VELOCITY) * 0.25
 	velocity += jump_impulse
 	var post_vel: Vector2 = velocity
 
