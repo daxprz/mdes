@@ -3558,10 +3558,13 @@ func _handle_archer_aim(delta: float) -> void:
 		# Auto re-string after 0.5s while L2 still held
 		if _archer_fired_this_pull and _attack_cooldown <= 0.0:
 			_archer_fired_this_pull = false
-			_archer_aim_hold_time = 0.0
-			_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
-			_archer_power_locked = false
 			_archer_power_reversing = false
+			if _archer_power_locked:
+				# Locked: keep speed, recompute hold_time to match
+				_archer_aim_hold_time = (_archer_arrow_speed - ARCHER_ARROW_MIN_SPEED) / ARCHER_ARROW_SPEED_RATE
+			else:
+				_archer_aim_hold_time = 0.0
+				_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
 
 		# R2 fires — requires fresh press (not held from last shot)
 		if not _archer_fired_this_pull and _attack_cooldown <= 0.0:
@@ -3812,6 +3815,17 @@ func _draw_archer_aim() -> void:
 	draw_rect(Rect2(bar_pos, Vector2(bar_width, bar_height)), Color(0.3, 0.3, 0.3, 0.6))
 	var fill_color := Color(0.3, 0.8, 0.3).lerp(Color(1.0, 0.3, 0.1), pull_ratio)
 	draw_rect(Rect2(bar_pos, Vector2(bar_width * pull_ratio, bar_height)), fill_color)
+
+	# Lock indicator: small white tick mark on the bar showing locked level
+	if _archer_power_locked:
+		var lock_x: float = bar_pos.x + bar_width * pull_ratio
+		draw_line(Vector2(lock_x, bar_pos.y - 2.0), Vector2(lock_x, bar_pos.y + bar_height + 2.0), Color(1.0, 1.0, 1.0, 0.9), 2.0)
+		# Small lock icon (diamond shape)
+		var diamond_y: float = bar_pos.y - 4.0
+		draw_line(Vector2(lock_x, diamond_y - 3.0), Vector2(lock_x + 2.0, diamond_y), Color(1.0, 0.9, 0.3), 1.5)
+		draw_line(Vector2(lock_x + 2.0, diamond_y), Vector2(lock_x, diamond_y + 3.0), Color(1.0, 0.9, 0.3), 1.5)
+		draw_line(Vector2(lock_x, diamond_y + 3.0), Vector2(lock_x - 2.0, diamond_y), Color(1.0, 0.9, 0.3), 1.5)
+		draw_line(Vector2(lock_x - 2.0, diamond_y), Vector2(lock_x, diamond_y - 3.0), Color(1.0, 0.9, 0.3), 1.5)
 
 	# Draw reticle crosshair
 	var ret_color := Color(1.0, 0.3, 0.2, reticle_alpha)
