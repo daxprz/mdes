@@ -2752,11 +2752,6 @@ func _handle_ranger_grapple() -> void:
 				# First L1 press: pull toward anchor, stay connected
 				_grapple_pull_to_anchor()
 
-	# Jump while connected = disconnect with jump boost
-	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
-		if _is_device_action_just_pressed("jump"):
-			_grapple_jump_release()
-
 	if _grapple_state == GrappleState.IDLE:
 		return
 
@@ -2773,6 +2768,11 @@ func _handle_ranger_grapple() -> void:
 			_grapple_tick_swinging(delta)
 		GrappleState.RETRACTING:
 			_grapple_tick_retracting(delta)
+
+	# Jump while connected = disconnect with jump boost (AFTER tick so velocity is current)
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		if _is_device_action_just_pressed("jump"):
+			_grapple_jump_release()
 
 	queue_redraw()
 
