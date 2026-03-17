@@ -578,8 +578,11 @@ func _apply_gravity(delta: float) -> void:
 
 
 func _handle_movement() -> void:
-	# Grapple launch immunity — don't override velocity after grapple jump
+	# Grapple launch immunity — don't override velocity after grapple release
+	# Stays active until timer expires AND player is on the floor
 	if _grapple_launch_immunity > 0.0:
+		if not is_on_floor():
+			_grapple_launch_immunity = maxf(_grapple_launch_immunity, 0.05)  # Keep alive while airborne
 		return
 	# Healer cannot move while channeling
 	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
