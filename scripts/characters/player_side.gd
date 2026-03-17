@@ -221,7 +221,8 @@ var _archer_launch_angle: float = 0.0  # Solved launch angle
 var _archer_arc_points: Array[Vector2] = []  # Points along the solved arc
 var _archer_lock_timer: float = 0.0  # Cooldown between lock recalculations
 var _archer_gleam_timer: float = 0.0  # For sparkle animation
-var _archer_fired_this_pull: bool = false  # Must release L2 to re-string
+var _archer_fired_this_pull: bool = false  # Re-strings after 0.5s cooldown
+var _archer_r2_was_pressed: bool = false  # Track R2 for fresh-press detection
 var _archer_debug_trails: Array = []  # [{points, time, color}] for debug arc/arrow trails
 var _archer_solved_vx: float = 0.0  # Cached solved velocity for firing
 var _archer_solved_vy: float = 0.0
@@ -3526,17 +3527,27 @@ func _handle_archer_aim(delta: float) -> void:
 		_archer_gleam_timer += delta
 		queue_redraw()
 
-		# R2 fires — must not have already fired this pull (release L2 to re-string)
-		if r2_pressed and _attack_cooldown <= 0.0 and not _archer_fired_this_pull:
-			_archer_fire_aimed()
-			_archer_fired_this_pull = true
+		# Auto re-string after 0.5s while L2 still held
+		if _archer_fired_this_pull and _attack_cooldown <= 0.0:
+			_archer_fired_this_pull = false
+			_archer_aim_hold_time = 0.0
+			_archer_arrow_speed = ARCHER_ARROW_MIN_SPEED
+
+		# R2 fires — requires fresh press (not held from last shot)
+		if not _archer_fired_this_pull and _attack_cooldown <= 0.0:
+			if r2_pressed and not _archer_r2_was_pressed:
+				_archer_fire_aimed()
+				_archer_fired_this_pull = true
+
+		_archer_r2_was_pressed = r2_pressed
 
 	else:
-		# L2 released — hide reticle, re-string (allow next shot on next pull)
+		# L2 released — hide reticle
 		if _archer_aiming:
 			_archer_aiming = false
 			_archer_arc_points.clear()
 			_archer_fired_this_pull = false
+			_archer_r2_was_pressed = false
 			queue_redraw()
 
 
