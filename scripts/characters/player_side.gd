@@ -3175,6 +3175,7 @@ func _grapple_release() -> void:
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
 	_grapple_pulling = false
+	_grapple_launch_immunity = 0.5  # Preserve velocity after release
 	_stop_rumble()
 	# velocity is already set from swing
 
@@ -3183,6 +3184,7 @@ func _grapple_start_retract() -> void:
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
+	_grapple_launch_immunity = 0.5  # Preserve velocity after retract
 
 
 func _grapple_tick_retracting(delta: float) -> void:
