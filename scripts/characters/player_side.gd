@@ -2816,7 +2816,9 @@ func _update_controller_led() -> void:
 		PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
 	}
 	var led_color: Color = colors.get(character_class, Color.WHITE)
-	Input.set_joy_light(device_id, led_color)
+	# Use call() to avoid parse error if set_joy_light doesn't exist in this build
+	if Input.has_method("set_joy_light"):
+		Input.call("set_joy_light", device_id, led_color)
 
 
 # -- Ranger Grapple (Circle) ---------------------------------------------------
