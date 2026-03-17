@@ -3527,7 +3527,7 @@ func _handle_archer_aim(delta: float) -> void:
 		queue_redraw()
 
 		# R2 fires — must not have already fired this pull (release L2 to re-string)
-		if r2_pressed and _archer_has_solution and _attack_cooldown <= 0.0 and not _archer_fired_this_pull:
+		if r2_pressed and _attack_cooldown <= 0.0 and not _archer_fired_this_pull:
 			_archer_fire_aimed()
 			_archer_fired_this_pull = true
 
@@ -3557,17 +3557,21 @@ func _archer_solve_arc() -> void:
 
 	_archer_has_solution = false
 	_archer_arc_points.clear()
-	var reticle_radius: float = 12.0  # Must pass within this distance to count as a hit
+	var reticle_radius: float = 12.0
+
+	# Always compute a fallback: aim directly at target with current speed
+	var aim_dir: Vector2 = target.normalized() if target.length() > 1.0 else Vector2(1.0 if dx >= 0 else -1.0, 0.0)
+	_archer_solved_vx = aim_dir.x * v
+	_archer_solved_vy = aim_dir.y * v
+	_build_arc_points_from_vel(_archer_solved_vx, _archer_solved_vy)
 
 	if absf(dx) < 1.0:
-		if dy < 0 and absf(dy) < (v * v) / (2.0 * g):
-			_archer_solved_vx = 0.0
-			_archer_solved_vy = -v
+		# Vertical shot
+		_archer_solved_vx = 0.0
+		_archer_solved_vy = -v
+		_build_arc_points_from_vel(0.0, -v)
+		if _verify_arc_hits_target(reticle_radius):
 			_archer_has_solution = true
-			_build_arc_points_from_vel(0.0, -v)
-			# Verify arc passes near target
-			if not _verify_arc_hits_target(reticle_radius):
-				_archer_has_solution = false
 		return
 
 	# Quadratic in m = vy/vx: a*m² + b*m + c = 0
@@ -3577,13 +3581,19 @@ func _archer_solve_arc() -> void:
 
 	var discriminant: float = b * b - 4.0 * a * c
 	if discriminant < 0:
+		# No quadratic solution — keep fallback arc for debug rendering
 		return
 
 	var sqrt_disc: float = sqrt(discriminant)
 	var m1: float = (-b + sqrt_disc) / (2.0 * a)
 	var m2: float = (-b - sqrt_disc) / (2.0 * a)
 
-	# Try both solutions, simulate each, pick the one that hits the target
+	# Try both solutions — keep the best (closest to target), mark as solution if within radius
+	var best_vx: float = _archer_solved_vx
+	var best_vy: float = _archer_solved_vy
+	var best_dist: float = INF
+	var best_hits: bool = false
+
 	var candidates: Array = [m1, m2]
 	for m_val in candidates:
 		var cvx: float = v / sqrt(1.0 + m_val * m_val)
@@ -3591,21 +3601,46 @@ func _archer_solve_arc() -> void:
 			cvx = -cvx
 		var cvy: float = m_val * cvx
 
-		# Check time is positive
 		var t_check: float = dx / cvx if absf(cvx) > 0.01 else -1.0
 		if t_check < 0:
 			continue
 
 		_build_arc_points_from_vel(cvx, cvy)
-		if _verify_arc_hits_target(reticle_radius):
-			_archer_solved_vx = cvx
-			_archer_solved_vy = cvy
-			_archer_launch_angle = atan2(cvy, cvx)
-			_archer_has_solution = true
-			return
+		var hits: bool = _verify_arc_hits_target(reticle_radius)
+		var closest: float = _arc_closest_distance_to_target()
 
-	# Neither solution hits — no valid arc
-	_archer_arc_points.clear()
+		if hits and not best_hits:
+			# First solution that hits — use it
+			best_vx = cvx
+			best_vy = cvy
+			best_dist = closest
+			best_hits = true
+		elif hits and closest < best_dist:
+			# Better hitting solution
+			best_vx = cvx
+			best_vy = cvy
+			best_dist = closest
+		elif not best_hits and closest < best_dist:
+			# No hit yet — pick closest miss for debug rendering
+			best_vx = cvx
+			best_vy = cvy
+			best_dist = closest
+
+	_archer_solved_vx = best_vx
+	_archer_solved_vy = best_vy
+	_archer_launch_angle = atan2(best_vy, best_vx)
+	_archer_has_solution = best_hits
+	_build_arc_points_from_vel(best_vx, best_vy)
+
+
+func _arc_closest_distance_to_target() -> float:
+	var target_local: Vector2 = _archer_reticle_pos - global_position
+	var closest: float = INF
+	for pt in _archer_arc_points:
+		var d: float = pt.distance_to(target_local)
+		if d < closest:
+			closest = d
+	return closest
 
 
 func _verify_arc_hits_target(radius: float) -> bool:
@@ -3749,17 +3784,15 @@ func _draw_archer_aim() -> void:
 			var sparkle_alpha: float = 0.5 + 0.5 * sin(_archer_gleam_timer * 8.0 + i * 1.5)
 			draw_circle(sparkle_pos, 2.0, Color(1.0, 0.9, 0.3, sparkle_alpha))
 
-	# Draw arc (debug or always-on dotted line)
-	if _archer_has_solution and _archer_arc_points.size() >= 2:
-		var arc_alpha: float = 0.5 if _debug_mode else 0.0
-		if _debug_mode:
-			# Dotted arc line
-			for i in range(_archer_arc_points.size() - 1):
-				if i % 3 == 0:  # Skip every 3rd segment for dotted effect
-					continue
-				var a: Vector2 = _archer_arc_points[i]
-				var b: Vector2 = _archer_arc_points[i + 1]
-				draw_line(a, b, Color(1.0, 0.6, 0.2, arc_alpha), 1.5)
+	# Draw arc in debug mode — always, even without a solution (shows best attempt)
+	if _debug_mode and _archer_arc_points.size() >= 2:
+		var arc_color := Color(0.2, 1.0, 0.3, 0.5) if _archer_has_solution else Color(1.0, 0.3, 0.2, 0.35)
+		for i in range(_archer_arc_points.size() - 1):
+			if i % 3 == 0:
+				continue
+			var a: Vector2 = _archer_arc_points[i]
+			var b: Vector2 = _archer_arc_points[i + 1]
+			draw_line(a, b, arc_color, 1.5)
 
 
 # -- Rogue Stealth -------------------------------------------------------------
