@@ -51,6 +51,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.4
+**Critical Fix & Procedural Rocks**
+- Fix: `Input.set_joy_light()` caused a parse error in export builds, preventing the entire player script from loading. Controllers could select classes but not move characters. Fixed via runtime `call()` dispatch.
+- Procedural vector rocks with faceted plane shading (Kats Pixels technique)
+- Configurable light direction, highlight intensity, and highlight width on rocks
+- Grey and red-brown rock palettes with directional shadow/base/lit/highlight shading
+- Debug: press G to regenerate nearest procedural scenery item (trees and rocks)
+- README.md with full release notes
+
 ### v0.9.3
 **Portal Doorway & Procedural Trees**
 - Stone archway with wooden double doors, keystone, and decorative transom with muffin symbol replaces "Press START to begin"
