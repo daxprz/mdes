@@ -360,6 +360,61 @@ func _draw_front_layer() -> void:
 	# Keystone rune/symbol
 	draw_circle(Vector2(0, ks_y + ks_h * 0.4), 3.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
 
+	# -- Decorative wooden section below the arch, above the doors --
+	var transom_y: float = -DOORWAY_HEIGHT  # Top of the door opening
+	var transom_h: float = 22.0
+	var beam_h: float = 6.0
+	var full_w: float = DOORWAY_WIDTH
+
+	# Horizontal beam across the top
+	draw_rect(Rect2(-half_w, transom_y - transom_h - beam_h, full_w, beam_h), DOOR_DARK)
+	# Beam edge highlights
+	draw_line(Vector2(-half_w, transom_y - transom_h - beam_h), Vector2(half_w, transom_y - transom_h - beam_h), DOOR_PLANK, 1.0)
+	draw_line(Vector2(-half_w, transom_y - transom_h), Vector2(half_w, transom_y - transom_h), DOOR_DARK * Color(0.8, 0.8, 0.8), 1.0)
+
+	# Wooden panel below beam
+	draw_rect(Rect2(-half_w, transom_y - transom_h, full_w, transom_h), DOOR_COLOR * Color(0.9, 0.9, 0.9))
+
+	# Vertical slats
+	var slat_count := 10
+	for i in range(slat_count + 1):
+		var sx: float = -half_w + (full_w / float(slat_count)) * i
+		draw_line(Vector2(sx, transom_y - transom_h), Vector2(sx, transom_y), DOOR_DARK, 1.0)
+
+	# Mysterious muffin symbol in the center of the transom
+	var sym_cx: float = 0.0
+	var sym_cy: float = transom_y - transom_h / 2.0
+	var sym_color := Color(0.7, 0.6, 0.35, 0.8)
+	var sym_glow := Color(0.8, 0.7, 0.4, 0.3)
+
+	# Muffin body (rounded trapezoid — drawn as polygon)
+	var mb_w: float = 10.0  # Half width at top
+	var mb_bw: float = 7.0  # Half width at bottom
+	var mb_h: float = 7.0
+	draw_polygon(
+		PackedVector2Array([
+			Vector2(sym_cx - mb_w, sym_cy - 1),
+			Vector2(sym_cx + mb_w, sym_cy - 1),
+			Vector2(sym_cx + mb_bw, sym_cy + mb_h),
+			Vector2(sym_cx - mb_bw, sym_cy + mb_h),
+		]),
+		PackedColorArray([sym_color, sym_color, sym_color, sym_color])
+	)
+
+	# Muffin top (puffy dome)
+	draw_circle(Vector2(sym_cx, sym_cy - 3), 8.0, sym_color)
+	draw_circle(Vector2(sym_cx - 5, sym_cy - 1), 5.0, sym_color)
+	draw_circle(Vector2(sym_cx + 5, sym_cy - 1), 5.0, sym_color)
+	# Highlight on top
+	draw_circle(Vector2(sym_cx, sym_cy - 5), 3.0, sym_glow)
+
+	# Wrapper lines
+	draw_line(Vector2(sym_cx - mb_bw + 1, sym_cy + 2), Vector2(sym_cx + mb_bw - 1, sym_cy + 2), DOOR_DARK, 1.0)
+	draw_line(Vector2(sym_cx - mb_bw + 1, sym_cy + 5), Vector2(sym_cx + mb_bw - 1, sym_cy + 5), DOOR_DARK, 1.0)
+
+	# Subtle glow behind the symbol
+	draw_circle(Vector2(sym_cx, sym_cy), 14.0, Color(0.6, 0.5, 0.3, 0.1))
+
 	# Base stones
 	draw_rect(Rect2(-half_w - stone_w - 8, -6, stone_w + 8, 10), STONE_DARK)
 	draw_rect(Rect2(half_w, -6, stone_w + 8, 10), STONE_DARK)
