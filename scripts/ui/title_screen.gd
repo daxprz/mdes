@@ -183,12 +183,12 @@ func _setup_rocks() -> void:
 
 	# Scatter rocks around the arena
 	var rock_configs := [
-		{"pos": Vector2(400, 890), "size": 25.0, "seed": 1001, "hue": "grey"},
-		{"pos": Vector2(750, 895), "size": 18.0, "seed": 1002, "hue": "grey"},
-		{"pos": Vector2(1150, 893), "size": 22.0, "seed": 1003, "hue": "grey"},
-		{"pos": Vector2(1520, 888), "size": 30.0, "seed": 1004, "hue": "red"},
-		{"pos": Vector2(350, 750), "size": 15.0, "seed": 1005, "hue": "grey"},
-		{"pos": Vector2(1600, 755), "size": 16.0, "seed": 1006, "hue": "red"},
+		{"pos": Vector2(400, 885), "size": 45.0, "seed": 1001, "hue": "grey"},
+		{"pos": Vector2(750, 890), "size": 35.0, "seed": 1002, "hue": "grey"},
+		{"pos": Vector2(1150, 888), "size": 40.0, "seed": 1003, "hue": "grey"},
+		{"pos": Vector2(1520, 882), "size": 55.0, "seed": 1004, "hue": "red"},
+		{"pos": Vector2(350, 745), "size": 30.0, "seed": 1005, "hue": "grey"},
+		{"pos": Vector2(1600, 748), "size": 32.0, "seed": 1006, "hue": "red"},
 	]
 
 	for cfg in rock_configs:

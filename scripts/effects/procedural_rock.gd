@@ -4,9 +4,12 @@ extends Node2D
 ## Irregular silhouette with 3-4 flat planes, directional lighting,
 ## crack lines between facets, and edge highlights.
 
-@export var rock_size: float = 40.0  # Base radius
+@export var rock_size: float = 60.0  # Base radius (bigger default)
 @export var seed_value: int = -1
 @export var hue: String = "grey"  # "grey" or "red"
+@export var light_direction: Vector2 = Vector2(-0.6, -0.8)  # Configurable light angle
+@export var highlight_intensity: float = 1.0  # 0.0 = no highlights, 1.0 = normal, 2.0 = strong
+@export var highlight_width: float = 2.0  # Edge highlight line thickness
 
 # Color palettes
 const GREY_PALETTE := {
@@ -139,11 +142,10 @@ func _generate_facets() -> void:
 		)
 		facet_pts = PackedVector2Array(sorted_pts)
 
-		# Determine shade based on facet center relative to rock center
-		# Light from top-left: facets in upper-left are brightest
+		# Determine shade based on facet direction relative to light
 		var facet_dir: Vector2 = (facet_center - center).normalized()
-		var light_dir := Vector2(-0.6, -0.8)  # Top-left light
-		var light_dot: float = facet_dir.dot(light_dir)
+		var light_norm: Vector2 = light_direction.normalized()
+		var light_dot: float = facet_dir.dot(light_norm)
 
 		var shade: String
 		if light_dot > 0.3:
@@ -175,15 +177,13 @@ func _generate_cracks() -> void:
 
 
 func _generate_edge_highlights() -> void:
-	# Highlight edges of the silhouette that face the light (top-left)
-	var light_dir := Vector2(-0.6, -0.8)
+	var light_norm: Vector2 = light_direction.normalized()
 	for i in range(_silhouette.size()):
 		var a: Vector2 = _silhouette[i]
 		var b: Vector2 = _silhouette[(i + 1) % _silhouette.size()]
 		var edge_dir: Vector2 = (b - a).normalized()
 		var edge_normal: Vector2 = Vector2(-edge_dir.y, edge_dir.x)
-		# If normal faces toward light, highlight this edge
-		if edge_normal.dot(light_dir) > 0.2:
+		if edge_normal.dot(light_norm) > 0.2:
 			_edge_highlights.append({"from": a, "to": b})
 
 
@@ -217,6 +217,9 @@ func _draw() -> void:
 		var b: Vector2 = _silhouette[(i + 1) % _silhouette.size()]
 		draw_line(a, b, _palette["shadow"] * Color(0.8, 0.8, 0.8), 1.5)
 
-	# 5. Draw edge highlights
-	for eh in _edge_highlights:
-		draw_line(eh["from"], eh["to"], _palette["highlight"], 2.0)
+	# 5. Draw edge highlights (configurable intensity and width)
+	if highlight_intensity > 0.0:
+		var hl_color: Color = _palette["highlight"]
+		hl_color.a = clampf(highlight_intensity, 0.0, 1.0)
+		for eh in _edge_highlights:
+			draw_line(eh["from"], eh["to"], hl_color, highlight_width * highlight_intensity)
