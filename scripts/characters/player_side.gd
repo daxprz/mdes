@@ -3079,8 +3079,9 @@ func _grapple_pull_to_anchor() -> void:
 func _grapple_jump_release() -> void:
 	## Jump while connected: disconnect and add jump velocity to current momentum
 	# Current velocity is already set from pendulum motion
-	# Add a full jump impulse on top of existing velocity
-	velocity.y += JUMP_VELOCITY  # Additive — stacks with swing momentum
+	# Add full jump speed in thumbstick direction, on top of existing velocity
+	var aim: Vector2 = _get_aim_direction_analog()
+	velocity += aim * abs(JUMP_VELOCITY)
 	AudioManager.play("jump")
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
