@@ -159,7 +159,7 @@ func _setup_background_trees() -> void:
 	left_tree.set_script(tree_script)
 	left_tree.trunk_weight = 22.0
 	left_tree.trunk_length = 250.0
-	left_tree.seed_value = 3444017493
+	left_tree.seed_value = 3105534387
 	left_tree.z_index = -5  # Behind everything
 	add_child(left_tree)
 	left_tree.global_position = Vector2(250, 900)
