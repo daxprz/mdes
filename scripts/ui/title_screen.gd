@@ -358,6 +358,13 @@ func _on_player_left(player_index: int) -> void:
 
 # -- Lobby Player Spawning -----------------------------------------------------
 
+const SPAWN_POSITIONS := [
+	Vector2(670, 560),   # P1: upper-left platform
+	Vector2(1250, 560),  # P2: upper-right platform
+	Vector2(540, 780),   # P3: lower-left platform
+	Vector2(1380, 780),  # P4: lower-right platform
+]
+
 func _spawn_lobby_player(player_index: int) -> void:
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
 	if p_data.is_empty():
@@ -368,8 +375,11 @@ func _spawn_lobby_player(player_index: int) -> void:
 	player_node.device_id = p_data["device_id"]
 	player_node.character_class = p_data["character_class"]
 
-	var offset := Vector2((player_index - 1.5) * 60, 0)
-	player_node.global_position = spawn_point.global_position + offset
+	# Spawn on assigned platform
+	if player_index < SPAWN_POSITIONS.size():
+		player_node.global_position = SPAWN_POSITIONS[player_index]
+	else:
+		player_node.global_position = spawn_point.global_position
 
 	players_container.add_child(player_node)
 	_spawned_players[player_index] = player_node

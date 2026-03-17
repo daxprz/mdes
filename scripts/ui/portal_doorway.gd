@@ -50,13 +50,13 @@ func _process(delta: float) -> void:
 			if dist < ACTIVATION_RANGE:
 				_players_near += 1
 
-	var was_activated: bool = _activated
 	_activated = _players_near > 0
 	_all_present = _players_near >= _total_players and _total_players > 0
 
-	# Open doors when any player approaches (stays open once opened)
+	# Doors open when a player stands in front, stay open once opened
 	if _activated and not _doors_open:
 		_doors_open = true
+		AudioManager.play("enemy_hit", -6.0, 0.4)  # Creak sound
 
 	# Animate door opening
 	if _doors_open and _door_open_amount < 1.0:
@@ -182,11 +182,13 @@ func _spawn_fog_particle() -> void:
 
 
 func _draw() -> void:
+	_draw_platform_and_stairs()
 	_draw_back_layer()
+	_draw_wooden_transom()  # Slats behind the arch
 	_draw_fog()
 	_draw_vortex()
 	_draw_doors()
-	_draw_front_layer()
+	_draw_front_layer()  # Stone arch in front of slats
 	_draw_rays()
 
 
@@ -360,61 +362,85 @@ func _draw_front_layer() -> void:
 	# Keystone rune/symbol
 	draw_circle(Vector2(0, ks_y + ks_h * 0.4), 3.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
 
-	# -- Decorative wooden section below the arch, above the doors --
-	var transom_y: float = -DOORWAY_HEIGHT  # Top of the door opening
-	var transom_h: float = 22.0
-	var beam_h: float = 6.0
-	var full_w: float = DOORWAY_WIDTH
-
-	# Horizontal beam across the top
-	draw_rect(Rect2(-half_w, transom_y - transom_h - beam_h, full_w, beam_h), DOOR_DARK)
-	# Beam edge highlights
-	draw_line(Vector2(-half_w, transom_y - transom_h - beam_h), Vector2(half_w, transom_y - transom_h - beam_h), DOOR_PLANK, 1.0)
-	draw_line(Vector2(-half_w, transom_y - transom_h), Vector2(half_w, transom_y - transom_h), DOOR_DARK * Color(0.8, 0.8, 0.8), 1.0)
-
-	# Wooden panel below beam
-	draw_rect(Rect2(-half_w, transom_y - transom_h, full_w, transom_h), DOOR_COLOR * Color(0.9, 0.9, 0.9))
-
-	# Vertical slats
-	var slat_count := 10
-	for i in range(slat_count + 1):
-		var sx: float = -half_w + (full_w / float(slat_count)) * i
-		draw_line(Vector2(sx, transom_y - transom_h), Vector2(sx, transom_y), DOOR_DARK, 1.0)
-
-	# Mysterious muffin symbol in the center of the transom
-	var sym_cx: float = 0.0
-	var sym_cy: float = transom_y - transom_h / 2.0
-	var sym_color := Color(0.7, 0.6, 0.35, 0.8)
-	var sym_glow := Color(0.8, 0.7, 0.4, 0.3)
-
-	# Muffin body (rounded trapezoid — drawn as polygon)
-	var mb_w: float = 10.0  # Half width at top
-	var mb_bw: float = 7.0  # Half width at bottom
-	var mb_h: float = 7.0
-	draw_polygon(
-		PackedVector2Array([
-			Vector2(sym_cx - mb_w, sym_cy - 1),
-			Vector2(sym_cx + mb_w, sym_cy - 1),
-			Vector2(sym_cx + mb_bw, sym_cy + mb_h),
-			Vector2(sym_cx - mb_bw, sym_cy + mb_h),
-		]),
-		PackedColorArray([sym_color, sym_color, sym_color, sym_color])
-	)
-
-	# Muffin top (puffy dome)
-	draw_circle(Vector2(sym_cx, sym_cy - 3), 8.0, sym_color)
-	draw_circle(Vector2(sym_cx - 5, sym_cy - 1), 5.0, sym_color)
-	draw_circle(Vector2(sym_cx + 5, sym_cy - 1), 5.0, sym_color)
-	# Highlight on top
-	draw_circle(Vector2(sym_cx, sym_cy - 5), 3.0, sym_glow)
-
-	# Wrapper lines
-	draw_line(Vector2(sym_cx - mb_bw + 1, sym_cy + 2), Vector2(sym_cx + mb_bw - 1, sym_cy + 2), DOOR_DARK, 1.0)
-	draw_line(Vector2(sym_cx - mb_bw + 1, sym_cy + 5), Vector2(sym_cx + mb_bw - 1, sym_cy + 5), DOOR_DARK, 1.0)
-
-	# Subtle glow behind the symbol
-	draw_circle(Vector2(sym_cx, sym_cy), 14.0, Color(0.6, 0.5, 0.3, 0.1))
-
 	# Base stones
 	draw_rect(Rect2(-half_w - stone_w - 8, -6, stone_w + 8, 10), STONE_DARK)
 	draw_rect(Rect2(half_w, -6, stone_w + 8, 10), STONE_DARK)
+
+
+func _draw_wooden_transom() -> void:
+	## Wooden slats and beam that fill the archway, drawn BEHIND the stone arch
+	var half_w: float = DOORWAY_WIDTH / 2.0
+	var door_top: float = -DOORWAY_HEIGHT + 10.0  # Top of the door panels
+	var arch_top: float = -DOORWAY_HEIGHT - half_w  # Top of the arch curve
+
+	# Fill the entire arch area with wooden slats
+	# The arch covers from arch_top to door_top in the curved region
+	var slat_region_top: float = arch_top + 10.0
+	var slat_region_bottom: float = door_top
+
+	# Wooden background panel for the full arch area
+	draw_rect(Rect2(-half_w, slat_region_top, DOORWAY_WIDTH, slat_region_bottom - slat_region_top), DOOR_COLOR * Color(0.85, 0.85, 0.85))
+
+	# Vertical slats
+	var slat_count := 12
+	for i in range(slat_count + 1):
+		var sx: float = -half_w + (DOORWAY_WIDTH / float(slat_count)) * i
+		draw_line(Vector2(sx, slat_region_top), Vector2(sx, slat_region_bottom), DOOR_DARK, 1.0)
+
+	# Horizontal beam just above the doors
+	var beam_h: float = 7.0
+	draw_rect(Rect2(-half_w, door_top - beam_h, DOORWAY_WIDTH, beam_h), DOOR_DARK)
+	draw_line(Vector2(-half_w, door_top - beam_h), Vector2(half_w, door_top - beam_h), DOOR_PLANK, 1.0)
+	draw_line(Vector2(-half_w, door_top), Vector2(half_w, door_top), DOOR_DARK * Color(0.7, 0.7, 0.7), 1.0)
+
+	# Mysterious muffin symbol centered in the slat area
+	var sym_cx: float = 0.0
+	var sym_cy: float = (slat_region_top + slat_region_bottom) / 2.0 - 5.0
+	var sym_color := Color(0.7, 0.6, 0.35, 0.85)
+	var sym_glow := Color(0.8, 0.7, 0.4, 0.3)
+
+	# Subtle glow behind
+	draw_circle(Vector2(sym_cx, sym_cy), 16.0, Color(0.6, 0.5, 0.3, 0.12))
+
+	# Muffin top (puffy dome — 3 overlapping circles)
+	draw_circle(Vector2(sym_cx, sym_cy - 4), 9.0, sym_color)
+	draw_circle(Vector2(sym_cx - 6, sym_cy - 1), 6.0, sym_color)
+	draw_circle(Vector2(sym_cx + 6, sym_cy - 1), 6.0, sym_color)
+	draw_circle(Vector2(sym_cx, sym_cy - 6), 4.0, sym_glow)  # Highlight
+
+	# Muffin wrapper body (trapezoid)
+	draw_polygon(
+		PackedVector2Array([
+			Vector2(sym_cx - 11, sym_cy),
+			Vector2(sym_cx + 11, sym_cy),
+			Vector2(sym_cx + 8, sym_cy + 8),
+			Vector2(sym_cx - 8, sym_cy + 8),
+		]),
+		PackedColorArray([sym_color, sym_color, sym_color, sym_color])
+	)
+	# Wrapper lines
+	draw_line(Vector2(sym_cx - 8, sym_cy + 3), Vector2(sym_cx + 8, sym_cy + 3), DOOR_DARK, 1.0)
+	draw_line(Vector2(sym_cx - 8, sym_cy + 6), Vector2(sym_cx + 8, sym_cy + 6), DOOR_DARK, 1.0)
+
+
+func _draw_platform_and_stairs() -> void:
+	## Platform the doorway sits on (50% wider) and 3 descending stairs
+	var half_w: float = DOORWAY_WIDTH / 2.0
+	var plat_w: float = DOORWAY_WIDTH * 1.5
+	var plat_half: float = plat_w / 2.0
+	var plat_h: float = 12.0
+	var stair_h: float = 10.0
+	var stair_grow: float = 16.0  # Each stair gets wider
+
+	# Main platform
+	draw_rect(Rect2(-plat_half, 0, plat_w, plat_h), STONE_COLOR)
+	draw_line(Vector2(-plat_half, 0), Vector2(plat_half, 0), STONE_LIGHT, 1.5)
+
+	# 3 descending stairs
+	for i in range(3):
+		var sw: float = plat_w + stair_grow * (i + 1)
+		var sh: float = plat_h + stair_h * (i + 1)
+		var sx: float = -sw / 2.0
+		var col: Color = STONE_DARK if i % 2 == 0 else STONE_COLOR
+		draw_rect(Rect2(sx, sh - stair_h, sw, stair_h), col)
+		draw_line(Vector2(sx, sh - stair_h), Vector2(sx + sw, sh - stair_h), STONE_LIGHT * Color(1, 1, 1, 0.4), 1.0)

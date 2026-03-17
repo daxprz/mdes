@@ -86,21 +86,6 @@ offset_right = 211.0
 offset_bottom = 10.0
 color = Color(0.4, 0.3, 0.22, 1)
 
-; -- Platform mid-center --
-[node name="PlatCenter" type="StaticBody2D" parent="."]
-position = Vector2(960, 680)
-
-[node name="PlatCenterShape" type="CollisionShape2D" parent="PlatCenter"]
-shape = SubResource("floor_shape")
-scale = Vector2(0.3, 1)
-
-[node name="PlatCenterVisual" type="ColorRect" parent="PlatCenter"]
-offset_left = -288.0
-offset_top = -10.0
-offset_right = 288.0
-offset_bottom = 10.0
-color = Color(0.45, 0.33, 0.22, 1)
-
 ; -- Platform top-left --
 [node name="PlatTopLeft" type="StaticBody2D" parent="."]
 position = Vector2(670, 580)
