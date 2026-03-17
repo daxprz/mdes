@@ -413,7 +413,7 @@ func _input(event: InputEvent) -> void:
 	if event.device != device_id:
 		return
 
-	for action in ["move_left", "move_right", "move_up", "move_down", "jump", "attack", "special", "block", "interact"]:
+	for action in ["move_left", "move_right", "move_up", "move_down", "jump", "attack", "special", "block", "interact", "grapple"]:
 		if event.is_action_pressed(action):
 			_controller_actions[action] = true
 			_controller_just_pressed[action] = true
@@ -453,15 +453,6 @@ func _physics_process(delta: float) -> void:
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
 	_handle_ranger_grapple()
-	# While winding up: gravity applies, horizontal input goes to grapple aim only
-	if _grapple_state == GrappleState.WINDUP:
-		# Keep gravity and existing horizontal momentum, but no new movement input
-		_update_health_bar()
-		_update_animation(delta)
-		move_and_slide()
-		_controller_just_pressed.clear()
-		queue_redraw()
-		return
 	if _grapple_state == GrappleState.SWINGING:
 		_update_health_bar()
 		_update_animation(delta)
@@ -1881,21 +1872,8 @@ func _special_shield_charge() -> void:
 
 
 func _special_grappling_hook() -> void:
-	# Start windup when special is pressed (if not already grappling)
-	if _grapple_state == GrappleState.IDLE:
-		_grapple_state = GrappleState.WINDUP
-		_grapple_hold_time = 0.0
-		_grapple_angle = 0.0
-		_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
-		_grapple_locked_aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
-	elif _grapple_state == GrappleState.SWINGING:
-		# Press grapple again while swinging = release or tug
-		if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
-			_grapple_tug()
-		else:
-			_grapple_release()
-	elif _grapple_state == GrappleState.CONNECTED:
-		_grapple_release()
+	# Grapple moved to left bumper — this is now a no-op for the special button
+	pass
 
 
 func _special_frosting_freeze() -> void:
@@ -2720,9 +2698,15 @@ func _handle_ranger_grapple() -> void:
 	if character_class != PlayerManager.CharacterClass.RANGED:
 		return
 
-	# Check for special press to release/tug while connected (bypasses cooldown)
-	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
-		if _is_device_action_just_pressed("special"):
+	# Initiate grapple on left bumper press
+	if _is_device_action_just_pressed("grapple"):
+		if _grapple_state == GrappleState.IDLE:
+			_grapple_state = GrappleState.WINDUP
+			_grapple_hold_time = 0.0
+			_grapple_angle = 0.0
+			_grapple_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
+			_grapple_locked_aim = Vector2(1.0 if _facing_right else -1.0, 0.0)
+		elif _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
 			if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 				_grapple_tug()
 			else:
@@ -2756,9 +2740,6 @@ func _grapple_tick_windup(delta: float) -> void:
 	)
 	_grapple_angle += _grapple_angular_vel * delta
 
-	# No horizontal input during windup — only gravity affects movement
-	velocity.x = move_toward(velocity.x, 0.0, 200.0 * delta)
-
 	# Hook orbits player
 	_grapple_hook_pos = global_position + Vector2(
 		cos(_grapple_angle) * GRAPPLE_SWING_RADIUS,
@@ -2788,8 +2769,8 @@ func _grapple_tick_windup(delta: float) -> void:
 		if kb_aim != Vector2.ZERO:
 			_grapple_locked_aim = kb_aim.normalized()
 
-	# Release check: special button released
-	if not _is_device_action_pressed("special"):
+	# Release check: grapple button released
+	if not _is_device_action_pressed("grapple"):
 		if _grapple_hold_time >= GRAPPLE_MIN_HOLD:
 			_grapple_throw()
 		else:
