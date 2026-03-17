@@ -302,7 +302,7 @@ func _process(delta: float) -> void:
 			hint.text = "RIFT ACTIVE..."
 			hint.modulate = Color(0.9, 0.3, 0.2)
 		elif is_title:
-			hint.text = "D-Pad: profile/class | START: new profile"
+			hint.text = "D-Pad: profile/class"
 			hint.modulate = Color(0.5, 0.5, 0.5)
 		else:
 			hint.text = "L/R: change class"

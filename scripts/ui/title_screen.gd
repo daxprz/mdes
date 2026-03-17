@@ -7,7 +7,6 @@ extends Node2D
 
 const PLAYER_SIDE_SCENE := preload("res://scenes/characters/player_side.tscn")
 
-@onready var start_text: Label = $UI/StartText
 @onready var title_label: Label = $UI/Title
 @onready var join_text: Label = $UI/JoinText
 @onready var players_container: Node2D = $Players
@@ -42,6 +41,7 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_name_entry()
 	_setup_version_label()
+	_setup_portal_doorway()
 
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
@@ -149,20 +149,24 @@ func _setup_version_label() -> void:
 	$UI.add_child(ver_label)
 
 
+func _setup_portal_doorway() -> void:
+	var doorway_script := load("res://scripts/ui/portal_doorway.gd")
+	var doorway := Node2D.new()
+	doorway.set_script(doorway_script)
+	# Place on the floor, center of the arena
+	doorway.global_position = Vector2(960, 940)
+	doorway.z_index = 2  # Behind players but above background
+	add_child(doorway)
+	doorway.all_players_entered.connect(_start_game)
+
+
 # -- Process -------------------------------------------------------------------
 
 func _process(delta: float) -> void:
 	_blink_timer += delta
 
-	# Blink start text
-	if start_text.visible:
-		start_text.modulate.a = 0.5 + 0.5 * sin(_blink_timer * 4.0)
-
 	# Blink join text
 	join_text.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.003)
-
-	# Update start visibility
-	start_text.visible = PlayerManager.get_active_player_count() > 0
 
 	# Count down rift locks
 	for pi in _rift_locks.keys():
@@ -204,11 +208,9 @@ func _check_non_movement_press(device_id: int) -> bool:
 
 # -- Input ---------------------------------------------------------------------
 
-func _input(event: InputEvent) -> void:
-	# START to begin game (only if at least 1 player joined)
-	if event.is_action_pressed("ps_button"):
-		if PlayerManager.get_active_player_count() > 0:
-			_start_game()
+func _input(_event: InputEvent) -> void:
+	# Game start is now handled by the portal doorway
+	pass
 
 
 # -- Profile Creation ----------------------------------------------------------

@@ -870,6 +870,33 @@ Physics-based arrow aiming with parabolic arc solver.
 
 ---
 
+## EPIC 35: Portal Doorway (Title Screen) (`ui`, `mechanics`)
+Replace "Press START to begin" with a magical portal doorway in the lobby arena.
+Players walk into the doorway to start the game.
+
+### Story 35.1: Doorway Structure
+- [ ] Task: Large stone doorway in center of title screen arena
+- [ ] Task: Front layer: stacked stones with archway and keystone
+- [ ] Task: Back layer: pure black (void behind the arch)
+- [ ] Task: Players render between front and back layers when near
+
+### Story 35.2: Portal Activation
+- [ ] Task: Single player in front of doorway: blue sparkly spiral appears, spinning
+- [ ] Task: Heavy particle effects around the spiral
+- [ ] Task: ALL players in front of doorway: glow brightens
+- [ ] Task: Translucent sparkly rays shoot outward from center
+
+### Story 35.3: Transition Sequence
+- [ ] Task: All players pulled toward door center
+- [ ] Task: Players shrink and spin as they are sucked in
+- [ ] Task: Transition to overworld after animation completes
+
+### Story 35.4: UI Cleanup
+- [ ] Task: Remove "Press START to begin" text
+- [ ] Task: Remove "START: begin" from HUD hints
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)
