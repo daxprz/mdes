@@ -2740,6 +2740,19 @@ func _ranger_fire_crossbow() -> void:
 	PlayerManager.add_skill_xp(player_index, "attack", 2)
 
 
+# -- Controller Rumble ---------------------------------------------------------
+
+func _rumble(weak: float, strong: float, duration: float) -> void:
+	## Trigger controller vibration. No-op for keyboard (device -1).
+	if device_id >= 0:
+		Input.start_joy_vibration(device_id, weak, strong, duration)
+
+
+func _stop_rumble() -> void:
+	if device_id >= 0:
+		Input.stop_joy_vibration(device_id)
+
+
 # -- Ranger Grapple (Circle) ---------------------------------------------------
 
 func _handle_ranger_grapple() -> void:
@@ -2799,6 +2812,10 @@ func _grapple_tick_windup(delta: float) -> void:
 	)
 	_grapple_angle += _grapple_angular_vel * delta
 
+	# Light rumble that builds with spin speed
+	var spin_ratio: float = _grapple_angular_vel / GRAPPLE_MAX_ANGULAR_VEL
+	_rumble(spin_ratio * 0.3, 0.0, 0.05)
+
 	# Hook orbits player
 	_grapple_hook_pos = global_position + Vector2(
 		cos(_grapple_angle) * GRAPPLE_SWING_RADIUS,
@@ -2848,6 +2865,7 @@ func _grapple_throw() -> void:
 	_grapple_state = GrappleState.THROWN
 	_grapple_anchor_entity = null
 	AudioManager.play("grapple_launch")
+	_rumble(0.4, 0.6, 0.15)  # Medium punch on throw
 
 	# Initialize rope points
 	_grapple_rope_points.clear()
@@ -2881,6 +2899,7 @@ func _grapple_tick_thrown(delta: float) -> void:
 				collider.take_damage(GRAPPLE_HOOK_DAMAGE, player_index)
 				PlayerManager.add_skill_xp(player_index, "special", 5)
 		AudioManager.play("grapple_hit")
+		_rumble(0.6, 0.9, 0.2)  # Strong impact on connection
 		_grapple_state = GrappleState.CONNECTED
 		_grapple_rope_len = global_position.distance_to(_grapple_anchor)
 
@@ -2982,6 +3001,7 @@ func _grapple_tick_swinging(delta: float) -> void:
 			global_position = _grapple_anchor + rope_dir * _grapple_rope_len
 			# Re-enter pendulum from current velocity
 			_enter_swing_from_velocity()
+			_rumble(0.4, 0.6, 0.1)  # Thump when rope snaps taut
 		return
 
 	# --- Taut rope: pendulum physics ---
@@ -3039,6 +3059,11 @@ func _grapple_tick_swinging(delta: float) -> void:
 	var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
 	velocity = tangent * _grapple_swing_vel * _grapple_rope_len
 
+	# Subtle rumble proportional to swing speed
+	var swing_speed: float = absf(_grapple_swing_vel * _grapple_rope_len)
+	var rumble_intensity: float = clampf(swing_speed / 500.0, 0.0, 0.4)
+	_rumble(rumble_intensity, rumble_intensity * 0.3, 0.05)
+
 
 func _grapple_tug() -> void:
 	## Newtonian tug when releasing from an enemy
@@ -3073,6 +3098,7 @@ func _grapple_tug() -> void:
 		_grapple_anchor_entity.apply_knockback(-dir_to_enemy * enemy_accel * GRAPPLE_TUG_DURATION)
 
 	AudioManager.play("grapple_hit", 0.0, 0.8)
+	_rumble(0.7, 1.0, 0.25)  # Heavy thud on tug
 	_spawn_blood_particles(_grapple_anchor_entity.global_position)
 	_grapple_start_retract()
 
@@ -3088,6 +3114,7 @@ func _grapple_pull_to_anchor() -> void:
 	_grapple_rope_len = global_position.distance_to(_grapple_anchor)
 	_grapple_pulling = true
 	AudioManager.play("grapple_hit", 0.0, 1.2)
+	_rumble(0.5, 0.7, 0.15)  # Pull toward anchor
 
 
 func _grapple_jump_release() -> void:
@@ -3112,6 +3139,7 @@ func _grapple_jump_release() -> void:
 		})
 
 	AudioManager.play("jump")
+	_rumble(0.3, 0.5, 0.1)  # Short pop on jump release
 	_grapple_state = GrappleState.RETRACTING
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
@@ -3123,6 +3151,7 @@ func _grapple_release() -> void:
 	_grapple_retract_timer = 0.2
 	_grapple_anchor_entity = null
 	_grapple_pulling = false
+	_stop_rumble()
 	# velocity is already set from swing
 
 
