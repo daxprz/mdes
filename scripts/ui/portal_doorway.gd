@@ -34,6 +34,7 @@ var _spiral_particles: Array = []
 var _fog_particles: Array = []
 var _particle_timer: float = 0.0
 var _fog_timer: float = 0.0
+var _hum_timer: float = 0.0
 
 
 func _process(delta: float) -> void:
@@ -57,6 +58,14 @@ func _process(delta: float) -> void:
 	if _activated and not _doors_open:
 		_doors_open = true
 		AudioManager.play("enemy_hit", -6.0, 0.4)  # Creak sound
+		AudioManager.play("boss_roar", -8.0, 0.25)  # Deep ominous drone
+
+	# Repeating ominous hum while doors open
+	if _doors_open:
+		_hum_timer -= delta
+		if _hum_timer <= 0.0:
+			_hum_timer = 4.0  # Repeat every 4 seconds
+			AudioManager.play("boss_roar", -12.0, 0.2)  # Very deep, quiet drone
 
 	# Animate door opening
 	if _doors_open and _door_open_amount < 1.0:
@@ -181,15 +190,31 @@ func _spawn_fog_particle() -> void:
 	})
 
 
+var _fog_overlay: Node2D = null
+
 func _draw() -> void:
+	# Everything here renders at z_index -1 (behind players)
 	_draw_platform_and_stairs()
 	_draw_back_layer()
-	_draw_wooden_transom()  # Slats behind the arch
-	_draw_fog()
+	_draw_wooden_transom()
 	_draw_vortex()
 	_draw_doors()
-	_draw_front_layer()  # Stone arch in front of slats
+	_draw_front_layer()
 	_draw_rays()
+
+	# Fog renders on a separate overlay node in front of everything
+	if _fog_overlay:
+		_fog_overlay.queue_redraw()
+
+
+func _ready() -> void:
+	z_index = -1  # Behind players
+	# Create fog overlay that renders in front of everything
+	_fog_overlay = Node2D.new()
+	_fog_overlay.z_index = 10  # In front of players
+	_fog_overlay.set_script(null)
+	add_child(_fog_overlay)
+	_fog_overlay.draw.connect(_draw_fog_on_overlay)
 
 
 func _draw_back_layer() -> void:
@@ -246,11 +271,11 @@ func _draw_single_door(x: float, y: float, w: float, h: float, is_right: bool) -
 	draw_circle(Vector2(handle_x, handle_y - 5.0), 2.0, HANDLE_COLOR)  # Mount point
 
 
-func _draw_fog() -> void:
+func _draw_fog_on_overlay() -> void:
 	for f in _fog_particles:
 		var alpha: float = clampf(f["time"] / 2.0, 0.0, 0.3)
-		var size: float = f["size"] + (5.0 - f["time"]) * 3.0  # Expands over time
-		draw_circle(Vector2(f["x"], f["y"]), size, Color(0.6, 0.65, 0.7, alpha))
+		var size: float = f["size"] + (5.0 - f["time"]) * 3.0
+		_fog_overlay.draw_circle(Vector2(f["x"], f["y"]), size, Color(0.6, 0.65, 0.7, alpha))
 
 
 func _draw_vortex() -> void:
@@ -258,20 +283,24 @@ func _draw_vortex() -> void:
 		return
 
 	var center := Vector2(0, -DOORWAY_HEIGHT / 2.0)
+	var vortex_scale: float = 1.25  # 25% larger
 
 	# Base glow (always present when doors open)
 	var base_glow: float = 0.08 + 0.04 * sin(_timer * 3.0)
-	draw_circle(center, 50.0, Color(0.2, 0.3, 0.8, base_glow))
-	draw_circle(center, 30.0, Color(0.3, 0.5, 1.0, base_glow * 1.5))
-	draw_circle(center, 15.0, Color(0.5, 0.7, 1.0, base_glow * 2.0))
+	draw_circle(center, 62.0 * vortex_scale, Color(0.2, 0.3, 0.8, base_glow))
+	draw_circle(center, 38.0 * vortex_scale, Color(0.3, 0.5, 1.0, base_glow * 1.5))
+	draw_circle(center, 18.0 * vortex_scale, Color(0.5, 0.7, 1.0, base_glow * 2.0))
 
-	# Spiral particles
+	# Spiral particles — outer edge slow, inner fast
 	for p in _spiral_particles:
 		if p["type"] != "spiral":
 			continue
 		var age_ratio: float = 1.0 - clampf(p["time"] / 2.5, 0.0, 1.0)
-		var current_angle: float = p["angle"] + _timer * SPIRAL_SPEED + age_ratio * 3.0
-		var current_dist: float = p["dist"] * (1.0 - age_ratio * 0.7)
+		var current_dist: float = p["dist"] * (1.0 - age_ratio * 0.7) * vortex_scale
+		# Speed inversely proportional to distance: closer = faster spin
+		var dist_ratio: float = clampf(current_dist / (55.0 * vortex_scale), 0.0, 1.0)
+		var spin_speed: float = lerpf(SPIRAL_SPEED * 3.0, SPIRAL_SPEED * 0.5, dist_ratio)
+		var current_angle: float = p["angle"] + _timer * spin_speed + age_ratio * 3.0
 		var pos: Vector2 = center + Vector2(cos(current_angle) * current_dist, sin(current_angle) * current_dist)
 		var alpha: float = p["brightness"] * (1.0 - age_ratio)
 		var size: float = p["size"] * (1.0 - age_ratio * 0.5)
@@ -320,30 +349,29 @@ func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
 
-	# Left pillar — stacked stones
+	# Pillars — matching pattern both sides
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
 		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_DARK
+		# Left pillar
 		draw_rect(Rect2(-half_w - stone_w, y, stone_w, 20.0), col)
 		draw_line(Vector2(-half_w - stone_w, y), Vector2(-half_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
-
-	# Right pillar
-	for i in range(9):
-		var y: float = -DOORWAY_HEIGHT + i * 20.0
-		var col: Color = STONE_DARK if i % 2 == 0 else STONE_COLOR
+		# Right pillar — same pattern
 		draw_rect(Rect2(half_w, y, stone_w, 20.0), col)
 		draw_line(Vector2(half_w, y), Vector2(half_w + stone_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
 
-	# Archway
-	var arch_segments := 14
+	# Archway — leave gap at top center for keystone
+	var arch_segments := 16
 	var prev_outer := Vector2.ZERO
 	var prev_inner := Vector2.ZERO
+	var keystone_start := arch_segments / 2 - 1
+	var keystone_end := arch_segments / 2 + 1
 	for i in range(arch_segments + 1):
 		var t: float = float(i) / float(arch_segments)
 		var angle: float = PI + t * PI
 		var inner_pt := Vector2(cos(angle) * half_w, sin(angle) * half_w + (-DOORWAY_HEIGHT))
 		var outer_pt := Vector2(cos(angle) * (half_w + stone_w), sin(angle) * (half_w + stone_w) + (-DOORWAY_HEIGHT))
-		if i > 0:
+		if i > 0 and not (i > keystone_start and i <= keystone_end):
 			var col: Color = STONE_COLOR if i % 2 == 0 else STONE_DARK
 			draw_polygon(
 				PackedVector2Array([prev_inner, prev_outer, outer_pt, inner_pt]),
@@ -352,15 +380,28 @@ func _draw_front_layer() -> void:
 		prev_outer = outer_pt
 		prev_inner = inner_pt
 
-	# Keystone
-	var ks_w: float = 18.0
-	var ks_h: float = 24.0
-	var ks_y: float = -DOORWAY_HEIGHT - half_w - stone_w * 0.3
-	draw_rect(Rect2(-ks_w / 2.0, ks_y, ks_w, ks_h), KEYSTONE_COLOR)
-	draw_line(Vector2(-ks_w / 2.0, ks_y), Vector2(0, ks_y - 7), STONE_LIGHT, 2.0)
-	draw_line(Vector2(ks_w / 2.0, ks_y), Vector2(0, ks_y - 7), STONE_LIGHT, 2.0)
-	# Keystone rune/symbol
-	draw_circle(Vector2(0, ks_y + ks_h * 0.4), 3.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
+	# Large trapezoidal keystone centered at arch peak
+	var ks_top_w: float = 14.0  # Half-width at top (narrower)
+	var ks_bot_w: float = 22.0  # Half-width at bottom (wider)
+	var ks_h: float = stone_w + 8.0  # Tall enough to span the arch thickness
+	var ks_cy: float = -DOORWAY_HEIGHT - half_w  # Center of the arch peak
+	var ks_top: float = ks_cy - ks_h / 2.0
+	var ks_bot: float = ks_cy + ks_h / 2.0
+	draw_polygon(
+		PackedVector2Array([
+			Vector2(-ks_top_w, ks_top),
+			Vector2(ks_top_w, ks_top),
+			Vector2(ks_bot_w, ks_bot),
+			Vector2(-ks_bot_w, ks_bot),
+		]),
+		PackedColorArray([KEYSTONE_COLOR, KEYSTONE_COLOR, KEYSTONE_COLOR, KEYSTONE_COLOR])
+	)
+	# Keystone border lines
+	draw_line(Vector2(-ks_top_w, ks_top), Vector2(ks_top_w, ks_top), STONE_LIGHT, 1.5)
+	draw_line(Vector2(-ks_top_w, ks_top), Vector2(-ks_bot_w, ks_bot), STONE_LIGHT * Color(1, 1, 1, 0.5), 1.0)
+	draw_line(Vector2(ks_top_w, ks_top), Vector2(ks_bot_w, ks_bot), STONE_LIGHT * Color(1, 1, 1, 0.5), 1.0)
+	# Keystone symbol
+	draw_circle(Vector2(0, ks_cy), 4.0, STONE_LIGHT * Color(1, 1, 1, 0.5))
 
 	# Base stones
 	draw_rect(Rect2(-half_w - stone_w - 8, -6, stone_w + 8, 10), STONE_DARK)
@@ -368,18 +409,17 @@ func _draw_front_layer() -> void:
 
 
 func _draw_wooden_transom() -> void:
-	## Wooden slats and beam that fill the archway, drawn BEHIND the stone arch
+	## Wooden slats and beam fill the entire archway, drawn BEHIND the stone arch
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var door_top: float = -DOORWAY_HEIGHT + 10.0  # Top of the door panels
-	var arch_top: float = -DOORWAY_HEIGHT - half_w  # Top of the arch curve
+	var arch_peak: float = -DOORWAY_HEIGHT - half_w - 10.0  # Above arch curve peak
 
-	# Fill the entire arch area with wooden slats
-	# The arch covers from arch_top to door_top in the curved region
-	var slat_region_top: float = arch_top + 10.0
+	# Slats fill from arch peak down to just above doors
+	var slat_region_top: float = arch_peak
 	var slat_region_bottom: float = door_top
 
-	# Wooden background panel for the full arch area
-	draw_rect(Rect2(-half_w, slat_region_top, DOORWAY_WIDTH, slat_region_bottom - slat_region_top), DOOR_COLOR * Color(0.85, 0.85, 0.85))
+	# Wooden background panel — extends into the arch curve (arch stone covers edges)
+	draw_rect(Rect2(-half_w - 5, slat_region_top, DOORWAY_WIDTH + 10, slat_region_bottom - slat_region_top), DOOR_COLOR * Color(0.85, 0.85, 0.85))
 
 	# Vertical slats
 	var slat_count := 12
