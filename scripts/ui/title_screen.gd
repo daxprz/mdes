@@ -153,8 +153,8 @@ func _setup_portal_doorway() -> void:
 	var doorway_script := load("res://scripts/ui/portal_doorway.gd")
 	var doorway := Node2D.new()
 	doorway.set_script(doorway_script)
-	# Place on the floor, center of the arena
-	doorway.global_position = Vector2(960, 940)
+	# Place on the floor, center of the arena (raised above floor line)
+	doorway.global_position = Vector2(960, 920)
 	doorway.z_index = 2  # Behind players but above background
 	add_child(doorway)
 	doorway.all_players_entered.connect(_start_game)
