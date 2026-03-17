@@ -169,7 +169,7 @@ const GRAPPLE_HOOK_GRAVITY := 400.0
 const GRAPPLE_HOOK_DRAG := 0.98
 const GRAPPLE_ROPE_SEGMENTS := 20
 const GRAPPLE_ROPE_SEGMENT_LEN := 12.0
-const GRAPPLE_LAUNCH_SPEED_RATIO := 2.5  # 250% of JUMP_VELOCITY (5x the original 50%)
+const GRAPPLE_LAUNCH_SPEED_RATIO := 0.75  # 75% of JUMP_VELOCITY (reduced 70% from 2.5)
 const GRAPPLE_PENDULUM_GRAVITY := 600.0
 const GRAPPLE_SWING_DAMPING := 0.02
 const GRAPPLE_INPUT_BOOST := 1.5  # rad/s² when pushing with swing
@@ -2864,9 +2864,11 @@ func _grapple_tick_thrown(delta: float) -> void:
 		_grapple_state = GrappleState.CONNECTED
 		_grapple_rope_len = global_position.distance_to(_grapple_anchor)
 
-		# Launch player toward anchor
-		var launch_dir: Vector2 = (_grapple_anchor - global_position).normalized()
-		velocity = launch_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+		# Launch: blend between direction-to-anchor and current travel tangent
+		var to_anchor: Vector2 = (_grapple_anchor - global_position).normalized()
+		var travel_dir: Vector2 = velocity.normalized() if velocity.length() > 1.0 else to_anchor
+		var blended_dir: Vector2 = (to_anchor + travel_dir).normalized()
+		velocity = blended_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
 		return
 
 	# Update rope points (trail behind hook)
@@ -3044,8 +3046,10 @@ func _grapple_tug() -> void:
 
 func _grapple_launch_to_anchor() -> void:
 	## L1 while connected to wall: launch player toward the hook point
-	var launch_dir: Vector2 = (_grapple_anchor - global_position).normalized()
-	velocity = launch_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+	var to_anchor: Vector2 = (_grapple_anchor - global_position).normalized()
+	var travel_dir: Vector2 = velocity.normalized() if velocity.length() > 1.0 else to_anchor
+	var blended_dir: Vector2 = (to_anchor + travel_dir).normalized()
+	velocity = blended_dir * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
 	AudioManager.play("grapple_hit", 0.0, 1.2)
 	_grapple_start_retract()
 
