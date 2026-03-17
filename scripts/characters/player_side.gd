@@ -2900,19 +2900,32 @@ func _grapple_update_rope_thrown() -> void:
 
 
 func _grapple_tick_connected(delta: float) -> void:
-	# Player is launching toward anchor
 	if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
 		_grapple_anchor = _grapple_anchor_entity.global_position
 
+	# If pulling, actively reel player toward anchor
+	if _grapple_pulling:
+		var to_anchor: Vector2 = (_grapple_anchor - global_position).normalized()
+		var pull_speed: float = abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+		global_position += to_anchor * pull_speed * delta
+		velocity = to_anchor * pull_speed  # Keep velocity aligned for smooth transition
+		# Update rope length to match current distance
+		var dist: float = global_position.distance_to(_grapple_anchor)
+		_grapple_rope_len = dist
+		# If very close to anchor, stop pulling and enter swing
+		if dist < 20.0:
+			_grapple_pulling = false
+			_enter_swing_from_velocity()
+		return
+
 	var dist: float = global_position.distance_to(_grapple_anchor)
 
-	# If player is moving away from anchor and exceeds rope length, transition to swing
+	# If player exceeds rope length, transition to swing
 	if dist >= _grapple_rope_len:
 		_grapple_rope_len = dist
 		_grapple_rope_slack = false
 		_enter_swing_from_velocity()
-	# If player is closer than rope length, rope is slack — keep moving freely
-	# Gravity and movement continue normally via _physics_process
+	# Otherwise rope is slack — normal movement via _physics_process
 
 
 func _enter_swing_from_velocity() -> void:
@@ -3052,8 +3065,13 @@ func _grapple_tug() -> void:
 
 func _grapple_pull_to_anchor() -> void:
 	## First L1: pull player straight toward anchor, stay connected
+	# Switch to CONNECTED state so pendulum doesn't override position
+	_grapple_state = GrappleState.CONNECTED
+	_grapple_rope_slack = true  # Allow free movement toward anchor
 	var to_anchor: Vector2 = (_grapple_anchor - global_position).normalized()
 	velocity = to_anchor * abs(JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
+	# Shorten rope to current distance so it goes taut at the new position
+	_grapple_rope_len = global_position.distance_to(_grapple_anchor)
 	_grapple_pulling = true
 	AudioManager.play("grapple_hit", 0.0, 1.2)
 
