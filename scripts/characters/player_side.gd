@@ -3146,10 +3146,9 @@ func _draw_debug() -> void:
 			var perp: Vector2 = Vector2(-pred_dir.y, pred_dir.x)
 			draw_line(pred_end, pred_end - pred_dir * 10.0 + perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
 			draw_line(pred_end, pred_end - pred_dir * 10.0 - perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
-
-		# Show speed text
-		var speed_text: String = "%d" % int(predicted.length())
-		draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
+			# Show speed text
+			var speed_text: String = "%d" % int(predicted.length())
+			draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
 
 
 func _draw_grapple() -> void:
