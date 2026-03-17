@@ -3059,10 +3059,10 @@ func _grapple_tick_swinging(delta: float) -> void:
 	var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
 	velocity = tangent * _grapple_swing_vel * _grapple_rope_len
 
-	# Subtle rumble proportional to swing speed
+	# Bare minimum rumble during swing — just enough to feel the rope
 	var swing_speed: float = absf(_grapple_swing_vel * _grapple_rope_len)
-	var rumble_intensity: float = clampf(swing_speed / 500.0, 0.0, 0.4)
-	_rumble(rumble_intensity, rumble_intensity * 0.3, 0.05)
+	var rumble_intensity: float = clampf(swing_speed / 800.0, 0.0, 0.08)
+	_rumble(rumble_intensity, 0.0, 0.05)
 
 
 func _grapple_tug() -> void:
