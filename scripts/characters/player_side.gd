@@ -243,6 +243,7 @@ func _ready() -> void:
 	add_to_group("players")
 	_apply_class_sprite()
 	_update_player_label()
+	_update_controller_led()
 	_setup_health_bar()
 	_setup_mana_bar()
 	# Load demolitionist upgrades from persistent state
@@ -313,6 +314,7 @@ func _on_class_changed_inline(p_index: int, new_class: PlayerManager.CharacterCl
 	character_class = new_class
 	_apply_class_sprite()
 	_update_player_label()
+	_update_controller_led()
 
 	# Red portal + smoke poof VFX at current position
 	_spawn_class_change_vfx()
@@ -2751,6 +2753,28 @@ func _rumble(weak: float, strong: float, duration: float) -> void:
 func _stop_rumble() -> void:
 	if device_id >= 0:
 		Input.stop_joy_vibration(device_id)
+
+
+func _update_controller_led() -> void:
+	## Set controller LED to match the player's class color
+	if device_id < 0:
+		return
+	var colors := {
+		PlayerManager.CharacterClass.MELEE: Color(0.9, 0.3, 0.2),
+		PlayerManager.CharacterClass.RANGED: Color(0.2, 0.8, 0.3),
+		PlayerManager.CharacterClass.MAGE: Color(0.3, 0.4, 0.95),
+		PlayerManager.CharacterClass.SUMMONER: Color(0.8, 0.5, 0.9),
+		PlayerManager.CharacterClass.ROGUE: Color(0.95, 0.85, 0.2),
+		PlayerManager.CharacterClass.DEMOLITIONIST: Color(0.9, 0.6, 0.1),
+		PlayerManager.CharacterClass.HEALER: Color(0.3, 0.9, 0.4),
+		PlayerManager.CharacterClass.TANK: Color(0.6, 0.5, 0.35),
+		PlayerManager.CharacterClass.NINJA: Color(0.2, 0.9, 0.9),
+		PlayerManager.CharacterClass.BALLOONIST: Color(0.9, 0.4, 0.7),
+		PlayerManager.CharacterClass.GUITARIST: Color(0.9, 0.7, 0.2),
+		PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
+	}
+	var led_color: Color = colors.get(character_class, Color.WHITE)
+	Input.set_joy_light(device_id, led_color)
 
 
 # -- Ranger Grapple (Circle) ---------------------------------------------------
