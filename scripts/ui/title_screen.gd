@@ -41,6 +41,7 @@ func _ready() -> void:
 	_setup_camera()
 	_setup_name_entry()
 	_setup_version_label()
+	_setup_background_trees()
 	_setup_portal_doorway()
 
 	# Restore saved player choices or auto-join connected controllers
@@ -147,6 +148,32 @@ func _setup_version_label() -> void:
 	ver_label.offset_bottom = 30
 	ver_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	$UI.add_child(ver_label)
+
+
+func _setup_background_trees() -> void:
+	var tree_script := load("res://scripts/effects/procedural_tree.gd")
+
+	# Left tree — large, stout
+	var left_tree := Node2D.new()
+	left_tree.set_script(tree_script)
+	left_tree.global_position = Vector2(250, 900)
+	left_tree.trunk_weight = 22.0
+	left_tree.trunk_length = 160.0
+	left_tree.max_recurse = 5
+	left_tree.seed_value = 42
+	left_tree.z_index = -5  # Behind everything
+	add_child(left_tree)
+
+	# Right tree — large, stout, different shape
+	var right_tree := Node2D.new()
+	right_tree.set_script(tree_script)
+	right_tree.global_position = Vector2(1670, 900)
+	right_tree.trunk_weight = 20.0
+	right_tree.trunk_length = 150.0
+	right_tree.max_recurse = 5
+	right_tree.seed_value = 137
+	right_tree.z_index = -5
+	add_child(right_tree)
 
 
 func _setup_portal_doorway() -> void:
