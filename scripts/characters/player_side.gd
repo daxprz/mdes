@@ -526,6 +526,7 @@ func _physics_process(delta: float) -> void:
 	# While swinging taut on grapple, skip normal movement (pendulum handles it)
 	# But if rope is slack, allow normal movement/gravity
 	if _grapple_state == GrappleState.SWINGING and not _grapple_rope_slack:
+		_handle_archer_aim(delta)  # Can aim and shoot while swinging
 		_update_health_bar()
 		_update_animation(delta)
 		_controller_just_pressed.clear()
