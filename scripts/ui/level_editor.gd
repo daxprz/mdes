@@ -4,9 +4,9 @@ extends CanvasLayer
 ## Modes: spawn areas, seeds, platforms, portal.
 ## Mouse-driven vertex editing, saves to user://levels/.
 
-enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL }
+enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL, MIGRATION }
 
-const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal"]
+const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal", "Migration"]
 const MODE_COLORS := [
 	Color(1.0, 0.9, 0.2, 0.3),   # Spawn areas: yellow
 	Color(0.2, 0.9, 0.5, 0.3),   # Seeds: green
@@ -25,6 +25,8 @@ var _dragging := false
 var _drag_handle: int = -1  # Which corner/handle is being dragged
 var _drag_item_type: String = ""
 var _nav_cooldown: float = 0.0
+var _migration_pattern_idx: int = 0  # Which pattern is selected
+var _migration_phase_idx: int = 0    # Which phase within that pattern
 
 # UI nodes
 var _panel: PanelContainer
@@ -145,6 +147,27 @@ func _input(event: InputEvent) -> void:
 		elif event.keycode == KEY_R and event.ctrl_pressed:
 			_reset()
 			get_viewport().set_input_as_handled()
+		elif _mode == Mode.MIGRATION:
+			# Number keys 1-9 switch phase within current pattern
+			var key_num: int = event.keycode - KEY_0
+			if key_num >= 1 and key_num <= 9:
+				var patterns: Array = _config.get("migration_patterns", [])
+				if _migration_pattern_idx < patterns.size():
+					var phases: Array = patterns[_migration_pattern_idx].get("phases", [])
+					if key_num - 1 < phases.size():
+						_migration_phase_idx = key_num - 1
+						_selected_idx = -1
+						_update_display()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_INSERT:
+				_migration_add_phase()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+				_migration_delete_last_phase()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:  # + key
+				_migration_add_zone()
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -161,7 +184,16 @@ func _input(event: InputEvent) -> void:
 
 
 func _update_display() -> void:
-	_mode_label.text = "MODE: " + MODE_NAMES[_mode]
+	if _mode == Mode.MIGRATION:
+		var patterns: Array = _config.get("migration_patterns", [])
+		if _migration_pattern_idx < patterns.size():
+			var p: Dictionary = patterns[_migration_pattern_idx]
+			var n_phases: int = p.get("phases", []).size()
+			_mode_label.text = "Migration [%s] Phase %d/%d  1-9:switch  Ins:+phase  Del:-phase  +:+zone" % [p.get("id", "?"), _migration_phase_idx + 1, n_phases]
+		else:
+			_mode_label.text = "MODE: Migration (no patterns)"
+	else:
+		_mode_label.text = "MODE: " + MODE_NAMES[_mode]
 
 
 func _get_world_pos(screen_pos: Vector2) -> Vector2:
@@ -189,6 +221,8 @@ func _start_drag(screen_pos: Vector2) -> void:
 			_try_select_platform(world_pos)
 		Mode.PORTAL:
 			_try_select_portal(world_pos)
+		Mode.MIGRATION:
+			_try_select_migration(world_pos)
 
 
 func _stop_drag() -> void:
@@ -213,6 +247,8 @@ func _do_drag(screen_pos: Vector2) -> void:
 			_drag_platform(world_pos)
 		Mode.PORTAL:
 			_drag_portal(world_pos)
+		Mode.MIGRATION:
+			_drag_migration(world_pos)
 
 
 # -- Spawn Area editing --------------------------------------------------------
@@ -361,6 +397,111 @@ func _drag_portal(world_pos: Vector2) -> void:
 	_config["portal"]["pos"] = [world_pos.x, world_pos.y]
 
 
+# -- Migration editing ---------------------------------------------------------
+
+func _get_migration_zones_for_phase() -> Array:
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		return []
+	var phases: Array = patterns[_migration_pattern_idx].get("phases", [])
+	if _migration_phase_idx >= phases.size():
+		return []
+	return phases[_migration_phase_idx].get("zones", [])
+
+
+func _try_select_migration(world_pos: Vector2) -> void:
+	var zones: Array = _get_migration_zones_for_phase()
+	for i in range(zones.size()):
+		var p: Array = zones[i].get("point", [0, 0])
+		var pos := Vector2(p[0], p[1])
+		var radius: float = zones[i].get("radius", 100.0)
+		# Check X delete button (top-right of circle)
+		var x_pos := pos + Vector2(radius * 0.7, -radius * 0.7)
+		if world_pos.distance_to(x_pos) < 12.0:
+			zones.remove_at(i)
+			_selected_idx = -1
+			_update_display()
+			config_changed.emit(_config)
+			return
+		# Check radius handle (on the right edge of the circle)
+		var radius_handle := pos + Vector2(radius, 0)
+		if world_pos.distance_to(radius_handle) < 15.0:
+			_selected_idx = i
+			_drag_item_type = "migration_radius"
+			_dragging = true
+			return
+		# Check center
+		if world_pos.distance_to(pos) < maxf(radius, 15.0):
+			_selected_idx = i
+			_drag_item_type = "migration_center"
+			_dragging = true
+			return
+
+
+func _drag_migration(world_pos: Vector2) -> void:
+	var zones: Array = _get_migration_zones_for_phase()
+	if _selected_idx < 0 or _selected_idx >= zones.size():
+		return
+	if _drag_item_type == "migration_center":
+		zones[_selected_idx]["point"] = [world_pos.x, world_pos.y]
+	elif _drag_item_type == "migration_radius":
+		var p: Array = zones[_selected_idx]["point"]
+		var center := Vector2(p[0], p[1])
+		zones[_selected_idx]["radius"] = maxf(20.0, world_pos.distance_to(center))
+
+
+func _migration_next_zone_id() -> int:
+	## Find the highest zone_id across all phases and return +1.
+	var patterns: Array = _config.get("migration_patterns", [])
+	var max_id: int = 0
+	for pattern in patterns:
+		for phase in pattern.get("phases", []):
+			for zone in phase.get("zones", []):
+				max_id = maxi(max_id, int(zone.get("zone_id", 0)))
+	return max_id + 1
+
+
+func _migration_add_phase() -> void:
+	## INSERT: add a new phase at the end with one default zone.
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		return
+	var phases: Array = patterns[_migration_pattern_idx].get("phases", [])
+	var new_zone_id: int = _migration_next_zone_id()
+	phases.append({"zones": [{"zone_id": new_zone_id, "point": [960, 500], "radius": 120, "strength": 2.0}]})
+	_migration_phase_idx = phases.size() - 1
+	_selected_idx = -1
+	_update_display()
+	config_changed.emit(_config)
+
+
+func _migration_delete_last_phase() -> void:
+	## DELETE: remove the last phase.
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		return
+	var phases: Array = patterns[_migration_pattern_idx].get("phases", [])
+	if phases.size() <= 1:
+		return  # Don't delete the only phase
+	phases.pop_back()
+	_migration_phase_idx = mini(_migration_phase_idx, phases.size() - 1)
+	_selected_idx = -1
+	_update_display()
+	config_changed.emit(_config)
+
+
+func _migration_add_zone() -> void:
+	## +: add a new zone to the current phase.
+	var zones: Array = _get_migration_zones_for_phase()
+	var new_zone_id: int = _migration_next_zone_id()
+	# Place near center of screen, offset slightly from existing zones
+	var offset_x: float = zones.size() * 80.0
+	zones.append({"zone_id": new_zone_id, "point": [960 + offset_x, 500], "radius": 100, "strength": 2.0})
+	_selected_idx = zones.size() - 1
+	_update_display()
+	config_changed.emit(_config)
+
+
 # -- Save / Reset --------------------------------------------------------------
 
 func _save() -> void:
@@ -433,6 +574,8 @@ func _draw_overlay() -> void:
 			_draw_platform_outlines()
 		Mode.PORTAL:
 			_draw_portal_overlay()
+		Mode.MIGRATION:
+			_draw_migration_overlay()
 
 
 func _draw_spawn_zones() -> void:
@@ -517,3 +660,72 @@ func _draw_portal_overlay() -> void:
 	_overlay.draw_circle(pos, range_val, Color(0.9, 0.3, 0.9, 0.1))
 	_overlay.draw_arc(pos, range_val, 0, TAU, 32, Color(0.9, 0.3, 0.9, 0.5), 1.5)
 	_overlay.draw_circle(pos, 6.0, Color(0.9, 0.4, 0.9, 0.7))
+
+
+func _draw_migration_overlay() -> void:
+	# Phase colors cycle through a palette
+	var phase_colors := [
+		Color(0.3, 0.5, 1.0),   # Blue
+		Color(0.2, 0.9, 0.4),   # Green
+		Color(1.0, 0.6, 0.2),   # Orange
+		Color(0.9, 0.2, 0.6),   # Pink
+		Color(0.5, 0.9, 0.9),   # Cyan
+		Color(0.9, 0.9, 0.2),   # Yellow
+	]
+
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		_overlay.draw_string(ThemeDB.fallback_font, Vector2(100, 80), "No migration patterns defined", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+		return
+
+	var pattern: Dictionary = patterns[_migration_pattern_idx]
+	var all_phases: Array = pattern.get("phases", [])
+
+	# Draw ALL phases (dim for inactive, bright for active)
+	for pi in range(all_phases.size()):
+		var is_active: bool = (pi == _migration_phase_idx)
+		var base_col: Color = phase_colors[pi % phase_colors.size()]
+		var alpha_mult: float = 1.0 if is_active else 0.25
+		var zones: Array = all_phases[pi].get("zones", [])
+
+		for zi in range(zones.size()):
+			var p: Array = zones[zi].get("point", [0, 0])
+			var pos := Vector2(p[0], p[1])
+			var radius: float = zones[zi].get("radius", 100.0)
+			var zone_id: int = int(zones[zi].get("zone_id", 0))
+			var is_selected: bool = is_active and _selected_idx == zi
+
+			# Fill circle
+			_overlay.draw_circle(pos, radius, base_col * Color(1, 1, 1, 0.08 * alpha_mult))
+			# Outline
+			var line_width: float = 2.5 if is_selected else 1.5
+			if is_active:
+				_overlay.draw_arc(pos, radius, 0, TAU, 32, base_col * Color(1, 1, 1, 0.7 * alpha_mult), line_width)
+			else:
+				# Dashed look: draw partial arcs
+				for seg in range(8):
+					var start_angle: float = seg * TAU / 8.0
+					var end_angle: float = start_angle + TAU / 16.0
+					_overlay.draw_arc(pos, radius, start_angle, end_angle, 4, base_col * Color(1, 1, 1, 0.4), 1.0)
+
+			# Center handle
+			_overlay.draw_circle(pos, 6.0 if is_selected else 4.0, base_col * Color(1, 1, 1, 0.8 * alpha_mult))
+
+			# Radius handle (right edge)
+			if is_active:
+				var rh := pos + Vector2(radius, 0)
+				_overlay.draw_rect(Rect2(rh - Vector2(4, 4), Vector2(8, 8)), base_col * Color(1, 1, 1, 0.8))
+
+			# X delete button (top-right of circle)
+			if is_active:
+				var x_pos := pos + Vector2(radius * 0.7, -radius * 0.7)
+				var x_col := Color(1.0, 0.3, 0.3, 0.9)
+				_overlay.draw_circle(x_pos, 8.0, Color(0.15, 0.15, 0.15, 0.85))
+				_overlay.draw_line(x_pos + Vector2(-4, -4), x_pos + Vector2(4, 4), x_col, 2.0)
+				_overlay.draw_line(x_pos + Vector2(4, -4), x_pos + Vector2(-4, 4), x_col, 2.0)
+
+			# Label
+			var label_text := "P%d Z%d" % [pi + 1, zone_id]
+			if is_active:
+				label_text += " r:%.0f s:%.1f" % [radius, zones[zi].get("strength", 2.0)]
+			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-20, -radius - 8), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, base_col * Color(1, 1, 1, alpha_mult))

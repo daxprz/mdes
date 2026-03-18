@@ -31,6 +31,7 @@ var _firefly_manager: Node2D = null
 var _bat_spawn_timer: float = 0.0
 var _bat_max: int = 5
 var _bat_bounds: Rect2 = Rect2(100, 350, 1720, 500)
+var _migration_patterns: Array = []  # MigrationPattern nodes
 
 
 func _ready() -> void:
@@ -55,6 +56,7 @@ func _ready() -> void:
 	_setup_camera_from_config(config.get("camera", {}))
 	_setup_name_entry()
 	_setup_version_label()
+	_setup_migration_patterns_from_config(config.get("migration_patterns", []))
 	_setup_background_trees_from_config(config.get("scenery", {}).get("trees", []))
 	_setup_rocks_from_config(config.get("scenery", {}).get("rocks", []))
 	_setup_fireflies_from_config(config.get("spawn_zones", {}).get("fireflies", []))
@@ -169,6 +171,17 @@ func _setup_version_label() -> void:
 	$UI.add_child(ver_label)
 
 
+func _setup_migration_patterns_from_config(pattern_configs: Array) -> void:
+	var pattern_script := load("res://scripts/systems/migration_pattern.gd")
+	for cfg in pattern_configs:
+		var pattern := Node.new()
+		pattern.set_script(pattern_script)
+		pattern.setup_from_config(cfg)
+		add_child(pattern)
+		_migration_patterns.append(pattern)
+		_dynamic_nodes.append(pattern)
+
+
 func _setup_background_trees_from_config(tree_configs: Array) -> void:
 	var tree_script := load("res://scripts/effects/procedural_tree.gd")
 	for cfg in tree_configs:
@@ -214,6 +227,9 @@ func _setup_fireflies_from_config(ff_zone_configs: Array) -> void:
 		weights.append(cfg.get("weight", 1.0))
 
 	_firefly_manager.setup_zones(zones, weights)
+	for pattern in _migration_patterns:
+		if pattern.has_species("fireflies"):
+			_firefly_manager.add_migration_pattern(pattern)
 	add_child(_firefly_manager)
 	_dynamic_nodes.append(_firefly_manager)
 
@@ -237,7 +253,11 @@ func _spawn_bat() -> void:
 	var bat := CharacterBody2D.new()
 	bat.set_script(bat_script)
 	bat.global_position = Vector2(960 + randf_range(-30, 30), 780 + randf_range(-20, 0))
-	bat.setup(_firefly_manager, _bat_bounds)
+	var bat_patterns: Array = []
+	for pattern in _migration_patterns:
+		if pattern.has_species("bats"):
+			bat_patterns.append(pattern)
+	bat.setup(_firefly_manager, _bat_bounds, bat_patterns)
 	players_container.add_child(bat)
 
 
@@ -355,6 +375,7 @@ func _rebuild_from_config(new_config: Dictionary) -> void:
 	_scenery_items.clear()
 	_firefly_manager = null
 	_portal_node = null
+	_migration_patterns.clear()
 
 	# Kill any bats
 	for node in get_tree().get_nodes_in_group("enemies"):
@@ -367,6 +388,7 @@ func _rebuild_from_config(new_config: Dictionary) -> void:
 
 func _deferred_rebuild() -> void:
 	var config: Dictionary = _current_config
+	_setup_migration_patterns_from_config(config.get("migration_patterns", []))
 	_setup_background_trees_from_config(config.get("scenery", {}).get("trees", []))
 	_setup_rocks_from_config(config.get("scenery", {}).get("rocks", []))
 	_setup_fireflies_from_config(config.get("spawn_zones", {}).get("fireflies", []))

@@ -30,13 +30,16 @@ var _firefly_manager: Node2D = null
 var _bounds: Rect2 = Rect2(100, 300, 1720, 500)
 var _noise: FastNoiseLite = null
 var _noise_offset: float = 0.0  # Unique offset per bat
+var _migration_patterns: Array = []  # Array of MigrationPattern nodes
+var _migration_zone: int = -1  # zone_id of last entered migration zone
 
 @onready var collision_shape: CollisionShape2D = null
 
 
-func setup(firefly_mgr: Node2D, bounds: Rect2) -> void:
+func setup(firefly_mgr: Node2D, bounds: Rect2, migration_patterns: Array = []) -> void:
 	_firefly_manager = firefly_mgr
 	_bounds = bounds
+	_migration_patterns = migration_patterns
 
 
 func _ready() -> void:
@@ -104,6 +107,26 @@ func _physics_process(delta: float) -> void:
 			if not zone.has_point(global_position):
 				var pull: Vector2 = (zone.get_center() - global_position).normalized() * MOVE_SPEED * 0.4
 				_target_vel += pull
+
+	# Migration force (overrides normal drift when active)
+	var migrating := false
+	for pattern in _migration_patterns:
+		if not pattern.has_species("bats"):
+			continue
+		var active_ids: Array[int] = pattern.get_active_zone_ids()
+		if active_ids.has(_migration_zone):
+			continue  # Already arrived — normal behavior
+		var nearest_zone: Dictionary = pattern.get_nearest_zone(global_position)
+		if nearest_zone.is_empty():
+			continue
+		if pattern.is_in_zone(global_position, nearest_zone):
+			_migration_zone = nearest_zone["zone_id"]
+			continue  # Just arrived
+		var strength: float = nearest_zone["strength"]
+		_target_vel = (nearest_zone["point"] - global_position).normalized() * MOVE_SPEED * strength
+		_direction = signf(_target_vel.x) if absf(_target_vel.x) > 5.0 else _direction
+		migrating = true
+		break
 
 	# Faster response — more abrupt direction changes
 	velocity = velocity.lerp(_target_vel, delta * 6.0)

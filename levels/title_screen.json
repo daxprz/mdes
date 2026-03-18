@@ -260,6 +260,32 @@
 			}
 		]
 	},
+	"migration_patterns": [
+		{
+			"id": "firefly_drift",
+			"species": ["fireflies"],
+			"cadence": 30.0,
+			"phases": [
+				{
+					"zones": [
+						{"zone_id": 1, "point": [250, 700], "radius": 140, "strength": 2.0},
+						{"zone_id": 2, "point": [1670, 700], "radius": 140, "strength": 2.0}
+					]
+				},
+				{
+					"zones": [
+						{"zone_id": 3, "point": [960, 300], "radius": 180, "strength": 2.5}
+					]
+				},
+				{
+					"zones": [
+						{"zone_id": 4, "point": [750, 850], "radius": 120, "strength": 2.0},
+						{"zone_id": 5, "point": [1170, 850], "radius": 120, "strength": 2.0}
+					]
+				}
+			]
+		}
+	],
 	"version": 1,
 	"walls": {
 		"ceiling": -10.0,

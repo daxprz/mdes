@@ -17,6 +17,11 @@ var _spawn_timer: float = 0.0
 var _zones: Array[Rect2] = []  # Spawn zones with weights
 var _zone_weights: Array[float] = []  # Relative weight for spawning probability
 var _total_weight: float = 0.0
+var _migration_patterns: Array = []  # Array of MigrationPattern nodes
+
+
+func add_migration_pattern(pattern: Node) -> void:
+	_migration_patterns.append(pattern)
 
 
 func setup_zones(zones: Array[Rect2], weights: Array[float] = []) -> void:
@@ -93,6 +98,7 @@ func _spawn_fly() -> void:
 		"glow_active": false,
 		"zone_idx": zi,
 		"home": home,
+		"migration_zone": -1,  # zone_id of last entered migration zone
 	})
 
 
@@ -154,11 +160,33 @@ func _process(delta: float) -> void:
 		# Light wander always
 		fly["vel"].x += randf_range(-10, 10) * delta
 
-		# Spawn gravity: find nearest zone, only pull when OUTSIDE it
+		# Migration force (takes priority over spawn-gravity when active)
 		var pos: Vector2 = fly["pos"]
+		var migrating := false
+		for pattern in _migration_patterns:
+			if not pattern.has_species("fireflies"):
+				continue
+			var active_ids: Array[int] = pattern.get_active_zone_ids()
+			if active_ids.has(fly["migration_zone"]):
+				continue  # Already arrived at an active zone — normal behavior
+			var nearest_zone: Dictionary = pattern.get_nearest_zone(pos)
+			if nearest_zone.is_empty():
+				continue
+			# Check if we've entered this zone
+			if pattern.is_in_zone(pos, nearest_zone):
+				fly["migration_zone"] = nearest_zone["zone_id"]
+				continue  # Just arrived — return to normal
+			# Apply migration pull toward nearest zone
+			var strength: float = nearest_zone["strength"]
+			var to_zone: Vector2 = (nearest_zone["point"] - pos).normalized() * MOVE_SPEED * strength
+			fly["vel"] = fly["vel"].lerp(to_zone, delta * 3.0)
+			migrating = true
+			break  # Only one pattern per species matters
+
+		# Spawn gravity: find nearest zone, only pull when OUTSIDE it (skip if migrating)
 		var in_zone: bool = zone.has_point(pos)
 
-		if not in_zone:
+		if not in_zone and not migrating:
 			# Pull toward this fly's home point (within its zone)
 			var home: Vector2 = fly["home"]
 			var pull: Vector2 = (home - pos).normalized() * MOVE_SPEED * 1.5
