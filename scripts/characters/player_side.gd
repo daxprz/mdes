@@ -298,6 +298,7 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 func _draw() -> void:
 	_draw_grapple()
 	_draw_archer_aim()
+	_draw_hud_popup_indicator()
 	_draw_debug()
 
 
@@ -488,11 +489,11 @@ func _input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	# Debug toggle
-	if _is_device_action_just_pressed("debug_toggle"):
-		_debug_mode = not _debug_mode
-	if _debug_mode:
-		queue_redraw()
+	# Sync debug mode from PlayerHUD (toggled via pause menu)
+	if PlayerHUD:
+		_debug_mode = PlayerHUD._debug_mode
+		if _debug_mode or PlayerHUD._hud_popups.has(player_index):
+			queue_redraw()
 	_apply_gravity(delta)
 	_check_out_of_bounds()
 	_check_class_change_ghost()
@@ -3260,6 +3261,73 @@ func _grapple_tick_retracting(delta: float) -> void:
 
 
 # -- Grapple Drawing -----------------------------------------------------------
+
+func _draw_hud_popup_indicator() -> void:
+	## Draw dashed circle around player and lines to HUD popup when active
+	if not PlayerHUD or not PlayerHUD._hud_popups.has(player_index):
+		return
+
+	var class_color: Color = PlayerHUD.CLASS_COLORS.get(character_class, Color.WHITE)
+	var dash_color := class_color * Color(1, 1, 1, 0.6)
+
+	# Dashed circle around player
+	var radius: float = 28.0
+	var segments: int = 24
+	for i in range(segments):
+		if i % 2 == 0:  # Skip every other for dashed effect
+			var a1: float = float(i) / float(segments) * TAU
+			var a2: float = float(i + 1) / float(segments) * TAU
+			var p1 := Vector2(cos(a1), sin(a1)) * radius
+			var p2 := Vector2(cos(a2), sin(a2)) * radius
+			draw_line(p1, p2, dash_color, 1.5)
+
+	# Find the popup panel position in screen space, convert to local
+	if not PlayerHUD._popup_panels.has(player_index):
+		return
+	var popup: Dictionary = PlayerHUD._popup_panels[player_index]
+	var panel: PanelContainer = popup["panel"]
+
+	var cam := get_viewport().get_camera_2d()
+	if not cam:
+		return
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE
+
+	# Panel screen position (top-left corner)
+	var panel_screen_tl := Vector2(panel.offset_left, panel.offset_top)
+	var panel_screen_br := Vector2(panel.offset_right, panel.offset_bottom)
+	var panel_screen_center := (panel_screen_tl + panel_screen_br) / 2.0
+
+	# Convert screen position to world position relative to player
+	var panel_world_center: Vector2 = (panel_screen_center - vp_size / 2.0) / zoom + cam.global_position - global_position
+	var panel_world_tl: Vector2 = (panel_screen_tl - vp_size / 2.0) / zoom + cam.global_position - global_position
+	var panel_world_br: Vector2 = (panel_screen_br - vp_size / 2.0) / zoom + cam.global_position - global_position
+
+	# Draw dashed lines from player to the two OUTERMOST corners of the HUD bounding box
+	var corners := [
+		panel_world_tl,
+		Vector2(panel_world_br.x, panel_world_tl.y),
+		panel_world_br,
+		Vector2(panel_world_tl.x, panel_world_br.y),
+	]
+
+	# Find 2 farthest corners from player (origin)
+	var dists: Array = []
+	for c in corners:
+		dists.append({"pos": c, "dist": c.length()})
+	dists.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["dist"] > b["dist"])
+
+	for i in range(2):
+		var target: Vector2 = dists[i]["pos"]
+		var seg_count: int = 12
+		for s in range(seg_count):
+			if s % 2 == 0:
+				var t1: float = float(s) / float(seg_count)
+				var t2: float = float(s + 1) / float(seg_count)
+				var a: Vector2 = Vector2.ZERO.lerp(target, t1)
+				var b: Vector2 = Vector2.ZERO.lerp(target, t2)
+				draw_line(a, b, dash_color, 1.0)
+
 
 func _draw_debug() -> void:
 	if not _debug_mode:

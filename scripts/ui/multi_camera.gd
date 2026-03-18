@@ -28,15 +28,18 @@ func _process(delta: float) -> void:
 		max_pos.x = max(max_pos.x, p.x)
 		max_pos.y = max(max_pos.y, p.y)
 
-	# Target position = center of players, shifted up so they sit above the HUD
+	# Target position = center of players
 	_target_pos = (min_pos + max_pos) / 2.0
-	# Shift camera up by half the HUD height (in world units, scaled by zoom)
-	var hud_world_offset: float = (HUD_RESERVED_HEIGHT * 0.5) / maxf(_target_zoom, 0.1)
-	_target_pos.y -= hud_world_offset
 
-	# Target zoom = fit all players + margin into the usable viewport (above HUD)
+	# Only reserve HUD space on title screen (bottom bar visible)
+	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
+	var reserve: float = HUD_RESERVED_HEIGHT if is_title else 0.0
+	if reserve > 0:
+		var hud_world_offset: float = (reserve * 0.5) / maxf(_target_zoom, 0.1)
+		_target_pos.y -= hud_world_offset
+
 	var viewport_size: Vector2 = get_viewport_rect().size
-	var usable_height: float = viewport_size.y - HUD_RESERVED_HEIGHT
+	var usable_height: float = viewport_size.y - reserve
 	var spread: Vector2 = max_pos - min_pos + zoom_margin * 2.0
 
 	var zoom_x: float = viewport_size.x / maxf(spread.x, 1.0)

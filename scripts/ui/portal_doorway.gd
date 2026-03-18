@@ -359,7 +359,7 @@ func _draw_front_layer() -> void:
 	# Pillars — matching pattern both sides
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
-		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_DARK
+		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
 		# Left pillar
 		draw_rect(Rect2(-half_w - stone_w, y, stone_w, 20.0), col)
 		draw_line(Vector2(-half_w - stone_w, y), Vector2(-half_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
@@ -367,19 +367,23 @@ func _draw_front_layer() -> void:
 		draw_rect(Rect2(half_w, y, stone_w, 20.0), col)
 		draw_line(Vector2(half_w, y), Vector2(half_w + stone_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
 
-	# Archway — leave gap at top center for keystone
+	# Archway — symmetrical stone pattern, gap for keystone at center
 	var arch_segments := 16
 	var prev_outer := Vector2.ZERO
 	var prev_inner := Vector2.ZERO
 	var keystone_start := arch_segments / 2 - 1
 	var keystone_end := arch_segments / 2 + 1
+	var half_seg := arch_segments / 2
 	for i in range(arch_segments + 1):
 		var t: float = float(i) / float(arch_segments)
 		var angle: float = PI + t * PI
+		var arch_thickness: float = stone_w * 1.2  # Slightly thicker than pillars
 		var inner_pt := Vector2(cos(angle) * half_w, sin(angle) * half_w + (-DOORWAY_HEIGHT))
-		var outer_pt := Vector2(cos(angle) * (half_w + stone_w), sin(angle) * (half_w + stone_w) + (-DOORWAY_HEIGHT))
+		var outer_pt := Vector2(cos(angle) * (half_w + arch_thickness), sin(angle) * (half_w + arch_thickness) + (-DOORWAY_HEIGHT))
 		if i > 0 and not (i > keystone_start and i <= keystone_end):
-			var col: Color = STONE_COLOR if i % 2 == 0 else STONE_DARK
+			# Mirror pattern: use index from the nearest end (left=i, right=segments-i)
+			var mirror_idx: int = mini(i, arch_segments - i + 1)
+			var col: Color = STONE_COLOR if mirror_idx % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
 			draw_polygon(
 				PackedVector2Array([prev_inner, prev_outer, outer_pt, inner_pt]),
 				PackedColorArray([col, col, col, col])

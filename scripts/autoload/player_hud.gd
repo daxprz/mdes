@@ -86,6 +86,8 @@ const MAX_ACTIVE_TENTACLES := 4  # Max rift tentacles in-game at once
 var active_tentacle_count: int = 0
 var _debug_mode: bool = false
 var _debug_labels: Dictionary = {}  # player_index -> Label
+var _hud_popups: Dictionary = {}  # player_index -> true (HUD popup visible for this player)
+var _popup_panels: Dictionary = {}  # player_index -> Control node in canvas
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -100,6 +102,24 @@ func _on_state_changed(_new_state: GameManager.GameState) -> void:
 	class_change_locked.clear()
 	tentacle_lost.clear()
 	active_tentacle_count = 0
+
+	# Remove all bottom bar panels when leaving title screen
+	if _new_state != GameManager.GameState.TITLE:
+		for pi in _panels.keys():
+			_panels[pi]["panel"].queue_free()
+		_panels.clear()
+		if _backing:
+			_backing.visible = false
+		if _hud_container:
+			_hud_container.visible = false
+		if _muffin_label:
+			_muffin_label.visible = false
+
+	# Clear popup HUDs on scene change
+	for pi in _popup_panels.keys():
+		_popup_panels[pi]["panel"].queue_free()
+	_popup_panels.clear()
+	_hud_popups.clear()
 
 
 func _build_hud() -> void:
@@ -260,13 +280,20 @@ func _remove_panel(player_index: int) -> void:
 
 
 func _on_player_joined(player_index: int) -> void:
-	if not _panels.has(player_index):
-		_create_panel(player_index)
-	_update_panel(player_index)
+	# Bottom bar panels only on title screen
+	if GameManager.current_state == GameManager.GameState.TITLE:
+		if not _panels.has(player_index):
+			_create_panel(player_index)
+		_update_panel(player_index)
+	else:
+		# During gameplay, remove any lingering bottom bar panel
+		_remove_panel(player_index)
 
 
 func _on_player_left(player_index: int) -> void:
 	_remove_panel(player_index)
+	_remove_popup_panel(player_index)
+	_hud_popups.erase(player_index)
 
 
 func _process(delta: float) -> void:
@@ -278,21 +305,25 @@ func _process(delta: float) -> void:
 
 	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
 
-	# Update muffin counter (hidden on title)
+	# Hide bottom bar and panels during gameplay — only show on title screen
+	if _backing:
+		_backing.visible = is_title
+	if _hud_container:
+		_hud_container.visible = is_title
+
+	# Update popup HUD positions (corner nearest to player)
+	_update_popup_positions()
+
+	# Muffin counter hidden during gameplay
 	if _muffin_label:
-		if is_title:
-			_muffin_label.text = ""
-		else:
-			var total: int = 0
-			for pi in GameManager.mini_muffin_counts:
-				total += GameManager.mini_muffin_counts[pi]
-			_muffin_label.text = "Muffins: %d" % total
+		_muffin_label.visible = false
 
-	# Update all panels
-	for pi in _panels.keys():
-		_update_panel(pi)
+	# Update bottom bar panels (title screen only)
+	if is_title:
+		for pi in _panels.keys():
+			_update_panel(pi)
 
-	# Show hints / tentacle status
+	# Show hints / tentacle status (title screen only)
 	for pi in _panels.keys():
 		var hint: Label = _panels[pi]["hint_label"]
 		if tentacle_lost.has(pi):
@@ -310,6 +341,187 @@ func _process(delta: float) -> void:
 
 	# Debug: show button states above each HUD panel
 	_update_debug_labels()
+
+
+func _create_popup_panel(player_index: int) -> void:
+	if _popup_panels.has(player_index):
+		return
+	# Create a small HUD panel on the canvas layer
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(HUD_PANEL_WIDTH, HUD_HEIGHT - 8)
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.06, 0.12, 0.85)
+	style.border_color = Color(0.4, 0.3, 0.2)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(4)
+	style.set_content_margin_all(6)
+	panel.add_theme_stylebox_override("panel", style)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	panel.add_child(hbox)
+
+	var icon_container := Control.new()
+	icon_container.custom_minimum_size = Vector2(48, 48)
+	icon_container.clip_contents = true
+	hbox.add_child(icon_container)
+	var icon := TextureRect.new()
+	icon.custom_minimum_size = Vector2(48, 48)
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	icon_container.add_child(icon)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 1)
+	hbox.add_child(vbox)
+
+	var name_lbl := Label.new()
+	name_lbl.text = "P%d" % (player_index + 1)
+	name_lbl.add_theme_font_size_override("font_size", 14)
+	vbox.add_child(name_lbl)
+
+	var class_lbl := Label.new()
+	class_lbl.text = "---"
+	class_lbl.add_theme_font_size_override("font_size", 11)
+	class_lbl.modulate = Color(0.7, 0.7, 0.7)
+	vbox.add_child(class_lbl)
+
+	var hp_bar := ProgressBar.new()
+	hp_bar.custom_minimum_size = Vector2(0, 8)
+	hp_bar.show_percentage = false
+	var hp_bg := StyleBoxFlat.new()
+	hp_bg.bg_color = Color(0.2, 0.05, 0.05)
+	hp_bg.set_corner_radius_all(2)
+	hp_bar.add_theme_stylebox_override("background", hp_bg)
+	var hp_fill := StyleBoxFlat.new()
+	hp_fill.bg_color = Color(0.8, 0.2, 0.15)
+	hp_fill.set_corner_radius_all(2)
+	hp_bar.add_theme_stylebox_override("fill", hp_fill)
+	vbox.add_child(hp_bar)
+
+	var mana_bar := ProgressBar.new()
+	mana_bar.custom_minimum_size = Vector2(0, 6)
+	mana_bar.show_percentage = false
+	var mana_bg := StyleBoxFlat.new()
+	mana_bg.bg_color = Color(0.05, 0.05, 0.2)
+	mana_bg.set_corner_radius_all(2)
+	mana_bar.add_theme_stylebox_override("background", mana_bg)
+	var mana_fill := StyleBoxFlat.new()
+	mana_fill.bg_color = Color(0.2, 0.3, 0.9)
+	mana_fill.set_corner_radius_all(2)
+	mana_bar.add_theme_stylebox_override("fill", mana_fill)
+	vbox.add_child(mana_bar)
+
+	_canvas.add_child(panel)
+	_popup_panels[player_index] = {
+		"panel": panel,
+		"icon": icon,
+		"name_label": name_lbl,
+		"class_label": class_lbl,
+		"hp_bar": hp_bar,
+		"mana_bar": mana_bar,
+		"style": style,
+		"current_class": -1,
+	}
+
+
+func _remove_popup_panel(player_index: int) -> void:
+	if _popup_panels.has(player_index):
+		_popup_panels[player_index]["panel"].queue_free()
+		_popup_panels.erase(player_index)
+
+
+func _update_popup_positions() -> void:
+	var cam := get_viewport().get_camera_2d() if get_viewport() else null
+	if not cam:
+		return
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	var zoom: Vector2 = cam.zoom if cam and cam.zoom.x > 0 else Vector2.ONE
+
+	for pi in _popup_panels.keys():
+		var popup: Dictionary = _popup_panels[pi]
+		var panel: PanelContainer = popup["panel"]
+
+		# Find the player's screen position
+		var p_data: Dictionary = PlayerManager.get_player(pi)
+		if p_data.is_empty():
+			continue
+
+		# Update the popup panel data
+		_update_popup_data(pi, popup, p_data)
+
+		# Find the player node
+		var player_pos: Vector2 = cam.global_position  # fallback
+		for node in get_tree().get_nodes_in_group("players"):
+			if node is Node2D and "player_index" in node and node.player_index == pi:
+				player_pos = node.global_position
+				break
+
+		# Convert player world pos to screen pos
+		var screen_pos: Vector2 = (player_pos - cam.global_position) * zoom + vp_size / 2.0
+
+		# Pick the nearest corner
+		var margin: float = 10.0
+		var pw: float = HUD_PANEL_WIDTH
+		var ph: float = HUD_HEIGHT
+		var corners := [
+			Vector2(margin, margin),  # Top-left
+			Vector2(vp_size.x - pw - margin, margin),  # Top-right
+			Vector2(margin, vp_size.y - ph - margin),  # Bottom-left
+			Vector2(vp_size.x - pw - margin, vp_size.y - ph - margin),  # Bottom-right
+		]
+
+		var best_corner: Vector2 = corners[0]
+		var best_dist: float = INF
+		for c in corners:
+			var center: Vector2 = c + Vector2(pw / 2.0, ph / 2.0)
+			var d: float = screen_pos.distance_to(center)
+			if d < best_dist:
+				best_dist = d
+				best_corner = c
+
+		panel.anchor_left = 0
+		panel.anchor_top = 0
+		panel.anchor_right = 0
+		panel.anchor_bottom = 0
+		panel.offset_left = best_corner.x
+		panel.offset_top = best_corner.y
+		panel.offset_right = best_corner.x + pw
+		panel.offset_bottom = best_corner.y + ph
+
+
+func _update_popup_data(player_index: int, popup: Dictionary, p_data: Dictionary) -> void:
+	var char_class: PlayerManager.CharacterClass = p_data["character_class"]
+	var name_lbl: Label = popup["name_label"]
+	var profile: Dictionary = ProfileManager.get_active_profile(player_index)
+	name_lbl.text = profile.get("name", "P%d" % (player_index + 1)) if not profile.is_empty() else "P%d" % (player_index + 1)
+
+	var class_lbl: Label = popup["class_label"]
+	class_lbl.text = CLASS_NAMES.get(char_class, "???")
+
+	if popup["current_class"] != char_class:
+		popup["current_class"] = char_class
+		var icon: TextureRect = popup["icon"]
+		var sprite_path: String = CLASS_SPRITE_PATHS.get(char_class, "")
+		if not sprite_path.is_empty():
+			var sheet: Texture2D = load(sprite_path)
+			if sheet:
+				var atlas := AtlasTexture.new()
+				atlas.atlas = sheet
+				atlas.region = Rect2(0, 0, 32, 32)
+				icon.texture = atlas
+
+	var style: StyleBoxFlat = popup["style"]
+	style.border_color = CLASS_COLORS.get(char_class, Color(0.4, 0.3, 0.2))
+
+	var hp_bar: ProgressBar = popup["hp_bar"]
+	hp_bar.max_value = p_data.get("max_health", 100)
+	hp_bar.value = p_data.get("health", 100)
+
+	var mana_bar: ProgressBar = popup["mana_bar"]
+	mana_bar.max_value = p_data.get("max_mana", 100)
+	mana_bar.value = p_data.get("mana", 100)
 
 
 func _update_debug_labels() -> void:
@@ -442,9 +654,17 @@ func _update_panel(player_index: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Debug toggle
+	# SEL toggles per-player HUD popup (not debug — debug is via pause menu now)
 	if event.is_action_pressed("debug_toggle"):
-		_debug_mode = not _debug_mode
+		var device_id_sel := _get_device_from_event(event)
+		var pi_sel := _get_player_index_for_device(device_id_sel)
+		if pi_sel >= 0:
+			if _hud_popups.has(pi_sel):
+				_hud_popups.erase(pi_sel)
+				_remove_popup_panel(pi_sel)
+			else:
+				_hud_popups[pi_sel] = true
+				_create_popup_panel(pi_sel)
 
 	var device_id := _get_device_from_event(event)
 	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
