@@ -655,20 +655,21 @@ func _update_panel(player_index: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# SEL: title screen = toggle debug, gameplay = toggle HUD popup
+	# Ctrl+D always toggles debug
+	if event is InputEventKey and event.pressed and event.keycode == KEY_D and event.ctrl_pressed:
+		_debug_mode = not _debug_mode
+
+	# SEL toggles HUD popup
 	if event.is_action_pressed("debug_toggle"):
-		if GameManager.current_state == GameManager.GameState.TITLE:
-			_debug_mode = not _debug_mode
-		else:
-			var device_id_sel := _get_device_from_event(event)
-			var pi_sel := _get_player_index_for_device(device_id_sel)
-			if pi_sel >= 0:
-				if _hud_popups.has(pi_sel):
-					_hud_popups.erase(pi_sel)
-					_remove_popup_panel(pi_sel)
-				else:
-					_hud_popups[pi_sel] = true
-					_create_popup_panel(pi_sel)
+		var device_id_sel := _get_device_from_event(event)
+		var pi_sel := _get_player_index_for_device(device_id_sel)
+		if pi_sel >= 0:
+			if _hud_popups.has(pi_sel):
+				_hud_popups.erase(pi_sel)
+				_remove_popup_panel(pi_sel)
+			else:
+				_hud_popups[pi_sel] = true
+				_create_popup_panel(pi_sel)
 
 	var device_id := _get_device_from_event(event)
 	var is_title: bool = GameManager.current_state == GameManager.GameState.TITLE
