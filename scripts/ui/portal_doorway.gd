@@ -222,7 +222,7 @@ func _draw_back_layer() -> void:
 
 
 func _draw_doors() -> void:
-	var stone_overhang: float = 10.0  # Doors extend slightly behind the stone pillars
+	var stone_overhang: float = 0.0  # Doors match doorway width exactly
 	if not _doors_open and _door_open_amount <= 0.0:
 		# Closed double doors — wider than the opening to sit behind pillars
 		var half_w: float = DOORWAY_WIDTH / 2.0 + stone_overhang
@@ -358,6 +358,11 @@ func _stone_jitter(seed_val: int) -> Vector2:
 func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
+
+	# Dark wood vertical frame strips behind the stone pillars (fills jitter gaps)
+	var frame_w: float = 7.0
+	draw_rect(Rect2(-half_w - frame_w, -DOORWAY_HEIGHT, frame_w, DOORWAY_HEIGHT), DOOR_DARK)
+	draw_rect(Rect2(half_w, -DOORWAY_HEIGHT, frame_w, DOORWAY_HEIGHT), DOOR_DARK)
 
 	# Pillars — each stone has ONE x-jitter applied to all 4 corners
 	for i in range(9):
