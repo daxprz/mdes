@@ -25,6 +25,8 @@ var _scenery_items: Array = []  # Procedurally generated background items
 var _current_config: Dictionary = {}
 var _config_spawn_positions: Array[Vector2] = []
 var _editor: Node = null
+var _dynamic_nodes: Array = []  # All nodes created from config (for teardown)
+var _portal_node: Node2D = null
 var _firefly_manager: Node2D = null
 var _bat_spawn_timer: float = 0.0
 var _bat_max: int = 5
@@ -180,6 +182,7 @@ func _setup_background_trees_from_config(tree_configs: Array) -> void:
 		var pos_arr: Array = cfg.get("pos", [960, 900])
 		tree.global_position = Vector2(pos_arr[0], pos_arr[1])
 		_scenery_items.append(tree)
+		_dynamic_nodes.append(tree)
 
 
 func _setup_rocks_from_config(rock_configs: Array) -> void:
@@ -195,6 +198,7 @@ func _setup_rocks_from_config(rock_configs: Array) -> void:
 		var pos_arr: Array = cfg.get("pos", [960, 900])
 		rock.global_position = Vector2(pos_arr[0], pos_arr[1])
 		_scenery_items.append(rock)
+		_dynamic_nodes.append(rock)
 
 
 func _setup_fireflies_from_config(ff_zone_configs: Array) -> void:
@@ -211,6 +215,7 @@ func _setup_fireflies_from_config(ff_zone_configs: Array) -> void:
 
 	_firefly_manager.setup_zones(zones, weights)
 	add_child(_firefly_manager)
+	_dynamic_nodes.append(_firefly_manager)
 
 
 func _setup_bats_from_config(bat_zone_configs: Array) -> void:
@@ -245,6 +250,8 @@ func _setup_portal_from_config(portal_config: Dictionary) -> void:
 	doorway.z_index = -1
 	add_child(doorway)
 	doorway.all_players_entered.connect(_start_game)
+	_portal_node = doorway
+	_dynamic_nodes.append(doorway)
 
 
 func _setup_spawn_positions_from_config(positions: Array) -> void:
@@ -330,9 +337,42 @@ func _toggle_editor() -> void:
 		_editor = CanvasLayer.new()
 		_editor.set_script(editor_script)
 		_editor.setup("title_screen", _current_config)
+		_editor.config_changed.connect(_rebuild_from_config)
 		add_child(_editor)
 	else:
 		_editor.toggle()
+
+
+func _rebuild_from_config(new_config: Dictionary) -> void:
+	## Tear down all dynamic objects and rebuild from new config
+	_current_config = new_config
+
+	# Remove all dynamic nodes
+	for node in _dynamic_nodes:
+		if is_instance_valid(node):
+			node.queue_free()
+	_dynamic_nodes.clear()
+	_scenery_items.clear()
+	_firefly_manager = null
+	_portal_node = null
+
+	# Kill any bats
+	for node in get_tree().get_nodes_in_group("enemies"):
+		if is_instance_valid(node):
+			node.queue_free()
+
+	# Defer rebuild to next frame so queue_free completes
+	call_deferred("_deferred_rebuild")
+
+
+func _deferred_rebuild() -> void:
+	var config: Dictionary = _current_config
+	_setup_background_trees_from_config(config.get("scenery", {}).get("trees", []))
+	_setup_rocks_from_config(config.get("scenery", {}).get("rocks", []))
+	_setup_fireflies_from_config(config.get("spawn_zones", {}).get("fireflies", []))
+	_setup_bats_from_config(config.get("spawn_zones", {}).get("bats", []))
+	_setup_portal_from_config(config.get("portal", {}))
+	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
 
 
 func _debug_regenerate_nearest_scenery() -> void:

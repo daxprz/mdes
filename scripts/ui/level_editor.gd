@@ -14,6 +14,8 @@ const MODE_COLORS := [
 	Color(0.9, 0.3, 0.9, 0.3),   # Portal: purple
 ]
 
+signal config_changed(data: Dictionary)
+
 var _active := false
 var _mode: Mode = Mode.SPAWN_AREAS
 var _level_name: String = ""
@@ -188,6 +190,9 @@ func _start_drag(screen_pos: Vector2) -> void:
 
 
 func _stop_drag() -> void:
+	if _dragging:
+		# Live refresh on drag release
+		config_changed.emit(_config)
 	_dragging = false
 	_drag_handle = -1
 
@@ -338,6 +343,7 @@ func _drag_portal(world_pos: Vector2) -> void:
 
 func _save() -> void:
 	LevelConfig.save_level(_level_name, _config)
+	config_changed.emit(_config)
 	_status_label.text = "SAVED!"
 	_status_label.modulate = Color(0.3, 1.0, 0.3)
 	_show_center_flash("SAVED", Color(0.3, 1.0, 0.3))
@@ -352,6 +358,7 @@ func _save() -> void:
 func _reset() -> void:
 	LevelConfig.reset_level(_level_name)
 	_config = LevelConfig.load_level(_level_name).duplicate(true)
+	config_changed.emit(_config)
 	_status_label.text = "RESET!"
 	_status_label.modulate = Color(1.0, 0.5, 0.3)
 	_show_center_flash("RESET", Color(1.0, 0.5, 0.3))
