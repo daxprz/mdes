@@ -129,18 +129,27 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# Thumbstick + D-pad navigation (both map to move_up/move_down)
+	# Thumbstick, D-pad, and keyboard navigation
 	if _nav_cooldown > 0.0:
 		return
 
-	if event.is_action_pressed("move_up") or event.is_action_pressed("move_left"):
+	# Check for D-pad buttons directly (not mapped to move_up/move_down actions)
+	var nav_up := event.is_action_pressed("move_up") or event.is_action_pressed("move_left")
+	var nav_down := event.is_action_pressed("move_down") or event.is_action_pressed("move_right")
+	if event is InputEventJoypadButton and event.pressed:
+		if event.button_index == 11:  # D-pad Up
+			nav_up = true
+		elif event.button_index == 12:  # D-pad Down
+			nav_down = true
+
+	if nav_up:
 		if _selected > 0:
 			_selected -= 1
 			_nav_cooldown = NAV_COOLDOWN_TIME
 			AudioManager.play("menu_select")
 			_update_selection()
 		get_viewport().set_input_as_handled()
-	elif event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
+	elif nav_down:
 		if _selected < _menu_labels.size() - 1:
 			_selected += 1
 			_nav_cooldown = NAV_COOLDOWN_TIME
