@@ -363,34 +363,29 @@ func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
 
-	# Pillars — each stone jitters only X, shared between adjacent stones
-	# Pre-compute jitter per row boundary (10 boundaries for 9 stones)
-	var left_jx: Array[float] = []
-	var right_jx: Array[float] = []
-	for i in range(10):
-		left_jx.append(_stone_jitter(i).x)
-		right_jx.append(_stone_jitter(50 + i).x)
-
+	# Pillars — each stone has ONE x-jitter applied to all 4 corners
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
 		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
 		var h: float = 20.0
-		# Left pillar — top edge = boundary i, bottom edge = boundary i+1
+		var jx_l: float = _stone_jitter(i).x
+		var jx_r: float = _stone_jitter(50 + i).x
+		# Left pillar — entire stone shifted by jx_l
 		draw_polygon(PackedVector2Array([
-			Vector2(-half_w - stone_w + left_jx[i], y),
-			Vector2(-half_w + left_jx[i], y),
-			Vector2(-half_w + left_jx[i + 1], y + h),
-			Vector2(-half_w - stone_w + left_jx[i + 1], y + h),
+			Vector2(-half_w - stone_w + jx_l, y),
+			Vector2(-half_w + jx_l, y),
+			Vector2(-half_w + jx_l, y + h),
+			Vector2(-half_w - stone_w + jx_l, y + h),
 		]), PackedColorArray([col, col, col, col]))
-		draw_line(Vector2(-half_w - stone_w + left_jx[i], y), Vector2(-half_w + left_jx[i], y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
-		# Right pillar
+		draw_line(Vector2(-half_w - stone_w + jx_l, y), Vector2(-half_w + jx_l, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		# Right pillar — entire stone shifted by jx_r
 		draw_polygon(PackedVector2Array([
-			Vector2(half_w + right_jx[i], y),
-			Vector2(half_w + stone_w + right_jx[i], y),
-			Vector2(half_w + stone_w + right_jx[i + 1], y + h),
-			Vector2(half_w + right_jx[i + 1], y + h),
+			Vector2(half_w + jx_r, y),
+			Vector2(half_w + stone_w + jx_r, y),
+			Vector2(half_w + stone_w + jx_r, y + h),
+			Vector2(half_w + jx_r, y + h),
 		]), PackedColorArray([col, col, col, col]))
-		draw_line(Vector2(half_w + right_jx[i], y), Vector2(half_w + stone_w + right_jx[i], y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		draw_line(Vector2(half_w + jx_r, y), Vector2(half_w + stone_w + jx_r, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
 
 	# Archway — symmetrical stone pattern, gap for keystone at center
 	var arch_segments := 16
