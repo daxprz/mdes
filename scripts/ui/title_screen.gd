@@ -22,10 +22,13 @@ var _name_entry: Node = null
 var _pending_device_id: int = -99
 var _returning_from_game: bool = false
 var _scenery_items: Array = []  # Procedurally generated background items
+var _current_config: Dictionary = {}
+var _config_spawn_positions: Array[Vector2] = []
+var _editor: Node = null
 var _firefly_manager: Node2D = null
 var _bat_spawn_timer: float = 0.0
-const MAX_BATS := 5
-const BAT_SPAWN_INTERVAL := 5.0
+var _bat_max: int = 5
+var _bat_bounds: Rect2 = Rect2(100, 350, 1720, 500)
 
 
 func _ready() -> void:
@@ -43,14 +46,19 @@ func _ready() -> void:
 	ProfileManager.unassign_all()
 	ProfileManager.device_profiles.clear()
 
-	_setup_camera()
+	# Load level config from JSON (with fallback to bundled default)
+	var config: Dictionary = LevelConfig.load_level("title_screen")
+	_current_config = config
+
+	_setup_camera_from_config(config.get("camera", {}))
 	_setup_name_entry()
 	_setup_version_label()
-	_setup_background_trees()
-	_setup_rocks()
-	_setup_fireflies()
-	_setup_bats()
-	_setup_portal_doorway()
+	_setup_background_trees_from_config(config.get("scenery", {}).get("trees", []))
+	_setup_rocks_from_config(config.get("scenery", {}).get("rocks", []))
+	_setup_fireflies_from_config(config.get("spawn_zones", {}).get("fireflies", []))
+	_setup_bats_from_config(config.get("spawn_zones", {}).get("bats", []))
+	_setup_portal_from_config(config.get("portal", {}))
+	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
 
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
@@ -127,9 +135,10 @@ func _auto_join_device(device_id: int) -> void:
 	PlayerManager._try_join(device_id)
 
 
-func _setup_camera() -> void:
+func _setup_camera_from_config(cam_config: Dictionary) -> void:
 	var cam := Camera2D.new()
-	cam.position = Vector2(960, 495)  # Shift up 45px for HUD buffer
+	var pos_arr: Array = cam_config.get("position", [960, 495])
+	cam.position = Vector2(pos_arr[0], pos_arr[1])
 	add_child(cam)
 
 
@@ -158,122 +167,93 @@ func _setup_version_label() -> void:
 	$UI.add_child(ver_label)
 
 
-func _setup_background_trees() -> void:
+func _setup_background_trees_from_config(tree_configs: Array) -> void:
 	var tree_script := load("res://scripts/effects/procedural_tree.gd")
-
-	# Left tree — large, stout
-	var left_tree := Node2D.new()
-	left_tree.set_script(tree_script)
-	left_tree.trunk_weight = 22.0
-	left_tree.trunk_length = 250.0
-	left_tree.seed_value = 3105534387
-	left_tree.z_index = -5  # Behind everything
-	add_child(left_tree)
-	left_tree.global_position = Vector2(250, 900)
-	_scenery_items.append(left_tree)
-
-	# Right tree — large, stout, different shape
-	var right_tree := Node2D.new()
-	right_tree.set_script(tree_script)
-	right_tree.trunk_weight = 20.0
-	right_tree.trunk_length = 230.0
-	right_tree.seed_value = 4178534353
-	right_tree.z_index = -5
-	add_child(right_tree)
-	right_tree.global_position = Vector2(1670, 900)
-	_scenery_items.append(right_tree)
+	for cfg in tree_configs:
+		var tree := Node2D.new()
+		tree.set_script(tree_script)
+		tree.trunk_weight = cfg.get("trunk_weight", 20.0)
+		tree.trunk_length = cfg.get("trunk_length", 200.0)
+		tree.seed_value = int(cfg.get("seed", randi()))
+		tree.z_index = -5
+		add_child(tree)
+		var pos_arr: Array = cfg.get("pos", [960, 900])
+		tree.global_position = Vector2(pos_arr[0], pos_arr[1])
+		_scenery_items.append(tree)
 
 
-func _setup_rocks() -> void:
+func _setup_rocks_from_config(rock_configs: Array) -> void:
 	var rock_script := load("res://scripts/effects/procedural_rock.gd")
-
-	# Scatter rocks around the arena
-	var rock_configs := [
-		{"pos": Vector2(400, 885), "size": 45.0, "seed": 1001, "hue": "grey"},
-		{"pos": Vector2(750, 890), "size": 35.0, "seed": 1002, "hue": "grey"},
-		{"pos": Vector2(1150, 888), "size": 40.0, "seed": 1003, "hue": "grey"},
-		{"pos": Vector2(1520, 882), "size": 55.0, "seed": 1004, "hue": "red"},
-		{"pos": Vector2(350, 745), "size": 30.0, "seed": 1005, "hue": "grey"},
-		{"pos": Vector2(1600, 748), "size": 32.0, "seed": 1006, "hue": "red"},
-	]
-
 	for cfg in rock_configs:
 		var rock := Node2D.new()
 		rock.set_script(rock_script)
-		rock.rock_size = cfg["size"]
-		rock.seed_value = cfg["seed"]
-		rock.hue = cfg["hue"]
+		rock.rock_size = cfg.get("size", 40.0)
+		rock.seed_value = int(cfg.get("seed", randi()))
+		rock.hue = cfg.get("hue", "grey")
 		rock.z_index = -3
 		add_child(rock)
-		rock.global_position = cfg["pos"]
+		var pos_arr: Array = cfg.get("pos", [960, 900])
+		rock.global_position = Vector2(pos_arr[0], pos_arr[1])
 		_scenery_items.append(rock)
 
 
-func _setup_fireflies() -> void:
+func _setup_fireflies_from_config(ff_zone_configs: Array) -> void:
 	var ff_script := load("res://scripts/effects/fireflies.gd")
 	_firefly_manager = Node2D.new()
 	_firefly_manager.set_script(ff_script)
 
-	# Spawn zones for fireflies:
-	# Layout reference:
-	#   Floor: y=900, Low platforms: y=760 (left x~329-751, right x~1169-1591)
-	#   Top platforms: y=540 (left x~526-814, right x~1106-1394)
-	#   Trees: left x=250, right x=1670
-	#   Door: x=960, width ~130
-	var zones: Array[Rect2] = [
-		# 1. Large upper area (full width minus 50px, above platforms)
-		Rect2(50, 50, 1820, 490),
-		# 2. Open area left of door (between low-left platform and door)
-		Rect2(752, 760, 143, 140),
-		# 3. Open area right of door (between door and low-right platform)
-		Rect2(1025, 760, 144, 140),
-		# 4. Thin band at bottom (between floor and lowest platforms)
-		Rect2(50, 830, 1820, 60),
-		# 5. Area to the left of the left tree
-		Rect2(50, 500, 180, 350),
-		# 6. Area to the right of the right tree
-		Rect2(1700, 500, 170, 350),
-	]
-	# Weights: larger zones get more fireflies
-	var weights: Array[float] = [
-		8.0,   # Large upper area — most fireflies
-		1.5,   # Left of door
-		1.5,   # Right of door
-		2.0,   # Bottom band
-		1.5,   # Left of tree
-		1.5,   # Right of tree
-	]
+	var zones: Array[Rect2] = []
+	var weights: Array[float] = []
+	for cfg in ff_zone_configs:
+		var r: Array = cfg.get("rect", [0, 0, 100, 100])
+		zones.append(Rect2(r[0], r[1], r[2], r[3]))
+		weights.append(cfg.get("weight", 1.0))
+
 	_firefly_manager.setup_zones(zones, weights)
 	add_child(_firefly_manager)
 
 
-func _setup_bats() -> void:
-	for _i in range(MAX_BATS):
+func _setup_bats_from_config(bat_zone_configs: Array) -> void:
+	if bat_zone_configs.is_empty():
+		return
+	var cfg: Dictionary = bat_zone_configs[0]
+	var r: Array = cfg.get("rect", [100, 350, 1720, 500])
+	_bat_bounds = Rect2(r[0], r[1], r[2], r[3])
+	_bat_max = int(cfg.get("max_count", 5))
+	for _i in range(_bat_max):
 		_spawn_bat()
 
 
 func _spawn_bat() -> void:
 	var bat_count: int = get_tree().get_nodes_in_group("enemies").size()
-	if bat_count >= MAX_BATS:
+	if bat_count >= _bat_max:
 		return
 	var bat_script := load("res://scripts/enemies/title_bat.gd")
 	var bat := CharacterBody2D.new()
 	bat.set_script(bat_script)
-	# Spawn from the doorway position
 	bat.global_position = Vector2(960 + randf_range(-30, 30), 780 + randf_range(-20, 0))
-	bat.setup(_firefly_manager, Rect2(100, 350, 1720, 500))
+	bat.setup(_firefly_manager, _bat_bounds)
 	players_container.add_child(bat)
 
 
-func _setup_portal_doorway() -> void:
+func _setup_portal_from_config(portal_config: Dictionary) -> void:
 	var doorway_script := load("res://scripts/ui/portal_doorway.gd")
 	var doorway := Node2D.new()
 	doorway.set_script(doorway_script)
-	# Place on the floor, center of the arena (raised above floor line)
-	doorway.global_position = Vector2(960, 880)
-	doorway.z_index = 2  # Behind players but above background
+	var pos_arr: Array = portal_config.get("pos", [960, 880])
+	doorway.global_position = Vector2(pos_arr[0], pos_arr[1])
+	doorway.z_index = -1
 	add_child(doorway)
 	doorway.all_players_entered.connect(_start_game)
+
+
+func _setup_spawn_positions_from_config(positions: Array) -> void:
+	if not positions.is_empty():
+		var new_spawns: Array[Vector2] = []
+		for p in positions:
+			new_spawns.append(Vector2(p[0], p[1]))
+		# Override the SPAWN_POSITIONS - can't change const, so use a var
+		_config_spawn_positions = new_spawns
 
 
 # -- Process -------------------------------------------------------------------
@@ -286,9 +266,9 @@ func _process(delta: float) -> void:
 
 	# Respawn bats from the doorway cracks
 	_bat_spawn_timer += delta
-	if _bat_spawn_timer >= BAT_SPAWN_INTERVAL:
+	if _bat_spawn_timer >= 5.0:
 		_bat_spawn_timer = 0.0
-		if randf() > 0.5:  # 50% chance each interval
+		if randf() > 0.5:
 			_spawn_bat()
 
 	# Count down rift locks
@@ -332,10 +312,27 @@ func _check_non_movement_press(device_id: int) -> bool:
 # -- Input ---------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
+	# Ctrl+E toggles level editor
+	if event is InputEventKey and event.pressed and event.keycode == KEY_E and event.ctrl_pressed:
+		_toggle_editor()
+		get_viewport().set_input_as_handled()
+		return
+
 	# Debug: G key regenerates nearest scenery item to P1
 	if event is InputEventKey and event.pressed and event.keycode == KEY_G:
 		if PlayerHUD._debug_mode:
 			_debug_regenerate_nearest_scenery()
+
+
+func _toggle_editor() -> void:
+	if _editor == null:
+		var editor_script := load("res://scripts/ui/level_editor.gd")
+		_editor = CanvasLayer.new()
+		_editor.set_script(editor_script)
+		_editor.setup("title_screen", _current_config)
+		add_child(_editor)
+	else:
+		_editor.toggle()
 
 
 func _debug_regenerate_nearest_scenery() -> void:
@@ -525,9 +522,10 @@ func _spawn_lobby_player(player_index: int) -> void:
 	player_node.device_id = p_data["device_id"]
 	player_node.character_class = p_data["character_class"]
 
-	# Spawn on assigned platform
-	if player_index < SPAWN_POSITIONS.size():
-		player_node.global_position = SPAWN_POSITIONS[player_index]
+	# Spawn on assigned platform (config overrides default)
+	var spawns: Array = _config_spawn_positions if not _config_spawn_positions.is_empty() else SPAWN_POSITIONS
+	if player_index < spawns.size():
+		player_node.global_position = spawns[player_index]
 	else:
 		player_node.global_position = spawn_point.global_position
 

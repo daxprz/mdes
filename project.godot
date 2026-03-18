@@ -27,6 +27,7 @@ ProfileManager="*res://scripts/autoload/profile_manager.gd"
 PauseMenu="*res://scripts/ui/pause_menu.gd"
 AudioManager="*res://scripts/autoload/audio_manager.gd"
 PlayerHUD="*res://scripts/autoload/player_hud.gd"
+LevelConfig="*res://scripts/autoload/level_config.gd"
 Version="*res://scripts/autoload/version.gd"
 
 [display]
