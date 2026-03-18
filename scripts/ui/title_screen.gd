@@ -22,6 +22,10 @@ var _name_entry: Node = null
 var _pending_device_id: int = -99
 var _returning_from_game: bool = false
 var _scenery_items: Array = []  # Procedurally generated background items
+var _firefly_manager: Node2D = null
+var _bat_spawn_timer: float = 0.0
+const MAX_BATS := 5
+const BAT_SPAWN_INTERVAL := 5.0
 
 
 func _ready() -> void:
@@ -44,6 +48,8 @@ func _ready() -> void:
 	_setup_version_label()
 	_setup_background_trees()
 	_setup_rocks()
+	_setup_fireflies()
+	_setup_bats()
 	_setup_portal_doorway()
 
 	# Restore saved player choices or auto-join connected controllers
@@ -203,6 +209,32 @@ func _setup_rocks() -> void:
 		_scenery_items.append(rock)
 
 
+func _setup_fireflies() -> void:
+	var ff_script := load("res://scripts/effects/fireflies.gd")
+	_firefly_manager = Node2D.new()
+	_firefly_manager.set_script(ff_script)
+	_firefly_manager.setup(Rect2(100, 400, 1720, 500))
+	add_child(_firefly_manager)
+
+
+func _setup_bats() -> void:
+	for _i in range(MAX_BATS):
+		_spawn_bat()
+
+
+func _spawn_bat() -> void:
+	var bat_count: int = get_tree().get_nodes_in_group("enemies").size()
+	if bat_count >= MAX_BATS:
+		return
+	var bat_script := load("res://scripts/enemies/title_bat.gd")
+	var bat := CharacterBody2D.new()
+	bat.set_script(bat_script)
+	# Spawn from the doorway position
+	bat.global_position = Vector2(960 + randf_range(-30, 30), 780 + randf_range(-20, 0))
+	bat.setup(_firefly_manager, Rect2(100, 350, 1720, 500))
+	players_container.add_child(bat)
+
+
 func _setup_portal_doorway() -> void:
 	var doorway_script := load("res://scripts/ui/portal_doorway.gd")
 	var doorway := Node2D.new()
@@ -221,6 +253,13 @@ func _process(delta: float) -> void:
 
 	# Blink join text
 	join_text.modulate.a = 0.6 + 0.4 * sin(Time.get_ticks_msec() * 0.003)
+
+	# Respawn bats from the doorway cracks
+	_bat_spawn_timer += delta
+	if _bat_spawn_timer >= BAT_SPAWN_INTERVAL:
+		_bat_spawn_timer = 0.0
+		if randf() > 0.5:  # 50% chance each interval
+			_spawn_bat()
 
 	# Count down rift locks
 	for pi in _rift_locks.keys():
