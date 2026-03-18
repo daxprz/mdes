@@ -363,31 +363,33 @@ func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
 
-	# Pillars — matching pattern both sides, with jittered vertices
+	# Pillars — each stone jitters only X (left/right faces stay vertical)
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
 		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
 		var h: float = 20.0
-		# Left pillar as polygon with jitter
-		var j0: Vector2 = _stone_jitter(i * 4)
-		var j1: Vector2 = _stone_jitter(i * 4 + 1)
-		var j2: Vector2 = _stone_jitter(i * 4 + 2)
-		var j3: Vector2 = _stone_jitter(i * 4 + 3)
+		# Each stone gets ONE x-jitter applied to both top corners
+		# and a different x-jitter on both bottom corners — keeps sides vertical
+		var jx_top: float = _stone_jitter(i * 2).x
+		var jx_bot: float = _stone_jitter(i * 2 + 1).x
+		# Left pillar
 		draw_polygon(PackedVector2Array([
-			Vector2(-half_w - stone_w, y) + j0,
-			Vector2(-half_w, y) + j1,
-			Vector2(-half_w, y + h) + j2,
-			Vector2(-half_w - stone_w, y + h) + j3,
+			Vector2(-half_w - stone_w + jx_top, y),
+			Vector2(-half_w + jx_top, y),
+			Vector2(-half_w + jx_bot, y + h),
+			Vector2(-half_w - stone_w + jx_bot, y + h),
 		]), PackedColorArray([col, col, col, col]))
-		draw_line(Vector2(-half_w - stone_w, y) + j0, Vector2(-half_w, y) + j1, STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
-		# Right pillar — mirrored jitter
+		draw_line(Vector2(-half_w - stone_w + jx_top, y), Vector2(-half_w + jx_top, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		# Right pillar — independent jitter
+		var jx_top_r: float = _stone_jitter(50 + i * 2).x
+		var jx_bot_r: float = _stone_jitter(50 + i * 2 + 1).x
 		draw_polygon(PackedVector2Array([
-			Vector2(half_w, y) + j1 * Vector2(-1, 1),
-			Vector2(half_w + stone_w, y) + j0 * Vector2(-1, 1),
-			Vector2(half_w + stone_w, y + h) + j3 * Vector2(-1, 1),
-			Vector2(half_w, y + h) + j2 * Vector2(-1, 1),
+			Vector2(half_w + jx_top_r, y),
+			Vector2(half_w + stone_w + jx_top_r, y),
+			Vector2(half_w + stone_w + jx_bot_r, y + h),
+			Vector2(half_w + jx_bot_r, y + h),
 		]), PackedColorArray([col, col, col, col]))
-		draw_line(Vector2(half_w, y) + j1 * Vector2(-1, 1), Vector2(half_w + stone_w, y) + j0 * Vector2(-1, 1), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		draw_line(Vector2(half_w + jx_top_r, y), Vector2(half_w + stone_w + jx_top_r, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
 
 	# Archway — symmetrical stone pattern, gap for keystone at center
 	var arch_segments := 16
