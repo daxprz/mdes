@@ -16,6 +16,8 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 - **Controller haptics** — rumble feedback for grapple events, LED color matching class
 - **Procedural background trees** with debug regeneration tools
 - **Portal doorway** — atmospheric game start with stone archway, wooden doors, vortex, and fog
+- **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
+- **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
 
 ## How to Play
 
@@ -35,7 +37,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 | RB (during L2) | Reverse power, release to lock power level |
 
 ### Debug Mode
-Press SELECT to toggle. Shows velocity arrows, button states, grapple tracers, archer arc trails. Press G near a procedural tree to regenerate it with a new seed.
+Ctrl+D toggles debug mode anywhere. Shows velocity arrows, button states, grapple tracers, archer arc trails. Press G near a procedural tree to regenerate it with a new seed.
 
 ## Downloads
 
@@ -50,6 +52,25 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.5
+**Level Editor, Fireflies & Bats, Archer Reticle Fix, Menu Overhaul**
+- Level editor (Ctrl+E): JSON-based config system for all level layout — spawn zones, P1-P4 positions, seeds, platforms, portal position
+- 5 editor modes: SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL with mouse drag on vertices/handles
+- Ctrl+S saves level edits, Ctrl+R resets to bundled defaults, live rebuild on every change
+- Fireflies: spawn-gravity zones with per-fly home points, 20% glow time, deficit-scaled spawn rate (1x-5x)
+- Bats: perlin noise movement via FastNoiseLite, firefly hunting within 100px, 5s hunger cooldown, max belly of 5
+- Archer auto-target: gold portal-style sense effect (glow, rays, particles) that dissipates over 0.5s
+- Fix: archer manual reticle was orphaned inside auto-target draw function — now renders reliably when L2 held
+- Fix: trigger detection uses analog axis with hysteresis (0.1 start, 0.05 stop) instead of nonexistent button constants
+- All menus support thumbstick, D-pad, and mouse input (3 input methods everywhere)
+- Fix: pause mapped to Options button (was D-pad UP), D-pad navigation works in pause menu
+- Profile select sub-mode in pause menu with HUD popups
+- Auto-select profile's preferred class when cycling profiles on title screen
+- Grapple hook connection no longer inflicts damage
+- HUD aura fades out over 1 second when popup dismissed
+- Portal stone pillars: per-stone X-only jitter, dark wood frame strips behind pillars
+- Ctrl+D toggles debug mode anywhere (title screen, gameplay, pause menu)
 
 ### v0.9.4
 **Critical Fix & Procedural Rocks**
