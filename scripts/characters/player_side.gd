@@ -3669,6 +3669,7 @@ func _handle_archer_aim(delta: float) -> void:
 
 	if _archer_starburst_timer > 0.0:
 		_archer_starburst_timer -= delta
+	if _archer_auto_target or _archer_starburst_timer > 0.0:
 		queue_redraw()
 
 
