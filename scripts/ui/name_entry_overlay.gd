@@ -141,6 +141,12 @@ func _build_ui() -> void:
 		bg.z_index = -1
 		cell.add_child(bg)
 
+		# Mouse support
+		cell.mouse_filter = Control.MOUSE_FILTER_STOP
+		var ci: int = i  # Capture for lambda
+		cell.mouse_entered.connect(func() -> void: _on_grid_mouse_hover(ci))
+		cell.gui_input.connect(func(event: InputEvent) -> void: _on_grid_mouse_click(event, ci))
+
 		_grid_container.add_child(cell)
 		_grid_cells.append(cell)
 
@@ -260,6 +266,36 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ps_button"):
 		_finish()
 		get_viewport().set_input_as_handled()
+
+
+func _on_grid_mouse_hover(cell_index: int) -> void:
+	if not _active:
+		return
+	_grid_x = cell_index % GRID_COLS
+	_grid_y = cell_index / GRID_COLS
+	_update_grid_highlight()
+
+
+func _on_grid_mouse_click(event: InputEvent, cell_index: int) -> void:
+	if not _active:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_grid_x = cell_index % GRID_COLS
+		_grid_y = cell_index / GRID_COLS
+		_update_grid_highlight()
+		_select_current_cell()
+
+
+func _select_current_cell() -> void:
+	var idx: int = _grid_y * GRID_COLS + _grid_x
+	if idx < 0 or idx >= GRID_CHARS.size():
+		return
+	var ch: String = GRID_CHARS[idx]
+	if ch == "OK":
+		_finish()
+	else:
+		_add_character(ch)
+		AudioManager.play("menu_confirm", -6.0)
 
 
 func _get_event_device(event: InputEvent) -> int:

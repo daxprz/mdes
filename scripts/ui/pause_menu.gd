@@ -1,7 +1,8 @@
 extends CanvasLayer
 
 ## Pause menu — any player can control it.
-## Simple: RESUME, QUIT TO MENU, QUIT GAME
+## Simple: RESUME, QUIT TO MAIN MENU, QUIT GAME
+## Supports: thumbstick, D-pad, and mouse selection.
 ## SEL while paused toggles debug mode.
 
 var _selected := 0
@@ -10,9 +11,8 @@ var _nav_cooldown: float = 0.0
 const NAV_COOLDOWN_TIME := 0.25
 
 var _panel: PanelContainer
-var _resume_label: Label
-var _quit_menu_label: Label
-var _quit_game_label: Label
+var _menu_labels: Array[Label] = []
+var _menu_texts := ["RESUME", "QUIT TO MAIN MENU", "QUIT GAME"]
 
 
 func _ready() -> void:
@@ -66,23 +66,18 @@ func _build_ui() -> void:
 	spacer.custom_minimum_size = Vector2(0, 10)
 	vbox.add_child(spacer)
 
-	_resume_label = Label.new()
-	_resume_label.text = "> RESUME"
-	_resume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_resume_label.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(_resume_label)
-
-	_quit_menu_label = Label.new()
-	_quit_menu_label.text = "  QUIT TO MAIN MENU"
-	_quit_menu_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quit_menu_label.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(_quit_menu_label)
-
-	_quit_game_label = Label.new()
-	_quit_game_label.text = "  QUIT GAME"
-	_quit_game_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_quit_game_label.add_theme_font_size_override("font_size", 24)
-	vbox.add_child(_quit_game_label)
+	# Create menu items with mouse support
+	for i in range(_menu_texts.size()):
+		var lbl := Label.new()
+		lbl.text = "  " + _menu_texts[i]
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.add_theme_font_size_override("font_size", 24)
+		lbl.mouse_filter = Control.MOUSE_FILTER_STOP
+		var idx: int = i  # Capture for lambda
+		lbl.mouse_entered.connect(func() -> void: _on_mouse_hover(idx))
+		lbl.gui_input.connect(func(event: InputEvent) -> void: _on_label_input(event, idx))
+		vbox.add_child(lbl)
+		_menu_labels.append(lbl)
 
 
 func _process(delta: float) -> void:
@@ -110,7 +105,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
-	# Any player can navigate
+	# Thumbstick + D-pad navigation (both map to move_up/move_down)
 	if _nav_cooldown > 0.0:
 		return
 
@@ -122,7 +117,7 @@ func _input(event: InputEvent) -> void:
 			_update_selection()
 		get_viewport().set_input_as_handled()
 	elif event.is_action_pressed("move_down") or event.is_action_pressed("move_right"):
-		if _selected < 2:
+		if _selected < _menu_labels.size() - 1:
 			_selected += 1
 			_nav_cooldown = NAV_COOLDOWN_TIME
 			AudioManager.play("menu_select")
@@ -132,6 +127,25 @@ func _input(event: InputEvent) -> void:
 		AudioManager.play("menu_confirm")
 		_confirm()
 		get_viewport().set_input_as_handled()
+
+
+func _on_mouse_hover(index: int) -> void:
+	if not _active:
+		return
+	if _selected != index:
+		_selected = index
+		AudioManager.play("menu_select")
+		_update_selection()
+
+
+func _on_label_input(event: InputEvent, index: int) -> void:
+	if not _active:
+		return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_selected = index
+		_update_selection()
+		AudioManager.play("menu_confirm")
+		_confirm()
 
 
 func _pause() -> void:
@@ -153,14 +167,13 @@ func _unpause() -> void:
 
 
 func _update_selection() -> void:
-	var labels := [_resume_label, _quit_menu_label, _quit_game_label]
-	for i in range(labels.size()):
+	for i in range(_menu_labels.size()):
 		if i == _selected:
-			labels[i].text = "> " + labels[i].text.strip_edges().trim_prefix(">").strip_edges()
-			labels[i].modulate = Color.WHITE
+			_menu_labels[i].text = "> " + _menu_texts[i]
+			_menu_labels[i].modulate = Color.WHITE
 		else:
-			labels[i].text = "  " + labels[i].text.strip_edges().trim_prefix(">").strip_edges()
-			labels[i].modulate = Color(0.6, 0.6, 0.6)
+			_menu_labels[i].text = "  " + _menu_texts[i]
+			_menu_labels[i].modulate = Color(0.6, 0.6, 0.6)
 
 
 func _confirm() -> void:
