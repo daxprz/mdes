@@ -76,48 +76,68 @@ func _process(delta: float) -> void:
 			_spawn_fly()
 
 	# Update each fly
+	var bounds_center: Vector2 = _bounds.get_center()
 	for fly in _flies:
 		fly["glow_phase"] += fly["glow_speed"] * delta
-		var glow: float = maxf(sin(fly["glow_phase"]), 0.0)  # 0 when dark, 1 at peak
-		fly["glow_active"] = glow > 0.3
+		# Strongly illuminated only 20% of the time:
+		# sin wave is positive ~50% of the time, so use a higher threshold
+		var raw_glow: float = sin(fly["glow_phase"])
+		var glow: float = clampf((raw_glow - 0.6) / 0.4, 0.0, 1.0)  # Only top 20% of wave
+		fly["glow_active"] = glow > 0.0
 
 		# Movement
 		if fly["glow_active"]:
-			# Glowing: rise up quickly
 			fly["vel"].y = lerpf(fly["vel"].y, -RISE_SPEED, delta * 3.0)
 		else:
-			# Not glowing: slight tendency to sink
 			fly["vel"].y = lerpf(fly["vel"].y, SINK_SPEED, delta * 1.5)
 
 		# Random drift
 		fly["vel"].x += randf_range(-20, 20) * delta
+
+		# Edge avoidance
+		var pos: Vector2 = fly["pos"]
+		var outside: bool = not _bounds.has_point(pos)
+		if outside:
+			# Outside bounds: steer straight to center, override everything
+			var to_center: Vector2 = (bounds_center - pos).normalized()
+			fly["vel"] = to_center * MOVE_SPEED * 2.0
+		else:
+			# Within 200px of edge: strong steering away
+			var edge_margin: float = 200.0
+			var steer := Vector2.ZERO
+			var dist_left: float = pos.x - _bounds.position.x
+			var dist_right: float = _bounds.end.x - pos.x
+			var dist_top: float = pos.y - _bounds.position.y
+			var dist_bottom: float = _bounds.end.y - pos.y
+
+			if dist_left < edge_margin:
+				steer.x += (1.0 - dist_left / edge_margin) * 80.0
+			if dist_right < edge_margin:
+				steer.x -= (1.0 - dist_right / edge_margin) * 80.0
+			if dist_top < edge_margin:
+				steer.y += (1.0 - dist_top / edge_margin) * 80.0
+			if dist_bottom < edge_margin:
+				steer.y -= (1.0 - dist_bottom / edge_margin) * 80.0
+
+			fly["vel"] += steer * delta
+
 		fly["vel"] = fly["vel"].limit_length(MOVE_SPEED * 2.0)
-
 		fly["pos"] += fly["vel"] * delta
-
-		# Keep in bounds (soft wrap)
-		if fly["pos"].x < _bounds.position.x - 20:
-			fly["vel"].x += 30.0 * delta
-		elif fly["pos"].x > _bounds.end.x + 20:
-			fly["vel"].x -= 30.0 * delta
-		if fly["pos"].y < _bounds.position.y - 40:
-			fly["vel"].y += 20.0 * delta
-		elif fly["pos"].y > _bounds.end.y + 20:
-			fly["vel"].y -= 20.0 * delta
 
 	queue_redraw()
 
 
 func _draw() -> void:
 	for fly in _flies:
-		var glow: float = maxf(sin(fly["glow_phase"]), 0.0)
+		var raw_glow: float = sin(fly["glow_phase"])
+		var glow: float = clampf((raw_glow - 0.6) / 0.4, 0.0, 1.0)
 		var pos: Vector2 = fly["pos"]
 
-		# Outer glow (larger, dimmer)
-		if glow > 0.1:
+		# Outer glow (only when strongly illuminated)
+		if glow > 0.0:
 			draw_circle(pos, 5.0 + glow * 3.0, Color(1.0, 0.85, 0.2, glow * 0.15))
 			draw_circle(pos, 3.0 + glow * 2.0, Color(1.0, 0.9, 0.3, glow * 0.3))
 
-		# Core (always visible, tiny)
-		var core_alpha: float = 0.3 + glow * 0.7
+		# Core (always visible, tiny — dim when not glowing)
+		var core_alpha: float = 0.15 + glow * 0.85
 		draw_circle(pos, 1.5, Color(1.0, 0.9, 0.4, core_alpha))
