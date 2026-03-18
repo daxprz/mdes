@@ -497,7 +497,8 @@ func _physics_process(delta: float) -> void:
 	# Sync debug mode from PlayerHUD (toggled via pause menu)
 	if PlayerHUD:
 		_debug_mode = PlayerHUD._debug_mode
-		if _debug_mode or PlayerHUD._hud_popups.has(player_index) or _hud_aura_fade > 0.0:
+		if _debug_mode or PlayerHUD._hud_popups.has(player_index) or _hud_aura_fade > 0.0 \
+			or character_class == PlayerManager.CharacterClass.RANGED:
 			queue_redraw()
 	_apply_gravity(delta)
 	_check_out_of_bounds()
@@ -3528,8 +3529,11 @@ func _handle_archer_aim(delta: float) -> void:
 	var l2_pressed: bool = false
 	var r2_pressed: bool = false
 	if device_id >= 0:
-		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.15
-		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.15
+		# Check both axis AND button — some controllers report triggers as buttons
+		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.15 \
+			or Input.is_joy_button_pressed(device_id, JOY_BUTTON_LEFT_TRIGGER)
+		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.15 \
+			or Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_TRIGGER)
 	else:
 		l2_pressed = Input.is_key_pressed(KEY_TAB)
 		r2_pressed = Input.is_key_pressed(KEY_ENTER)
