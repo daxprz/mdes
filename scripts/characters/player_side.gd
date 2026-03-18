@@ -3528,8 +3528,8 @@ func _handle_archer_aim(delta: float) -> void:
 	var l2_pressed: bool = false
 	var r2_pressed: bool = false
 	if device_id >= 0:
-		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.3
-		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.3
+		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.15
+		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.15
 	else:
 		l2_pressed = Input.is_key_pressed(KEY_TAB)
 		r2_pressed = Input.is_key_pressed(KEY_ENTER)
@@ -3979,6 +3979,13 @@ func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_
 					draw_line(a_pt, b_pt, col, 1.5)
 
 	if not _archer_aiming:
+		# Show dim reticle at last position even when not aiming (ranged only)
+		if character_class == PlayerManager.CharacterClass.RANGED and _archer_reticle_pos != Vector2.ZERO:
+			var dim_local: Vector2 = _archer_reticle_pos - global_position
+			var dim_col := Color(1.0, 0.3, 0.2, 0.15)
+			draw_line(dim_local + Vector2(-12, 0), dim_local + Vector2(12, 0), dim_col, 1.5)
+			draw_line(dim_local + Vector2(0, -12), dim_local + Vector2(0, 12), dim_col, 1.5)
+			draw_arc(dim_local, 10.0, 0, TAU, 16, dim_col, 1.0)
 		return
 
 	var reticle_local: Vector2 = _archer_reticle_pos - global_position
