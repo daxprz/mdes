@@ -352,20 +352,42 @@ func _draw_rays() -> void:
 		draw_circle(pos, size, Color(0.7, 0.85, 1.0, alpha))
 
 
+func _stone_jitter(seed_val: int) -> Vector2:
+	## Deterministic tiny jitter from a seed — same every frame
+	var x: float = fmod(sin(float(seed_val) * 127.1) * 43758.5, 1.0) * 2.0 - 1.0
+	var y: float = fmod(sin(float(seed_val) * 311.7) * 43758.5, 1.0) * 2.0 - 1.0
+	return Vector2(x, y) * 1.5  # 1.5px max jitter
+
+
 func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
 
-	# Pillars — matching pattern both sides
+	# Pillars — matching pattern both sides, with jittered vertices
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
 		var col: Color = STONE_COLOR if i % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
-		# Left pillar
-		draw_rect(Rect2(-half_w - stone_w, y, stone_w, 20.0), col)
-		draw_line(Vector2(-half_w - stone_w, y), Vector2(-half_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
-		# Right pillar — same pattern
-		draw_rect(Rect2(half_w, y, stone_w, 20.0), col)
-		draw_line(Vector2(half_w, y), Vector2(half_w + stone_w, y), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		var h: float = 20.0
+		# Left pillar as polygon with jitter
+		var j0: Vector2 = _stone_jitter(i * 4)
+		var j1: Vector2 = _stone_jitter(i * 4 + 1)
+		var j2: Vector2 = _stone_jitter(i * 4 + 2)
+		var j3: Vector2 = _stone_jitter(i * 4 + 3)
+		draw_polygon(PackedVector2Array([
+			Vector2(-half_w - stone_w, y) + j0,
+			Vector2(-half_w, y) + j1,
+			Vector2(-half_w, y + h) + j2,
+			Vector2(-half_w - stone_w, y + h) + j3,
+		]), PackedColorArray([col, col, col, col]))
+		draw_line(Vector2(-half_w - stone_w, y) + j0, Vector2(-half_w, y) + j1, STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
+		# Right pillar — mirrored jitter
+		draw_polygon(PackedVector2Array([
+			Vector2(half_w, y) + j1 * Vector2(-1, 1),
+			Vector2(half_w + stone_w, y) + j0 * Vector2(-1, 1),
+			Vector2(half_w + stone_w, y + h) + j3 * Vector2(-1, 1),
+			Vector2(half_w, y + h) + j2 * Vector2(-1, 1),
+		]), PackedColorArray([col, col, col, col]))
+		draw_line(Vector2(half_w, y) + j1 * Vector2(-1, 1), Vector2(half_w + stone_w, y) + j0 * Vector2(-1, 1), STONE_LIGHT * Color(1, 1, 1, 0.3), 1.0)
 
 	# Archway — symmetrical stone pattern, gap for keystone at center
 	var arch_segments := 16
@@ -373,15 +395,14 @@ func _draw_front_layer() -> void:
 	var prev_inner := Vector2.ZERO
 	var keystone_start := arch_segments / 2 - 1
 	var keystone_end := arch_segments / 2 + 1
-	var half_seg := arch_segments / 2
 	for i in range(arch_segments + 1):
 		var t: float = float(i) / float(arch_segments)
 		var angle: float = PI + t * PI
-		var arch_thickness: float = stone_w * 1.2  # Slightly thicker than pillars
-		var inner_pt := Vector2(cos(angle) * half_w, sin(angle) * half_w + (-DOORWAY_HEIGHT))
-		var outer_pt := Vector2(cos(angle) * (half_w + arch_thickness), sin(angle) * (half_w + arch_thickness) + (-DOORWAY_HEIGHT))
+		var arch_thickness: float = stone_w * 1.2
+		var jit: Vector2 = _stone_jitter(100 + i * 2)
+		var inner_pt := Vector2(cos(angle) * half_w, sin(angle) * half_w + (-DOORWAY_HEIGHT)) + jit
+		var outer_pt := Vector2(cos(angle) * (half_w + arch_thickness), sin(angle) * (half_w + arch_thickness) + (-DOORWAY_HEIGHT)) + _stone_jitter(100 + i * 2 + 1)
 		if i > 0 and not (i > keystone_start and i <= keystone_end):
-			# Mirror pattern: use index from the nearest end (left=i, right=segments-i)
 			var mirror_idx: int = mini(i, arch_segments - i + 1)
 			var col: Color = STONE_COLOR if mirror_idx % 2 == 0 else STONE_COLOR.lerp(STONE_DARK, 0.4)
 			draw_polygon(
