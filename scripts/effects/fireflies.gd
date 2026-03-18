@@ -28,13 +28,18 @@ func _ready() -> void:
 func _spawn_fly() -> void:
 	if _flies.size() >= MAX_FIREFLIES:
 		return
+	# Each fly gets a preferred home position to spread them out
+	var home := Vector2(
+		randf_range(_bounds.position.x + 100, _bounds.end.x - 100),
+		randf_range(_bounds.position.y + 50, _bounds.end.y - 50)
+	)
 	_flies.append({
-		"pos": Vector2(randf_range(_bounds.position.x, _bounds.end.x),
-					   randf_range(_bounds.position.y, _bounds.end.y)),
+		"pos": home,
 		"vel": Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized() * MOVE_SPEED * randf_range(0.5, 1.5),
-		"glow_phase": randf() * TAU,  # Random starting phase
-		"glow_speed": GLOW_BASE_SPEED * randf_range(0.7, 1.4),  # Slightly different cadence
+		"glow_phase": randf() * TAU,
+		"glow_speed": GLOW_BASE_SPEED * randf_range(0.7, 1.4),
 		"glow_active": false,
+		"home": home,  # Preferred area — gentle drift back
 	})
 
 
@@ -87,22 +92,26 @@ func _process(delta: float) -> void:
 
 		# Movement
 		if fly["glow_active"]:
+			# Glowing: brief upward burst
 			fly["vel"].y = lerpf(fly["vel"].y, -RISE_SPEED, delta * 3.0)
 		else:
-			fly["vel"].y = lerpf(fly["vel"].y, SINK_SPEED, delta * 1.5)
+			# Not glowing: gentle drift back toward home altitude
+			var home_y: float = fly["home"].y
+			var y_diff: float = home_y - fly["pos"].y
+			fly["vel"].y = lerpf(fly["vel"].y, clampf(y_diff * 0.5, -SINK_SPEED, SINK_SPEED * 2.0), delta * 1.0)
 
-		# Random drift
-		fly["vel"].x += randf_range(-20, 20) * delta
+		# Random horizontal wander + gentle pull toward home X
+		fly["vel"].x += randf_range(-30, 30) * delta
+		var home_x_diff: float = fly["home"].x - fly["pos"].x
+		fly["vel"].x += home_x_diff * 0.3 * delta  # Gentle home pull
 
 		# Edge avoidance
 		var pos: Vector2 = fly["pos"]
 		var outside: bool = not _bounds.has_point(pos)
 		if outside:
-			# Outside bounds: steer straight to center, override everything
 			var to_center: Vector2 = (bounds_center - pos).normalized()
 			fly["vel"] = to_center * MOVE_SPEED * 2.0
 		else:
-			# Within 200px of edge: strong steering away
 			var edge_margin: float = 200.0
 			var steer := Vector2.ZERO
 			var dist_left: float = pos.x - _bounds.position.x
@@ -111,17 +120,17 @@ func _process(delta: float) -> void:
 			var dist_bottom: float = _bounds.end.y - pos.y
 
 			if dist_left < edge_margin:
-				steer.x += (1.0 - dist_left / edge_margin) * 80.0
+				steer.x += (1.0 - dist_left / edge_margin) * 60.0
 			if dist_right < edge_margin:
-				steer.x -= (1.0 - dist_right / edge_margin) * 80.0
+				steer.x -= (1.0 - dist_right / edge_margin) * 60.0
 			if dist_top < edge_margin:
-				steer.y += (1.0 - dist_top / edge_margin) * 80.0
+				steer.y += (1.0 - dist_top / edge_margin) * 60.0
 			if dist_bottom < edge_margin:
-				steer.y -= (1.0 - dist_bottom / edge_margin) * 80.0
+				steer.y -= (1.0 - dist_bottom / edge_margin) * 60.0
 
 			fly["vel"] += steer * delta
 
-		fly["vel"] = fly["vel"].limit_length(MOVE_SPEED * 2.0)
+		fly["vel"] = fly["vel"].limit_length(MOVE_SPEED * 2.5)
 		fly["pos"] += fly["vel"] * delta
 
 	queue_redraw()
