@@ -340,6 +340,7 @@ func _save() -> void:
 	LevelConfig.save_level(_level_name, _config)
 	_status_label.text = "SAVED!"
 	_status_label.modulate = Color(0.3, 1.0, 0.3)
+	_show_center_flash("SAVED", Color(0.3, 1.0, 0.3))
 	var tween := create_tween()
 	tween.tween_interval(1.5)
 	tween.tween_callback(func() -> void:
@@ -353,12 +354,37 @@ func _reset() -> void:
 	_config = LevelConfig.load_level(_level_name).duplicate(true)
 	_status_label.text = "RESET!"
 	_status_label.modulate = Color(1.0, 0.5, 0.3)
+	_show_center_flash("RESET", Color(1.0, 0.5, 0.3))
 	var tween := create_tween()
 	tween.tween_interval(1.5)
 	tween.tween_callback(func() -> void:
 		_status_label.text = "EDITOR"
 		_status_label.modulate = Color(0.3, 0.8, 0.3)
 	)
+
+
+func _show_center_flash(text: String, color: Color) -> void:
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 64)
+	lbl.modulate = color
+	lbl.anchors_preset = Control.PRESET_CENTER
+	lbl.anchor_left = 0.5
+	lbl.anchor_right = 0.5
+	lbl.anchor_top = 0.5
+	lbl.anchor_bottom = 0.5
+	lbl.offset_left = -200
+	lbl.offset_right = 200
+	lbl.offset_top = -40
+	lbl.offset_bottom = 40
+	add_child(lbl)
+
+	var tween := lbl.create_tween()
+	tween.tween_interval(1.0)  # Hold for 1 second
+	tween.tween_property(lbl, "modulate:a", 0.0, 0.5)  # Fade out over 0.5s
+	tween.tween_callback(lbl.queue_free)
 
 
 # -- Overlay drawing -----------------------------------------------------------
