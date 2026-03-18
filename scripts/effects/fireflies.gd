@@ -66,9 +66,11 @@ func get_nearest_fly(world_pos: Vector2, max_range: float) -> Vector2:
 
 
 func _process(delta: float) -> void:
-	# Respawn timer
+	# Respawn timer — rate scales with deficit
 	if _flies.size() < MAX_FIREFLIES:
-		_spawn_timer += delta
+		var deficit: int = MAX_FIREFLIES - _flies.size()
+		var rate_mult: float = clampf(float(deficit) / 10.0, 1.0, 5.0)  # 1x-5x speed
+		_spawn_timer += delta * rate_mult
 		if _spawn_timer >= SPAWN_INTERVAL:
 			_spawn_timer = 0.0
 			_spawn_fly()
