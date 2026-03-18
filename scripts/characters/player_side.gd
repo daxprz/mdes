@@ -477,6 +477,32 @@ func _is_device_action_just_pressed(action: String) -> bool:
 	return _controller_just_pressed.get(action, false)
 
 
+func _needs_redraw() -> bool:
+	## Returns true if this player needs to redraw custom visuals this frame.
+	if _debug_mode:
+		return true
+	if _hud_aura_fade > 0.0:
+		return true
+	if PlayerHUD and PlayerHUD._hud_popups.has(player_index):
+		return true
+	if character_class == PlayerManager.CharacterClass.RANGED:
+		return true
+	if _grapple_state != GrappleState.IDLE:
+		return true
+	return false
+
+
+func _is_trigger_pressed(axis: JoyAxis) -> bool:
+	## Check if an analog trigger is pressed. Handles keyboard fallback.
+	if device_id == -1:
+		if axis == JOY_AXIS_TRIGGER_LEFT:
+			return Input.is_key_pressed(KEY_TAB)
+		elif axis == JOY_AXIS_TRIGGER_RIGHT:
+			return Input.is_key_pressed(KEY_ENTER)
+		return false
+	return Input.get_joy_axis(device_id, axis) > 0.15
+
+
 func _input(event: InputEvent) -> void:
 	if device_id == -1:
 		return
@@ -497,9 +523,8 @@ func _physics_process(delta: float) -> void:
 	# Sync debug mode from PlayerHUD (toggled via pause menu)
 	if PlayerHUD:
 		_debug_mode = PlayerHUD._debug_mode
-		if _debug_mode or PlayerHUD._hud_popups.has(player_index) or _hud_aura_fade > 0.0 \
-			or character_class == PlayerManager.CharacterClass.RANGED:
-			queue_redraw()
+	if _needs_redraw():
+		queue_redraw()
 	_apply_gravity(delta)
 	_check_out_of_bounds()
 	_check_class_change_ghost()
@@ -3528,15 +3553,8 @@ func _handle_archer_aim(delta: float) -> void:
 	# L2 analog trigger
 	var l2_pressed: bool = false
 	var r2_pressed: bool = false
-	if device_id >= 0:
-		# Check both axis AND button — some controllers report triggers as buttons
-		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.15 \
-			or Input.is_joy_button_pressed(device_id, JOY_BUTTON_LEFT_TRIGGER)
-		r2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT) > 0.15 \
-			or Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_TRIGGER)
-	else:
-		l2_pressed = Input.is_key_pressed(KEY_TAB)
-		r2_pressed = Input.is_key_pressed(KEY_ENTER)
+	l2_pressed = _is_trigger_pressed(JOY_AXIS_TRIGGER_LEFT)
+	r2_pressed = _is_trigger_pressed(JOY_AXIS_TRIGGER_RIGHT)
 
 	# Tick debug trails
 	var trail_i: int = _archer_debug_trails.size() - 1
