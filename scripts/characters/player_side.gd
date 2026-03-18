@@ -3683,10 +3683,13 @@ func _archer_find_nearest_enemy() -> void:
 			best_dist = dist
 			best_enemy = node
 
+	var target_changed: bool = best_enemy != _archer_auto_target
 	_archer_auto_target = best_enemy
 	if best_enemy:
 		_archer_reticle_pos = best_enemy.global_position
-		_archer_starburst_timer = 0.6  # Trigger starburst every cycle
+		# Only trigger starburst when target changes or first acquired
+		if target_changed:
+			_archer_starburst_timer = 0.5
 
 
 func _archer_solve_arc() -> void:
@@ -3893,18 +3896,25 @@ func _track_arrow_trail(proj: Node2D) -> void:
 func _draw_archer_aim() -> void:
 	# Auto-target sense effect (portal-style: glow, subtle rays, particles)
 	if _archer_starburst_timer > 0.0 and character_class == PlayerManager.CharacterClass.RANGED:
-		# Phase: 0.0 = just appeared, 0.5 = fully dissipated
 		var phase: float = 1.0 - clampf(_archer_starburst_timer / 0.5, 0.0, 1.0)
-		# Dissipate: alpha fades, radius expands
-		var fade: float = 1.0 - phase * phase  # Ease-out fade
-		var expand: float = 1.0 + phase * 0.6  # Expands as it fades
+		var sense_fade: float = 1.0 - phase * phase
+		var expand: float = 1.0 + phase * 0.6
 
-		_draw_sense_effect(Vector2.ZERO, 18.0 * expand, fade, phase)
+		_draw_sense_effect(Vector2.ZERO, 18.0 * expand, sense_fade, phase)
 
-		# Enemy effect
 		if _archer_auto_target and is_instance_valid(_archer_auto_target):
 			var enemy_local: Vector2 = _archer_auto_target.global_position - global_position
-			_draw_sense_effect(enemy_local, 15.0 * expand, fade * 0.8, phase)
+			_draw_sense_effect(enemy_local, 15.0 * expand, sense_fade * 0.8, phase)
+
+	# Auto-target reticle (subtle crosshair on targeted enemy when not aiming)
+	if not _archer_aiming and _archer_auto_target and is_instance_valid(_archer_auto_target):
+		if character_class == PlayerManager.CharacterClass.RANGED:
+			var target_local: Vector2 = _archer_auto_target.global_position - global_position
+			var ret_alpha: float = 0.35
+			var ret_color := Color(1.0, 0.85, 0.2, ret_alpha)
+			draw_line(target_local + Vector2(-8, 0), target_local + Vector2(8, 0), ret_color, 1.5)
+			draw_line(target_local + Vector2(0, -8), target_local + Vector2(0, 8), ret_color, 1.5)
+			draw_circle(target_local, 6.0, Color(1.0, 0.85, 0.2, ret_alpha * 0.3))
 
 
 func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_phase: float) -> void:
