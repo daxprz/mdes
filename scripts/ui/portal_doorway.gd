@@ -222,7 +222,7 @@ func _draw_back_layer() -> void:
 
 
 func _draw_doors() -> void:
-	var stone_overhang: float = 22.0  # Doors extend behind the stone pillars
+	var stone_overhang: float = 10.0  # Doors extend slightly behind the stone pillars
 	if not _doors_open and _door_open_amount <= 0.0:
 		# Closed double doors — wider than the opening to sit behind pillars
 		var half_w: float = DOORWAY_WIDTH / 2.0 + stone_overhang
