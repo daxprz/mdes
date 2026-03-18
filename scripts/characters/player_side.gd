@@ -3683,12 +3683,10 @@ func _archer_find_nearest_enemy() -> void:
 			best_dist = dist
 			best_enemy = node
 
-	if best_enemy and best_enemy != _archer_last_auto_target:
-		_archer_last_auto_target = best_enemy
-		_archer_starburst_timer = 0.6  # Trigger starburst animation
 	_archer_auto_target = best_enemy
 	if best_enemy:
 		_archer_reticle_pos = best_enemy.global_position
+		_archer_starburst_timer = 0.6  # Trigger starburst every cycle
 
 
 func _archer_solve_arc() -> void:
