@@ -40,10 +40,10 @@ func _build_ui() -> void:
 	_panel.anchor_right = 0.5
 	_panel.anchor_top = 0.5
 	_panel.anchor_bottom = 0.5
-	_panel.offset_left = -140
-	_panel.offset_right = 140
-	_panel.offset_top = -100
-	_panel.offset_bottom = 100
+	_panel.offset_left = -180
+	_panel.offset_right = 180
+	_panel.offset_top = -120
+	_panel.offset_bottom = 120
 
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.12, 0.08, 0.18, 0.95)
@@ -202,10 +202,10 @@ func _unpause() -> void:
 func _update_selection() -> void:
 	for i in range(_menu_labels.size()):
 		if i == _selected:
-			_menu_labels[i].text = "> " + _menu_texts[i]
+			_menu_labels[i].text = "> " + _menu_texts[i] + " <"
 			_menu_labels[i].modulate = Color.WHITE
 		else:
-			_menu_labels[i].text = "  " + _menu_texts[i]
+			_menu_labels[i].text = "  " + _menu_texts[i] + "  "
 			_menu_labels[i].modulate = Color(0.6, 0.6, 0.6)
 
 

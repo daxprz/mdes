@@ -223,6 +223,11 @@ var _archer_launch_angle: float = 0.0  # Solved launch angle
 var _archer_arc_points: Array[Vector2] = []  # Points along the solved arc
 var _archer_lock_timer: float = 0.0  # Cooldown between lock recalculations
 var _archer_gleam_timer: float = 0.0  # For sparkle animation
+var _archer_inactive_timer: float = 0.0  # Time since reticle was last active
+var _archer_auto_target: Node2D = null  # Auto-targeted enemy
+var _archer_auto_target_cooldown: float = 0.0
+var _archer_last_auto_target: Node2D = null  # Track changes for starburst
+var _archer_starburst_timer: float = 0.0  # Starburst animation timer
 var _archer_fired_this_pull: bool = false  # Re-strings after 0.5s cooldown
 var _archer_r2_was_pressed: bool = false  # Track R2 for fresh-press detection
 var _archer_power_locked: bool = false  # True when RB released after power-down
@@ -3263,70 +3268,38 @@ func _grapple_tick_retracting(delta: float) -> void:
 # -- Grapple Drawing -----------------------------------------------------------
 
 func _draw_hud_popup_indicator() -> void:
-	## Draw dashed circle around player and lines to HUD popup when active
+	## Draw color-matched starburst aura around player when HUD popup is active
 	if not PlayerHUD or not PlayerHUD._hud_popups.has(player_index):
 		return
 
 	var class_color: Color = PlayerHUD.CLASS_COLORS.get(character_class, Color.WHITE)
-	var dash_color := class_color * Color(1, 1, 1, 0.6)
+	var t: float = Time.get_ticks_msec() * 0.001
 
-	# Dashed circle around player
-	var radius: float = 28.0
-	var segments: int = 24
-	for i in range(segments):
-		if i % 2 == 0:  # Skip every other for dashed effect
-			var a1: float = float(i) / float(segments) * TAU
-			var a2: float = float(i + 1) / float(segments) * TAU
-			var p1 := Vector2(cos(a1), sin(a1)) * radius
-			var p2 := Vector2(cos(a2), sin(a2)) * radius
-			draw_line(p1, p2, dash_color, 1.5)
+	# Multi-layered sparkly aura around player
+	# Outer layer (dimmer, larger)
+	var outer_rays: int = 12
+	for i in range(outer_rays):
+		var angle: float = float(i) / float(outer_rays) * TAU + t * 0.5
+		var sparkle: float = 0.5 + 0.5 * sin(t * 4.0 + i * 1.3)
+		var inner_r: float = 20.0
+		var outer_r: float = 32.0 + sparkle * 8.0
+		var col := class_color * Color(1, 1, 1, 0.2 + sparkle * 0.15)
+		draw_line(Vector2(cos(angle) * inner_r, sin(angle) * inner_r),
+				  Vector2(cos(angle) * outer_r, sin(angle) * outer_r), col, 2.0)
 
-	# Find the popup panel position in screen space, convert to local
-	if not PlayerHUD._popup_panels.has(player_index):
-		return
-	var popup: Dictionary = PlayerHUD._popup_panels[player_index]
-	var panel: PanelContainer = popup["panel"]
+	# Inner layer (brighter, smaller)
+	var inner_rays: int = 8
+	for i in range(inner_rays):
+		var angle: float = float(i) / float(inner_rays) * TAU - t * 0.8
+		var sparkle: float = 0.5 + 0.5 * sin(t * 6.0 + i * 2.1)
+		var inner_r: float = 14.0
+		var outer_r: float = 22.0 + sparkle * 5.0
+		var col := class_color * Color(1.2, 1.2, 1.2, 0.3 + sparkle * 0.2)
+		draw_line(Vector2(cos(angle) * inner_r, sin(angle) * inner_r),
+				  Vector2(cos(angle) * outer_r, sin(angle) * outer_r), col, 1.5)
 
-	var cam := get_viewport().get_camera_2d()
-	if not cam:
-		return
-	var vp_size: Vector2 = get_viewport().get_visible_rect().size
-	var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE
-
-	# Panel screen position (top-left corner)
-	var panel_screen_tl := Vector2(panel.offset_left, panel.offset_top)
-	var panel_screen_br := Vector2(panel.offset_right, panel.offset_bottom)
-	var panel_screen_center := (panel_screen_tl + panel_screen_br) / 2.0
-
-	# Convert screen position to world position relative to player
-	var panel_world_center: Vector2 = (panel_screen_center - vp_size / 2.0) / zoom + cam.global_position - global_position
-	var panel_world_tl: Vector2 = (panel_screen_tl - vp_size / 2.0) / zoom + cam.global_position - global_position
-	var panel_world_br: Vector2 = (panel_screen_br - vp_size / 2.0) / zoom + cam.global_position - global_position
-
-	# Draw dashed lines from player to the two OUTERMOST corners of the HUD bounding box
-	var corners := [
-		panel_world_tl,
-		Vector2(panel_world_br.x, panel_world_tl.y),
-		panel_world_br,
-		Vector2(panel_world_tl.x, panel_world_br.y),
-	]
-
-	# Find 2 farthest corners from player (origin)
-	var dists: Array = []
-	for c in corners:
-		dists.append({"pos": c, "dist": c.length()})
-	dists.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return a["dist"] > b["dist"])
-
-	for i in range(2):
-		var target: Vector2 = dists[i]["pos"]
-		var seg_count: int = 12
-		for s in range(seg_count):
-			if s % 2 == 0:
-				var t1: float = float(s) / float(seg_count)
-				var t2: float = float(s + 1) / float(seg_count)
-				var a: Vector2 = Vector2.ZERO.lerp(target, t1)
-				var b: Vector2 = Vector2.ZERO.lerp(target, t2)
-				draw_line(a, b, dash_color, 1.0)
+	# Glow circle
+	draw_circle(Vector2.ZERO, 16.0, class_color * Color(1, 1, 1, 0.08 + 0.04 * sin(t * 3.0)))
 
 
 func _draw_debug() -> void:
@@ -3673,7 +3646,7 @@ func _handle_archer_aim(delta: float) -> void:
 		_archer_r2_was_pressed = r2_pressed
 
 	else:
-		# L2 released — hide reticle, reset all state
+		# L2 released — hide reticle
 		if _archer_aiming:
 			_archer_aiming = false
 			_archer_arc_points.clear()
@@ -3682,6 +3655,40 @@ func _handle_archer_aim(delta: float) -> void:
 			_archer_power_locked = false
 			_archer_power_reversing = false
 			queue_redraw()
+
+	# Auto-target: after 5s of reticle inactivity, target nearest enemy
+	if not _archer_aiming:
+		_archer_inactive_timer += delta
+		_archer_auto_target_cooldown -= delta
+		if _archer_inactive_timer >= 5.0 and _archer_auto_target_cooldown <= 0.0:
+			_archer_auto_target_cooldown = 0.25
+			_archer_find_nearest_enemy()
+	else:
+		_archer_inactive_timer = 0.0
+		_archer_auto_target = null
+
+	if _archer_starburst_timer > 0.0:
+		_archer_starburst_timer -= delta
+		queue_redraw()
+
+
+func _archer_find_nearest_enemy() -> void:
+	var best_dist: float = 600.0  # Max auto-target range
+	var best_enemy: Node2D = null
+	for node in get_tree().get_nodes_in_group("enemies"):
+		if not node is Node2D:
+			continue
+		var dist: float = global_position.distance_to(node.global_position)
+		if dist < best_dist:
+			best_dist = dist
+			best_enemy = node
+
+	if best_enemy and best_enemy != _archer_last_auto_target:
+		_archer_last_auto_target = best_enemy
+		_archer_starburst_timer = 0.6  # Trigger starburst animation
+	_archer_auto_target = best_enemy
+	if best_enemy:
+		_archer_reticle_pos = best_enemy.global_position
 
 
 func _archer_solve_arc() -> void:
@@ -3886,6 +3893,32 @@ func _track_arrow_trail(proj: Node2D) -> void:
 
 
 func _draw_archer_aim() -> void:
+	# Auto-target starbursts (spidey-sense)
+	if _archer_starburst_timer > 0.0 and character_class == PlayerManager.CharacterClass.RANGED:
+		var burst_alpha: float = clampf(_archer_starburst_timer / 0.4, 0.0, 1.0)
+		var gold := Color(1.0, 0.85, 0.2, burst_alpha * 0.7)
+		var gold_dim := Color(1.0, 0.85, 0.2, burst_alpha * 0.3)
+		# Starburst around player
+		var n_rays: int = 8
+		for i in range(n_rays):
+			var angle: float = float(i) / float(n_rays) * TAU + _archer_starburst_timer * 3.0
+			var inner: float = 12.0
+			var outer: float = 25.0 + (1.0 - burst_alpha) * 15.0
+			draw_line(Vector2(cos(angle) * inner, sin(angle) * inner),
+					  Vector2(cos(angle) * outer, sin(angle) * outer), gold, 2.0)
+		draw_circle(Vector2.ZERO, 14.0, gold_dim)
+
+		# Starburst around targeted enemy
+		if _archer_auto_target and is_instance_valid(_archer_auto_target):
+			var enemy_local: Vector2 = _archer_auto_target.global_position - global_position
+			for i in range(n_rays):
+				var angle: float = float(i) / float(n_rays) * TAU - _archer_starburst_timer * 3.0
+				var inner: float = 10.0
+				var outer: float = 22.0 + (1.0 - burst_alpha) * 12.0
+				draw_line(enemy_local + Vector2(cos(angle) * inner, sin(angle) * inner),
+						  enemy_local + Vector2(cos(angle) * outer, sin(angle) * outer), gold, 2.0)
+			draw_circle(enemy_local, 12.0, gold_dim)
+
 	# Always draw debug trails even when not aiming
 	if _debug_mode:
 		for trail in _archer_debug_trails:

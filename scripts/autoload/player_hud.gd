@@ -687,7 +687,8 @@ func _input(event: InputEvent) -> void:
 
 	# Determine if profile/class cycling is allowed
 	var allow_profiles: bool = is_title or profile_select_mode
-	var allow_classes: bool = is_title or profile_select_mode or (not is_paused)
+	# Class cycling: title screen or gameplay (NOT during profile select mode)
+	var allow_classes: bool = is_title or (not is_paused and not profile_select_mode)
 
 	# D-pad input
 	if event is InputEventJoypadButton and event.pressed:

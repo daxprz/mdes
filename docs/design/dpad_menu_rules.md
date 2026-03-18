@@ -43,13 +43,14 @@ Entered by selecting "SELECT PROFILE" from the pause menu.
 | Input | Action |
 |-------|--------|
 | D-Pad UP/DOWN | Cycle profile (same as title screen) |
-| D-Pad LEFT/RIGHT | Cycle class (same as title screen) |
+| D-Pad LEFT/RIGHT | **Nothing** — class selection disabled in profile select mode |
 | START (any player) | Exit profile selection, return to pause menu |
 
-- All player HUDs open (popup panels appear)
+- All player HUDs open (popup panels appear with starburst aura)
 - Pause menu disappears
 - Text at top: "D-Pad: select profile/class. Press START to continue."
 - Rift status is **ignored** during profile selection mode
+- Class selection is **disabled** — only profile cycling with UP/DOWN
 - When exiting: HUDs close, pause menu reappears
 
 ## Rift Status Reset Triggers
