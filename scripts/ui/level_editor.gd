@@ -4,9 +4,9 @@ extends CanvasLayer
 ## Modes: spawn areas, seeds, platforms, portal.
 ## Mouse-driven vertex editing, saves to user://levels/.
 
-enum Mode { SPAWN_AREAS, SEEDS, PLATFORMS, PORTAL }
+enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL }
 
-const MODE_NAMES := ["Spawn Areas", "Seeds", "Platforms", "Portal"]
+const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal"]
 const MODE_COLORS := [
 	Color(1.0, 0.9, 0.2, 0.3),   # Spawn areas: yellow
 	Color(0.2, 0.9, 0.5, 0.3),   # Seeds: green
@@ -181,6 +181,8 @@ func _start_drag(screen_pos: Vector2) -> void:
 	match _mode:
 		Mode.SPAWN_AREAS:
 			_try_select_zone(world_pos)
+		Mode.SPAWN_POSITIONS:
+			_try_select_spawn_pos(world_pos)
 		Mode.SEEDS:
 			_try_select_scenery(world_pos)
 		Mode.PLATFORMS:
@@ -203,6 +205,8 @@ func _do_drag(screen_pos: Vector2) -> void:
 	match _mode:
 		Mode.SPAWN_AREAS:
 			_drag_zone(world_pos)
+		Mode.SPAWN_POSITIONS:
+			_drag_spawn_pos(world_pos)
 		Mode.SEEDS:
 			_drag_scenery(world_pos)
 		Mode.PLATFORMS:
@@ -236,7 +240,9 @@ func _try_select_zone(world_pos: Vector2) -> void:
 				_dragging = true
 				return
 
-	# Check spawn positions (P1-P4)
+
+
+func _try_select_spawn_pos(world_pos: Vector2) -> void:
 	var spawn_pos: Array = _config.get("spawn_positions", [])
 	for i in range(spawn_pos.size()):
 		var p: Array = spawn_pos[i]
@@ -247,14 +253,13 @@ func _try_select_zone(world_pos: Vector2) -> void:
 			return
 
 
-func _drag_zone(world_pos: Vector2) -> void:
-	# Handle spawn positions
-	if _drag_item_type == "spawn_position":
-		var spawn_pos: Array = _config.get("spawn_positions", [])
-		if _selected_idx >= 0 and _selected_idx < spawn_pos.size():
-			spawn_pos[_selected_idx] = [world_pos.x, world_pos.y]
-		return
+func _drag_spawn_pos(world_pos: Vector2) -> void:
+	var spawn_pos: Array = _config.get("spawn_positions", [])
+	if _selected_idx >= 0 and _selected_idx < spawn_pos.size():
+		spawn_pos[_selected_idx] = [world_pos.x, world_pos.y]
 
+
+func _drag_zone(world_pos: Vector2) -> void:
 	# Handle zone rects (fireflies_zone, bats_zone)
 	var zone_key: String = _drag_item_type.replace("_zone", "")
 	var zones: Array = _config.get("spawn_zones", {}).get(zone_key, [])
@@ -420,6 +425,8 @@ func _draw_overlay() -> void:
 	match _mode:
 		Mode.SPAWN_AREAS:
 			_draw_spawn_zones()
+		Mode.SPAWN_POSITIONS:
+			_draw_spawn_positions()
 		Mode.SEEDS:
 			_draw_seed_markers()
 		Mode.PLATFORMS:
@@ -456,15 +463,20 @@ func _draw_spawn_zones() -> void:
 				label_text += " max:%d" % int(zones[i]["max_count"])
 			_overlay.draw_string(ThemeDB.fallback_font, rect.position + Vector2(4, 14), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, base_col)
 
-	# Draw P1-P4 spawn positions
+
+
+func _draw_spawn_positions() -> void:
 	var spawn_pos: Array = _config.get("spawn_positions", [])
 	for i in range(spawn_pos.size()):
 		var p: Array = spawn_pos[i]
 		var pos := Vector2(p[0], p[1])
 		var is_selected: bool = (_drag_item_type == "spawn_position" and _selected_idx == i)
 		var col := Color(0.2, 0.9, 1.0, 0.9) if is_selected else Color(0.2, 0.9, 1.0, 0.6)
-		_overlay.draw_circle(pos, 8.0 if is_selected else 6.0, col)
-		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-8, -10), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
+		_overlay.draw_circle(pos, 10.0 if is_selected else 7.0, col)
+		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-8, -14), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, col)
+		# Crosshair
+		_overlay.draw_line(pos + Vector2(-12, 0), pos + Vector2(12, 0), col, 1.0)
+		_overlay.draw_line(pos + Vector2(0, -12), pos + Vector2(0, 12), col, 1.0)
 
 
 func _draw_seed_markers() -> void:
