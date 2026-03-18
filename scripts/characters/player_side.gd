@@ -497,7 +497,7 @@ func _physics_process(delta: float) -> void:
 	# Sync debug mode from PlayerHUD (toggled via pause menu)
 	if PlayerHUD:
 		_debug_mode = PlayerHUD._debug_mode
-		if _debug_mode or PlayerHUD._hud_popups.has(player_index):
+		if _debug_mode or PlayerHUD._hud_popups.has(player_index) or _hud_aura_fade > 0.0:
 			queue_redraw()
 	_apply_gravity(delta)
 	_check_out_of_bounds()
@@ -3267,15 +3267,28 @@ func _grapple_tick_retracting(delta: float) -> void:
 
 # -- Grapple Drawing -----------------------------------------------------------
 
+var _hud_aura_fade: float = 0.0  # 1.0 = fully visible, fades to 0 over 1s
+
 func _draw_hud_popup_indicator() -> void:
 	## Draw color-matched starburst aura around player when HUD popup is active
-	if not PlayerHUD or not PlayerHUD._hud_popups.has(player_index):
+	if not PlayerHUD:
 		return
 
+	var popup_active: bool = PlayerHUD._hud_popups.has(player_index)
+	if popup_active:
+		_hud_aura_fade = 1.0
+	elif _hud_aura_fade > 0.0:
+		_hud_aura_fade -= get_process_delta_time()
+		if _hud_aura_fade <= 0.0:
+			_hud_aura_fade = 0.0
+			return
+	else:
+		return
+
+	var aura_alpha: float = clampf(_hud_aura_fade, 0.0, 1.0)
 	var class_color: Color = PlayerHUD.CLASS_COLORS.get(character_class, Color.WHITE)
 	var t: float = Time.get_ticks_msec() * 0.001
 
-	# Multi-layered sparkly aura around player
 	# Outer layer (dimmer, larger)
 	var outer_rays: int = 12
 	for i in range(outer_rays):
@@ -3283,7 +3296,7 @@ func _draw_hud_popup_indicator() -> void:
 		var sparkle: float = 0.5 + 0.5 * sin(t * 4.0 + i * 1.3)
 		var inner_r: float = 20.0
 		var outer_r: float = 32.0 + sparkle * 8.0
-		var col := class_color * Color(1, 1, 1, 0.2 + sparkle * 0.15)
+		var col := class_color * Color(1, 1, 1, (0.2 + sparkle * 0.15) * aura_alpha)
 		draw_line(Vector2(cos(angle) * inner_r, sin(angle) * inner_r),
 				  Vector2(cos(angle) * outer_r, sin(angle) * outer_r), col, 2.0)
 
@@ -3294,12 +3307,12 @@ func _draw_hud_popup_indicator() -> void:
 		var sparkle: float = 0.5 + 0.5 * sin(t * 6.0 + i * 2.1)
 		var inner_r: float = 14.0
 		var outer_r: float = 22.0 + sparkle * 5.0
-		var col := class_color * Color(1.2, 1.2, 1.2, 0.3 + sparkle * 0.2)
+		var col := class_color * Color(1.2, 1.2, 1.2, (0.3 + sparkle * 0.2) * aura_alpha)
 		draw_line(Vector2(cos(angle) * inner_r, sin(angle) * inner_r),
 				  Vector2(cos(angle) * outer_r, sin(angle) * outer_r), col, 1.5)
 
 	# Glow circle
-	draw_circle(Vector2.ZERO, 16.0, class_color * Color(1, 1, 1, 0.08 + 0.04 * sin(t * 3.0)))
+	draw_circle(Vector2.ZERO, 16.0, class_color * Color(1, 1, 1, (0.08 + 0.04 * sin(t * 3.0)) * aura_alpha))
 
 
 func _draw_debug() -> void:
