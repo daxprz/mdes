@@ -214,37 +214,54 @@ func _do_drag(screen_pos: Vector2) -> void:
 # -- Spawn Area editing --------------------------------------------------------
 
 func _try_select_zone(world_pos: Vector2) -> void:
-	var ff_zones: Array = _config.get("spawn_zones", {}).get("fireflies", [])
-	for i in range(ff_zones.size()):
-		var r: Array = ff_zones[i].get("rect", [0, 0, 100, 100])
-		var rect := Rect2(r[0], r[1], r[2], r[3])
-		# Check corners (8px handles)
-		var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
-		for ci in range(4):
-			if world_pos.distance_to(corners[ci]) < 15.0:
+	# Check all zone types: fireflies, bats, and spawn positions
+	var zone_types := ["fireflies", "bats"]
+	for zone_type in zone_types:
+		var zones: Array = _config.get("spawn_zones", {}).get(zone_type, [])
+		for i in range(zones.size()):
+			var r: Array = zones[i].get("rect", [0, 0, 100, 100])
+			var rect := Rect2(r[0], r[1], r[2], r[3])
+			var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
+			for ci in range(4):
+				if world_pos.distance_to(corners[ci]) < 15.0:
+					_selected_idx = i
+					_drag_handle = ci
+					_drag_item_type = zone_type + "_zone"
+					_dragging = true
+					return
+			if rect.has_point(world_pos):
 				_selected_idx = i
-				_drag_handle = ci
-				_drag_item_type = "firefly_zone"
+				_drag_item_type = zone_type + "_zone"
+				_drag_handle = -1
 				_dragging = true
 				return
-		# Check if clicking inside rect (select without drag handle)
-		if rect.has_point(world_pos):
+
+	# Check spawn positions (P1-P4)
+	var spawn_pos: Array = _config.get("spawn_positions", [])
+	for i in range(spawn_pos.size()):
+		var p: Array = spawn_pos[i]
+		if world_pos.distance_to(Vector2(p[0], p[1])) < 15.0:
 			_selected_idx = i
-			_drag_item_type = "firefly_zone"
-			_drag_handle = -1  # Move entire zone
+			_drag_item_type = "spawn_position"
 			_dragging = true
 			return
 
 
 func _drag_zone(world_pos: Vector2) -> void:
-	if _selected_idx < 0 or _drag_item_type != "firefly_zone":
+	# Handle spawn positions
+	if _drag_item_type == "spawn_position":
+		var spawn_pos: Array = _config.get("spawn_positions", [])
+		if _selected_idx >= 0 and _selected_idx < spawn_pos.size():
+			spawn_pos[_selected_idx] = [world_pos.x, world_pos.y]
 		return
-	var ff_zones: Array = _config.get("spawn_zones", {}).get("fireflies", [])
-	if _selected_idx >= ff_zones.size():
+
+	# Handle zone rects (fireflies_zone, bats_zone)
+	var zone_key: String = _drag_item_type.replace("_zone", "")
+	var zones: Array = _config.get("spawn_zones", {}).get(zone_key, [])
+	if _selected_idx < 0 or _selected_idx >= zones.size():
 		return
-	var r: Array = ff_zones[_selected_idx]["rect"]
+	var r: Array = zones[_selected_idx]["rect"]
 	if _drag_handle >= 0:
-		# Drag specific corner
 		match _drag_handle:
 			0:  # Top-left
 				var dx: float = world_pos.x - r[0]
@@ -412,27 +429,42 @@ func _draw_overlay() -> void:
 
 
 func _draw_spawn_zones() -> void:
-	var ff_zones: Array = _config.get("spawn_zones", {}).get("fireflies", [])
-	for i in range(ff_zones.size()):
-		var r: Array = ff_zones[i].get("rect", [0, 0, 100, 100])
-		var rect := Rect2(r[0], r[1], r[2], r[3])
-		var col := Color(1.0, 0.9, 0.2, 0.15) if i != _selected_idx else Color(1.0, 0.9, 0.2, 0.35)
-		_overlay.draw_rect(rect, col)
-		_overlay.draw_rect(rect, Color(1.0, 0.9, 0.2, 0.6), false, 1.5)
-		# Corner handles
-		var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
-		for c in corners:
-			_overlay.draw_rect(Rect2(c - Vector2(4, 4), Vector2(8, 8)), Color(1.0, 0.8, 0.2, 0.8))
-		# Weight label
-		var weight: float = ff_zones[i].get("weight", 1.0)
-		_overlay.draw_string(ThemeDB.fallback_font, rect.position + Vector2(4, 14), "w:%.1f" % weight, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.9, 0.3))
+	# Draw all zone types with labels and draggable corners
+	var zone_configs := [
+		{"key": "fireflies", "color": Color(1.0, 0.9, 0.2), "label": "FF"},
+		{"key": "bats", "color": Color(0.7, 0.2, 0.9), "label": "BAT"},
+	]
+	for zcfg in zone_configs:
+		var zones: Array = _config.get("spawn_zones", {}).get(zcfg["key"], [])
+		var base_col: Color = zcfg["color"]
+		for i in range(zones.size()):
+			var r: Array = zones[i].get("rect", [0, 0, 100, 100])
+			var rect := Rect2(r[0], r[1], r[2], r[3])
+			var is_selected: bool = (_drag_item_type == zcfg["key"] + "_zone" and _selected_idx == i)
+			var fill_alpha: float = 0.25 if is_selected else 0.1
+			_overlay.draw_rect(rect, base_col * Color(1, 1, 1, fill_alpha))
+			_overlay.draw_rect(rect, base_col * Color(1, 1, 1, 0.6), false, 1.5 if not is_selected else 2.5)
+			# Corner handles
+			var corners := [rect.position, Vector2(rect.end.x, rect.position.y), rect.end, Vector2(rect.position.x, rect.end.y)]
+			for c in corners:
+				_overlay.draw_rect(Rect2(c - Vector2(4, 4), Vector2(8, 8)), base_col * Color(1, 1, 1, 0.8))
+			# Label with type and weight/count
+			var label_text: String = zcfg["label"]
+			if zones[i].has("weight"):
+				label_text += " w:%.1f" % zones[i]["weight"]
+			if zones[i].has("max_count"):
+				label_text += " max:%d" % int(zones[i]["max_count"])
+			_overlay.draw_string(ThemeDB.fallback_font, rect.position + Vector2(4, 14), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, base_col)
 
-	var bat_zones: Array = _config.get("spawn_zones", {}).get("bats", [])
-	for bz in bat_zones:
-		var r: Array = bz.get("rect", [0, 0, 100, 100])
-		var rect := Rect2(r[0], r[1], r[2], r[3])
-		_overlay.draw_rect(rect, Color(0.7, 0.2, 0.9, 0.1))
-		_overlay.draw_rect(rect, Color(0.7, 0.2, 0.9, 0.4), false, 1.5)
+	# Draw P1-P4 spawn positions
+	var spawn_pos: Array = _config.get("spawn_positions", [])
+	for i in range(spawn_pos.size()):
+		var p: Array = spawn_pos[i]
+		var pos := Vector2(p[0], p[1])
+		var is_selected: bool = (_drag_item_type == "spawn_position" and _selected_idx == i)
+		var col := Color(0.2, 0.9, 1.0, 0.9) if is_selected else Color(0.2, 0.9, 1.0, 0.6)
+		_overlay.draw_circle(pos, 8.0 if is_selected else 6.0, col)
+		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-8, -10), "P%d" % (i + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, col)
 
 
 func _draw_seed_markers() -> void:
