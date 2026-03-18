@@ -80,6 +80,11 @@ func _spawn_fly() -> void:
 		randf_range(zone.position.y, zone.end.y)
 	)
 
+	# Each fly gets a random home point within its zone (not the center)
+	var home := Vector2(
+		randf_range(zone.position.x + 20, zone.end.x - 20),
+		randf_range(zone.position.y + 20, zone.end.y - 20)
+	)
 	_flies.append({
 		"pos": pos,
 		"vel": Vector2(randf_range(-1, 1), randf_range(-1, 1)).normalized() * MOVE_SPEED * randf_range(0.5, 1.5),
@@ -87,6 +92,7 @@ func _spawn_fly() -> void:
 		"glow_speed": GLOW_BASE_SPEED * randf_range(0.7, 1.4),
 		"glow_active": false,
 		"zone_idx": zi,
+		"home": home,
 	})
 
 
@@ -150,19 +156,10 @@ func _process(delta: float) -> void:
 		var in_zone: bool = zone.has_point(pos)
 
 		if not in_zone:
-			# Find the nearest zone (may have drifted to a different one)
-			var nearest_zone: Rect2 = zone
-			var nearest_dist: float = _dist_to_rect(pos, zone)
-			for zi2 in range(_zones.size()):
-				var d: float = _dist_to_rect(pos, _zones[zi2])
-				if d < nearest_dist:
-					nearest_dist = d
-					nearest_zone = _zones[zi2]
-					fly["zone_idx"] = zi2
-			# Strong pull toward nearest zone center
-			var pull_target: Vector2 = nearest_zone.get_center()
-			var pull: Vector2 = (pull_target - pos).normalized() * MOVE_SPEED * 1.5
-			fly["vel"] = fly["vel"].lerp(pull, delta * 3.0)
+			# Pull toward this fly's home point (within its zone)
+			var home: Vector2 = fly["home"]
+			var pull: Vector2 = (home - pos).normalized() * MOVE_SPEED * 1.5
+			fly["vel"] = fly["vel"].lerp(pull, delta * 2.5)
 
 		# Hard edge avoidance (screen bounds)
 		var screen_bounds := Rect2(30, 30, 1860, 930)

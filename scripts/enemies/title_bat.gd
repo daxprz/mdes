@@ -6,9 +6,8 @@ extends CharacterBody2D
 signal died(global_pos: Vector2)
 
 const MAX_HEALTH := 8
-const MOVE_SPEED := 80.0
-const SWOOP_AMPLITUDE := 30.0
-const SWOOP_FREQ := 2.5
+const MOVE_SPEED := 120.0
+const NOISE_SCALE := 0.4  # Perlin noise sampling scale
 const WING_SPEED := 8.0
 const FIREFLY_DETECT_RANGE := 100.0
 const FIREFLY_EAT_RANGE := 10.0
@@ -24,11 +23,12 @@ var _timer: float = 0.0
 var _hunger_timer: float = 0.0  # Counts down to next meal
 var _belly: int = 0  # How many fireflies eaten
 var _wing_phase: float = 0.0
-var _direction: float = 1.0  # 1 = right, -1 = left
-var _swoop_phase: float = 0.0
+var _direction: float = 1.0
 var _target_vel: Vector2 = Vector2.ZERO
-var _firefly_manager: Node2D = null  # Reference to the fireflies node
+var _firefly_manager: Node2D = null
 var _bounds: Rect2 = Rect2(100, 300, 1720, 500)
+var _noise: FastNoiseLite = null
+var _noise_offset: float = 0.0  # Unique offset per bat
 
 @onready var collision_shape: CollisionShape2D = null
 
@@ -51,9 +51,13 @@ func _ready() -> void:
 	add_child(collision_shape)
 
 	_direction = 1.0 if randf() > 0.5 else -1.0
-	_swoop_phase = randf() * TAU
 	_wing_phase = randf() * TAU
 	_timer = randf() * 5.0
+	_noise_offset = randf() * 1000.0  # Unique noise sampling offset per bat
+	_noise = FastNoiseLite.new()
+	_noise.noise_type = FastNoiseLite.TYPE_PERLIN
+	_noise.seed = randi()
+	_noise.frequency = 0.8
 
 
 func _physics_process(delta: float) -> void:
@@ -62,11 +66,12 @@ func _physics_process(delta: float) -> void:
 
 	_timer += delta
 	_wing_phase += WING_SPEED * delta
-	_swoop_phase += SWOOP_FREQ * delta
 
-	# Base swooping movement
-	var swoop_y: float = sin(_swoop_phase) * SWOOP_AMPLITUDE
-	_target_vel = Vector2(_direction * MOVE_SPEED, swoop_y)
+	# Perlin noise-driven movement (organic, unpredictable)
+	var noise_x: float = _noise.get_noise_2d(_timer * NOISE_SCALE + _noise_offset, 0.0)
+	var noise_y: float = _noise.get_noise_2d(0.0, _timer * NOISE_SCALE + _noise_offset + 500.0)
+	_target_vel = Vector2(noise_x * MOVE_SPEED * 1.5, noise_y * MOVE_SPEED)
+	_direction = signf(_target_vel.x) if absf(_target_vel.x) > 5.0 else _direction
 
 	# Hunger cooldown
 	if _hunger_timer > 0.0:
@@ -87,22 +92,30 @@ func _physics_process(delta: float) -> void:
 					_hunger_timer = HUNGER_COOLDOWN
 					_belly += 1
 
+	# Gravitate toward firefly spawn zones (when not hunting)
+	if not is_hungry or not _firefly_manager or not is_instance_valid(_firefly_manager):
+		pass  # Just use noise movement
+	elif _firefly_manager.get_nearest_fly(global_position, FIREFLY_DETECT_RANGE) == Vector2.INF:
+		# No nearby fly — drift toward a random zone
+		if not _firefly_manager._zones.is_empty():
+			var zone_idx: int = randi() % _firefly_manager._zones.size()
+			var zone: Rect2 = _firefly_manager._zones[zone_idx]
+			if not zone.has_point(global_position):
+				var pull: Vector2 = (zone.get_center() - global_position).normalized() * MOVE_SPEED * 0.4
+				_target_vel += pull
+
 	# Smooth velocity
-	velocity = velocity.lerp(_target_vel, delta * 3.0)
+	velocity = velocity.lerp(_target_vel, delta * 4.0)
 
 	# Bounds steering
 	if global_position.x < _bounds.position.x:
-		_direction = 1.0
+		velocity.x += 150.0 * delta
 	elif global_position.x > _bounds.end.x:
-		_direction = -1.0
+		velocity.x -= 150.0 * delta
 	if global_position.y < _bounds.position.y - 50:
-		velocity.y += 100.0 * delta
+		velocity.y += 120.0 * delta
 	elif global_position.y > _bounds.end.y:
-		velocity.y -= 100.0 * delta
-
-	# Random direction changes
-	if randf() < 0.005:
-		_direction *= -1.0
+		velocity.y -= 120.0 * delta
 
 	move_and_slide()
 	queue_redraw()
