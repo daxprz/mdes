@@ -4005,11 +4005,12 @@ func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_
 		draw_line(Vector2(lock_x, diamond_y + 3.0), Vector2(lock_x - 2.0, diamond_y), Color(1.0, 0.9, 0.3), 1.5)
 		draw_line(Vector2(lock_x - 2.0, diamond_y), Vector2(lock_x, diamond_y - 3.0), Color(1.0, 0.9, 0.3), 1.5)
 
-	# Draw reticle crosshair
+	# Draw reticle crosshair (large, visible)
 	var ret_color := Color(1.0, 0.3, 0.2, reticle_alpha)
-	draw_line(reticle_local + Vector2(-10, 0), reticle_local + Vector2(10, 0), ret_color, 2.0)
-	draw_line(reticle_local + Vector2(0, -10), reticle_local + Vector2(0, 10), ret_color, 2.0)
-	draw_circle(reticle_local, 8.0, Color(1.0, 0.3, 0.2, reticle_alpha * 0.3))
+	draw_line(reticle_local + Vector2(-16, 0), reticle_local + Vector2(16, 0), ret_color, 2.5)
+	draw_line(reticle_local + Vector2(0, -16), reticle_local + Vector2(0, 16), ret_color, 2.5)
+	draw_circle(reticle_local, 12.0, Color(1.0, 0.3, 0.2, reticle_alpha * 0.2))
+	draw_arc(reticle_local, 12.0, 0, TAU, 24, ret_color, 1.5)
 
 	# Gleam/sparkle when solution found
 	if _archer_has_solution:
