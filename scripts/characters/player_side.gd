@@ -284,6 +284,9 @@ func _ready() -> void:
 	_demo_power_tier = PlayerManager.demo_power_tier
 	_demo_size_tier = PlayerManager.demo_size_tier
 	_demo_napalm = PlayerManager.demo_napalm
+	# Initialize ranged reticle position
+	if character_class == PlayerManager.CharacterClass.RANGED:
+		call_deferred("_init_reticle_pos")
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
 	ProfileManager.profile_loaded.connect(_on_profile_changed)
@@ -477,6 +480,10 @@ func _is_device_action_just_pressed(action: String) -> bool:
 	return _controller_just_pressed.get(action, false)
 
 
+func _init_reticle_pos() -> void:
+	_archer_reticle_pos = global_position + Vector2(100.0 if _facing_right else -100.0, -50.0)
+
+
 func _needs_redraw() -> bool:
 	## Returns true if this player needs to redraw custom visuals this frame.
 	if _debug_mode:
@@ -493,14 +500,18 @@ func _needs_redraw() -> bool:
 
 
 func _is_trigger_pressed(axis: JoyAxis) -> bool:
-	## Check if an analog trigger is pressed. Handles keyboard fallback.
+	## Check if an analog trigger is pressed with hysteresis.
+	## Higher threshold to START pressing, lower threshold to STOP.
 	if device_id == -1:
 		if axis == JOY_AXIS_TRIGGER_LEFT:
 			return Input.is_key_pressed(KEY_TAB)
 		elif axis == JOY_AXIS_TRIGGER_RIGHT:
 			return Input.is_key_pressed(KEY_ENTER)
 		return false
-	return Input.get_joy_axis(device_id, axis) > 0.15
+	var value: float = Input.get_joy_axis(device_id, axis)
+	# Hysteresis: if already aiming, use lower threshold to keep it active
+	var threshold: float = 0.05 if _archer_aiming else 0.1
+	return value > threshold
 
 
 func _input(event: InputEvent) -> void:
