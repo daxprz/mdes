@@ -363,10 +363,6 @@ func _draw_front_layer() -> void:
 	var half_w: float = DOORWAY_WIDTH / 2.0
 	var stone_w: float = 20.0
 
-	# Solid backing behind pillars to fill gaps from jittered stones
-	draw_rect(Rect2(-half_w - stone_w - 2, -DOORWAY_HEIGHT, stone_w + 4, DOORWAY_HEIGHT + 4), STONE_DARK)
-	draw_rect(Rect2(half_w - 2, -DOORWAY_HEIGHT, stone_w + 4, DOORWAY_HEIGHT + 4), STONE_DARK)
-
 	# Pillars — each stone has ONE x-jitter applied to all 4 corners
 	for i in range(9):
 		var y: float = -DOORWAY_HEIGHT + i * 20.0
