@@ -14,10 +14,15 @@ const FIREFLY_DETECT_RANGE := 100.0
 const FIREFLY_EAT_RANGE := 10.0
 const GRAVITY := 200.0
 
+const HUNGER_COOLDOWN := 5.0
+const MAX_BELLY := 5  # Stops eating after this many
+
 var health := MAX_HEALTH
 var mass := 3.0  # Very light
 var _dead := false
 var _timer: float = 0.0
+var _hunger_timer: float = 0.0  # Counts down to next meal
+var _belly: int = 0  # How many fireflies eaten
 var _wing_phase: float = 0.0
 var _direction: float = 1.0  # 1 = right, -1 = left
 var _swoop_phase: float = 0.0
@@ -63,19 +68,24 @@ func _physics_process(delta: float) -> void:
 	var swoop_y: float = sin(_swoop_phase) * SWOOP_AMPLITUDE
 	_target_vel = Vector2(_direction * MOVE_SPEED, swoop_y)
 
-	# Hunt fireflies
-	if _firefly_manager and is_instance_valid(_firefly_manager):
+	# Hunger cooldown
+	if _hunger_timer > 0.0:
+		_hunger_timer -= delta
+
+	# Hunt fireflies (only if hungry and not full)
+	var is_hungry: bool = _hunger_timer <= 0.0 and _belly < MAX_BELLY
+	if is_hungry and _firefly_manager and is_instance_valid(_firefly_manager):
 		var nearest_fly: Vector2 = _firefly_manager.get_nearest_fly(global_position, FIREFLY_DETECT_RANGE)
 		if nearest_fly != Vector2.INF:
-			# Veer toward firefly
 			var to_fly: Vector2 = (nearest_fly - global_position)
 			_target_vel = to_fly.normalized() * MOVE_SPEED * 1.3
 			_direction = signf(to_fly.x) if absf(to_fly.x) > 1.0 else _direction
 
-			# Eat firefly if close enough
 			if to_fly.length() < FIREFLY_EAT_RANGE:
 				if _firefly_manager.remove_nearest(global_position):
-					AudioManager.play("menu_select", -12.0, 2.0)  # Quiet peep
+					AudioManager.play("menu_select", -12.0, 2.0)
+					_hunger_timer = HUNGER_COOLDOWN
+					_belly += 1
 
 	# Smooth velocity
 	velocity = velocity.lerp(_target_vel, delta * 3.0)
