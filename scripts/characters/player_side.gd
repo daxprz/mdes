@@ -3970,40 +3970,7 @@ func _draw_archer_aim() -> void:
 			draw_line(target_local + Vector2(0, -8), target_local + Vector2(0, 8), ret_color, 1.5)
 			draw_circle(target_local, 6.0, Color(1.0, 0.85, 0.2, ret_alpha * 0.3))
 
-
-func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_phase: float) -> void:
-	## Portal-style sense effect: circular gradients, subtle rays, particles
-	var gold := Color(1.0, 0.85, 0.2)
-	var t: float = Time.get_ticks_msec() * 0.001
-
-	# Outer glow circle (large, very dim)
-	draw_circle(center, radius * 1.8, gold * Color(1, 1, 1, alpha_mult * 0.06))
-	# Mid glow
-	draw_circle(center, radius * 1.2, gold * Color(1, 1, 1, alpha_mult * 0.12))
-	# Inner glow (brighter)
-	draw_circle(center, radius * 0.7, gold * Color(1, 1, 1, alpha_mult * 0.2))
-	# Core
-	draw_circle(center, radius * 0.3, gold * Color(1, 1, 1, alpha_mult * 0.3))
-
-	# Subtle radiating rays (thin, varying length)
-	var n_rays: int = 6
-	for i in range(n_rays):
-		var angle: float = float(i) / float(n_rays) * TAU + t * 0.4 + anim_phase * 2.0
-		var ray_len: float = radius * (0.8 + 0.4 * sin(t * 3.0 + i * 1.7))
-		var ray_alpha: float = alpha_mult * (0.15 + 0.1 * sin(t * 5.0 + i * 2.3))
-		draw_line(center + Vector2(cos(angle), sin(angle)) * radius * 0.5,
-				  center + Vector2(cos(angle), sin(angle)) * (radius * 0.5 + ray_len),
-				  gold * Color(1, 1, 1, ray_alpha), 1.0)
-
-	# Randomized particles (small dots scattered around, using deterministic noise)
-	for i in range(5):
-		var seed_f: float = float(i) * 127.1 + anim_phase * 50.0
-		var px: float = fmod(sin(seed_f) * 43758.5, 1.0) * 2.0 - 1.0
-		var py: float = fmod(sin(seed_f * 1.3 + 311.7) * 43758.5, 1.0) * 2.0 - 1.0
-		var particle_pos: Vector2 = center + Vector2(px, py) * radius * 1.5
-		var particle_alpha: float = alpha_mult * (0.3 + 0.2 * sin(t * 7.0 + i * 3.1))
-		var particle_size: float = 1.5 + sin(t * 4.0 + i) * 0.5
-		draw_circle(particle_pos, particle_size, gold * Color(1, 1, 1, particle_alpha))
+	# -- Manual reticle (independent of auto-aim) --
 
 	# Always draw debug trails even when not aiming
 	if _debug_mode:
@@ -4085,6 +4052,41 @@ func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_
 			var a: Vector2 = _archer_arc_points[i]
 			var b: Vector2 = _archer_arc_points[i + 1]
 			draw_line(a, b, arc_color, 1.5)
+
+
+func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_phase: float) -> void:
+	## Portal-style sense effect: circular gradients, subtle rays, particles
+	var gold := Color(1.0, 0.85, 0.2)
+	var t: float = Time.get_ticks_msec() * 0.001
+
+	# Outer glow circle (large, very dim)
+	draw_circle(center, radius * 1.8, gold * Color(1, 1, 1, alpha_mult * 0.06))
+	# Mid glow
+	draw_circle(center, radius * 1.2, gold * Color(1, 1, 1, alpha_mult * 0.12))
+	# Inner glow (brighter)
+	draw_circle(center, radius * 0.7, gold * Color(1, 1, 1, alpha_mult * 0.2))
+	# Core
+	draw_circle(center, radius * 0.3, gold * Color(1, 1, 1, alpha_mult * 0.3))
+
+	# Subtle radiating rays (thin, varying length)
+	var n_rays: int = 6
+	for i in range(n_rays):
+		var angle: float = float(i) / float(n_rays) * TAU + t * 0.4 + anim_phase * 2.0
+		var ray_len: float = radius * (0.8 + 0.4 * sin(t * 3.0 + i * 1.7))
+		var ray_alpha: float = alpha_mult * (0.15 + 0.1 * sin(t * 5.0 + i * 2.3))
+		draw_line(center + Vector2(cos(angle), sin(angle)) * radius * 0.5,
+				  center + Vector2(cos(angle), sin(angle)) * (radius * 0.5 + ray_len),
+				  gold * Color(1, 1, 1, ray_alpha), 1.0)
+
+	# Randomized particles (small dots scattered around, using deterministic noise)
+	for i in range(5):
+		var seed_f: float = float(i) * 127.1 + anim_phase * 50.0
+		var px: float = fmod(sin(seed_f) * 43758.5, 1.0) * 2.0 - 1.0
+		var py: float = fmod(sin(seed_f * 1.3 + 311.7) * 43758.5, 1.0) * 2.0 - 1.0
+		var particle_pos: Vector2 = center + Vector2(px, py) * radius * 1.5
+		var particle_alpha: float = alpha_mult * (0.3 + 0.2 * sin(t * 7.0 + i * 3.1))
+		var particle_size: float = 1.5 + sin(t * 4.0 + i) * 0.5
+		draw_circle(particle_pos, particle_size, gold * Color(1, 1, 1, particle_alpha))
 
 
 # -- Rogue Stealth -------------------------------------------------------------
