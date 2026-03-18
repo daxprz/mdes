@@ -18,6 +18,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 - **Portal doorway** — atmospheric game start with stone archway, wooden doors, vortex, and fog
 - **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
 - **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
+- **Migration patterns** — cyclic multi-phase movement sequences that drive wildlife across the level
 
 ## How to Play
 
@@ -52,6 +53,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.6
+**Migration Patterns**
+- Migration patterns: cyclic multi-phase species movement — wildlife migrates between configurable zones on a timer
+- Per-species patterns with independent zones (fireflies and bats each have their own pattern)
+- Stagger mode: random phase offset per individual so not all entities migrate in lockstep
+- Bat repulsion: bats strongly repel each other within 120px
+- Level editor MIGRATION mode: drag zone centers/radii, X to delete zones, N/Del for phases, +/- for zones, S to switch species, G to toggle stagger, left/right arrows for cadence (1s steps)
+- Species and cadence shown in editor top bar, species label on each zone circle
 
 ### v0.9.5
 **Level Editor, Fireflies & Bats, Archer Reticle Fix, Menu Overhaul**
