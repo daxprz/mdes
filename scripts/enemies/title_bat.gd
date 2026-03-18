@@ -32,6 +32,8 @@ var _noise: FastNoiseLite = null
 var _noise_offset: float = 0.0  # Unique offset per bat
 var _migration_patterns: Array = []  # Array of MigrationPattern nodes
 var _migration_zone: int = -1  # zone_id of last entered migration zone
+var _migration_offset: int = 0  # Random phase offset (stagger)
+var _migration_offset_set: bool = false
 
 @onready var collision_shape: CollisionShape2D = null
 
@@ -113,10 +115,15 @@ func _physics_process(delta: float) -> void:
 	for pattern in _migration_patterns:
 		if not pattern.has_species("bats"):
 			continue
-		var active_ids: Array[int] = pattern.get_active_zone_ids()
-		if active_ids.has(_migration_zone):
+		# Assign stagger offset once
+		if not _migration_offset_set:
+			_migration_offset = pattern.generate_offset()
+			_migration_offset_set = true
+		var eff_phase: int = pattern.effective_phase(_migration_offset)
+		var phase_ids: Array[int] = pattern.get_zone_ids_for_phase(eff_phase)
+		if phase_ids.has(_migration_zone):
 			continue  # Already arrived — normal behavior
-		var nearest_zone: Dictionary = pattern.get_nearest_zone(global_position)
+		var nearest_zone: Dictionary = pattern.get_nearest_zone_in_phase(global_position, eff_phase)
 		if nearest_zone.is_empty():
 			continue
 		if pattern.is_in_zone(global_position, nearest_zone):
@@ -127,6 +134,18 @@ func _physics_process(delta: float) -> void:
 		_direction = signf(_target_vel.x) if absf(_target_vel.x) > 5.0 else _direction
 		migrating = true
 		break
+
+	# Repulsion from other bats
+	var repulse := Vector2.ZERO
+	for other in get_tree().get_nodes_in_group("enemies"):
+		if other == self or not is_instance_valid(other) or not other is CharacterBody2D:
+			continue
+		var away: Vector2 = global_position - other.global_position
+		var dist: float = away.length()
+		if dist > 0.0 and dist < 120.0:
+			# Inverse-square falloff: strong close, fades at range
+			repulse += away.normalized() * (1.0 - dist / 120.0) * MOVE_SPEED * 2.0
+	_target_vel += repulse
 
 	# Faster response — more abrupt direction changes
 	velocity = velocity.lerp(_target_vel, delta * 6.0)

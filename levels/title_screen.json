@@ -263,8 +263,9 @@
 	"migration_patterns": [
 		{
 			"id": "firefly_drift",
-			"species": ["fireflies"],
+			"species": "fireflies",
 			"cadence": 30.0,
+			"stagger": true,
 			"phases": [
 				{
 					"zones": [
@@ -281,6 +282,29 @@
 					"zones": [
 						{"zone_id": 4, "point": [750, 850], "radius": 120, "strength": 2.0},
 						{"zone_id": 5, "point": [1170, 850], "radius": 120, "strength": 2.0}
+					]
+				}
+			]
+		},
+		{
+			"id": "bat_roost",
+			"species": "bats",
+			"cadence": 45.0,
+			"stagger": false,
+			"phases": [
+				{
+					"zones": [
+						{"zone_id": 10, "point": [250, 500], "radius": 160, "strength": 1.8}
+					]
+				},
+				{
+					"zones": [
+						{"zone_id": 11, "point": [1670, 500], "radius": 160, "strength": 1.8}
+					]
+				},
+				{
+					"zones": [
+						{"zone_id": 12, "point": [960, 600], "radius": 200, "strength": 2.0}
 					]
 				}
 			]

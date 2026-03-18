@@ -159,7 +159,7 @@ func _input(event: InputEvent) -> void:
 						_selected_idx = -1
 						_update_display()
 				get_viewport().set_input_as_handled()
-			elif event.keycode == KEY_INSERT:
+			elif event.keycode == KEY_N:
 				_migration_add_phase()
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
@@ -167,6 +167,18 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_EQUAL or event.keycode == KEY_KP_ADD:  # + key
 				_migration_add_zone()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_S and not event.ctrl_pressed:
+				_migration_cycle_species()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_G:
+				_migration_toggle_stagger()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_LEFT:
+				_migration_adjust_cadence(-1.0)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_RIGHT:
+				_migration_adjust_cadence(1.0)
 				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
@@ -189,7 +201,10 @@ func _update_display() -> void:
 		if _migration_pattern_idx < patterns.size():
 			var p: Dictionary = patterns[_migration_pattern_idx]
 			var n_phases: int = p.get("phases", []).size()
-			_mode_label.text = "Migration [%s] Phase %d/%d  1-9:switch  Ins:+phase  Del:-phase  +:+zone" % [p.get("id", "?"), _migration_phase_idx + 1, n_phases]
+			var species_str: String = str(p.get("species", "fireflies"))
+			var cadence_val: float = p.get("cadence", 30.0)
+			var stagger_str: String = " STAGGER" if p.get("stagger", false) else ""
+			_mode_label.text = "Migration [%s] %ds%s  Phase %d/%d  1-9:phase N/Del S:species +:zone </>:cadence G:stagger" % [species_str, int(cadence_val), stagger_str, _migration_phase_idx + 1, n_phases]
 		else:
 			_mode_label.text = "MODE: Migration (no patterns)"
 	else:
@@ -490,6 +505,39 @@ func _migration_delete_last_phase() -> void:
 	config_changed.emit(_config)
 
 
+func _migration_cycle_species() -> void:
+	## S: switch to the next migration pattern (each pattern = one species).
+	var patterns: Array = _config.get("migration_patterns", [])
+	if patterns.size() <= 1:
+		return
+	_migration_pattern_idx = (_migration_pattern_idx + 1) % patterns.size()
+	_migration_phase_idx = 0
+	_selected_idx = -1
+	_update_display()
+
+
+func _migration_toggle_stagger() -> void:
+	## G: toggle stagger (random phase offset per individual).
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		return
+	var pattern: Dictionary = patterns[_migration_pattern_idx]
+	pattern["stagger"] = not pattern.get("stagger", false)
+	_update_display()
+	config_changed.emit(_config)
+
+
+func _migration_adjust_cadence(delta: float) -> void:
+	## Left/Right arrows: adjust cadence by delta seconds (min 5s).
+	var patterns: Array = _config.get("migration_patterns", [])
+	if _migration_pattern_idx >= patterns.size():
+		return
+	var pattern: Dictionary = patterns[_migration_pattern_idx]
+	pattern["cadence"] = maxf(1.0, pattern.get("cadence", 30.0) + delta)
+	_update_display()
+	config_changed.emit(_config)
+
+
 func _migration_add_zone() -> void:
 	## +: add a new zone to the current phase.
 	var zones: Array = _get_migration_zones_for_phase()
@@ -679,6 +727,7 @@ func _draw_migration_overlay() -> void:
 		return
 
 	var pattern: Dictionary = patterns[_migration_pattern_idx]
+	var species_name: String = str(pattern.get("species", "?"))
 	var all_phases: Array = pattern.get("phases", [])
 
 	# Draw ALL phases (dim for inactive, bright for active)
@@ -725,7 +774,7 @@ func _draw_migration_overlay() -> void:
 				_overlay.draw_line(x_pos + Vector2(4, -4), x_pos + Vector2(-4, 4), x_col, 2.0)
 
 			# Label
-			var label_text := "P%d Z%d" % [pi + 1, zone_id]
+			var label_text := "%s P%d Z%d" % [species_name, pi + 1, zone_id]
 			if is_active:
 				label_text += " r:%.0f s:%.1f" % [radius, zones[zi].get("strength", 2.0)]
 			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-20, -radius - 8), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, base_col * Color(1, 1, 1, alpha_mult))

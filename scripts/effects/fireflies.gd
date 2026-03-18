@@ -99,6 +99,8 @@ func _spawn_fly() -> void:
 		"zone_idx": zi,
 		"home": home,
 		"migration_zone": -1,  # zone_id of last entered migration zone
+		"migration_offset": 0,  # random phase offset (assigned when patterns are available)
+		"migration_offset_set": false,
 	})
 
 
@@ -166,10 +168,15 @@ func _process(delta: float) -> void:
 		for pattern in _migration_patterns:
 			if not pattern.has_species("fireflies"):
 				continue
-			var active_ids: Array[int] = pattern.get_active_zone_ids()
-			if active_ids.has(fly["migration_zone"]):
+			# Assign stagger offset once
+			if not fly["migration_offset_set"]:
+				fly["migration_offset"] = pattern.generate_offset()
+				fly["migration_offset_set"] = true
+			var eff_phase: int = pattern.effective_phase(fly["migration_offset"])
+			var phase_ids: Array[int] = pattern.get_zone_ids_for_phase(eff_phase)
+			if phase_ids.has(fly["migration_zone"]):
 				continue  # Already arrived at an active zone — normal behavior
-			var nearest_zone: Dictionary = pattern.get_nearest_zone(pos)
+			var nearest_zone: Dictionary = pattern.get_nearest_zone_in_phase(pos, eff_phase)
 			if nearest_zone.is_empty():
 				continue
 			# Check if we've entered this zone

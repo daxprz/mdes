@@ -5,8 +5,9 @@ extends Node
 ## Once an individual arrives at a zone, it returns to normal behavior until the phase advances.
 
 var pattern_id: String = ""
-var species: Array[String] = []
+var species: String = "fireflies"  # One species per pattern
 var cadence: float = 30.0
+var stagger: bool = false  # When true, each individual gets a random phase offset
 var phases: Array = []  # Array of Arrays of zone dicts: [{zone_id, point, radius, strength}]
 var active_phase: int = 0  # 0-based index into phases
 
@@ -16,11 +17,9 @@ var _timer: float = 0.0
 func setup_from_config(config: Dictionary) -> void:
 	pattern_id = config.get("id", "")
 	cadence = config.get("cadence", 30.0)
+	stagger = config.get("stagger", false)
 
-	var sp: Array = config.get("species", [])
-	species.clear()
-	for s in sp:
-		species.append(str(s))
+	species = str(config.get("species", "fireflies"))
 
 	phases.clear()
 	var phase_configs: Array = config.get("phases", [])
@@ -49,30 +48,43 @@ func _process(delta: float) -> void:
 		active_phase = (active_phase + 1) % phases.size()
 
 
-func get_active_zones() -> Array:
-	## Returns the zones for the current active phase.
-	if active_phase >= 0 and active_phase < phases.size():
-		return phases[active_phase]
+func effective_phase(offset: int) -> int:
+	## Returns the effective phase index for an individual with the given offset.
+	if phases.is_empty():
+		return 0
+	return (active_phase + offset) % phases.size()
+
+
+func get_zones_for_phase(phase_idx: int) -> Array:
+	if phase_idx >= 0 and phase_idx < phases.size():
+		return phases[phase_idx]
 	return []
 
 
-func get_active_zone_ids() -> Array[int]:
-	## Returns just the zone_ids for the current active phase.
+func get_zone_ids_for_phase(phase_idx: int) -> Array[int]:
 	var ids: Array[int] = []
-	for zone in get_active_zones():
+	for zone in get_zones_for_phase(phase_idx):
 		ids.append(zone["zone_id"])
 	return ids
 
 
+func get_active_zones() -> Array:
+	return get_zones_for_phase(active_phase)
+
+
+func get_active_zone_ids() -> Array[int]:
+	return get_zone_ids_for_phase(active_phase)
+
+
 func has_species(species_name: String) -> bool:
-	return species.has(species_name)
+	return species == species_name
 
 
-func get_nearest_zone(pos: Vector2) -> Dictionary:
-	## Returns the nearest active zone to the given position, or empty dict.
+func get_nearest_zone_in_phase(pos: Vector2, phase_idx: int) -> Dictionary:
+	## Returns the nearest zone in the given phase to the position, or empty dict.
 	var best: Dictionary = {}
 	var best_dist: float = INF
-	for zone in get_active_zones():
+	for zone in get_zones_for_phase(phase_idx):
 		var d: float = pos.distance_to(zone["point"])
 		if d < best_dist:
 			best_dist = d
@@ -80,5 +92,16 @@ func get_nearest_zone(pos: Vector2) -> Dictionary:
 	return best
 
 
+func get_nearest_zone(pos: Vector2) -> Dictionary:
+	return get_nearest_zone_in_phase(pos, active_phase)
+
+
 func is_in_zone(pos: Vector2, zone: Dictionary) -> bool:
 	return pos.distance_to(zone["point"]) < zone["radius"]
+
+
+func generate_offset() -> int:
+	## Returns a random phase offset if stagger is enabled, else 0.
+	if stagger and phases.size() > 1:
+		return randi() % phases.size()
+	return 0

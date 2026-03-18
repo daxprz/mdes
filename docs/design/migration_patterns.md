@@ -13,7 +13,7 @@ A named, repeating multi-phase sequence that governs where a species congregates
 | Property   | Type       | Description                                          |
 |------------|------------|------------------------------------------------------|
 | `id`       | String     | Unique identifier (e.g. `"firefly_drift"`)           |
-| `species`  | String[]   | Which species this pattern applies to (e.g. `["fireflies"]`) |
+| `species`  | String     | Which species this pattern applies to (e.g. `"fireflies"`) — one species per pattern |
 | `cadence`  | float      | Seconds between phase transitions                    |
 | `phases`   | Phase[]    | Ordered list of phases (1 through N)                 |
 
@@ -71,7 +71,7 @@ Added to the level config under a top-level `"migration_patterns"` key:
   "migration_patterns": [
     {
       "id": "firefly_drift",
-      "species": ["fireflies"],
+      "species": "fireflies",
       "cadence": 30.0,
       "phases": [
         {
