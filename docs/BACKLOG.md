@@ -897,6 +897,52 @@ Players walk into the doorway to start the game.
 
 ---
 
+## EPIC 36: Level Editor (`tools`)
+Built-in level editor for configuring levels via JSON files.
+See `docs/design/level_editor.md` for full specification.
+
+### Story 36.1: JSON Level Configuration
+- [ ] Task: Define JSON schema for level configuration (spawn zones, platforms, scenery, portal, camera)
+- [ ] Task: Default JSON files stored in `res://levels/` (bundled with game)
+- [ ] Task: Override JSON files stored in `user://levels/` (user data directory)
+- [ ] Task: LevelConfig autoload: loads level data with fallback to bundled defaults
+- [ ] Task: Validation: corrupt/missing override falls back gracefully with warning
+
+### Story 36.2: Level Loading Integration
+- [ ] Task: Title screen loads configuration from JSON instead of hardcoded values
+- [ ] Task: Tower levels load platform layout from JSON
+- [ ] Task: Spawn zones for all creature types loaded from JSON
+- [ ] Task: Scenery (trees, rocks) loaded from JSON with seeds
+
+### Story 36.3: Editor UI Framework
+- [ ] Task: Editor toggle via key combo (Ctrl+E)
+- [ ] Task: Mode selector tab bar (spawn areas, seeds, platforms, portal)
+- [ ] Task: Properties panel for selected item
+- [ ] Task: Save/Reset buttons
+
+### Story 36.4: Edit Spawn Areas Mode
+- [ ] Task: Spawn zones shown as colored translucent overlays
+- [ ] Task: Corner vertices draggable via mouse click-and-drag
+- [ ] Task: Add/delete zones via right-click context menu
+- [ ] Task: Zone weight and type editable
+
+### Story 36.5: Edit Seeds Mode
+- [ ] Task: Procedural items shown with seed numbers
+- [ ] Task: Click to select, G to regenerate (existing feature)
+- [ ] Task: Position draggable via mouse
+
+### Story 36.6: Edit Platforms Mode
+- [ ] Task: Platform positions and widths shown with drag handles
+- [ ] Task: Drag center to move, drag edges to resize
+- [ ] Task: Click empty space to add new platform
+
+### Story 36.7: Edit Portal Mode
+- [ ] Task: Portal position draggable
+- [ ] Task: Activation range shown as circle overlay
+- [ ] Task: Timer value editable
+
+---
+
 ## Future Ideas (Unscheduled)
 - Multiplayer lobby over network (not just local)
 - Additional tower sets (post-game content)

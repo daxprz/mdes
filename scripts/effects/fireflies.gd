@@ -143,13 +143,16 @@ func _process(delta: float) -> void:
 		var zone: Rect2 = _zones[zi] if zi >= 0 and zi < _zones.size() else Rect2()
 		var zone_center: Vector2 = zone.get_center()
 
-		# Movement: glow = rise briefly
+		# Movement: glow = rise briefly, not glowing = strong random dispersion
 		if fly["glow_active"]:
 			fly["vel"].y = lerpf(fly["vel"].y, -RISE_SPEED, delta * 3.0)
+		else:
+			# Strong random dispersion in all directions when dim
+			fly["vel"].x += randf_range(-50, 50) * delta
+			fly["vel"].y += randf_range(-30, 40) * delta  # Bias slightly downward
 
-		# Random wander (always active)
-		fly["vel"].x += randf_range(-25, 25) * delta
-		fly["vel"].y += randf_range(-8, 8) * delta
+		# Light wander always
+		fly["vel"].x += randf_range(-10, 10) * delta
 
 		# Spawn gravity: find nearest zone, only pull when OUTSIDE it
 		var pos: Vector2 = fly["pos"]

@@ -6,8 +6,9 @@ extends CharacterBody2D
 signal died(global_pos: Vector2)
 
 const MAX_HEALTH := 8
-const MOVE_SPEED := 120.0
-const NOISE_SCALE := 0.4  # Perlin noise sampling scale
+const MOVE_SPEED := 160.0
+const MIN_SPEED := 60.0  # Must always be moving at least this fast
+const NOISE_SCALE := 0.6  # Higher = more frequent direction changes
 const WING_SPEED := 8.0
 const FIREFLY_DETECT_RANGE := 100.0
 const FIREFLY_EAT_RANGE := 10.0
@@ -104,18 +105,25 @@ func _physics_process(delta: float) -> void:
 				var pull: Vector2 = (zone.get_center() - global_position).normalized() * MOVE_SPEED * 0.4
 				_target_vel += pull
 
-	# Smooth velocity
-	velocity = velocity.lerp(_target_vel, delta * 4.0)
+	# Faster response — more abrupt direction changes
+	velocity = velocity.lerp(_target_vel, delta * 6.0)
+
+	# Enforce minimum speed — bats must always be moving
+	if velocity.length() < MIN_SPEED:
+		if velocity.length() > 0.1:
+			velocity = velocity.normalized() * MIN_SPEED
+		else:
+			velocity = Vector2(_direction * MIN_SPEED, randf_range(-20, 20))
 
 	# Bounds steering
 	if global_position.x < _bounds.position.x:
-		velocity.x += 150.0 * delta
+		velocity.x += 200.0 * delta
 	elif global_position.x > _bounds.end.x:
-		velocity.x -= 150.0 * delta
+		velocity.x -= 200.0 * delta
 	if global_position.y < _bounds.position.y - 50:
-		velocity.y += 120.0 * delta
+		velocity.y += 150.0 * delta
 	elif global_position.y > _bounds.end.y:
-		velocity.y -= 120.0 * delta
+		velocity.y -= 150.0 * delta
 
 	move_and_slide()
 	queue_redraw()
