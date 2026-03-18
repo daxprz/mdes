@@ -3891,31 +3891,55 @@ func _track_arrow_trail(proj: Node2D) -> void:
 
 
 func _draw_archer_aim() -> void:
-	# Auto-target starbursts (spidey-sense)
+	# Auto-target sense effect (portal-style: glow, subtle rays, particles)
 	if _archer_starburst_timer > 0.0 and character_class == PlayerManager.CharacterClass.RANGED:
-		var burst_alpha: float = clampf(_archer_starburst_timer / 0.4, 0.0, 1.0)
-		var gold := Color(1.0, 0.85, 0.2, burst_alpha * 0.7)
-		var gold_dim := Color(1.0, 0.85, 0.2, burst_alpha * 0.3)
-		# Starburst around player
-		var n_rays: int = 8
-		for i in range(n_rays):
-			var angle: float = float(i) / float(n_rays) * TAU + _archer_starburst_timer * 3.0
-			var inner: float = 12.0
-			var outer: float = 25.0 + (1.0 - burst_alpha) * 15.0
-			draw_line(Vector2(cos(angle) * inner, sin(angle) * inner),
-					  Vector2(cos(angle) * outer, sin(angle) * outer), gold, 2.0)
-		draw_circle(Vector2.ZERO, 14.0, gold_dim)
+		# Phase: 0.0 = just appeared, 0.5 = fully dissipated
+		var phase: float = 1.0 - clampf(_archer_starburst_timer / 0.5, 0.0, 1.0)
+		# Dissipate: alpha fades, radius expands
+		var fade: float = 1.0 - phase * phase  # Ease-out fade
+		var expand: float = 1.0 + phase * 0.6  # Expands as it fades
 
-		# Starburst around targeted enemy
+		_draw_sense_effect(Vector2.ZERO, 18.0 * expand, fade, phase)
+
+		# Enemy effect
 		if _archer_auto_target and is_instance_valid(_archer_auto_target):
 			var enemy_local: Vector2 = _archer_auto_target.global_position - global_position
-			for i in range(n_rays):
-				var angle: float = float(i) / float(n_rays) * TAU - _archer_starburst_timer * 3.0
-				var inner: float = 10.0
-				var outer: float = 22.0 + (1.0 - burst_alpha) * 12.0
-				draw_line(enemy_local + Vector2(cos(angle) * inner, sin(angle) * inner),
-						  enemy_local + Vector2(cos(angle) * outer, sin(angle) * outer), gold, 2.0)
-			draw_circle(enemy_local, 12.0, gold_dim)
+			_draw_sense_effect(enemy_local, 15.0 * expand, fade * 0.8, phase)
+
+
+func _draw_sense_effect(center: Vector2, radius: float, fade: float, phase: float) -> void:
+	## Portal-style sense effect: circular gradients, subtle rays, particles
+	var gold := Color(1.0, 0.85, 0.2)
+	var t: float = Time.get_ticks_msec() * 0.001
+
+	# Outer glow circle (large, very dim)
+	draw_circle(center, radius * 1.8, gold * Color(1, 1, 1, fade * 0.06))
+	# Mid glow
+	draw_circle(center, radius * 1.2, gold * Color(1, 1, 1, fade * 0.12))
+	# Inner glow (brighter)
+	draw_circle(center, radius * 0.7, gold * Color(1, 1, 1, fade * 0.2))
+	# Core
+	draw_circle(center, radius * 0.3, gold * Color(1, 1, 1, fade * 0.3))
+
+	# Subtle radiating rays (thin, varying length)
+	var n_rays: int = 6
+	for i in range(n_rays):
+		var angle: float = float(i) / float(n_rays) * TAU + t * 0.4 + phase * 2.0
+		var ray_len: float = radius * (0.8 + 0.4 * sin(t * 3.0 + i * 1.7))
+		var ray_alpha: float = fade * (0.15 + 0.1 * sin(t * 5.0 + i * 2.3))
+		draw_line(center + Vector2(cos(angle), sin(angle)) * radius * 0.5,
+				  center + Vector2(cos(angle), sin(angle)) * (radius * 0.5 + ray_len),
+				  gold * Color(1, 1, 1, ray_alpha), 1.0)
+
+	# Randomized particles (small dots scattered around, using deterministic noise)
+	for i in range(5):
+		var seed_f: float = float(i) * 127.1 + phase * 50.0
+		var px: float = fmod(sin(seed_f) * 43758.5, 1.0) * 2.0 - 1.0
+		var py: float = fmod(sin(seed_f * 1.3 + 311.7) * 43758.5, 1.0) * 2.0 - 1.0
+		var particle_pos: Vector2 = center + Vector2(px, py) * radius * 1.5
+		var particle_alpha: float = fade * (0.3 + 0.2 * sin(t * 7.0 + i * 3.1))
+		var particle_size: float = 1.5 + sin(t * 4.0 + i) * 0.5
+		draw_circle(particle_pos, particle_size, gold * Color(1, 1, 1, particle_alpha))
 
 	# Always draw debug trails even when not aiming
 	if _debug_mode:
