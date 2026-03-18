@@ -762,6 +762,7 @@ func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
 		var new_profile: Dictionary = available[0]
 		ProfileManager.bind_device_to_profile(device_id, new_profile)
 		ProfileManager.assign_profile_to_player(player_index, new_profile)
+		_apply_profile_preferred_class(player_index, new_profile)
 		AudioManager.play("menu_select")
 		return
 
@@ -783,6 +784,59 @@ func _cycle_profile(player_index: int, device_id: int, direction: int) -> void:
 	ProfileManager.bind_device_to_profile(device_id, new_profile)
 	ProfileManager.assign_profile_to_player(player_index, new_profile)
 	AudioManager.play("menu_select")
+
+	# Auto-select the profile's preferred class if available
+	_apply_profile_preferred_class(player_index, new_profile)
+
+
+func _apply_profile_preferred_class(player_index: int, profile: Dictionary) -> void:
+	## Set the player's class to the profile's preferred class if available
+	var p_data: Dictionary = PlayerManager.get_player(player_index)
+	if p_data.is_empty():
+		return
+
+	# Get taken classes (by other players)
+	var taken: Array[int] = []
+	for pi in PlayerManager.players:
+		if pi != player_index:
+			taken.append(int(PlayerManager.players[pi]["character_class"]))
+
+	# Try last_class first
+	if profile.has("last_class"):
+		var last: int = int(profile["last_class"])
+		if last not in taken and last >= 0 and last < PlayerManager.CharacterClass.values().size():
+			_set_player_class(player_index, last as PlayerManager.CharacterClass)
+			return
+
+	# Try class_preferences list
+	var prefs: Array = profile.get("class_preferences", [])
+	for pref in prefs:
+		var cls: int = int(pref)
+		if cls not in taken and cls >= 0 and cls < PlayerManager.CharacterClass.values().size():
+			_set_player_class(player_index, cls as PlayerManager.CharacterClass)
+			return
+
+	# No preference found or all taken — pick random available
+	var all_classes: int = PlayerManager.CharacterClass.values().size()
+	for cls in range(all_classes):
+		if cls not in taken:
+			_set_player_class(player_index, cls as PlayerManager.CharacterClass)
+			return
+
+
+func _set_player_class(player_index: int, new_class: PlayerManager.CharacterClass) -> void:
+	var p_data: Dictionary = PlayerManager.get_player(player_index)
+	if p_data.is_empty():
+		return
+	p_data["character_class"] = new_class
+	var stats: Dictionary = PlayerManager.CLASS_STATS[new_class]
+	p_data["max_health"] = stats["max_health"]
+	p_data["health"] = stats["max_health"]
+	p_data["max_mana"] = stats["max_mana"]
+	p_data["mana"] = stats["max_mana"]
+	p_data["speed"] = stats["speed"]
+	p_data["mana_regen"] = stats["mana_regen"]
+	class_changed.emit(player_index, new_class)
 
 
 # -- Class Cycling -------------------------------------------------------------
