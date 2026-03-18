@@ -3567,6 +3567,13 @@ func _handle_archer_aim(delta: float) -> void:
 	l2_pressed = _is_trigger_pressed(JOY_AXIS_TRIGGER_LEFT)
 	r2_pressed = _is_trigger_pressed(JOY_AXIS_TRIGGER_RIGHT)
 
+	# DEBUG: print trigger values every frame when trigger is pulled
+	if device_id >= 0:
+		var l2_val: float = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT)
+		var r2_val: float = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_RIGHT)
+		if l2_val > 0.01 or r2_val > 0.01:
+			print("L2=%.3f R2=%.3f pressed=%s,%s aiming=%s" % [l2_val, r2_val, l2_pressed, r2_pressed, _archer_aiming])
+
 	# Tick debug trails
 	var trail_i: int = _archer_debug_trails.size() - 1
 	while trail_i >= 0:
