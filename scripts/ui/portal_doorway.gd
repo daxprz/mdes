@@ -222,29 +222,25 @@ func _draw_back_layer() -> void:
 
 
 func _draw_doors() -> void:
+	var stone_overhang: float = 22.0  # Doors extend behind the stone pillars
 	if not _doors_open and _door_open_amount <= 0.0:
-		# Closed double doors
-		var half_w: float = DOORWAY_WIDTH / 2.0
+		# Closed double doors — wider than the opening to sit behind pillars
+		var half_w: float = DOORWAY_WIDTH / 2.0 + stone_overhang
 		var door_h: float = DOORWAY_HEIGHT - 10.0
 
-		# Left door
 		_draw_single_door(-half_w, -door_h, half_w, door_h, false)
-		# Right door
 		_draw_single_door(0, -door_h, half_w, door_h, true)
 		return
 
 	if _door_open_amount > 0.0:
-		# Doors swinging open (perspective effect: width shrinks as they open)
-		var half_w: float = DOORWAY_WIDTH / 2.0
+		var half_w: float = DOORWAY_WIDTH / 2.0 + stone_overhang
 		var door_h: float = DOORWAY_HEIGHT - 10.0
 		var open_ratio: float = _door_open_amount
 		var visible_width: float = half_w * (1.0 - open_ratio * 0.85)
 
 		if visible_width > 2.0:
-			# Left door (swings left)
 			var left_x: float = -half_w
 			_draw_single_door(left_x, -door_h, visible_width, door_h, false)
-			# Right door (swings right)
 			var right_x: float = half_w - visible_width
 			_draw_single_door(right_x, -door_h, visible_width, door_h, true)
 
