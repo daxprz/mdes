@@ -213,7 +213,37 @@ func _setup_fireflies() -> void:
 	var ff_script := load("res://scripts/effects/fireflies.gd")
 	_firefly_manager = Node2D.new()
 	_firefly_manager.set_script(ff_script)
-	_firefly_manager.setup(Rect2(100, 400, 1720, 500))
+
+	# Spawn zones for fireflies:
+	# Layout reference:
+	#   Floor: y=900, Low platforms: y=760 (left x~329-751, right x~1169-1591)
+	#   Top platforms: y=540 (left x~526-814, right x~1106-1394)
+	#   Trees: left x=250, right x=1670
+	#   Door: x=960, width ~130
+	var zones: Array[Rect2] = [
+		# 1. Large upper area (full width minus 50px, above platforms)
+		Rect2(50, 50, 1820, 490),
+		# 2. Open area left of door (between low-left platform and door)
+		Rect2(752, 760, 143, 140),
+		# 3. Open area right of door (between door and low-right platform)
+		Rect2(1025, 760, 144, 140),
+		# 4. Thin band at bottom (between floor and lowest platforms)
+		Rect2(50, 830, 1820, 60),
+		# 5. Area to the left of the left tree
+		Rect2(50, 500, 180, 350),
+		# 6. Area to the right of the right tree
+		Rect2(1700, 500, 170, 350),
+	]
+	# Weights: larger zones get more fireflies
+	var weights: Array[float] = [
+		8.0,   # Large upper area — most fireflies
+		1.5,   # Left of door
+		1.5,   # Right of door
+		2.0,   # Bottom band
+		1.5,   # Left of tree
+		1.5,   # Right of tree
+	]
+	_firefly_manager.setup_zones(zones, weights)
 	add_child(_firefly_manager)
 
 
