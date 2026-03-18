@@ -88,6 +88,7 @@ var _debug_mode: bool = false
 var _debug_labels: Dictionary = {}  # player_index -> Label
 var _hud_popups: Dictionary = {}  # player_index -> true (HUD popup visible for this player)
 var _popup_panels: Dictionary = {}  # player_index -> Control node in canvas
+var profile_select_mode: bool = false  # True when in pause-menu profile selection mode
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -678,6 +679,16 @@ func _input(event: InputEvent) -> void:
 				create_profile_requested.emit(device_id)
 				return
 
+	# Don't process D-pad for class/profile while pause menu is showing
+	# (pause menu handles its own D-pad navigation)
+	var is_paused: bool = get_tree().paused
+	if is_paused and not profile_select_mode:
+		return
+
+	# Determine if profile/class cycling is allowed
+	var allow_profiles: bool = is_title or profile_select_mode
+	var allow_classes: bool = is_title or profile_select_mode or (not is_paused)
+
 	# D-pad input
 	if event is InputEventJoypadButton and event.pressed:
 		var pi := _get_player_index_for_device(device_id)
@@ -688,8 +699,8 @@ func _input(event: InputEvent) -> void:
 		if _cycle_cooldowns.has(cooldown_key):
 			return
 
-		# Profile cycling: title screen only
-		if is_title:
+		# Profile cycling: title screen or profile select mode only
+		if allow_profiles:
 			if event.button_index == 11:  # D-pad Up
 				_cycle_profile(pi, device_id, -1)
 				_cycle_cooldowns[cooldown_key] = 0.3
@@ -697,26 +708,28 @@ func _input(event: InputEvent) -> void:
 				_cycle_profile(pi, device_id, 1)
 				_cycle_cooldowns[cooldown_key] = 0.3
 
-		# Class cycling: ANY time
-		if event.button_index == 13:  # D-pad Left
-			_cycle_class(pi, -1)
-			_cycle_cooldowns[cooldown_key] = 0.2
-		elif event.button_index == 14:  # D-pad Right
-			_cycle_class(pi, 1)
-			_cycle_cooldowns[cooldown_key] = 0.2
+		# Class cycling: title/profile-select (unlimited) or gameplay (rift-limited)
+		if allow_classes:
+			if event.button_index == 13:  # D-pad Left
+				_cycle_class(pi, -1, is_title or profile_select_mode)
+				_cycle_cooldowns[cooldown_key] = 0.2
+			elif event.button_index == 14:  # D-pad Right
+				_cycle_class(pi, 1, is_title or profile_select_mode)
+				_cycle_cooldowns[cooldown_key] = 0.2
 
-	# Keyboard: Q/E for class (always), R/F for profile (title only)
+	# Keyboard: Q/E for class, R/F for profile
 	if event is InputEventKey and event.pressed:
 		var pi := _get_player_index_for_device(-1)
 		if pi < 0:
 			return
-		if event.keycode == KEY_Q:
-			_cycle_class(pi, -1)
-		elif event.keycode == KEY_E:
-			_cycle_class(pi, 1)
-		elif is_title and event.keycode == KEY_R:
+		if allow_classes:
+			if event.keycode == KEY_Q:
+				_cycle_class(pi, -1, is_title or profile_select_mode)
+			elif event.keycode == KEY_E:
+				_cycle_class(pi, 1, is_title or profile_select_mode)
+		if allow_profiles and event.keycode == KEY_R:
 			_cycle_profile(pi, -1, -1)
-		elif is_title and event.keycode == KEY_F:
+		elif allow_profiles and event.keycode == KEY_F:
 			_cycle_profile(pi, -1, 1)
 
 
@@ -841,13 +854,14 @@ func _set_player_class(player_index: int, new_class: PlayerManager.CharacterClas
 
 # -- Class Cycling -------------------------------------------------------------
 
-func _cycle_class(player_index: int, direction: int) -> void:
-	if class_change_locked.has(player_index):
-		return
-	if tentacle_lost.has(player_index):
-		return
-	if active_tentacle_count >= MAX_ACTIVE_TENTACLES:
-		return
+func _cycle_class(player_index: int, direction: int, ignore_rift: bool = false) -> void:
+	if not ignore_rift:
+		if class_change_locked.has(player_index):
+			return
+		if tentacle_lost.has(player_index):
+			return
+		if active_tentacle_count >= MAX_ACTIVE_TENTACLES:
+			return
 	var p_data: Dictionary = PlayerManager.get_player(player_index)
 	if p_data.is_empty():
 		return

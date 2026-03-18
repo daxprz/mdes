@@ -7,12 +7,15 @@ extends CanvasLayer
 
 var _selected := 0
 var _active := false
+var _profile_select_active := false  # Profile selection sub-mode
 var _nav_cooldown: float = 0.0
 const NAV_COOLDOWN_TIME := 0.25
 
 var _panel: PanelContainer
+var _overlay: ColorRect
 var _menu_labels: Array[Label] = []
-var _menu_texts := ["RESUME", "QUIT TO MAIN MENU", "QUIT GAME"]
+var _menu_texts := ["RESUME", "SELECT PROFILE", "QUIT TO MAIN MENU", "QUIT GAME"]
+var _profile_select_label: Label = null
 
 
 func _ready() -> void:
@@ -23,13 +26,13 @@ func _ready() -> void:
 
 
 func _build_ui() -> void:
-	var overlay := ColorRect.new()
-	overlay.name = "Overlay"
-	overlay.anchors_preset = Control.PRESET_FULL_RECT
-	overlay.anchor_right = 1.0
-	overlay.anchor_bottom = 1.0
-	overlay.color = Color(0, 0, 0, 0.6)
-	add_child(overlay)
+	_overlay = ColorRect.new()
+	_overlay.name = "Overlay"
+	_overlay.anchors_preset = Control.PRESET_FULL_RECT
+	_overlay.anchor_right = 1.0
+	_overlay.anchor_bottom = 1.0
+	_overlay.color = Color(0, 0, 0, 0.6)
+	add_child(_overlay)
 
 	_panel = PanelContainer.new()
 	_panel.anchors_preset = Control.PRESET_CENTER
@@ -79,6 +82,22 @@ func _build_ui() -> void:
 		vbox.add_child(lbl)
 		_menu_labels.append(lbl)
 
+	# Profile selection mode label (hidden by default)
+	_profile_select_label = Label.new()
+	_profile_select_label.text = "D-Pad: select profile/class. Press START to continue."
+	_profile_select_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_profile_select_label.add_theme_font_size_override("font_size", 20)
+	_profile_select_label.modulate = Color(1.0, 0.85, 0.3)
+	_profile_select_label.anchors_preset = Control.PRESET_CENTER_TOP
+	_profile_select_label.anchor_left = 0.5
+	_profile_select_label.anchor_right = 0.5
+	_profile_select_label.offset_left = -300
+	_profile_select_label.offset_right = 300
+	_profile_select_label.offset_top = 40
+	_profile_select_label.offset_bottom = 70
+	_profile_select_label.visible = false
+	add_child(_profile_select_label)
+
 
 func _process(delta: float) -> void:
 	if _nav_cooldown > 0.0:
@@ -86,8 +105,13 @@ func _process(delta: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# START/Options or Escape to toggle pause — any player
+	# START/Options or Escape
 	if event.is_action_pressed("pause") or event.is_action_pressed("ps_button"):
+		if _profile_select_active:
+			# Exit profile selection mode, return to pause menu
+			_exit_profile_select()
+			get_viewport().set_input_as_handled()
+			return
 		if _active:
 			_unpause()
 			get_viewport().set_input_as_handled()
@@ -178,8 +202,13 @@ func _update_selection() -> void:
 
 func _confirm() -> void:
 	if _selected == 0:
+		# RESUME
 		_unpause()
 	elif _selected == 1:
+		# SELECT PROFILE
+		_enter_profile_select()
+	elif _selected == 2:
+		# QUIT TO MAIN MENU
 		ProfileManager.auto_save()
 		var saved_choices: Dictionary = {}
 		for pi in PlayerManager.players.keys():
@@ -189,10 +218,44 @@ func _confirm() -> void:
 				"character_class": p.get("character_class", 0),
 			}
 		PlayerManager.set_meta("saved_choices", saved_choices)
+		# Reset rift status
+		PlayerHUD.class_change_locked.clear()
+		PlayerHUD.tentacle_lost.clear()
+		PlayerHUD.active_tentacle_count = 0
 		_unpause()
 		GameManager.reset_game()
 		PlayerManager.reset_all_players()
 		get_tree().change_scene_to_file("res://scenes/ui/title_screen.tscn")
-	elif _selected == 2:
+	elif _selected == 3:
+		# QUIT GAME
 		ProfileManager.auto_save()
 		get_tree().quit()
+
+
+func _enter_profile_select() -> void:
+	_profile_select_active = true
+	_active = false  # Disable normal menu input
+	_panel.visible = false
+	_profile_select_label.visible = true
+	PlayerHUD.profile_select_mode = true
+
+	# Open all player HUD popups
+	for pi in PlayerManager.players.keys():
+		if not PlayerHUD._hud_popups.has(pi):
+			PlayerHUD._hud_popups[pi] = true
+			PlayerHUD._create_popup_panel(pi)
+
+
+func _exit_profile_select() -> void:
+	_profile_select_active = false
+	_active = true  # Re-enable menu input
+	_panel.visible = true
+	_profile_select_label.visible = false
+	PlayerHUD.profile_select_mode = false
+
+	# Close all player HUD popups
+	for pi in PlayerHUD._hud_popups.keys():
+		PlayerHUD._remove_popup_panel(pi)
+	PlayerHUD._hud_popups.clear()
+
+	_update_selection()
