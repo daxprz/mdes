@@ -27,7 +27,7 @@ const TAIL_WHIP_STIFFNESS := 2.0  # Loose only during whip
 const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
 # Foot-driven locomotion
-const STEP_THRESHOLD := 60.0   # How far behind a foot gets before it steps
+const STEP_THRESHOLD := 35.0   # How far behind a foot gets before it steps (tight)
 const STEP_DURATION := 0.12    # Seconds to complete a step (quick feet)
 const STEP_HEIGHT := 28.0      # How high foot lifts during step
 const STEP_OVERSHOOT := 0.25   # Overshoot fraction past target
