@@ -3036,8 +3036,19 @@ func _end_leap() -> void:
 	else:
 		_precog_path.clear()
 		_precog_path_edges.clear()
-		_state = State.CHASE
 		_time_since_strike_range = 0.0
+
+		# After all platform hops: if target is within leap range, do an
+		# aerial strike directly at the PLAYER (not a platform).
+		# This handles targets on undetected surfaces (cave wall ledges, etc.)
+		if is_instance_valid(_target):
+			var to_target: float = global_position.distance_to(_target.global_position)
+			if to_target < LEAP_RANGE and _count_active_legs() >= 2:
+				_leap_cooldown = 0.0
+				_start_leap()
+				return
+
+		_state = State.CHASE
 
 
 func _spawn_slash_effect(local_pos: Vector2) -> void:
