@@ -129,6 +129,7 @@ var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
 var _initialized: bool = false  # First-frame init flag
 var _leap_cooldown: float = 0.0  # Cooldown between leaps
 var _leap_ik_off: bool = false   # Disable leg IK during leap (legs positioned manually)
+var _leap_body_angle: float = 0.0  # Body rotation during leap
 var _leap_phase: float = 0.0    # Sub-phase progress within leap states
 var _leap_target_pos: Vector2 = Vector2.ZERO  # Where we're leaping to
 var _leap_slash_count: int = 0  # Slashes delivered so far
@@ -149,6 +150,7 @@ var _head_severed: bool = false
 
 # Hitbox nodes (assigned in _ready from scene tree or created dynamically)
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
+var _body_collision: CollisionShape2D = null  # Main body collision shape
 
 
 func _ready() -> void:
@@ -255,11 +257,11 @@ func _init_collision() -> void:
 	var shape := CapsuleShape2D.new()
 	shape.radius = 10.0
 	shape.height = SPINE_SEG_LEN * 2.0 + shape.radius * 2.0
-	var col := CollisionShape2D.new()
-	col.shape = shape
-	col.rotation = PI / 2.0  # Horizontal
-	col.position = Vector2(0, -10.0)  # Centered on body, slightly above floor
-	add_child(col)
+	_body_collision = CollisionShape2D.new()
+	_body_collision.shape = shape
+	_body_collision.rotation = PI / 2.0  # Horizontal
+	_body_collision.position = Vector2(0, -10.0)  # Centered on body, slightly above floor
+	add_child(_body_collision)
 
 
 func _init_hitboxes() -> void:
@@ -333,18 +335,24 @@ func _physics_process(delta: float) -> void:
 		State.TRANSITION_QUADRUPED:
 			_do_transition_quadruped(delta)
 
-	# FOOT-DRIVEN LOCOMOTION (skip during leap)
+	# Leap states handle their own skeleton — skip normal locomotion/pose
 	var in_leap: bool = (_state == State.ATTACK_LEAP_WINDUP or _state == State.ATTACK_LEAP_AIRBORNE
 		or _state == State.ATTACK_LEAP_STRIKE or _state == State.ATTACK_LEAP_THRASH)
-	if not in_leap:
+
+	if in_leap:
+		_update_leap_collision(delta)
+	else:
 		_update_foot_push(delta)
 
 	move_and_slide()
 
-	# Update skeleton after body has moved
-	_update_spine()
-	_update_gait(delta)
-	_solve_pose(delta)
+	if in_leap:
+		_update_leap_pose(delta)
+	else:
+		_update_spine()
+		_update_gait(delta)
+		_solve_pose(delta)
+
 	_update_hitbox_positions()
 
 	queue_redraw()
@@ -892,6 +900,118 @@ func _do_transition_quadruped(delta: float) -> void:
 
 # -- Vertical Leap Attack ------------------------------------------------------
 
+func _update_leap_collision(delta: float) -> void:
+	## During leap: rotate the collision shape to match the body's flight angle.
+	if _state == State.ATTACK_LEAP_WINDUP:
+		# During windup, rotate collision to match spine tilt
+		var to_target: Vector2 = _leap_target_pos - global_position
+		var target_angle: float = to_target.angle()
+		_leap_body_angle = lerpf(_leap_body_angle, target_angle, 3.0 * delta)
+	elif _state == State.ATTACK_LEAP_AIRBORNE:
+		# During flight, align with velocity
+		if velocity.length() > 10:
+			_leap_body_angle = velocity.angle()
+	# Apply rotation to collision shape
+	if _body_collision:
+		_body_collision.rotation = _leap_body_angle
+		# Position collision at spine center
+		_body_collision.position = (_spine[0] + _spine[2]) * 0.5
+
+
+func _update_leap_pose(delta: float) -> void:
+	## Position ALL skeleton parts relative to the body during leap.
+	## The body (CharacterBody2D) moves via velocity — skeleton follows it.
+
+	# Body aim direction
+	var aim_dir: Vector2
+	if _state == State.ATTACK_LEAP_AIRBORNE and velocity.length() > 10:
+		aim_dir = velocity.normalized()
+		# Blend toward target
+		if is_instance_valid(_target):
+			var to_target: Vector2 = (_target.global_position - global_position).normalized()
+			aim_dir = aim_dir.lerp(to_target, 0.5)
+	elif is_instance_valid(_target):
+		aim_dir = (_target.global_position - global_position).normalized()
+	else:
+		aim_dir = Vector2(_facing, 0)
+
+	var aim_perp: Vector2 = Vector2(-aim_dir.y, aim_dir.x)
+	if aim_perp.y > 0:
+		aim_perp = -aim_perp  # Keep "up" pointing screen-up
+
+	# -- Spine aligns along aim direction --
+	var spine_center := Vector2.ZERO  # Local center
+	if _state == State.ATTACK_LEAP_WINDUP:
+		# During windup, gradually tilt from horizontal to aimed
+		var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
+		var rest_spine0 := Vector2(SPINE_SEG_LEN * _facing, -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN))
+		var aimed_spine0 := spine_center + aim_dir * SPINE_SEG_LEN
+		_spine[0] = _spine[0].lerp(rest_spine0.lerp(aimed_spine0, t), 6.0 * delta)
+		var rest_spine2 := Vector2(-SPINE_SEG_LEN * _facing, -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN))
+		var aimed_spine2 := spine_center - aim_dir * SPINE_SEG_LEN
+		_spine[2] = _spine[2].lerp(rest_spine2.lerp(aimed_spine2, t), 6.0 * delta)
+		_spine[1] = (_spine[0] + _spine[2]) * 0.5
+	else:
+		# Airborne/strike/thrash: spine fully aimed
+		_spine[0] = _spine[0].lerp(spine_center + aim_dir * SPINE_SEG_LEN, 10.0 * delta)
+		_spine[2] = _spine[2].lerp(spine_center - aim_dir * SPINE_SEG_LEN, 10.0 * delta)
+		_spine[1] = (_spine[0] + _spine[2]) * 0.5
+
+	# -- Neck + Head: aim at target --
+	_neck[0] = _spine[0]
+	var neck_tip: Vector2 = _spine[0] + aim_dir * NECK_LEN
+	_neck[1] = _neck[1].lerp(neck_tip, 8.0 * delta)
+	var skull_pos: Vector2 = _neck[1] + aim_dir * 14.0
+	_skull = _skull.lerp(skull_pos, 8.0 * delta)
+	var jaw_down: Vector2 = -aim_perp  # Jaw opens away from "up"
+	_jaw = _jaw.lerp(_skull + jaw_down * (JAW_LEN * 0.3 + _jaw_open * JAW_LEN * 0.5), 8.0 * delta)
+
+	# -- Tail: trails behind --
+	if not _tail_severed:
+		var tail_dir: Vector2 = -aim_dir
+		if _state == State.ATTACK_LEAP_WINDUP:
+			# Tail plants on ground during windup (handled by _do_leap_windup)
+			pass
+		else:
+			# Airborne: tail streams straight behind
+			for i in range(5):
+				var tail_target: Vector2 = _spine[2] + tail_dir * TAIL_SEG_LEN * (i + 1)
+				_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
+
+	# -- Front legs: tucked against chest --
+	for li in [0, 1]:
+		if _leg_severed[li]:
+			continue
+		_foot_planted[li] = false
+		_legs[li][0] = _spine[0] + aim_perp * (3.0 if li == 0 else -3.0)
+		var tuck: Vector2 = _legs[li][0] + aim_perp * -8.0  # Tucked close
+		_legs[li][2] = _legs[li][2].lerp(tuck, 8.0 * delta)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+
+	# -- Rear legs: during windup compress, airborne stretch behind --
+	for li in [2, 3]:
+		if _leg_severed[li]:
+			continue
+		_legs[li][0] = _spine[2] + aim_perp * (3.0 if li == 2 else -3.0)
+		if _state == State.ATTACK_LEAP_WINDUP:
+			# Compress: feet close to hips
+			var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
+			if t > 0.5:
+				_foot_planted[li] = false
+				var compressed: Vector2 = _legs[li][0] + aim_perp * -10.0
+				_legs[li][2] = _legs[li][2].lerp(compressed, 4.0 * delta)
+				_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+		else:
+			# Airborne: stretch fully behind
+			_foot_planted[li] = false
+			var stretched: Vector2 = _legs[li][0] - aim_dir * (LEG_UPPER_LEN + LEG_LOWER_LEN - 2)
+			_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
+			_legs[li][1] = _legs[li][0] - aim_dir * LEG_UPPER_LEN
+
+	# -- Floor constraints OFF during airborne --
+	# (handled by skipping _solve_pose entirely)
+
+
 func _start_leap() -> void:
 	_state = State.ATTACK_LEAP_WINDUP
 	_attack_timer = 0.0
@@ -901,7 +1021,8 @@ func _start_leap() -> void:
 	_leap_slash_count = 0
 	_leap_thrash_count = 0
 	_leap_slash_side = 1
-	_leap_ik_off = false  # IK still on during early windup for rear legs
+	_leap_ik_off = true  # IK off for entire leap sequence
+	_leap_body_angle = 0.0
 	velocity.x = 0
 	if is_instance_valid(_target):
 		_leap_target_pos = _target.global_position
@@ -1131,8 +1252,13 @@ func _end_leap() -> void:
 	_posture_blend = 0.0
 	_tail_whipping = false
 	_leap_ik_off = false  # Re-enable IK
+	_leap_body_angle = 0.0
 	_state = State.CHASE
 	_attack_timer = 0.0
+	# Reset collision shape to normal horizontal orientation
+	if _body_collision:
+		_body_collision.rotation = PI / 2.0
+		_body_collision.position = Vector2(0, -10.0)
 	# Re-plant feet at current positions
 	for li in range(4):
 		if not _leg_severed[li]:
@@ -1529,13 +1655,24 @@ func _draw_debug() -> void:
 	draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
 	draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
-	# -- Collision shape bounds (horizontal capsule) --
+	# -- Collision shape bounds (rotates during leap) --
 	var col_r: float = 10.0
-	var col_w: float = SPINE_SEG_LEN * 2.0 + col_r * 2.0
-	var col_center := Vector2(0, -10.0)
-	draw_rect(Rect2(col_center.x - col_w / 2.0, col_center.y - col_r, col_w, col_r * 2.0), Color(1, 0, 1, 0.15))
-	draw_rect(Rect2(col_center.x - col_w / 2.0, col_center.y - col_r, col_w, col_r * 2.0), Color(1, 0, 1, 0.5), false, 1.0)
-	draw_string(font, col_center + Vector2(-col_w / 2.0, -col_r - 4), "COLLISION", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0, 1, 0.7))
+	var col_half_w: float = SPINE_SEG_LEN + col_r
+	var col_center: Vector2 = _body_collision.position if _body_collision else Vector2(0, -10)
+	var col_angle: float = _body_collision.rotation if _body_collision else PI / 2.0
+	var col_dir: Vector2 = Vector2(cos(col_angle), sin(col_angle))
+	var col_perp: Vector2 = Vector2(-col_dir.y, col_dir.x)
+	# Draw rotated rectangle as 4 lines
+	var c1: Vector2 = col_center + col_dir * col_half_w + col_perp * col_r
+	var c2: Vector2 = col_center + col_dir * col_half_w - col_perp * col_r
+	var c3: Vector2 = col_center - col_dir * col_half_w - col_perp * col_r
+	var c4: Vector2 = col_center - col_dir * col_half_w + col_perp * col_r
+	draw_polygon(PackedVector2Array([c1, c2, c3, c4]), PackedColorArray([Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15)]))
+	draw_line(c1, c2, Color(1, 0, 1, 0.5), 1.0)
+	draw_line(c2, c3, Color(1, 0, 1, 0.5), 1.0)
+	draw_line(c3, c4, Color(1, 0, 1, 0.5), 1.0)
+	draw_line(c4, c1, Color(1, 0, 1, 0.5), 1.0)
+	draw_string(font, col_center + Vector2(-20, -col_r - 4), "COLLISION", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0, 1, 0.7))
 
 	# -- Spine points --
 	for i in range(_spine.size()):
