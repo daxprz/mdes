@@ -1625,16 +1625,8 @@ func _simulate_leap_paths() -> void:
 
 			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
-			# Reject arcs where the closest approach to the target is from below.
-			# Find the arc point nearest to the target — if it's below the platform, reject.
-			if clear:
-				var best_approach_y: float = INF
-				for pt in arc_c:
-					if pt.distance_to(target_pos) < LEAP_STRIKE_REACH * 2:
-						if pt.y < best_approach_y:
-							best_approach_y = pt.y
-				if best_approach_y > target_floor_y + 10:
-					clear = false  # Approaching from below the platform
+			# Arrival point filter + airspace check handle underside prevention.
+			# Arc clearance prevents hitting platforms mid-flight.
 
 			var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
 
