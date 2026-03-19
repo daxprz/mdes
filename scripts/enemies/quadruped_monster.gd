@@ -45,7 +45,7 @@ const SWIPE_DAMAGE := 20
 const TAIL_DAMAGE := 18
 const LUNGE_DAMAGE := 20
 const LUNGE_SPEED := 300.0
-const BITE_RANGE := 60.0
+const BITE_RANGE := 90.0  # Generous — skull can reach this far
 const TAIL_RANGE := 90.0
 const ATTACK_COOLDOWN := 0.8  # Fast attack cycling
 const AGGRO_SWITCH_HITS := 3
@@ -2604,7 +2604,7 @@ func _spawn_blood_spatter(local_pos: Vector2) -> void:
 
 func _check_bite_hit() -> void:
 	var bite_pos: Vector2 = global_position + _skull
-	_damage_players_in_range(bite_pos, 30.0, BITE_DAMAGE)
+	_damage_players_in_range(bite_pos, 50.0, BITE_DAMAGE)
 
 
 func _check_swipe_hit(leg_idx: int) -> void:

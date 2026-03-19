@@ -156,6 +156,9 @@ func _execute(command: String) -> String:
 					p.damage_taken = 0
 			return "OK: reset HP"
 
+		"fps":
+			return "fps=%.0f" % Engine.get_frames_per_second()
+
 		"debugdraw":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "debug_draw_enabled" in e:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Baseline: measure damage dealt to dummy in 20s per scenario
+# Baseline: damage + FPS per scenario
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -24,7 +24,11 @@ if [ "$EC" = "0" ]; then
     exit 1
 fi
 R "tab 1"
-sleep 1
+sleep 2
+
+# Get initial FPS
+INIT_FPS=$(R "fps" | grep -o '[0-9]*')
+printf "Initial FPS: %s\n\n" "$INIT_FPS"
 
 SCENARIOS="
 same_floor_near:800:885
@@ -42,9 +46,10 @@ P2_to_P4:1250:525
 TOTAL_DMG=0
 PASS=0
 FAIL=0
+MIN_FPS=999
 
-printf "%-20s %6s %6s %s\n" "SCENARIO" "DMG" "TIME" "MONSTER_POS"
-printf "%-20s %6s %6s %s\n" "--------" "---" "----" "-----------"
+printf "%-20s %5s %5s %5s %s\n" "SCENARIO" "DMG" "FPS" "minFPS" "MONSTER_POS"
+printf "%-20s %5s %5s %5s %s\n" "--------" "---" "---" "------" "-----------"
 
 for SCENE in $SCENARIOS; do
     LABEL=${SCENE%%:*}
@@ -57,11 +62,26 @@ for SCENE in $SCENARIOS; do
     : > /tmp/godot_baseline.log
     sleep 0.3
     R "precog" > /dev/null 2>&1
-    sleep 15
+
+    # Sample FPS during the scenario
+    SCENARIO_MIN_FPS=999
+    for I in $(seq 1 15); do
+        sleep 1
+        FPS=$(R "fps" | grep -o '[0-9]*')
+        FPS=${FPS:-0}
+        if [ "$FPS" -lt "$SCENARIO_MIN_FPS" ]; then
+            SCENARIO_MIN_FPS=$FPS
+        fi
+        if [ "$FPS" -lt "$MIN_FPS" ]; then
+            MIN_FPS=$FPS
+        fi
+    done
+
     HPLINE=$(R "hp")
     DMG=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
     DMG=${DMG:-0}
     MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
+    END_FPS=$(R "fps" | grep -o '[0-9]*')
 
     if [ "$DMG" -gt 0 ]; then
         PASS=$((PASS + 1))
@@ -70,7 +90,7 @@ for SCENE in $SCENARIOS; do
     fi
     TOTAL_DMG=$((TOTAL_DMG + DMG))
 
-    printf "%-20s %5d %5ss %s\n" "$LABEL" "$DMG" "15" "monster=$MPOS"
+    printf "%-20s %5d %5s %5d %s\n" "$LABEL" "$DMG" "$END_FPS" "$SCENARIO_MIN_FPS" "monster=$MPOS"
 done
 
-printf "\n=== SUMMARY: %d/%d passed, total damage=%d ===\n" "$PASS" "$((PASS + FAIL))" "$TOTAL_DMG"
+printf "\n=== SUMMARY: %d/%d passed, total_dmg=%d, min_fps=%d ===\n" "$PASS" "$((PASS + FAIL))" "$TOTAL_DMG" "$MIN_FPS"
