@@ -3038,14 +3038,27 @@ func _end_leap() -> void:
 		_precog_path_edges.clear()
 		_time_since_strike_range = 0.0
 
-		# After all platform hops: if target is within leap range, do an
-		# aerial strike directly at the PLAYER (not a platform).
-		# This handles targets on undetected surfaces (cave wall ledges, etc.)
+		# After all platform hops: if target is still not reachable by walking,
+		# do a RAW ballistic leap directly at the player — no planning, just launch.
 		if is_instance_valid(_target):
-			var to_target: float = global_position.distance_to(_target.global_position)
-			if to_target < LEAP_RANGE and _count_active_legs() >= 2:
-				_leap_cooldown = 0.0
-				_start_leap()
+			var to_target: Vector2 = _target.global_position - global_position
+			var dist: float = to_target.length()
+			if dist < LEAP_RANGE and dist > GRAB_RANGE:
+				# Raw launch: aim directly at the player
+				var flight_time: float = 0.6
+				var launch_vx: float = to_target.x / flight_time
+				var launch_vy: float = (to_target.y - 0.5 * GRAVITY * flight_time * flight_time) / flight_time
+				velocity = Vector2(launch_vx, launch_vy)
+				_leap_target_pos = _target.global_position
+				set_meta("_leap_chosen_vel", velocity)
+				_leap_launch_pos = global_position
+				_leap_found_path = true
+				_state = State.ATTACK_LEAP_AIRBORNE
+				_attack_timer = 0.0
+				_leap_ik_off = true
+				_leap_cooldown = LEAP_COOLDOWN
+				print("PRECOG: RAW AERIAL STRIKE at (%.0f,%.0f) vel=(%.0f,%.0f)" % [
+					_target.global_position.x, _target.global_position.y, velocity.x, velocity.y])
 				return
 
 		_state = State.CHASE
