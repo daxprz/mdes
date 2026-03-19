@@ -756,10 +756,13 @@ func _animate_step(li: int, delta: float) -> void:
 	_legs[li][2] = world_pos - global_position
 
 	if _step_timers[li] <= 0.0:
-		# Foot plants at the new world position
+		# Re-raycast floor at landing position to snap to actual surface
+		var land_local: Vector2 = _step_targets[li] - global_position
+		var floor_y: float = _raycast_floor(land_local) + global_position.y
+		var land_pos := Vector2(_step_targets[li].x, floor_y)
 		_foot_planted[li] = true
-		_foot_world[li] = _step_targets[li]
-		_legs[li][2] = _foot_world[li] - global_position
+		_foot_world[li] = land_pos
+		_legs[li][2] = land_pos - global_position
 
 
 # -- Floor raycasting ----------------------------------------------------------
