@@ -369,6 +369,8 @@ func _physics_process(delta: float) -> void:
 		_attack_cooldown -= delta
 	if _leap_cooldown > 0.0:
 		_leap_cooldown -= delta
+	if _precog_cooldown > 0.0:
+		_precog_cooldown -= delta
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
@@ -1681,7 +1683,13 @@ func _precog_build_graph_tick() -> void:
 			_precog_process_j = 0
 
 
+var _precog_cooldown: float = 0.0  # Prevent precog spam
+
 func _start_precognition() -> void:
+	if _precog_cooldown > 0.0:
+		_state = State.CHASE
+		return
+	_precog_cooldown = 5.0  # Don't re-enter precog for 5 seconds
 	_state = State.PRECOGNITION
 	_attack_timer = 0.0
 	_precog_phase = 0
@@ -1712,7 +1720,7 @@ func _do_precognition(delta: float) -> void:
 	match _precog_phase:
 		0:
 			# Build graph if not cached yet
-			if _precog_edges.is_empty() or _precog_platforms.size() < 3:
+			if not _precog_platforms_cached or _precog_platforms.size() < 3:
 				_precache_platforms()
 			# Wait for async graph building to complete
 			if _precog_graph_building:
