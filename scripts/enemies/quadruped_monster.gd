@@ -510,26 +510,14 @@ func _solve_pose(delta: float) -> void:
 		if _leap_ik_off:
 			continue
 
-		# Sanity check: clamp foot if it's too far from hip (wonky leg detection)
+		# Sanity check: only clamp if foot is wildly far (> 2x leg reach)
 		var hip: Vector2 = _legs[li][0]
 		var foot: Vector2 = _legs[li][2]
 		var hip_to_foot: float = hip.distance_to(foot)
-		if hip_to_foot > max_leg_reach * 1.1:
-			# Foot is unreachable — snap it to directly below the hip
-			var clamped_foot: Vector2 = hip + (foot - hip).normalized() * max_leg_reach * 0.9
+		if hip_to_foot > max_leg_reach * 2.0:
+			var clamped_foot: Vector2 = hip + (foot - hip).normalized() * max_leg_reach
 			_legs[li][2] = clamped_foot
-			# Also re-plant at the corrected world position
 			_foot_world[li] = global_position + clamped_foot
-			_foot_planted[li] = true
-
-		# Additional check: foot should not be on a wildly different Y level
-		# (e.g., foot dangling to a platform 200px below)
-		if _foot_planted[li] and absf(foot.y - hip.y) > max_leg_reach * 1.2:
-			# Foot is on a different level — force replant at current floor
-			var floor_y: float = _raycast_floor(hip)
-			var fixed_foot := Vector2(hip.x, minf(floor_y, hip.y + max_leg_reach * 0.9))
-			_legs[li][2] = fixed_foot
-			_foot_world[li] = global_position + fixed_foot
 			_foot_planted[li] = true
 
 		# Knee: solved via 2-bone IK — snap quickly (no slow lerp)
@@ -633,22 +621,15 @@ func _update_gait(delta: float) -> void:
 			var hip: Vector2 = _legs[li][0]
 			var hip_to_foot_dist: float = hip.distance_to(local_foot)
 
-			# Clamp: foot must stay within leg reach
-			if hip_to_foot_dist > max_reach * 0.95:
-				# Pull foot toward hip — keep it reachable
-				local_foot = hip + (local_foot - hip).normalized() * max_reach * 0.9
+			# Only clamp if the foot is wildly out of range (> 2x leg length)
+			# or on a different platform level (> 1.5x leg length below hip)
+			if hip_to_foot_dist > max_reach * 2.0:
+				local_foot = hip + (local_foot - hip).normalized() * max_reach
 				_foot_world[li] = global_position + local_foot
 
-			# Clamp: foot must not be more than leg-length below the hip
-			# (prevents foot reaching down to a lower platform)
-			if local_foot.y > hip.y + max_reach:
+			# Prevent foot from reaching down to a much lower platform
+			if local_foot.y > hip.y + max_reach * 1.5:
 				local_foot.y = hip.y + max_reach
-				_foot_world[li] = global_position + local_foot
-
-			# Clamp: foot must stay roughly under the body (not spread too wide)
-			var max_spread: float = max_reach * 0.8
-			if absf(local_foot.x - hip.x) > max_spread:
-				local_foot.x = hip.x + signf(local_foot.x - hip.x) * max_spread
 				_foot_world[li] = global_position + local_foot
 
 			_legs[li][2] = local_foot
