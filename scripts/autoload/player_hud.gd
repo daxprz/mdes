@@ -86,6 +86,8 @@ const MAX_ACTIVE_TENTACLES := 4  # Max rift tentacles in-game at once
 var active_tentacle_count: int = 0
 var _debug_mode: bool = false
 var _debug_labels: Dictionary = {}  # player_index -> Label
+var debug_selected_enemy: Node2D = null  # TAB-cycled enemy for diagnostics
+var _debug_enemy_index: int = -1  # Index into enemies group
 var _hud_popups: Dictionary = {}  # player_index -> true (HUD popup visible for this player)
 var _popup_panels: Dictionary = {}  # player_index -> Control node in canvas
 var profile_select_mode: bool = false  # True when in pause-menu profile selection mode
@@ -658,6 +660,13 @@ func _input(event: InputEvent) -> void:
 	# Ctrl+D always toggles debug
 	if event is InputEventKey and event.pressed and event.keycode == KEY_D and event.ctrl_pressed:
 		_debug_mode = not _debug_mode
+		if not _debug_mode:
+			debug_selected_enemy = null
+			_debug_enemy_index = -1
+
+	# TAB cycles through enemies in debug mode
+	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
+		_debug_cycle_enemy()
 
 	# SEL toggles HUD popup
 	if event.is_action_pressed("debug_toggle"):
@@ -736,6 +745,18 @@ func _input(event: InputEvent) -> void:
 			_cycle_profile(pi, -1, -1)
 		elif allow_profiles and event.keycode == KEY_F:
 			_cycle_profile(pi, -1, 1)
+
+
+func _debug_cycle_enemy() -> void:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if enemies.is_empty():
+		debug_selected_enemy = null
+		_debug_enemy_index = -1
+		return
+	_debug_enemy_index = (_debug_enemy_index + 1) % enemies.size()
+	debug_selected_enemy = enemies[_debug_enemy_index]
+	if not is_instance_valid(debug_selected_enemy):
+		debug_selected_enemy = null
 
 
 func _get_device_from_event(event: InputEvent) -> int:

@@ -63,6 +63,7 @@ func _ready() -> void:
 	_setup_bats_from_config(config.get("spawn_zones", {}).get("bats", []))
 	_setup_portal_from_config(config.get("portal", {}))
 	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
+	_setup_cave_walls_from_config(config.get("cave_walls", {}))
 
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
@@ -279,8 +280,32 @@ func _setup_spawn_positions_from_config(positions: Array) -> void:
 		var new_spawns: Array[Vector2] = []
 		for p in positions:
 			new_spawns.append(Vector2(p[0], p[1]))
-		# Override the SPAWN_POSITIONS - can't change const, so use a var
 		_config_spawn_positions = new_spawns
+
+
+func _setup_cave_walls_from_config(cave_config: Dictionary) -> void:
+	if cave_config.is_empty():
+		return
+	var cave_script := load("res://scripts/effects/cave_wall.gd")
+	var floor_y: float = cave_config.get("floor_y", 900.0)
+	var ceil_y: float = cave_config.get("ceiling_y", 0.0)
+	var curve_w: float = cave_config.get("curve_width", 180.0)
+	var ledge_ratio: float = cave_config.get("ledge_height_ratio", 0.33)
+	var ledge_depth: float = cave_config.get("ledge_depth", 40.0)
+
+	for side in ["left", "right"]:
+		var wall := StaticBody2D.new()
+		wall.set_script(cave_script)
+		wall.side = side
+		wall.room_height = floor_y
+		wall.room_top = ceil_y
+		wall.curve_width = curve_w
+		wall.ledge_height_ratio = ledge_ratio
+		wall.ledge_depth = ledge_depth
+		wall.global_position = Vector2(0 if side == "left" else 1920, 0)
+		wall.z_index = -2
+		add_child(wall)
+		_dynamic_nodes.append(wall)
 
 
 # -- Process -------------------------------------------------------------------
@@ -350,6 +375,11 @@ func _input(event: InputEvent) -> void:
 		if PlayerHUD._debug_mode:
 			_debug_regenerate_nearest_scenery()
 
+	# Debug: M key spawns a quadruped monster
+	if event is InputEventKey and event.pressed and event.keycode == KEY_M:
+		if PlayerHUD._debug_mode:
+			_debug_spawn_monster()
+
 
 func _toggle_editor() -> void:
 	if _editor == null:
@@ -395,6 +425,7 @@ func _deferred_rebuild() -> void:
 	_setup_bats_from_config(config.get("spawn_zones", {}).get("bats", []))
 	_setup_portal_from_config(config.get("portal", {}))
 	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
+	_setup_cave_walls_from_config(config.get("cave_walls", {}))
 
 
 func _debug_regenerate_nearest_scenery() -> void:
@@ -420,6 +451,15 @@ func _debug_regenerate_nearest_scenery() -> void:
 		var new_seed: int = randi()
 		best_item.regenerate(new_seed)
 		print("Regenerated scenery with seed: ", new_seed)
+
+
+func _debug_spawn_monster() -> void:
+	var monster_script := load("res://scripts/enemies/quadruped_monster.gd")
+	var monster := CharacterBody2D.new()
+	monster.set_script(monster_script)
+	monster.global_position = Vector2(960, 750)
+	players_container.add_child(monster)
+	print("Spawned quadruped monster at (960, 750)")
 
 
 # -- Profile Creation ----------------------------------------------------------

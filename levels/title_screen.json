@@ -28,6 +28,241 @@
 		"width": 1920.0
 	},
 	"level_name": "title_screen",
+	"migration_patterns": [
+		{
+			"cadence": 30.0,
+			"id": "firefly_drift",
+			"phases": [
+				{
+					"zones": [
+						{
+							"point": [
+								0.0,
+								849.75
+							],
+							"radius": 224.540222167969,
+							"strength": 2.0,
+							"zone_id": 1.0
+						},
+						{
+							"point": [
+								1880.0,
+								848.0
+							],
+							"radius": 205.512313842773,
+							"strength": 2.0,
+							"zone_id": 2.0
+						},
+						{
+							"point": [
+								602.25,
+								495.25
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 14.0
+						},
+						{
+							"point": [
+								761.0,
+								498.5
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 15.0
+						},
+						{
+							"point": [
+								911.75,
+								498.0
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 16.0
+						},
+						{
+							"point": [
+								1061.5,
+								499.5
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 17.0
+						},
+						{
+							"point": [
+								1222.0,
+								502.75
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 18.0
+						},
+						{
+							"point": [
+								1402.0,
+								503.5
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 19.0
+						}
+					]
+				},
+				{
+					"zones": [
+						{
+							"point": [
+								161.0,
+								348.25
+							],
+							"radius": 154.753234863281,
+							"strength": 2.5,
+							"zone_id": 3.0
+						},
+						{
+							"point": [
+								1757.5,
+								421.5
+							],
+							"radius": 163.886581420898,
+							"strength": 2.0,
+							"zone_id": 13.0
+						},
+						{
+							"point": [
+								450.0,
+								843.25
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 20.0
+						},
+						{
+							"point": [
+								603.5,
+								850.25
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 21.0
+						},
+						{
+							"point": [
+								742.0,
+								858.75
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 22.0
+						},
+						{
+							"point": [
+								1185.25,
+								851.25
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 23.0
+						},
+						{
+							"point": [
+								1348.75,
+								853.75
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 24.0
+						},
+						{
+							"point": [
+								1490.25,
+								856.5
+							],
+							"radius": 100.0,
+							"strength": 2.0,
+							"zone_id": 25.0
+						}
+					]
+				}
+			],
+			"species": "fireflies",
+			"stagger": true
+		},
+		{
+			"cadence": 3.0,
+			"id": "bat_roost",
+			"phases": [
+				{
+					"zones": [
+						{
+							"point": [
+								101.25,
+								163.25
+							],
+							"radius": 156.250793457031,
+							"strength": 1.8,
+							"zone_id": 10.0
+						}
+					]
+				},
+				{
+					"zones": [
+						{
+							"point": [
+								944.0,
+								173.25
+							],
+							"radius": 154.75080871582,
+							"strength": 1.8,
+							"zone_id": 11.0
+						}
+					]
+				},
+				{
+					"zones": [
+						{
+							"point": [
+								1318.75,
+								427.0
+							],
+							"radius": 81.0867614746094,
+							"strength": 2.0,
+							"zone_id": 26.0
+						}
+					]
+				},
+				{
+					"zones": [
+						{
+							"point": [
+								595.25,
+								418.75
+							],
+							"radius": 89.3899459838867,
+							"strength": 2.0,
+							"zone_id": 27.0
+						}
+					]
+				},
+				{
+					"zones": [
+						{
+							"point": [
+								1735.0,
+								184.5
+							],
+							"radius": 166.054397583008,
+							"strength": 2.0,
+							"zone_id": 28.0
+						}
+					]
+				}
+			],
+			"species": "bats",
+			"stagger": true
+		}
+	],
 	"platforms": [
 		{
 			"color": [
@@ -260,60 +495,18 @@
 			}
 		]
 	},
-	"migration_patterns": [
-		{
-			"id": "firefly_drift",
-			"species": "fireflies",
-			"cadence": 30.0,
-			"stagger": true,
-			"phases": [
-				{
-					"zones": [
-						{"zone_id": 1, "point": [250, 700], "radius": 140, "strength": 2.0},
-						{"zone_id": 2, "point": [1670, 700], "radius": 140, "strength": 2.0}
-					]
-				},
-				{
-					"zones": [
-						{"zone_id": 3, "point": [960, 300], "radius": 180, "strength": 2.5}
-					]
-				},
-				{
-					"zones": [
-						{"zone_id": 4, "point": [750, 850], "radius": 120, "strength": 2.0},
-						{"zone_id": 5, "point": [1170, 850], "radius": 120, "strength": 2.0}
-					]
-				}
-			]
-		},
-		{
-			"id": "bat_roost",
-			"species": "bats",
-			"cadence": 45.0,
-			"stagger": false,
-			"phases": [
-				{
-					"zones": [
-						{"zone_id": 10, "point": [250, 500], "radius": 160, "strength": 1.8}
-					]
-				},
-				{
-					"zones": [
-						{"zone_id": 11, "point": [1670, 500], "radius": 160, "strength": 1.8}
-					]
-				},
-				{
-					"zones": [
-						{"zone_id": 12, "point": [960, 600], "radius": 200, "strength": 2.0}
-					]
-				}
-			]
-		}
-	],
 	"version": 1,
 	"walls": {
 		"ceiling": -10.0,
 		"left": -10.0,
 		"right": 1930.0
+	},
+	"cave_walls": {
+		"floor_y": 900.0,
+		"ceiling_y": 0.0,
+		"curve_width": 180.0,
+		"ledge_height_ratio": 0.33,
+		"ledge_depth": 55.0,
+		"ledge_thickness": 30.0
 	}
 }

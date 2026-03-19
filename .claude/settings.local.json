@@ -40,7 +40,8 @@
       "Read(//private/tmp/**)",
       "Bash(pip3 install:*)",
       "Bash(cd:*)",
-      "WebFetch(domain:80.lv)"
+      "WebFetch(domain:80.lv)",
+      "Bash(gh api:*)"
     ]
   }
 }
