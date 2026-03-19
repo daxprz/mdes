@@ -2604,10 +2604,14 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 		if not node is CharacterBody2D:
 			continue
 		if world_pos.distance_to(node.global_position) < radius:
-			var pi_val: Variant = node.get("player_index")
-			var pi: int = pi_val if pi_val is int else 0
-			PlayerManager.damage_player(pi, damage)
-			_time_since_strike_range = 0.0  # Reset precog timer on successful hit
+			# Damage via node method (supports dummy) or PlayerManager (real players)
+			if node.has_method("take_damage"):
+				node.take_damage(damage)
+			else:
+				var pi_val: Variant = node.get("player_index")
+				var pi: int = pi_val if pi_val is int else 0
+				PlayerManager.damage_player(pi, damage)
+			_time_since_strike_range = 0.0
 			# Knockback
 			var kb_dir: Vector2 = (node.global_position - world_pos).normalized()
 			node.velocity += kb_dir * 250.0

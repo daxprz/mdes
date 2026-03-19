@@ -139,6 +139,23 @@ func _execute(command: String) -> String:
 					e._start_precognition()
 			return "OK: forced precognition"
 
+		"hp":
+			var players: Array = get_tree().get_nodes_in_group("players")
+			for p in players:
+				var hp: Variant = p.get("health")
+				var dmg: Variant = p.get("damage_taken")
+				if hp != null:
+					return "hp=%s damage_taken=%s" % [str(hp), str(dmg)]
+			return "ERR: no player with health"
+
+		"resethp":
+			var players: Array = get_tree().get_nodes_in_group("players")
+			for p in players:
+				if "health" in p:
+					p.health = p.max_health
+					p.damage_taken = 0
+			return "OK: reset HP"
+
 		"debugdraw":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "debug_draw_enabled" in e:
@@ -253,6 +270,11 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0) -> String:
 			var gravity_script := GDScript.new()
 			gravity_script.source_code = """extends CharacterBody2D
 
+var player_index: int = 0
+var health: int = 1000
+var max_health: int = 1000
+var damage_taken: int = 0
+
 func _physics_process(delta: float) -> void:
 	velocity.y += 600.0 * delta
 	move_and_slide()
@@ -260,7 +282,15 @@ func _physics_process(delta: float) -> void:
 func _draw() -> void:
 	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.8, 0.2, 0.8))
 	draw_circle(Vector2(0, -14), 7.0, Color(0.2, 0.8, 0.2, 0.8))
-	draw_string(ThemeDB.fallback_font, Vector2(-8, -26), "DUMMY", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.GREEN)
+	var hp_text: String = "HP:%d DMG:%d" % [health, damage_taken]
+	draw_string(ThemeDB.fallback_font, Vector2(-20, -26), hp_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.GREEN)
+
+func take_damage(amount: int, _source: int = -1) -> void:
+	damage_taken += amount
+	health -= amount
+	if health < 0:
+		health = 0
+	queue_redraw()
 """
 			gravity_script.reload()
 			dummy.set_script(gravity_script)

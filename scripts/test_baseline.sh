@@ -1,5 +1,5 @@
 #!/bin/bash
-# Baseline: measure time from forced precog to EXECUTING for each scenario
+# Baseline: measure damage dealt to dummy in 20s per scenario
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -24,23 +24,27 @@ if [ "$EC" = "0" ]; then
     exit 1
 fi
 R "tab 1"
+sleep 1
 
-# Valid platform positions: floor=890, P1=750, P2=750, P3=530, P4=530
 SCENARIOS="
-same_floor:700:885
-floor_far:200:885
+same_floor_near:800:885
+same_floor_far:200:885
 on_P1:550:745
 on_P2:1400:745
 on_P3:670:525
 on_P4:1250:525
 floor_to_P3:670:525
-floor_center:960:885
-P1_edge:380:745
-cross_P1_to_P4:1250:525
+cross_P1_to_P2:1400:745
+P1_to_P3:670:525
+P2_to_P4:1250:525
 "
 
-printf "%-20s %6s %8s %s\n" "SCENARIO" "TIME" "RESULT" "NOTES"
-printf "%-20s %6s %8s %s\n" "--------" "----" "------" "-----"
+TOTAL_DMG=0
+PASS=0
+FAIL=0
+
+printf "%-20s %6s %6s %s\n" "SCENARIO" "DMG" "TIME" "MONSTER_POS"
+printf "%-20s %6s %6s %s\n" "--------" "---" "----" "-----------"
 
 for SCENE in $SCENARIOS; do
     LABEL=${SCENE%%:*}
@@ -49,27 +53,24 @@ for SCENE in $SCENARIOS; do
     Y=${REST#*:}
 
     R "tp $X $Y" > /dev/null 2>&1
+    R "resethp" > /dev/null 2>&1
     : > /tmp/godot_baseline.log
-    sleep 0.5
-    START=$(python3 -c "import time; print(time.time())")
+    sleep 0.3
     R "precog" > /dev/null 2>&1
-    RESULT="TIMEOUT"
-    for I in $(seq 1 20); do
-        sleep 0.5
-        if grep -qa "EXECUTING" /tmp/godot_baseline.log 2>/dev/null; then
-            RESULT="LEAP"
-            break
-        fi
-        if grep -qa "instant path=\[" /tmp/godot_baseline.log 2>/dev/null; then
-            if grep -qa "hop 1" /tmp/godot_baseline.log 2>/dev/null; then
-                RESULT="WALKING"
-            fi
-        fi
-    done
-    END=$(python3 -c "import time; print(time.time())")
-    ELAPSED=$(python3 -c "print('%.1f' % ($END - $START))")
+    sleep 15
+    HPLINE=$(R "hp")
+    DMG=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
+    DMG=${DMG:-0}
     MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
-    printf "%-20s %5ss %-8s %s\n" "$LABEL" "$ELAPSED" "$RESULT" "monster=$MPOS"
+
+    if [ "$DMG" -gt 0 ]; then
+        PASS=$((PASS + 1))
+    else
+        FAIL=$((FAIL + 1))
+    fi
+    TOTAL_DMG=$((TOTAL_DMG + DMG))
+
+    printf "%-20s %5d %5ss %s\n" "$LABEL" "$DMG" "15" "monster=$MPOS"
 done
 
-printf "\nDone.\n"
+printf "\n=== SUMMARY: %d/%d passed, total damage=%d ===\n" "$PASS" "$((PASS + FAIL))" "$TOTAL_DMG"
