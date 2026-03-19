@@ -19,6 +19,8 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 - **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
 - **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
 - **Migration patterns** — cyclic multi-phase movement sequences that drive wildlife across the level
+- **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, and head tracking
+- **Cave walls** — curved floor-to-wall transitions with collision, undulation, and standing ledges
 
 ## How to Play
 
@@ -53,6 +55,20 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.8
+**Quadruped Monster, Cave Walls, Debug Inspector**
+- Quadruped monster: procedurally animated 23-point skeleton with foot-driven locomotion
+- Feet grip the ground in world space and push the body forward — body moves as a result of foot forces
+- 2-bone IK solves knee positions; mammal anatomy (front elbows backward, rear knees forward)
+- Head pivots to track target: skull, jaw, eye, teeth all rotate in head-local space
+- Paired stepping: one front foot + one rear foot move at a time, rear legs trail behind
+- Bite, claw swipe, tail whip, and lunge attacks; aggro switches after 3 hits from another player
+- 7 independently damageable/severable body parts (body, head, tail, 4 legs)
+- Cave walls: curved CollisionPolygon2D floor-to-wall transitions on both sides of the room
+- Flat ledge shelf at 1/3 height for standing; undulation, rock texture, depth shading
+- Debug entity inspector: TAB cycles enemies, shows skeleton, foot targets, state, target crosshair
+- Debug M key spawns a quadruped on the title screen
 
 ### v0.9.7
 **Rift Tentacle Physics**
