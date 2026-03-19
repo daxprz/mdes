@@ -57,6 +57,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.14
+**10/10 Hit Rate, Belly Sphere Collider, Skeleton World Constraints**
+- Achieved 10/10 baseline hit rate (all scenarios deal damage)
+- Body collider: circle sphere (r=14) rigidly attached to torso as hanging belly
+- Skeleton-to-world constraints: skull, tail, spine pushed out of geometry via raycasts
+- Airspace validation: arrival points under overhangs rejected via upward raycast
+- Underside attack rejection: arrival points below target's platform filtered
+- State lock timer (3s precog, 1.5s attack) eliminates same-floor strategy thrashing
+- Strategy thrash scoring: tracks state changes since target moved
+- IK quality scoring: spread + hover + stretch, queryable via RCON
+- EPIC documentation with 6 prioritized stories and specific tasks
+- Baseline: 9-10/10 hit, 590-780 dmg, IK/thrash/FPS tracked per scenario
+
 ### v0.9.13
 **Realistic Trajectory Clearance, IK Scoring, 1395 Total Damage**
 - LEAP_BODY_RADIUS increased from 22px to 55px — trajectories now account for the creature's actual size
