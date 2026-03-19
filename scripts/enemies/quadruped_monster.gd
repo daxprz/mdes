@@ -1285,7 +1285,7 @@ func _start_grab() -> void:
 	velocity = Vector2.ZERO
 	# Enlarge body collision to trap the player
 	if _body_collision and _body_collision.shape is CircleShape2D:
-		(_body_collision.shape as CircleShape2D).radius = 30.0
+		(_body_collision.shape as CircleShape2D).radius = 45.0
 
 
 func _do_grab(delta: float) -> void:
@@ -1309,7 +1309,7 @@ func _do_grab(delta: float) -> void:
 		_body_collision.position = target_local
 
 	var center: Vector2 = target_local
-	var ball_r: float = 25.0  # Orbit radius
+	var ball_r: float = 40.0  # Orbit radius — big enough to see the player inside
 	var spin: float = _attack_timer * 4.0  # Spin speed (rad/s)
 	var curl: float = clampf(_attack_timer * 6.0, 0.0, 1.0)  # Fast curl-in (0.17s)
 
