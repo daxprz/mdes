@@ -26,14 +26,15 @@ const TAIL_STIFFNESS := 14.0  # Tail is rigid by default
 const TAIL_WHIP_STIFFNESS := 2.0  # Loose only during whip
 const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
-# Walk
-const STEP_THRESHOLD := 30.0   # How far foot drifts before taking a step
+# Foot-driven locomotion
+const STEP_THRESHOLD := 30.0   # How far behind a foot gets before it steps
 const STEP_DURATION := 0.15    # Seconds to complete a step
 const STEP_HEIGHT := 18.0      # How high foot lifts during step
-const FOOT_SPRING := 8.0       # Spring force pulling foot to target
-const LEG_PHASE_OFFSETS := [0.0, 0.5, 0.5, 0.0]  # Diagonal gait
+const STEP_OVERSHOOT := 0.25   # Overshoot fraction past target
+const FOOT_PUSH_FORCE := 120.0 # Force each planted foot exerts to push body
+const FOOT_GRIP := 0.92        # How well planted feet hold ground (velocity damping)
 
-# Speed tiers
+# Speed tiers (desired speed — foot push force is modulated to achieve this)
 const SPEED_SLOW := 30.0
 const SPEED_MEDIUM := 80.0
 const SPEED_FAST := 160.0
@@ -92,12 +93,12 @@ var _tail_rest: Array[Vector2] = []       # tail[i] offset from tail[i-1] (or sp
 var _leg_rest: Array = []                 # 4 arrays of 3 offsets each
 
 # Foot targeting
-var _foot_targets: Array[Vector2] = []   # Local-space targets
-var _foot_home: Array[Vector2] = []      # Home positions (ideal foot placement)
+var _foot_world: Array[Vector2] = []     # WORLD-space planted foot positions
 var _foot_planted: Array[bool] = []      # Is the foot currently planted?
 var _step_timers: Array[float] = []      # Time remaining in current step
-var _step_origins: Array[Vector2] = []   # Where the step started
-var _step_center: Array[Vector2] = []    # Bezier control point (lifted midpoint)
+var _step_origins: Array[Vector2] = []   # Where the step started (world)
+var _step_targets: Array[Vector2] = []   # Where the step is going (world)
+var _step_center: Array[Vector2] = []    # Bezier control point (world)
 
 # -- State ---------------------------------------------------------------------
 
@@ -110,13 +111,11 @@ var _facing: float = 1.0  # 1=right, -1=left
 var _timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _attack_timer: float = 0.0  # Time within current attack
-var _gait_phase: float = 0.0
-var _gait_speed: float = 0.5
 var _move_speed: float = SPEED_SLOW
 var _posture_blend: float = 0.0  # 0=quadruped, 1=bipedal
-var _current_velocity_x: float = 0.0  # Smooth acceleration
-var _move_accel: float = 3.0  # Acceleration factor (Gecko-style exp smoothing)
 var _breathe_time: float = 0.0  # Idle breathing phase
+var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
+var _initialized: bool = false  # First-frame init flag
 
 # Target tracking
 var _target: Node2D = null
@@ -185,38 +184,38 @@ func _init_skeleton() -> void:
 	# Legs
 	_legs.resize(4)
 	_leg_rest.resize(4)
-	_foot_targets.resize(4)
-	_foot_home.resize(4)
+	_foot_world.resize(4)
 	_foot_planted.resize(4)
 	_step_timers.resize(4)
 	_step_origins.resize(4)
+	_step_targets.resize(4)
 	_step_center.resize(4)
 
 	for li in range(4):
 		var hip_anchor: Vector2 = _spine[0] if li < 2 else _spine[2]
-		var side_x: float = 3.0 if (li % 2 == 0) else -3.0  # Slight depth offset
+		var side_x: float = 3.0 if (li % 2 == 0) else -3.0
 
 		var leg: Array[Vector2] = []
 		leg.resize(3)
-		leg[0] = hip_anchor + Vector2(side_x, 6)                    # hip
-		leg[1] = hip_anchor + Vector2(side_x, 6 + LEG_UPPER_LEN)    # knee
-		leg[2] = Vector2(hip_anchor.x + side_x, 0)                  # foot at floor
+		leg[0] = hip_anchor + Vector2(side_x, 6)
+		leg[1] = hip_anchor + Vector2(side_x, 6 + LEG_UPPER_LEN)
+		leg[2] = Vector2(hip_anchor.x + side_x, 0)
 		_legs[li] = leg
 
-		# Rest offsets: hip from spine, knee from hip, foot from knee
 		var rest: Array[Vector2] = []
 		rest.resize(3)
-		rest[0] = Vector2(side_x, 6)                         # hip offset from spine
-		rest[1] = Vector2(0, LEG_UPPER_LEN)                  # knee offset from hip
-		rest[2] = Vector2(0, LEG_LOWER_LEN)                  # foot offset from knee
+		rest[0] = Vector2(side_x, 6)
+		rest[1] = Vector2(0, LEG_UPPER_LEN)
+		rest[2] = Vector2(0, LEG_LOWER_LEN)
 		_leg_rest[li] = rest
 
-		_foot_targets[li] = leg[2]
-		_foot_home[li] = leg[2]
+		# Initialize foot world positions (will be set properly on first frame)
+		_foot_world[li] = Vector2.ZERO  # Set in first _physics_process
 		_foot_planted[li] = true
 		_step_timers[li] = 0.0
-		_step_origins[li] = leg[2]
-		_step_center[li] = leg[2]
+		_step_origins[li] = Vector2.ZERO
+		_step_targets[li] = Vector2.ZERO
+		_step_center[li] = Vector2.ZERO
 
 
 func _init_part_health() -> void:
@@ -268,19 +267,24 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
+	# First-frame: plant feet at current world position
+	if not _initialized:
+		_initialized = true
+		for li in range(4):
+			var hip_local: Vector2 = _legs[li][0]
+			_foot_world[li] = global_position + Vector2(hip_local.x, _raycast_floor(hip_local))
+			_step_targets[li] = _foot_world[li]
+			_step_origins[li] = _foot_world[li]
+
 	_timer += delta
 	if _attack_cooldown > 0.0:
 		_attack_cooldown -= delta
 
-	# Gravity (only on the CharacterBody2D, not skeleton segments)
+	# Gravity
 	velocity.y += GRAVITY * delta
 
-	# Smooth horizontal acceleration (Gecko-style: exponential smoothing)
-	var target_vx: float = _move_speed * _facing if (_state == State.PATROL or _state == State.CHASE) else 0.0
-	_current_velocity_x = lerpf(_current_velocity_x, target_vx, 1.0 - exp(-_move_accel * delta))
-	velocity.x = _current_velocity_x
-
-	# State machine
+	# State machine (sets _want_direction and _move_speed)
+	_want_direction = 0.0
 	match _state:
 		State.PATROL:
 			_do_patrol(delta)
@@ -299,9 +303,13 @@ func _physics_process(delta: float) -> void:
 		State.TRANSITION_QUADRUPED:
 			_do_transition_quadruped(delta)
 
+	# FOOT-DRIVEN LOCOMOTION:
+	# Planted feet push the body. The body does NOT move on its own.
+	_update_foot_push(delta)
+
 	move_and_slide()
 
-	# Update skeleton (pose-driven, not verlet)
+	# Update skeleton after body has moved
 	_update_spine()
 	_update_gait(delta)
 	_solve_pose(delta)
@@ -373,9 +381,8 @@ func _solve_pose(delta: float) -> void:
 		# Hip: pinned to spine
 		_legs[li][0] = hip_spine + _get_facing_offset(rest[0])
 
-		# Foot: driven by gait system targets
-		if _foot_planted[li]:
-			_legs[li][2] = _legs[li][2].lerp(_foot_targets[li], s_clamp)
+		# Foot position is set by _update_gait (world→local).
+		# IK solves the knee to connect hip to wherever the foot is.
 
 		# Knee: solved via 2-bone IK (hip → knee → foot)
 		# Front legs bend forward (+1), rear legs bend backward (-1)
@@ -423,49 +430,73 @@ func _update_spine() -> void:
 	# spine[1] and [2] follow via _solve_pose constraints
 
 
-# -- Gait / Walking -----------------------------------------------------------
+# -- Foot-Driven Locomotion ----------------------------------------------------
+# Feet grip the ground in WORLD SPACE. Planted feet push the body forward.
+# Body moves as a RESULT of foot forces, not the other way around.
+
+func _update_foot_push(delta: float) -> void:
+	## Planted feet exert a push force on the body based on AI intent (_want_direction).
+	## This replaces direct velocity control — the body only moves because feet push it.
+	if _state == State.DEAD:
+		return
+
+	var push_x: float = 0.0
+	var planted_count: int = 0
+
+	for li in range(4):
+		if _leg_severed[li] or not _foot_planted[li]:
+			continue
+		planted_count += 1
+
+		# Each planted foot pushes the body in the desired direction.
+		# Force scales with desired speed.
+		push_x += _want_direction * FOOT_PUSH_FORCE * (_move_speed / SPEED_MEDIUM)
+
+	# More planted feet = more traction = more force
+	if planted_count > 0:
+		velocity.x += push_x * delta
+		# Friction/grip: dampen velocity when feet are planted (prevents sliding)
+		velocity.x *= FOOT_GRIP
+	else:
+		# No feet planted = no traction, body slides freely
+		velocity.x *= 0.98
+
+	# Clamp to desired speed
+	velocity.x = clampf(velocity.x, -_move_speed, _move_speed)
+
 
 func _update_gait(delta: float) -> void:
 	if _state == State.DEAD:
 		return
 
-	# Idle breathing: subtle vertical oscillation on spine (Gecko-style)
+	# Idle breathing
 	_breathe_time += delta
 	var breathe_offset: float = sin(_breathe_time * 2.0) * 1.5
 	for i in range(3):
 		_spine[i].y += breathe_offset * delta * 4.0
 
-	var moving: bool = absf(velocity.x) > 5.0
-	if not moving:
-		# Even when not moving, keep feet planted at home positions
-		for li in range(4):
-			if not _leg_severed[li]:
-				_foot_home[li] = _calc_home_position(li)
-		return
-
-	_gait_phase = fmod(_gait_phase + _gait_speed * delta, 1.0)
-
-	# Update home positions for all legs
+	# Convert planted feet from world space to local space for rendering/IK
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
-		_foot_home[li] = _calc_home_position(li)
+		if _foot_planted[li]:
+			# Foot stays fixed in world space — convert to local for drawing
+			_legs[li][2] = _foot_world[li] - global_position
+		# else: foot is mid-step, _animate_step handles it
 
-	# Gecko-style diagonal pair locking:
-	# Pair A = legs 0,3 (front-left, rear-right)
-	# Pair B = legs 1,2 (front-right, rear-left)
-	var pair_a_moving: bool = _is_leg_stepping(0) or _is_leg_stepping(3)
-	var pair_b_moving: bool = _is_leg_stepping(1) or _is_leg_stepping(2)
+	# Check if any feet need to step (they've fallen too far behind the body)
+	# Diagonal pair locking: only one pair steps at a time
+	var pair_a_stepping: bool = _is_leg_stepping(0) or _is_leg_stepping(3)
+	var pair_b_stepping: bool = _is_leg_stepping(1) or _is_leg_stepping(2)
 
-	# Only allow one pair to step at a time
-	if not pair_b_moving:
-		_try_step(0, delta)
-		_try_step(3, delta)
-	if not pair_a_moving:
-		_try_step(1, delta)
-		_try_step(2, delta)
+	if not pair_b_stepping:
+		_try_step(0)
+		_try_step(3)
+	if not pair_a_stepping:
+		_try_step(1)
+		_try_step(2)
 
-	# Animate all active steps
+	# Animate active steps
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
@@ -478,58 +509,69 @@ func _is_leg_stepping(li: int) -> bool:
 	return not _foot_planted[li] and not _leg_severed[li]
 
 
-func _calc_home_position(li: int) -> Vector2:
-	## Calculate ideal foot home position: below hip, on the real world floor.
-	var hip: Vector2 = _legs[li][0]
-	var stride_offset: float = _move_speed * 0.15 * _facing
-	var cast_x: float = hip.x + stride_offset
-	var floor_y: float = _raycast_floor(Vector2(cast_x, hip.y))
-	return Vector2(cast_x, floor_y)
+func _ideal_foot_world(li: int) -> Vector2:
+	## Where this foot SHOULD be in world space: below hip, on the floor, ahead of body.
+	var hip_local: Vector2 = _legs[li][0]
+	var hip_world: Vector2 = global_position + hip_local
+	var stride_ahead: float = _want_direction * _move_speed * 0.2
+	var target_x: float = hip_world.x + stride_ahead
+	var floor_y: float = _raycast_floor(Vector2(target_x - global_position.x, hip_local.y)) + global_position.y
+	return Vector2(target_x, floor_y)
 
 
-func _try_step(li: int, _delta: float) -> void:
-	## Check if leg needs to start a step.
+func _try_step(li: int) -> void:
+	## Check if a planted foot has fallen too far behind and needs to step.
 	if _leg_severed[li] or not _foot_planted[li]:
 		return
 	if _posture == Posture.BIPEDAL and li < 2:
 		return
 
-	var foot: Vector2 = _legs[li][2]
-	var home: Vector2 = _foot_home[li]
+	var foot_pos: Vector2 = _foot_world[li]
+	var ideal: Vector2 = _ideal_foot_world(li)
+	var dist: float = foot_pos.distance_to(ideal)
 
-	if foot.distance_to(home) > STEP_THRESHOLD:
+	if dist > STEP_THRESHOLD:
+		# Start a step: foot lifts from current world position to new ideal
 		_foot_planted[li] = false
 		_step_timers[li] = STEP_DURATION
-		_step_origins[li] = foot
+		_step_origins[li] = foot_pos
 
-		# Gecko-style overshoot: target overshoots home by 25%
-		var toward_home: Vector2 = home - foot
-		var overshoot: Vector2 = toward_home * 0.25
-		_foot_targets[li] = home + Vector2(overshoot.x, 0)  # Keep y at floor
+		# Overshoot past the ideal position
+		var toward_ideal: Vector2 = ideal - foot_pos
+		_step_targets[li] = ideal + toward_ideal.normalized() * toward_ideal.length() * STEP_OVERSHOOT
+		# Raycast the target to make sure it lands on actual floor
+		var target_local_x: float = _step_targets[li].x - global_position.x
+		var target_floor_y: float = _raycast_floor(Vector2(target_local_x, _legs[li][0].y)) + global_position.y
+		_step_targets[li].y = target_floor_y
 
-		# Bezier control point: midpoint lifted up
-		_step_center[li] = (foot + _foot_targets[li]) * 0.5 + Vector2(0, -STEP_HEIGHT)
+		# Bezier midpoint: lifted arc between start and end
+		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -STEP_HEIGHT)
 
 
 func _animate_step(li: int, delta: float) -> void:
-	## Animate an active step using quadratic bezier curve (Gecko-style).
+	## Animate a stepping foot along a bezier arc in WORLD space.
 	if _foot_planted[li]:
 		return
 
 	_step_timers[li] -= delta
 	var t: float = 1.0 - clampf(_step_timers[li] / STEP_DURATION, 0.0, 1.0)
 
-	# Quadratic bezier: P = (1-t)²·start + 2(1-t)t·center + t²·end
+	# Quadratic bezier in world space
 	var p0: Vector2 = _step_origins[li]
 	var p1: Vector2 = _step_center[li]
-	var p2: Vector2 = _foot_targets[li]
+	var p2: Vector2 = _step_targets[li]
 	var a: Vector2 = p0.lerp(p1, t)
 	var b: Vector2 = p1.lerp(p2, t)
-	_legs[li][2] = a.lerp(b, t)
+	var world_pos: Vector2 = a.lerp(b, t)
+
+	# Convert to local for rendering
+	_legs[li][2] = world_pos - global_position
 
 	if _step_timers[li] <= 0.0:
+		# Foot plants at the new world position
 		_foot_planted[li] = true
-		_legs[li][2] = _foot_targets[li]
+		_foot_world[li] = _step_targets[li]
+		_legs[li][2] = _foot_world[li] - global_position
 
 
 # -- Floor raycasting ----------------------------------------------------------
@@ -586,14 +628,14 @@ func _solve_leg_ik(hip: Vector2, foot: Vector2, upper_len: float, lower_len: flo
 
 func _do_patrol(_delta: float) -> void:
 	_move_speed = SPEED_SLOW
-	_gait_speed = 0.5
+	_want_direction = _facing
 
 	_pick_target()
 	if _target and is_instance_valid(_target):
 		_state = State.CHASE
 
 
-func _do_chase(delta: float) -> void:
+func _do_chase(_delta: float) -> void:
 	if not is_instance_valid(_target):
 		_state = State.PATROL
 		return
@@ -602,18 +644,16 @@ func _do_chase(delta: float) -> void:
 
 	var to_target: Vector2 = _target.global_position - global_position
 	_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
+	_want_direction = _facing
 	var dist: float = absf(to_target.x)
 
 	# Speed based on distance
 	if dist > 200.0:
 		_move_speed = SPEED_FAST
-		_gait_speed = 2.0
 	elif dist > 80.0:
 		_move_speed = SPEED_MEDIUM
-		_gait_speed = 1.0
 	else:
 		_move_speed = SPEED_SLOW
-		_gait_speed = 0.5
 
 	# Choose attack when in range
 	if _attack_cooldown <= 0.0:
@@ -1143,15 +1183,15 @@ func _draw_debug() -> void:
 		# Labels
 		var label: String = ["FL", "FR", "RL", "RR"][li]
 		draw_string(font, leg[0] + Vector2(-8, -6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col)
-		# Foot position
+		# Foot local position
 		draw_string(font, leg[2] + Vector2(4, 10), "ft(%.0f,%.0f)" % [leg[2].x, leg[2].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
-		# Foot target (X marker)
-		var ft: Vector2 = _foot_targets[li]
-		draw_line(ft + Vector2(-4, -4), ft + Vector2(4, 4), col, 1.5)
-		draw_line(ft + Vector2(4, -4), ft + Vector2(-4, 4), col, 1.5)
-		# Home position (circle)
-		var fh: Vector2 = _foot_home[li]
-		draw_arc(fh, 5.0, 0, TAU, 12, col * Color(1,1,1,0.4), 1.0)
+		# World foot position (X marker, converted to local for drawing)
+		var fw_local: Vector2 = _foot_world[li] - global_position
+		draw_line(fw_local + Vector2(-5, -5), fw_local + Vector2(5, 5), col, 2.0)
+		draw_line(fw_local + Vector2(5, -5), fw_local + Vector2(-5, 5), col, 2.0)
+		# Ideal foot position (circle)
+		var ideal: Vector2 = _ideal_foot_world(li) - global_position
+		draw_arc(ideal, 6.0, 0, TAU, 12, col * Color(1,1,1,0.4), 1.0)
 		# Planted indicator
 		var planted_text: String = "PLANT" if _foot_planted[li] else "STEP"
 		draw_string(font, leg[2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
@@ -1164,5 +1204,5 @@ func _draw_debug() -> void:
 	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 22), "HP: %d  Legs: %d" % [health, _count_active_legs()], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 32), "Posture: %s  Vel: (%.0f,%.0f)" % ["QUAD" if _posture == Posture.QUADRUPED else "BIPED", velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  gaitPh: %.2f" % [str(is_on_floor()), _gait_phase], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f" % [str(is_on_floor()), _want_direction], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 52), "floorY: %.1f  global: (%.0f,%.0f)" % [floor_y, global_position.x, global_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
