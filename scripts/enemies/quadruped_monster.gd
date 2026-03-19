@@ -59,6 +59,17 @@ const LEAP_BITE_DAMAGE := 30   # Bite + thrash
 const LEAP_THRASH_COUNT := 3   # Number of thrash shakes
 const LEAP_COOLDOWN := 8.0     # Seconds between leaps
 
+# Leap planning
+const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
+const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
+const LEAP_ARRIVAL_SAMPLES := 12  # Number of arrival angles to test around target
+const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
+const LEAP_FLIGHT_TIME_MIN := 0.3 # Shortest flight time to test
+const LEAP_FLIGHT_TIME_MAX := 1.0 # Longest flight time to test
+const LEAP_ARC_STEPS := 40        # Simulation steps per arc
+const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
+const LEAP_ARC_DT := 0.04         # Simulation timestep
+
 # Health
 const MAX_HEALTH := 200
 const HEAD_HEALTH := 60
@@ -68,8 +79,8 @@ const LEG_HEALTH := 40
 # -- Enums ---------------------------------------------------------------------
 
 enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
-			 ATTACK_LUNGE, ATTACK_LEAP_WINDUP, ATTACK_LEAP_AIRBORNE,
-			 ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
+			 ATTACK_LUNGE, ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
+			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
 			 TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
 enum Posture { QUADRUPED, BIPEDAL }
 
@@ -130,6 +141,13 @@ var _initialized: bool = false  # First-frame init flag
 var _leap_cooldown: float = 0.0  # Cooldown between leaps
 var _leap_ik_off: bool = false   # Disable leg IK during leap (legs positioned manually)
 var _leap_body_angle: float = 0.0  # Body rotation during leap
+var _leap_launch_pos: Vector2 = Vector2.ZERO  # Chosen launch position (world)
+var _leap_found_path: bool = false  # Did planning find a clear path?
+var _leap_plan_phase: int = 0       # 0=not started, 1=phase1 done, 2=phase2 done
+var _leap_plan_results: Array = []  # Debug: [{pos, arc_l, arc_r, clear}] for each sample
+var _leap_phase1_near_misses: Array = []  # Best candidates from phase 1 for phase 2 refinement
+var _leap_chosen_arc_l: PackedVector2Array = PackedVector2Array()  # Debug: chosen left arc
+var _leap_chosen_arc_r: PackedVector2Array = PackedVector2Array()  # Debug: chosen right arc
 var _leap_phase: float = 0.0    # Sub-phase progress within leap states
 var _leap_target_pos: Vector2 = Vector2.ZERO  # Where we're leaping to
 var _leap_slash_count: int = 0  # Slashes delivered so far
@@ -322,6 +340,8 @@ func _physics_process(delta: float) -> void:
 			_do_tail_whip(delta)
 		State.ATTACK_LUNGE:
 			_do_lunge(delta)
+		State.ATTACK_LEAP_PLAN:
+			_do_leap_plan(delta)
 		State.ATTACK_LEAP_WINDUP:
 			_do_leap_windup(delta)
 		State.ATTACK_LEAP_AIRBORNE:
@@ -336,17 +356,18 @@ func _physics_process(delta: float) -> void:
 			_do_transition_quadruped(delta)
 
 	# Leap states handle their own skeleton — skip normal locomotion/pose
-	var in_leap: bool = (_state == State.ATTACK_LEAP_WINDUP or _state == State.ATTACK_LEAP_AIRBORNE
-		or _state == State.ATTACK_LEAP_STRIKE or _state == State.ATTACK_LEAP_THRASH)
+	var in_leap_flight: bool = (_state == State.ATTACK_LEAP_WINDUP
+		or _state == State.ATTACK_LEAP_AIRBORNE or _state == State.ATTACK_LEAP_STRIKE
+		or _state == State.ATTACK_LEAP_THRASH)
 
-	if in_leap:
+	if in_leap_flight:
 		_update_leap_collision(delta)
 	else:
-		_update_foot_push(delta)
+		_update_foot_push(delta)  # PLAN state still walks to launch position
 
 	move_and_slide()
 
-	if in_leap:
+	if in_leap_flight:
 		_update_leap_pose(delta)
 	else:
 		_update_spine()
@@ -1013,7 +1034,7 @@ func _update_leap_pose(delta: float) -> void:
 
 
 func _start_leap() -> void:
-	_state = State.ATTACK_LEAP_WINDUP
+	_state = State.ATTACK_LEAP_PLAN
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_leap_cooldown = LEAP_COOLDOWN
@@ -1021,11 +1042,325 @@ func _start_leap() -> void:
 	_leap_slash_count = 0
 	_leap_thrash_count = 0
 	_leap_slash_side = 1
-	_leap_ik_off = true  # IK off for entire leap sequence
+	_leap_ik_off = false  # IK stays on during planning (still walking)
 	_leap_body_angle = 0.0
-	velocity.x = 0
+	_leap_found_path = false
+	_leap_plan_phase = 0
+	_leap_plan_results.clear()
+	_leap_phase1_near_misses.clear()
+	_leap_chosen_arc_l.clear()
+	_leap_chosen_arc_r.clear()
 	if is_instance_valid(_target):
 		_leap_target_pos = _target.global_position
+
+
+func _do_leap_plan(delta: float) -> void:
+	## PLAN phase: two-pass search for a clear trajectory.
+	## Phase 1: broad gaussian search. Phase 2: refine around near-misses.
+	_attack_timer += delta
+
+	if not is_instance_valid(_target):
+		_state = State.CHASE
+		return
+
+	_leap_target_pos = _target.global_position
+
+	# Phase 1: broad search
+	if _leap_plan_phase == 0:
+		_simulate_leap_paths()
+		_leap_plan_phase = 1
+
+	# Phase 2: if phase 1 failed, refine around the best candidates
+	if not _leap_found_path and _leap_plan_phase == 1 and not _leap_phase1_near_misses.is_empty():
+		_simulate_leap_paths_phase2()
+		_leap_plan_phase = 2
+
+	if _leap_found_path:
+		# Walk toward the chosen launch position
+		var to_launch: Vector2 = _leap_launch_pos - global_position
+		var dist_to_launch: float = absf(to_launch.x)
+
+		if dist_to_launch < 10.0:
+			# Arrived at launch position — commit to the leap
+			_state = State.ATTACK_LEAP_WINDUP
+			_attack_timer = 0.0
+			_leap_ik_off = true
+			velocity.x = 0
+		else:
+			# Walk toward launch position
+			_facing = signf(to_launch.x) if absf(to_launch.x) > 5.0 else _facing
+			_want_direction = signf(to_launch.x)
+			_move_speed = SPEED_MEDIUM
+	else:
+		# Both phases failed — abort after brief pause
+		if _attack_timer > 0.5:
+			_state = State.CHASE
+			_leap_cooldown = 2.0
+
+
+func _simulate_leap_paths() -> void:
+	## REVERSE approach: start at the target, find open-air attack zones,
+	## then reverse-solve arcs from the monster's position to those zones.
+	##
+	## 1. Sample arrival points on strike-reach circle around target
+	## 2. Filter to open air only (not inside geometry)
+	## 3. For each valid arrival, reverse-solve launch velocity for several flight times
+	## 4. Simulate full arc with body-width checks
+	_leap_plan_results.clear()
+	_leap_found_path = false
+
+	var target_pos: Vector2 = _leap_target_pos
+	var monster_pos: Vector2 = global_position
+	var best_sample: Dictionary = {}
+	var best_score: float = INF
+
+	# Step 1: find valid arrival points (open air within strike reach of target)
+	var arrival_points: Array[Vector2] = []
+	for ai in range(LEAP_ARRIVAL_SAMPLES):
+		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
+		var arrival: Vector2 = target_pos + Vector2(cos(angle), sin(angle)) * LEAP_STRIKE_REACH
+
+		# Must be in open air
+		if _is_point_in_solid(arrival):
+			continue
+
+		# Only consider arrival points above or level with target (not attacking from below)
+		if arrival.y > target_pos.y + 30:
+			continue
+
+		arrival_points.append(arrival)
+
+	if arrival_points.is_empty():
+		_leap_phase1_near_misses.clear()
+		return
+
+	# Step 2: for each valid arrival point, reverse-solve launch velocities
+	for arrival in arrival_points:
+		for fi in range(LEAP_FLIGHT_TIMES):
+			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
+				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+
+			# Reverse-solve: Vx = dx/t, Vy = (dy - 0.5*g*t^2) / t
+			var dx: float = arrival.x - monster_pos.x
+			var dy: float = arrival.y - monster_pos.y
+			var launch_vx: float = dx / t_flight
+			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+
+			var launch_vel := Vector2(launch_vx, launch_vy)
+			var speed: float = launch_vel.length()
+			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+				continue
+			if launch_vy > -50:
+				continue
+
+			# Body-width arc simulation
+			var launch_dir: Vector2 = launch_vel.normalized()
+			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
+			if launch_perp.y > 0:
+				launch_perp = -launch_perp
+
+			var arc_c: PackedVector2Array = _simulate_arc(monster_pos, launch_vel)
+			var arc_l: PackedVector2Array = _simulate_arc(monster_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			var arc_r: PackedVector2Array = _simulate_arc(monster_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+
+			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
+
+			var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
+
+			var result := {
+				"pos": monster_pos,
+				"arrival": arrival,
+				"arc_l": arc_l,
+				"arc_r": arc_r,
+				"clear": clear,
+				"arc_ratio": arc_ratio,
+				"launch_vel": launch_vel,
+				"flight_time": t_flight,
+			}
+			_leap_plan_results.append(result)
+
+			if clear:
+				var time_penalty: float = absf(t_flight - 0.5) * 20.0
+				var score: float = arrival.distance_to(target_pos) + time_penalty
+				if score < best_score:
+					best_score = score
+					best_sample = result
+
+	if not best_sample.is_empty():
+		_leap_found_path = true
+		_leap_launch_pos = best_sample["pos"]
+		_leap_chosen_arc_l = best_sample["arc_l"]
+		_leap_chosen_arc_r = best_sample["arc_r"]
+		set_meta("_leap_chosen_vel", best_sample["launch_vel"])
+	else:
+		# Collect near-miss arrival points for phase 2
+		_leap_phase1_near_misses.clear()
+		var seen: Dictionary = {}
+		for result in _leap_plan_results:
+			var arr: Vector2 = result.get("arrival", target_pos)
+			var key: String = "%.0f,%.0f" % [arr.x, arr.y]
+			if not seen.has(key):
+				seen[key] = true
+				_leap_phase1_near_misses.append({
+					"arrival": arr,
+					"flight_time": result.get("flight_time", 0.5),
+				})
+		if _leap_phase1_near_misses.size() > 6:
+			_leap_phase1_near_misses.resize(6)
+
+
+func _is_point_in_solid(world_pos: Vector2) -> bool:
+	## Check if a world-space point is inside solid geometry.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return false
+	var dirs := [Vector2(1, 0), Vector2(-1, 0), Vector2(0, 1), Vector2(0, -1)]
+	var hit_count: int = 0
+	for dir in dirs:
+		var query := PhysicsRayQueryParameters2D.create(world_pos, world_pos + dir * 10, 1)
+		query.exclude = [get_rid()]
+		if not space.intersect_ray(query).is_empty():
+			hit_count += 1
+	return hit_count >= 3
+
+
+func _simulate_leap_paths_phase2() -> void:
+	## Phase 2: try nearby launch positions for each near-miss arrival,
+	## with wider flight time spread.
+	var target_pos: Vector2 = _leap_target_pos
+	var monster_pos: Vector2 = global_position
+	var best_sample: Dictionary = {}
+	var best_score: float = INF
+	var bounds_left: float = _find_wall_x(-1)
+	var bounds_right: float = _find_wall_x(1)
+
+	for candidate in _leap_phase1_near_misses:
+		var arrival: Vector2 = candidate["arrival"]
+		var base_time: float = candidate["flight_time"]
+
+		# Try 5 launch positions near the monster
+		for pi in range(5):
+			var offset_x: float = (float(pi) / 4.0 - 0.5) * 80.0
+			var launch_pos: Vector2 = monster_pos + Vector2(offset_x, 0)
+
+			if launch_pos.x < bounds_left + LEAP_BODY_RADIUS * 2:
+				continue
+			if launch_pos.x > bounds_right - LEAP_BODY_RADIUS * 2:
+				continue
+
+			# 7 flight times, wider spread around candidate
+			for fi in range(7):
+				var t_offset: float = (float(fi) / 6.0 - 0.5) * 0.8
+				var t_flight: float = clampf(base_time + t_offset, 0.2, 1.5)
+
+				var dx: float = arrival.x - launch_pos.x
+				var dy: float = arrival.y - launch_pos.y
+				var launch_vx: float = dx / t_flight
+				var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+
+				var launch_vel := Vector2(launch_vx, launch_vy)
+				var speed: float = launch_vel.length()
+				if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+					continue
+				if launch_vy > -50:
+					continue
+
+				var launch_dir: Vector2 = launch_vel.normalized()
+				var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
+				if launch_perp.y > 0:
+					launch_perp = -launch_perp
+
+				var arc_c: PackedVector2Array = _simulate_arc(launch_pos, launch_vel)
+				var arc_l: PackedVector2Array = _simulate_arc(launch_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
+				var arc_r: PackedVector2Array = _simulate_arc(launch_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+
+				var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
+
+				var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
+
+				var result := {
+					"pos": launch_pos,
+					"arrival": arrival,
+					"arc_l": arc_l,
+					"arc_r": arc_r,
+					"clear": clear,
+					"arc_ratio": arc_ratio,
+					"launch_vel": launch_vel,
+					"flight_time": t_flight,
+				}
+				_leap_plan_results.append(result)
+
+				if clear:
+					var time_penalty: float = absf(t_flight - 0.5) * 20.0
+					var score: float = arrival.distance_to(target_pos) + time_penalty
+					if score < best_score:
+						best_score = score
+						best_sample = result
+
+	if not best_sample.is_empty():
+		_leap_found_path = true
+		_leap_launch_pos = best_sample["pos"]
+		_leap_chosen_arc_l = best_sample["arc_l"]
+		_leap_chosen_arc_r = best_sample["arc_r"]
+		set_meta("_leap_chosen_vel", best_sample["launch_vel"])
+
+
+
+func _find_wall_x(direction: int) -> float:
+	## Raycast horizontally to find the nearest wall. Returns world x.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return global_position.x + direction * 1000
+
+	var from: Vector2 = global_position + Vector2(0, -30)
+	var to: Vector2 = from + Vector2(direction * 1000, 0)
+	var query := PhysicsRayQueryParameters2D.create(from, to, 1)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+	if result.is_empty():
+		return to.x
+	return result["position"].x
+
+
+func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
+	## Simulate a parabolic arc from start with launch_vel, returning world-space points.
+	## Stops early if the arc descends past the starting height (landed).
+	var points := PackedVector2Array()
+	var pos: Vector2 = start
+	var vel: Vector2 = launch_vel
+
+	points.append(pos)
+	var past_peak: bool = false
+	for _i in range(LEAP_ARC_STEPS):
+		vel.y += LEAP_PLAN_GRAVITY * LEAP_ARC_DT
+		pos += vel * LEAP_ARC_DT
+		points.append(pos)
+		# Track if we've gone past the peak
+		if vel.y > 0:
+			past_peak = true
+		# Stop if we've descended back to or below launch height
+		if past_peak and pos.y >= start.y + 20:
+			break
+
+	return points
+
+
+func _check_arc_clear(arc: PackedVector2Array) -> bool:
+	## Raycast along each segment of the arc. If any hit, path is blocked.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true  # Can't check, assume clear
+
+	for i in range(arc.size() - 1):
+		var from: Vector2 = arc[i]
+		var to: Vector2 = arc[i + 1]
+		var query := PhysicsRayQueryParameters2D.create(from, to, 1)  # Mask 1 = world
+		query.exclude = [get_rid()]
+		var result: Dictionary = space.intersect_ray(query)
+		if not result.is_empty():
+			return false
+
+	return true
 
 
 func _do_leap_windup(delta: float) -> void:
@@ -1079,17 +1414,21 @@ func _do_leap_windup(delta: float) -> void:
 	if _attack_timer >= LEAP_WINDUP_TIME:
 		_state = State.ATTACK_LEAP_AIRBORNE
 		_attack_timer = 0.0
-		_leap_ik_off = true  # All legs positioned manually from here
-		# Update target one last time
-		if is_instance_valid(_target):
-			_leap_target_pos = _target.global_position
-		# Launch: strong parabolic arc aimed at target
-		var to_target: Vector2 = _leap_target_pos - global_position
-		var dist: float = to_target.length()
-		# Calculate launch angle for a nice arc — more horizontal for close, more vertical for far
-		var arc_ratio: float = clampf(dist / 400.0, 0.3, 0.8)
-		velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * (1.0 - arc_ratio * 0.5)
-		velocity.y = -LEAP_LAUNCH_SPEED * arc_ratio
+		_leap_ik_off = true
+		# Use the pre-computed launch velocity from planning, adjusted for current target
+		if has_meta("_leap_chosen_vel"):
+			var planned_vel: Vector2 = get_meta("_leap_chosen_vel")
+			# Adjust horizontal direction toward current target position
+			if is_instance_valid(_target):
+				_leap_target_pos = _target.global_position
+				var to_target: Vector2 = _leap_target_pos - global_position
+				planned_vel.x = signf(to_target.x) * absf(planned_vel.x)
+			velocity = planned_vel
+		else:
+			# Fallback if no plan data
+			var to_target: Vector2 = _leap_target_pos - global_position
+			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7
+			velocity.y = -LEAP_LAUNCH_SPEED * 0.5
 		# Unplant all feet
 		for li in range(4):
 			_foot_planted[li] = false
@@ -1146,7 +1485,7 @@ func _do_leap_airborne(delta: float) -> void:
 	# Check if we've reached the target
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
-		if dist_to_target < 60.0:
+		if dist_to_target < LEAP_STRIKE_REACH:
 			_state = State.ATTACK_LEAP_STRIKE
 			_attack_timer = 0.0
 			_leap_slash_count = 0
@@ -1253,6 +1592,9 @@ func _end_leap() -> void:
 	_tail_whipping = false
 	_leap_ik_off = false  # Re-enable IK
 	_leap_body_angle = 0.0
+	_leap_plan_results.clear()
+	_leap_chosen_arc_l.clear()
+	_leap_chosen_arc_r.clear()
 	_state = State.CHASE
 	_attack_timer = 0.0
 	# Reset collision shape to normal horizontal orientation
@@ -1726,7 +2068,7 @@ func _draw_debug() -> void:
 
 	# -- State info (top-left of creature) --
 	var info_pos := _spine[0] + Vector2(-40, -60)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "->BIPED", "->QUAD", "HURT", "DEAD"]
+	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
 	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
@@ -1748,3 +2090,56 @@ func _draw_debug() -> void:
 		draw_string(font, target_local + Vector2(14, -14), "TARGET P%d  dist:%.0f" % [_target_player_index, target_dist], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, tgt_col)
 		# Line from skull to target
 		draw_line(_skull, target_local, Color(1, 0.3, 0.1, 0.3), 1.0)
+
+	# -- Leap plan visualization --
+	if is_instance_valid(_target) and (_state == State.ATTACK_LEAP_PLAN or not _leap_plan_results.is_empty()):
+		var tgt_local: Vector2 = _leap_target_pos - global_position
+
+		# Strike zone circle around target
+		draw_arc(tgt_local, LEAP_STRIKE_REACH, 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
+		draw_string(font, tgt_local + Vector2(LEAP_STRIKE_REACH + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
+
+		# Arrival point markers (dots on the strike circle)
+		for result in _leap_plan_results:
+			if result.has("arrival"):
+				var arr_local: Vector2 = result["arrival"] - global_position
+				var is_clear: bool = result["clear"]
+				var arr_col: Color = Color(0, 1, 0, 0.7) if is_clear else Color(1, 0.3, 0, 0.4)
+				draw_circle(arr_local, 3.0, arr_col)
+
+	if not _leap_plan_results.is_empty():
+		# Summary
+		var plan_info: Vector2 = _spine[0] + Vector2(-40, -80)
+		var clear_count: int = 0
+		for r in _leap_plan_results:
+			if r["clear"]:
+				clear_count += 1
+		var phase_str: String = "P1" if _leap_plan_phase <= 1 else "P1+P2"
+		draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), LEAP_ARRIVAL_SAMPLES], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
+
+		# Draw all arcs (dim)
+		for result in _leap_plan_results:
+			var is_clear: bool = result["clear"]
+			var arc_col: Color = Color(0, 0.7, 0, 0.2) if is_clear else Color(0.7, 0, 0, 0.08)
+			var arc_l: PackedVector2Array = result["arc_l"]
+			var arc_r: PackedVector2Array = result["arc_r"]
+			for i in range(arc_l.size() - 1):
+				draw_line(arc_l[i] - global_position, arc_l[i + 1] - global_position, arc_col, 1.0)
+			for i in range(arc_r.size() - 1):
+				draw_line(arc_r[i] - global_position, arc_r[i + 1] - global_position, arc_col, 1.0)
+
+		# Highlight the chosen path
+		if _leap_found_path:
+			var launch_local: Vector2 = _leap_launch_pos - global_position
+			draw_circle(launch_local, 8.0, Color(0, 1, 0.5, 0.8))
+			draw_string(font, launch_local + Vector2(10, -8), "LAUNCH", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
+			var chosen_col := Color(0, 1, 0.3, 0.8)
+			for i in range(_leap_chosen_arc_l.size() - 1):
+				draw_line(_leap_chosen_arc_l[i] - global_position, _leap_chosen_arc_l[i + 1] - global_position, chosen_col, 2.5)
+			for i in range(_leap_chosen_arc_r.size() - 1):
+				draw_line(_leap_chosen_arc_r[i] - global_position, _leap_chosen_arc_r[i + 1] - global_position, chosen_col, 2.5)
+			# Body width at peak
+			if _leap_chosen_arc_l.size() > 5 and _leap_chosen_arc_r.size() > 5:
+				var peak_l: Vector2 = _leap_chosen_arc_l[5] - global_position
+				var peak_r: Vector2 = _leap_chosen_arc_r[5] - global_position
+				draw_line(peak_l, peak_r, Color(0, 1, 0.5, 0.5), 1.0)
