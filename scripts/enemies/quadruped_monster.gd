@@ -1498,7 +1498,19 @@ func _simulate_leap_paths() -> void:
 	var best_sample: Dictionary = {}
 	var best_score: float = INF
 
-	# Step 1: find valid arrival points (open air within strike reach of target)
+	# Step 1: find the platform surface the target is standing on
+	# Raycast down from the target to find the floor beneath them
+	var target_floor_y: float = target_pos.y  # Default: target's Y
+	var space := get_world_2d().direct_space_state
+	if space:
+		var query := PhysicsRayQueryParameters2D.create(
+			target_pos + Vector2(0, -5), target_pos + Vector2(0, 30), 1)
+		query.exclude = [get_rid()]
+		var hit: Dictionary = space.intersect_ray(query)
+		if not hit.is_empty():
+			target_floor_y = hit["position"].y
+
+	# Step 2: find valid arrival points (open air, ABOVE the target's platform)
 	var arrival_points: Array[Vector2] = []
 	for ai in range(LEAP_ARRIVAL_SAMPLES):
 		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
@@ -1508,8 +1520,8 @@ func _simulate_leap_paths() -> void:
 		if _is_point_in_solid(arrival):
 			continue
 
-		# Only consider arrival points above or level with target (not attacking from below)
-		if arrival.y > target_pos.y + 30:
+		# REJECT: any arrival point below the platform the target is standing on
+		if arrival.y > target_floor_y - 5:
 			continue
 
 		arrival_points.append(arrival)
@@ -2226,18 +2238,33 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 	var best: Dictionary = {}
 	var best_score: float = INF
 
-	# Sample arrival points: circle around target + direct landing on target surface
+	# Find the floor/platform surface at the target position
+	var to_floor_y: float = to_pos.y
+	var space := get_world_2d().direct_space_state
+	if space:
+		var fq := PhysicsRayQueryParameters2D.create(
+			to_pos + Vector2(0, -5), to_pos + Vector2(0, 30), 1)
+		fq.exclude = [get_rid()]
+		var fhit: Dictionary = space.intersect_ray(fq)
+		if not fhit.is_empty():
+			to_floor_y = fhit["position"].y
+
+	# Sample arrival points: circle around target + direct landing
 	var arrivals: Array[Vector2] = []
 	for ai in range(LEAP_ARRIVAL_SAMPLES):
 		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
 		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * LEAP_STRIKE_REACH)
-	# Also try landing directly on the target (important for platform-to-platform)
 	arrivals.append(to_pos)
 	arrivals.append(to_pos + Vector2(-40, 0))
 	arrivals.append(to_pos + Vector2(40, 0))
 
 	for arrival in arrivals:
 		if _is_point_in_solid(arrival):
+			continue
+		# Reject circle arrivals below the target's platform (attacking the underside)
+		# But allow direct landing points (they're at platform level by design)
+		var is_direct_landing: bool = absf(arrival.y - to_pos.y) < 5.0
+		if not is_direct_landing and arrival.y > to_floor_y - 5:
 			continue
 
 		for fi in range(LEAP_FLIGHT_TIMES):
