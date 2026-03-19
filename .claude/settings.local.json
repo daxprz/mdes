@@ -50,7 +50,9 @@
       "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_baseline.sh 2>&1)",
       "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_upper_platforms.sh 2>&1)",
       "Bash(git checkout:*)",
-      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_edge_cases.sh 2>&1)"
+      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_edge_cases.sh 2>&1)",
+      "Bash(chmod:*)",
+      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_cliff_attack.sh 2>&1)"
     ]
   }
 }
