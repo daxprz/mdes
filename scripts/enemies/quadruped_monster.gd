@@ -1421,7 +1421,22 @@ func _do_grab(delta: float) -> void:
 		# Restore normal body collision
 		if _body_collision and _body_collision.shape is CircleShape2D:
 			(_body_collision.shape as CircleShape2D).radius = 14.0
+			_body_collision.position = Vector2(0, -14.0)  # Reset belly position
+
+		# Find safe landing position (raycast down from current spot)
+		var safe_floor: float = _raycast_floor(Vector2(0, -30))
+		if safe_floor < 200:  # Valid floor found
+			# Nudge to safe position above the floor
+			global_position.y = global_position.y + safe_floor - 14.0
+		velocity = Vector2.ZERO
+
 		_state = State.CHASE
+
+		# Reset skeleton to standing pose
+		var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)
+		_spine[0] = Vector2(SPINE_SEG_LEN * _facing, body_y)
+		_spine[1] = Vector2(0, body_y)
+		_spine[2] = Vector2(-SPINE_SEG_LEN * _facing, body_y)
 
 		# Re-plant feet
 		for li in range(4):
