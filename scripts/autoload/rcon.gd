@@ -172,6 +172,12 @@ func _execute(command: String) -> String:
 					return "ik_now=%.0f ik_avg=%.0f ik_peak=%.0f" % [e._ik_score, e._ik_score_avg, e._ik_score_peak]
 			return "ERR: no enemy with IK score"
 
+		"ball":
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if "_ball_score" in e:
+					return "ball_now=%.0f ball_peak=%.0f" % [e._ball_score, e._ball_score_peak]
+			return "ERR: no enemy with ball score"
+
 		"thrash":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "_strategy_changes" in e:

@@ -223,6 +223,8 @@ var _ik_score: float = 0.0         # Current frame IK quality score
 var _ik_score_avg: float = 0.0     # Rolling average
 var _ik_score_peak: float = 0.0    # Worst score seen
 var _ik_score_samples: int = 0
+var _ball_score: float = 0.0       # Current ball quality (0 = perfect, higher = worse)
+var _ball_score_peak: float = 0.0  # Worst ball score seen
 
 # Strategy thrash scoring (lower = better)
 var _last_state: int = -1          # Previous frame's state
@@ -668,6 +670,42 @@ func _score_ik_quality() -> void:
 	_ik_score_avg = lerpf(_ik_score_avg, score, 0.05)  # Exponential moving average
 	if score > _ik_score_peak:
 		_ik_score_peak = score
+
+
+func _score_ball_quality(center: Vector2, radius: float) -> void:
+	## Score how well the ball contains all body parts.
+	## Each px outside the ball radius = 1 point. 0 = perfect ball.
+	var score: float = 0.0
+	var margin: float = radius + 10.0  # Allow a small margin beyond the ball edge
+
+	# Check all skeleton points
+	var points: Array[Vector2] = [_spine[0], _spine[1], _spine[2], _neck[0], _neck[1], _skull, _jaw]
+	for pt in points:
+		var d: float = pt.distance_to(center)
+		if d > margin:
+			score += (d - margin) * 2.0
+
+	# Check all leg joints
+	for li in range(4):
+		if _leg_severed[li]:
+			continue
+		for j in range(3):
+			var d: float = _legs[li][j].distance_to(center)
+			if d > margin:
+				score += (d - margin) * 1.5
+
+	# Check tail points
+	if not _tail_severed:
+		for i in range(_tail.size()):
+			var d: float = _tail[i].distance_to(center)
+			# Tail gets extra margin (spirals outward)
+			var tail_margin: float = margin + float(i) * 4.0
+			if d > tail_margin:
+				score += (d - tail_margin)
+
+	_ball_score = score
+	if score > _ball_score_peak:
+		_ball_score_peak = score
 
 
 func _score_strategy_thrash() -> void:
@@ -1338,6 +1376,10 @@ func _do_grab(delta: float) -> void:
 				_tail[i] = tail_pos
 			else:
 				_tail[i] = _tail[i].lerp(tail_pos, curl * 15.0 * delta)
+
+	# Score ball quality: any point outside the ball radius = penalty
+	if curl >= 1.0:
+		_score_ball_quality(center, ball_r)
 
 	# Phase 2: damage ticks
 	if t > 0.2 and t < 0.8:
@@ -3439,6 +3481,10 @@ func _draw_debug() -> void:
 	dy += 12
 	var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
 	draw_string(font, info_pos + Vector2(0, dy), "Thrash: %d  plan: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
+	if _state == State.ATTACK_GRAB:
+		dy += 12
+		var ball_col: Color = Color(0, 1, 0) if _ball_score < 10 else (Color(1, 1, 0) if _ball_score < 50 else Color(1, 0, 0))
+		draw_string(font, info_pos + Vector2(0, dy), "Ball: %.0f pk:%.0f" % [_ball_score, _ball_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ball_col)
 
 	# Draw waypoint marker if active
 	if _precog_has_waypoint:
