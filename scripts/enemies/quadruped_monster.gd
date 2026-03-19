@@ -1426,10 +1426,12 @@ func _do_grab(delta: float) -> void:
 			(_body_collision.shape as CircleShape2D).radius = 14.0
 			_body_collision.position = Vector2(0, -14.0)  # Reset belly position
 
-		# Find safe landing position (raycast down from current spot)
+		# Teleport to where the grab happened (near the player), not pre-grab position
+		if is_instance_valid(_target):
+			global_position.x = _target.global_position.x
+		# Find safe floor at the new position
 		var safe_floor: float = _raycast_floor(Vector2(0, -30))
-		if safe_floor < 200:  # Valid floor found
-			# Nudge to safe position above the floor
+		if safe_floor < 200:
 			global_position.y = global_position.y + safe_floor - 14.0
 		velocity = Vector2.ZERO
 
