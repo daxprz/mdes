@@ -321,76 +321,18 @@ func _init_part_health() -> void:
 	}
 
 
-var _col_skull: CollisionShape2D = null
-var _col_shoulder: CollisionShape2D = null
-var _col_hip: CollisionShape2D = null
-var _col_tail: CollisionShape2D = null
-
-var _col_body_center: CollisionShape2D = null  # Floor contact
-
 func _init_collision() -> void:
-	# 5 circle colliders that follow the skeleton:
-	# skull, shoulders, body center (floor contact), hips, tail tip
-	_col_skull = _make_circle_collider(12.0)
-	_col_shoulder = _make_circle_collider(14.0)
-	_col_body_center = _make_circle_collider(16.0)  # Larger — primary floor contact
-	_col_hip = _make_circle_collider(14.0)
-	_col_tail = _make_circle_collider(6.0)
-	_body_collision = _col_body_center
+	# Single capsule for physics — reliable floor contact + platform interaction
+	# 4 circle colliders were tried but caused body/skeleton desync
+	var shape := CapsuleShape2D.new()
+	shape.radius = 10.0
+	shape.height = SPINE_SEG_LEN * 2.0 + shape.radius * 2.0
+	_body_collision = CollisionShape2D.new()
+	_body_collision.shape = shape
+	_body_collision.rotation = PI / 2.0
+	_body_collision.position = Vector2(0, -10.0)
+	add_child(_body_collision)
 
-
-func _make_circle_collider(radius: float) -> CollisionShape2D:
-	var shape := CircleShape2D.new()
-	shape.radius = radius
-	var col := CollisionShape2D.new()
-	col.shape = shape
-	add_child(col)
-	return col
-
-
-func _update_collision_positions() -> void:
-	## Move the 5 collision circles to follow the skeleton.
-	## During normal movement: skull/shoulder/hip follow spine, body center near floor.
-	## During leaps: all follow skeleton with smaller radii.
-	var in_flight: bool = _leap_ik_off
-
-	if in_flight:
-		# During flight: compact circles following skeleton
-		if _col_skull:
-			_col_skull.position = _skull
-			(_col_skull.shape as CircleShape2D).radius = 6.0
-		if _col_shoulder:
-			_col_shoulder.position = _spine[0]
-			(_col_shoulder.shape as CircleShape2D).radius = 8.0
-		if _col_body_center:
-			_col_body_center.position = _spine[1]
-			(_col_body_center.shape as CircleShape2D).radius = 8.0
-		if _col_hip:
-			_col_hip.position = _spine[2]
-			(_col_hip.shape as CircleShape2D).radius = 8.0
-	else:
-		# Ground movement: circles positioned for proper floor contact
-		# Body center low enough to touch the floor (y = -8, r = 10 → reaches y=2)
-		if _col_body_center:
-			_col_body_center.position = Vector2(0, -10.0)
-			(_col_body_center.shape as CircleShape2D).radius = 12.0
-		# Shoulder and hip at spine level (handle platform edge contact)
-		if _col_shoulder:
-			_col_shoulder.position = _spine[0]
-			(_col_shoulder.shape as CircleShape2D).radius = 10.0
-		if _col_hip:
-			_col_hip.position = _spine[2]
-			(_col_hip.shape as CircleShape2D).radius = 10.0
-		# Skull follows head
-		if _col_skull:
-			_col_skull.position = _skull
-			(_col_skull.shape as CircleShape2D).radius = 8.0
-
-	# Tail always follows
-	if _col_tail and not _tail_severed and _tail.size() > 4:
-		_col_tail.position = _tail[4]
-	elif _col_tail:
-		_col_tail.position = _spine[2]
 
 
 func _init_hitboxes() -> void:
@@ -502,7 +444,6 @@ func _physics_process(delta: float) -> void:
 	elif not in_precog:
 		_update_foot_push(delta)
 
-	_update_collision_positions()
 	move_and_slide()
 
 	if in_leap_flight:
@@ -3197,16 +3138,13 @@ func _draw_debug() -> void:
 	draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
 	draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
-	# -- 4 collision circles --
-	var col_col := Color(1, 0, 1, 0.4)
-	var col_labels := [["SKULL", _col_skull, 12.0], ["SHLDR", _col_shoulder, 14.0], ["BODY", _col_body_center, 16.0], ["HIP", _col_hip, 14.0], ["TAIL", _col_tail, 6.0]]
-	for cl in col_labels:
-		var lbl: String = cl[0]
-		var node: CollisionShape2D = cl[1]
-		var r: float = cl[2]
-		if node:
-			draw_arc(node.position, r, 0, TAU, 12, col_col, 1.0)
-			draw_string(font, node.position + Vector2(-12, -r - 3), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
+	# -- Collision capsule --
+	if _body_collision:
+		var col_col := Color(1, 0, 1, 0.3)
+		var cp: Vector2 = _body_collision.position
+		var cr: float = 10.0
+		var cw: float = SPINE_SEG_LEN * 2.0 + cr * 2.0
+		draw_rect(Rect2(cp.x - cw / 2.0, cp.y - cr, cw, cr * 2.0), col_col, false, 1.0)
 
 	# -- Spine points --
 	for i in range(_spine.size()):
