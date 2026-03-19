@@ -1621,15 +1621,16 @@ func _simulate_leap_paths() -> void:
 
 			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
-			# Reject arcs that never rise above the target's platform.
-			# The arc peak must be ABOVE target_floor_y to approach from above.
+			# Reject arcs where the closest approach to the target is from below.
+			# Find the arc point nearest to the target — if it's below the platform, reject.
 			if clear:
-				var peak_y: float = INF
+				var best_approach_y: float = INF
 				for pt in arc_c:
-					if pt.y < peak_y:
-						peak_y = pt.y
-				if peak_y > target_floor_y:
-					clear = false  # Arc peaks below the platform — attacking from underneath
+					if pt.distance_to(target_pos) < LEAP_STRIKE_REACH * 2:
+						if pt.y < best_approach_y:
+							best_approach_y = pt.y
+				if best_approach_y > target_floor_y + 10:
+					clear = false  # Approaching from below the platform
 
 			var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
 
@@ -2301,13 +2302,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 			if not (_check_arc_clear_ignore(arc_c, dest_rect) and _check_arc_clear_ignore(arc_l, dest_rect) and _check_arc_clear_ignore(arc_r, dest_rect)):
 				continue
 
-			# Reject arcs that peak below the destination platform
-			var peak_y: float = INF
-			for pt in arc_c:
-				if pt.y < peak_y:
-					peak_y = pt.y
-			if peak_y > plat_y:
-				continue  # Arc never rises above the platform — attacking from below
+			# Surface landing already ensures we approach from above
 
 			# Score: prefer landing near platform center
 			var center_dist: float = absf(landing_x - plat["pos"].x)
@@ -2389,13 +2384,7 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 			if not (_check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)):
 				continue
 
-			# Reject arcs that peak below the target's platform (attacking from underneath)
-			var peak_y: float = INF
-			for pt in arc_c:
-				if pt.y < peak_y:
-					peak_y = pt.y
-			if peak_y > to_floor_y:
-				continue  # Arc never rises above target — attacking from underneath
+			# Arrival point filter already rejects below-platform arrivals
 
 			var time_penalty: float = absf(t_flight - 0.5) * 20.0
 			var score: float = arrival.distance_to(to_pos) + time_penalty
