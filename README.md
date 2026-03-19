@@ -57,6 +57,20 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.16
+**10/10 Baseline, Rigid Spinning Ball, Safe Landing, Thrash=8**
+- 10/10 baseline hit rate, 1175 total damage, worst thrash 8 (was 29)
+- 8/8 edge cases hit, time-to-first-hit 1.1-10.4s
+- Rigid spinning ball grab: body parts SET (not lerped) on computed circle positions
+- Ball radius 40px (player visible in center), collision expands to full tail spiral (~88px)
+- Body frozen during grab (move_and_slide skipped, IK/gait/spine all skipped)
+- Safe landing after grab: teleports to player's position, raycasts floor, resets skeleton
+- 25% chance of grab-ball on leap contact (instead of normal slash barrage)
+- Periodic slash visual effects spawn at ball center during bites/kicks
+- Ball quality scoring: measures containment of body parts within ball radius
+- Tail spiral starts from spine[2] angle, grows proportionally by TAIL_SEG_LEN
+- I key toggles debug draw on all enemies
+
 ### v0.9.15
 **Death Ball Grab, Down-Jump Loosening, Edge Case 8/8**
 - Death ball grab attack: monster curls around player, clasps with front legs, kicks with rear, bites repeatedly, ejects after 2s
