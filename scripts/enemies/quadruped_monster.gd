@@ -1584,6 +1584,10 @@ func _simulate_leap_paths() -> void:
 		if arrival.y > target_floor_y - 5:
 			continue
 
+		# REJECT: arrival point with no clear airspace above (under an overhang)
+		if not _has_clear_airspace(arrival):
+			continue
+
 		arrival_points.append(arrival)
 
 	if arrival_points.is_empty():
@@ -1694,6 +1698,23 @@ func _has_lateral_clearance(world_pos: Vector2) -> bool:
 			if not space.intersect_ray(query).is_empty():
 				return false
 
+	return true
+
+
+func _has_clear_airspace(world_pos: Vector2) -> bool:
+	## Check that there's clear sky above this point — not tucked under an overhang.
+	## Raycasts upward from the point. If it hits something within LEAP_BODY_RADIUS,
+	## the point is in a pocket with no room to approach from above.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	var query := PhysicsRayQueryParameters2D.create(
+		world_pos, world_pos + Vector2(0, -LEAP_BODY_RADIUS * 2), 1)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+	if not result.is_empty():
+		# Something above within 2× body radius — no clear airspace
+		return false
 	return true
 
 
@@ -2350,10 +2371,12 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 	for arrival in arrivals:
 		if _is_point_in_solid(arrival):
 			continue
-		# Reject circle arrivals below the target's platform (attacking the underside)
-		# But allow direct landing points (they're at platform level by design)
+		# Reject circle arrivals below the target's platform
 		var is_direct_landing: bool = absf(arrival.y - to_pos.y) < 5.0
 		if not is_direct_landing and arrival.y > to_floor_y - 5:
+			continue
+		# Reject arrivals with no clear airspace (under overhang)
+		if not is_direct_landing and not _has_clear_airspace(arrival):
 			continue
 
 		for fi in range(LEAP_FLIGHT_TIMES):
