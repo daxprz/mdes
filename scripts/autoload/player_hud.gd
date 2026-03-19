@@ -668,13 +668,15 @@ func _input(event: InputEvent) -> void:
 	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
 		_debug_cycle_enemy()
 
-	# I toggles debug draw on selected enemy
-	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_I:
-		if is_instance_valid(debug_selected_enemy):
-			if "debug_draw_lite" in debug_selected_enemy:
-				debug_selected_enemy.debug_draw_lite = not debug_selected_enemy.debug_draw_lite
-			if "debug_draw_enabled" in debug_selected_enemy:
-				debug_selected_enemy.debug_draw_enabled = not debug_selected_enemy.debug_draw_enabled
+	# I toggles debug draw on ALL enemies (no prerequisites)
+	if event is InputEventKey and event.pressed and event.keycode == KEY_I:
+		_debug_mode = true  # Ensure debug mode is on
+		for e in get_tree().get_nodes_in_group("enemies"):
+			if "debug_draw_lite" in e:
+				e.debug_draw_lite = not e.debug_draw_lite
+		# Auto-select first enemy if none selected
+		if not is_instance_valid(debug_selected_enemy):
+			_debug_cycle_enemy()
 
 	# SEL toggles HUD popup
 	if event.is_action_pressed("debug_toggle"):
