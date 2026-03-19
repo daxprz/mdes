@@ -19,6 +19,8 @@ const SUCKER_RADIUS := 3.0
 const ATTACHED_ATTACK_COOLDOWN := 4.0  # Seconds between attacks when attached to enemy
 const FLING_SPEED := 600.0
 const TENTACLE_MAX_HEALTH := 50.0  # Sub-health for the tentacle when attached
+const SEGMENT_DRAG := 0.92  # Velocity retention per frame (lower = more sluggish)
+const SEGMENT_GRAVITY := 30.0  # Downward pull on each segment
 
 # Phases: 0=wiggle, 1=hunt, 2=smashing player, 3=attached to enemy (permanent)
 var _segments: Array[Vector2] = []  # positions in local space
@@ -64,12 +66,12 @@ func _process(delta: float) -> void:
 	if _lunge_cooldown > 0.0:
 		_lunge_cooldown -= delta
 
-	# Phase-specific logic
+	# Phase-specific logic (controls tip/anchor targets only)
 	match _phase:
 		0:  # Wiggle (confused)
 			if _timer >= HUNT_DELAY:
 				_phase = 1
-			_wiggle(delta)
+			_wiggle_tip(delta)
 		1:  # Hunt players and enemies
 			if _timer >= RIFT_DURATION:
 				queue_free()
@@ -84,19 +86,30 @@ func _process(delta: float) -> void:
 		3:  # Permanently attached to enemy
 			_follow_enemy(delta)
 
+	# Verlet integration with drag on all interior segments
+	_verlet_step(delta)
 	_apply_constraints()
 	queue_redraw()
 
 
-func _wiggle(delta: float) -> void:
+func _verlet_step(delta: float) -> void:
+	## Verlet integration with drag on all interior segments.
+	## Endpoints (anchor=0, tip=last) are controlled by phase logic.
+	## Interior segments move under inertia + gravity + drag.
 	for i in range(1, SEGMENT_COUNT):
+		var vel: Vector2 = _segments[i] - _prev_segments[i]
+		_prev_segments[i] = _segments[i]
+		_segments[i] += vel * SEGMENT_DRAG + Vector2(0, SEGMENT_GRAVITY * delta)
+
+
+func _wiggle_tip(delta: float) -> void:
+	## Applies a gentle wiggle force to the tip and nearby segments.
+	for i in range(maxi(1, SEGMENT_COUNT - 4), SEGMENT_COUNT):
 		var wiggle_offset := Vector2(
 			sin(_timer * WIGGLE_SPEED * 2.0 + i * 0.7) * 15.0,
 			cos(_timer * WIGGLE_SPEED * 1.5 + i * 0.9) * 8.0
 		)
-		var vel: Vector2 = _segments[i] - _prev_segments[i]
-		_prev_segments[i] = _segments[i]
-		_segments[i] += vel * 0.95 + wiggle_offset * delta + Vector2(0, 12.0 * delta)
+		_segments[i] += wiggle_offset * delta
 
 
 func _hunt(delta: float) -> void:
@@ -158,7 +171,7 @@ func _hunt(delta: float) -> void:
 				_smash_direction = 1
 				_lunge_cooldown = 3.0
 	else:
-		_wiggle(delta)
+		_wiggle_tip(delta)
 		if _lunge_cooldown <= 0.0:
 			_lunge_cooldown = 2.0 + randf() * 2.0
 
@@ -186,11 +199,6 @@ func _smash(delta: float) -> void:
 		if _smash_count >= 4:
 			_grabbed_player.velocity = Vector2(_smash_direction * 500.0, -300.0)
 			_release_grab()
-
-	for i in range(1, SEGMENT_COUNT - 1):
-		var vel: Vector2 = _segments[i] - _prev_segments[i]
-		_prev_segments[i] = _segments[i]
-		_segments[i] += vel * 0.9 + Vector2(0, 10.0 * delta)
 
 
 func _release_grab() -> void:
@@ -330,13 +338,17 @@ func _spawn_buff_particles(pos: Vector2) -> void:
 
 
 func _follow_enemy(delta: float) -> void:
-	## Permanently follow the attached enemy and attack nearby players
+	## Permanently follow the attached enemy and attack nearby players.
+	## The rift node stays where it spawned — only segment[0] tracks the enemy.
+	## This lets the chain lag behind and resist the enemy's movement.
 	if not is_instance_valid(_attached_enemy):
 		queue_free()
 		return
 
-	# Anchor rift to enemy position
-	global_position = _attached_enemy.global_position + Vector2(0, -20)
+	# Move anchor segment to enemy position (in local space)
+	var anchor_target: Vector2 = _attached_enemy.global_position + Vector2(0, -20) - global_position
+	_segments[0] = anchor_target
+	_prev_segments[0] = anchor_target
 
 	_attached_attack_timer -= delta
 
@@ -383,15 +395,8 @@ func _attached_hunt(delta: float) -> void:
 		_prev_segments[SEGMENT_COUNT - 1] = _segments[SEGMENT_COUNT - 1]
 		_segments[SEGMENT_COUNT - 1] += dir * LUNGE_SPEED * delta
 	else:
-		# Idle wiggle
-		for i in range(1, SEGMENT_COUNT):
-			var wiggle_offset := Vector2(
-				sin(_timer * 2.0 + i * 0.5) * 6.0,
-				cos(_timer * 1.8 + i * 0.7) * 4.0
-			)
-			var vel: Vector2 = _segments[i] - _prev_segments[i]
-			_prev_segments[i] = _segments[i]
-			_segments[i] += vel * 0.9 + wiggle_offset * delta + Vector2(0, 8.0 * delta)
+		# Idle wiggle on tip segments only
+		_wiggle_tip(delta)
 
 
 func _attached_pound(delta: float) -> void:
@@ -420,18 +425,19 @@ func _attached_pound(delta: float) -> void:
 		_attached_target_pi = -1
 		_attached_smash_phase = 2
 
-	# Gravity on other segments
-	for i in range(1, SEGMENT_COUNT - 1):
-		var vel: Vector2 = _segments[i] - _prev_segments[i]
-		_prev_segments[i] = _segments[i]
-		_segments[i] += vel * 0.9 + Vector2(0, 10.0 * delta)
-
 
 func _apply_constraints() -> void:
-	_segments[0] = Vector2.ZERO
+	# Pin anchor: to origin normally, to enemy position in attached phase
+	var anchor: Vector2 = Vector2.ZERO
+	if _phase == 3 and is_instance_valid(_attached_enemy):
+		anchor = _attached_enemy.global_position + Vector2(0, -20) - global_position
+	_segments[0] = anchor
 
-	for _iter in range(3):
-		_segments[0] = Vector2.ZERO
+	# Multiple iterations for stability — forces propagate both directions
+	for _iter in range(5):
+		_segments[0] = anchor
+
+		# Forward pass (anchor → tip)
 		for i in range(1, SEGMENT_COUNT):
 			var diff: Vector2 = _segments[i] - _segments[i - 1]
 			var dist: float = diff.length()
@@ -444,8 +450,22 @@ func _apply_constraints() -> void:
 			if dist > max_len:
 				var correction: Vector2 = diff.normalized() * (dist - max_len) * 0.5
 				_segments[i] -= correction
-				if i > 0:
-					_segments[i - 1] += correction
+				_segments[i - 1] += correction
+
+		# Reverse pass (tip → anchor) — ensures tip-end forces propagate back
+		for i in range(SEGMENT_COUNT - 2, 0, -1):
+			var diff: Vector2 = _segments[i] - _segments[i + 1]
+			var dist: float = diff.length()
+			if dist < 0.01:
+				diff = Vector2(0, 1)
+				dist = 1.0
+			var max_len: float = SEGMENT_LENGTH
+			if _phase == 1 and (i + 1) >= SEGMENT_COUNT - 3 and _lunge_cooldown <= 0.0:
+				max_len = SEGMENT_LENGTH * 1.5
+			if dist > max_len:
+				var correction: Vector2 = diff.normalized() * (dist - max_len) * 0.5
+				_segments[i] -= correction
+				_segments[i + 1] += correction
 
 
 func _draw() -> void:
@@ -456,6 +476,7 @@ func _draw() -> void:
 func _draw_rift() -> void:
 	var pulse: float = 1.0 + 0.15 * sin(_timer * 6.0)
 	var rift_size: float = 22.0 * _rift_scale * pulse
+	var center: Vector2 = _segments[0]  # Draw at anchor segment
 
 	# Attached to enemy: rift size scales with tentacle sub-health
 	if _phase == 3:
@@ -463,17 +484,17 @@ func _draw_rift() -> void:
 		rift_size = 14.0 * health_ratio * pulse
 		if rift_size < 0.5:
 			return  # Too small to draw
-		draw_circle(Vector2.ZERO, rift_size + 4, Color(0.7, 0.1, 0.3, 0.2 * health_ratio))
-		draw_circle(Vector2.ZERO, rift_size, Color(0.6, 0.05, 0.2, 0.6))
-		draw_circle(Vector2.ZERO, rift_size * 0.4, Color(0.9, 0.3, 0.5, 0.8))
+		draw_circle(center, rift_size + 4, Color(0.7, 0.1, 0.3, 0.2 * health_ratio))
+		draw_circle(center, rift_size, Color(0.6, 0.05, 0.2, 0.6))
+		draw_circle(center, rift_size * 0.4, Color(0.9, 0.3, 0.5, 0.8))
 		return
 
 	# Normal rift
-	draw_circle(Vector2.ZERO, rift_size + 6, Color(0.9, 0.1, 0.1, 0.2 * _rift_scale))
-	draw_circle(Vector2.ZERO, rift_size + 3, Color(0.9, 0.1, 0.1, 0.3 * _rift_scale))
-	draw_circle(Vector2.ZERO, rift_size, Color(0.8, 0.05, 0.05, 0.7 * _rift_scale))
-	draw_circle(Vector2.ZERO, rift_size * 0.5, Color(1.0, 0.3, 0.2, 0.9 * _rift_scale))
-	draw_circle(Vector2.ZERO, rift_size * 0.2, Color(1.0, 0.6, 0.4, _rift_scale))
+	draw_circle(center, rift_size + 6, Color(0.9, 0.1, 0.1, 0.2 * _rift_scale))
+	draw_circle(center, rift_size + 3, Color(0.9, 0.1, 0.1, 0.3 * _rift_scale))
+	draw_circle(center, rift_size, Color(0.8, 0.05, 0.05, 0.7 * _rift_scale))
+	draw_circle(center, rift_size * 0.5, Color(1.0, 0.3, 0.2, 0.9 * _rift_scale))
+	draw_circle(center, rift_size * 0.2, Color(1.0, 0.6, 0.4, _rift_scale))
 
 
 func _draw_tentacle() -> void:
