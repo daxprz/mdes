@@ -498,28 +498,35 @@ func _physics_process(delta: float) -> void:
 	if _precog_graph_building:
 		_precog_build_graph_tick()
 
+	var in_grab: bool = (_state == State.ATTACK_GRAB)
+
 	if in_leap_flight:
 		_update_leap_collision(delta)
-	elif not in_precog:
+	elif not in_precog and not in_grab:
 		_update_foot_push(delta)
 
-	move_and_slide()
+	if in_grab:
+		# During grab: FREEZE body position. Don't let move_and_slide shift us.
+		# The collision sphere traps the player, not moves us.
+		velocity = Vector2.ZERO
+	else:
+		move_and_slide()
 
 	if in_leap_flight:
 		_update_leap_pose(delta)
+	elif in_grab:
+		pass  # Grab pose is handled inside _do_grab — skip all normal skeleton updates
 	elif not in_precog:
 		_update_spine()
 		_update_gait(delta)
 		_solve_pose(delta)
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
 
-	# Affix body collider to torso — hanging belly that reaches the floor
-	# Spine is at ~y=-50, floor at ~y=0. Belly at y=-14 with r=14 reaches y=0.
-	if _body_collision:
-		_body_collision.position = Vector2(_spine[1].x, -14.0)
-
-	# Prevent skull/tail/spine from clipping through geometry
-	_constrain_skeleton_to_world()
+	# Affix body collider to torso (skip during grab — grab controls collision)
+	if not in_grab:
+		if _body_collision:
+			_body_collision.position = Vector2(_spine[1].x, -14.0)
+		_constrain_skeleton_to_world()
 
 	_update_hitbox_positions()
 	_score_ik_quality()
@@ -673,12 +680,11 @@ func _score_ik_quality() -> void:
 
 
 func _score_ball_quality(center: Vector2, radius: float) -> void:
-	## Score how well the ball contains all body parts.
-	## Each px outside the ball radius = 1 point. 0 = perfect ball.
+	## Score how well the ball contains all body parts (in LOCAL space).
+	## Each px outside = penalty. 0 = perfect. Checks rendered positions.
 	var score: float = 0.0
-	var margin: float = radius + 10.0  # Allow a small margin beyond the ball edge
+	var margin: float = radius + 12.0
 
-	# Check all skeleton points
 	var points: Array[Vector2] = [_spine[0], _spine[1], _spine[2], _neck[0], _neck[1], _skull, _jaw]
 	for pt in points:
 		var d: float = pt.distance_to(center)

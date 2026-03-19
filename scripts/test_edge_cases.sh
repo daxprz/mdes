@@ -1,5 +1,5 @@
 #!/bin/bash
-# Edge case tests: measure TIME TO FIRST DAMAGE + total damage
+# Edge case tests: TIME TO HIT + BALL score + all metrics
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -20,8 +20,8 @@ near_cliff_left:220:580:250:750
 near_cliff_right:1700:580:1680:750
 "
 
-printf "%-22s %5s %7s %5s %s\n" "SCENARIO" "DMG" "1stHIT" "FPS" "MONSTER"
-printf "%-22s %5s %7s %5s %s\n" "--------" "---" "------" "---" "-------"
+printf "%-22s %5s %6s %5s %6s %6s %s\n" "SCENARIO" "DMG" "1stHIT" "FPS" "BALL" "IK" "MONSTER"
+printf "%-22s %5s %6s %5s %6s %6s %s\n" "--------" "---" "------" "---" "----" "--" "-------"
 
 for SCENE in $SCENARIOS; do
     IFS=: read -r LABEL DX DY MX MY <<< "$SCENE"
@@ -34,6 +34,7 @@ for SCENE in $SCENARIOS; do
     R "spawn monster $MX $MY" > /dev/null 2>&1
     sleep 2
     R "resethp" > /dev/null 2>&1
+    R "ikreset" > /dev/null 2>&1
     : > /tmp/godot_edge.log
 
     START=$(python3 -c "import time; print(time.time())")
@@ -56,7 +57,15 @@ for SCENE in $SCENARIOS; do
     MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
     END_FPS=$(R "fps" | grep -o '[0-9]*')
 
-    printf "%-22s %5d %6ss %5s %s\n" "$LABEL" "$DMG" "$FIRST_HIT" "$END_FPS" "monster=$MPOS"
+    BALLLINE=$(R "ball")
+    BALL_PK=$(printf "%s" "$BALLLINE" | grep -o 'ball_peak=[0-9]*' | cut -d= -f2)
+    BALL_PK=${BALL_PK:-0}
+
+    IKLINE=$(R "ik")
+    IK_PK=$(printf "%s" "$IKLINE" | grep -o 'ik_peak=[0-9]*' | cut -d= -f2)
+    IK_PK=${IK_PK:-0}
+
+    printf "%-22s %5d %5ss %5s %5d %5d %s\n" "$LABEL" "$DMG" "$FIRST_HIT" "$END_FPS" "$BALL_PK" "$IK_PK" "monster=$MPOS"
 done
 
 printf "\n=== DONE ===\n"
