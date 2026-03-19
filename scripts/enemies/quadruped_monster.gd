@@ -320,17 +320,42 @@ func _init_part_health() -> void:
 	}
 
 
+var _col_skull: CollisionShape2D = null
+var _col_shoulder: CollisionShape2D = null
+var _col_hip: CollisionShape2D = null
+var _col_tail: CollisionShape2D = null
+
 func _init_collision() -> void:
-	# Small horizontal capsule around the body core only.
-	# Legs find the floor via raycasting, not the collision shape.
-	var shape := CapsuleShape2D.new()
-	shape.radius = 10.0
-	shape.height = SPINE_SEG_LEN * 2.0 + shape.radius * 2.0
-	_body_collision = CollisionShape2D.new()
-	_body_collision.shape = shape
-	_body_collision.rotation = PI / 2.0  # Horizontal
-	_body_collision.position = Vector2(0, -10.0)  # Centered on body, slightly above floor
-	add_child(_body_collision)
+	# 4 circle colliders that follow the skeleton:
+	# skull (leads during leaps), shoulders (spine[0]), hips (spine[2]), tail tip
+	_col_skull = _make_circle_collider(12.0)
+	_col_shoulder = _make_circle_collider(14.0)
+	_col_hip = _make_circle_collider(12.0)
+	_col_tail = _make_circle_collider(6.0)
+	_body_collision = _col_shoulder  # Primary reference for leap rotation
+
+
+func _make_circle_collider(radius: float) -> CollisionShape2D:
+	var shape := CircleShape2D.new()
+	shape.radius = radius
+	var col := CollisionShape2D.new()
+	col.shape = shape
+	add_child(col)
+	return col
+
+
+func _update_collision_positions() -> void:
+	## Move the 4 collision circles to follow the skeleton each frame.
+	if _col_skull:
+		_col_skull.position = _skull
+	if _col_shoulder:
+		_col_shoulder.position = _spine[0]
+	if _col_hip:
+		_col_hip.position = _spine[2]
+	if _col_tail and not _tail_severed and _tail.size() > 4:
+		_col_tail.position = _tail[4]
+	elif _col_tail:
+		_col_tail.position = _spine[2]
 
 
 func _init_hitboxes() -> void:
@@ -440,6 +465,7 @@ func _physics_process(delta: float) -> void:
 	elif not in_precog:
 		_update_foot_push(delta)
 
+	_update_collision_positions()
 	move_and_slide()
 
 	if in_leap_flight:
@@ -1328,21 +1354,15 @@ func _do_transition_quadruped(delta: float) -> void:
 # -- Vertical Leap Attack ------------------------------------------------------
 
 func _update_leap_collision(delta: float) -> void:
-	## During leap: rotate the collision shape to match the body's flight angle.
+	## During leap: track body angle for pose alignment.
+	## Collision circles follow skeleton via _update_collision_positions().
 	if _state == State.ATTACK_LEAP_WINDUP:
-		# During windup, rotate collision to match spine tilt
 		var to_target: Vector2 = _leap_target_pos - global_position
 		var target_angle: float = to_target.angle()
 		_leap_body_angle = lerpf(_leap_body_angle, target_angle, 3.0 * delta)
 	elif _state == State.ATTACK_LEAP_AIRBORNE:
-		# During flight, align with velocity
 		if velocity.length() > 10:
 			_leap_body_angle = velocity.angle()
-	# Apply rotation to collision shape
-	if _body_collision:
-		_body_collision.rotation = _leap_body_angle
-		# Position collision at spine center
-		_body_collision.position = (_spine[0] + _spine[2]) * 0.5
 
 
 func _update_leap_pose(delta: float) -> void:
@@ -2677,9 +2697,7 @@ func _end_leap() -> void:
 	_leap_chosen_arc_r.clear()
 	_attack_timer = 0.0
 	velocity = Vector2.ZERO  # Kill all momentum on landing
-	if _body_collision:
-		_body_collision.rotation = PI / 2.0
-		_body_collision.position = Vector2(0, -10.0)
+	# Collision circles reset via _update_collision_positions on next frame
 
 	# Reset skeleton to standing pose — spine horizontal, feet on the ground
 	var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)
@@ -3106,24 +3124,16 @@ func _draw_debug() -> void:
 	draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
 	draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
-	# -- Collision shape bounds (rotates during leap) --
-	var col_r: float = 10.0
-	var col_half_w: float = SPINE_SEG_LEN + col_r
-	var col_center: Vector2 = _body_collision.position if _body_collision else Vector2(0, -10)
-	var col_angle: float = _body_collision.rotation if _body_collision else PI / 2.0
-	var col_dir: Vector2 = Vector2(cos(col_angle), sin(col_angle))
-	var col_perp: Vector2 = Vector2(-col_dir.y, col_dir.x)
-	# Draw rotated rectangle as 4 lines
-	var c1: Vector2 = col_center + col_dir * col_half_w + col_perp * col_r
-	var c2: Vector2 = col_center + col_dir * col_half_w - col_perp * col_r
-	var c3: Vector2 = col_center - col_dir * col_half_w - col_perp * col_r
-	var c4: Vector2 = col_center - col_dir * col_half_w + col_perp * col_r
-	draw_polygon(PackedVector2Array([c1, c2, c3, c4]), PackedColorArray([Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15), Color(1, 0, 1, 0.15)]))
-	draw_line(c1, c2, Color(1, 0, 1, 0.5), 1.0)
-	draw_line(c2, c3, Color(1, 0, 1, 0.5), 1.0)
-	draw_line(c3, c4, Color(1, 0, 1, 0.5), 1.0)
-	draw_line(c4, c1, Color(1, 0, 1, 0.5), 1.0)
-	draw_string(font, col_center + Vector2(-20, -col_r - 4), "COLLISION", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0, 1, 0.7))
+	# -- 4 collision circles --
+	var col_col := Color(1, 0, 1, 0.4)
+	var col_labels := [["SKULL", _col_skull, 12.0], ["SHLDR", _col_shoulder, 14.0], ["HIP", _col_hip, 12.0], ["TAIL", _col_tail, 6.0]]
+	for cl in col_labels:
+		var lbl: String = cl[0]
+		var node: CollisionShape2D = cl[1]
+		var r: float = cl[2]
+		if node:
+			draw_arc(node.position, r, 0, TAU, 12, col_col, 1.0)
+			draw_string(font, node.position + Vector2(-12, -r - 3), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
 
 	# -- Spine points --
 	for i in range(_spine.size()):
