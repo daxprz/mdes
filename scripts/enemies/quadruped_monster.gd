@@ -553,12 +553,11 @@ func _solve_pose(delta: float) -> void:
 
 func _score_ik_quality() -> void:
 	## Score how "good" the IK looks this frame. Lower = better.
-	## Components:
-	##   spread:    horizontal distance from foot to its hip (penalty > 30px)
-	##   hover:     distance from planted foot to the floor beneath it (penalty > 5px)
-	##   stretch:   hip-to-foot distance exceeding max reach (any excess = bad)
+	## Only runs every 10th frame to avoid FPS impact from raycasts.
 	if _leap_ik_off or _state == State.PRECOGNITION:
-		return  # Don't score during leap/precog (legs are manually positioned)
+		return
+	if Engine.get_frames_drawn() % 10 != 0:
+		return
 
 	var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
 	var score: float = 0.0
