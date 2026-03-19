@@ -330,27 +330,29 @@ func _solve_pose(delta: float) -> void:
 		var rest_target: Vector2 = _spine[i - 1] + _get_facing_offset(_spine_rest[i])
 		_spine[i] = _spine[i].lerp(rest_target, s_clamp)
 
-	# -- Neck: base at spine[0], tip springs to rest offset --
+	# -- Neck + Skull: head pivots toward target, neck bends to follow --
 	_neck[0] = _spine[0]
-	var neck_target: Vector2 = _spine[0] + _get_facing_offset(_neck_rest)
+	var neck_rest_target: Vector2 = _spine[0] + _get_facing_offset(_neck_rest)
+	var skull_rest_target: Vector2 = neck_rest_target + _get_facing_offset(_skull_rest)
 
-	# Head tracking: bias neck tip toward target if one exists
 	if is_instance_valid(_target) and not _head_severed:
+		# Skull aims directly at target
 		var to_target: Vector2 = _target.global_position - global_position
-		var look_dir: Vector2 = to_target.normalized()
-		var track_offset: Vector2 = look_dir * NECK_LEN * 0.5
-		neck_target = neck_target.lerp(_spine[0] + track_offset + Vector2(0, -NECK_LEN * 0.4), HEAD_TRACK_SPEED * delta)
+		var aim_dir: Vector2 = to_target.normalized()
 
-	_neck[1] = _neck[1].lerp(neck_target, s_clamp)
+		# Place skull along the aim direction, at the right distance from spine[0]
+		var skull_dist: float = NECK_LEN + _skull_rest.length()
+		var skull_aim: Vector2 = _spine[0] + aim_dir * skull_dist
+		skull_rest_target = skull_rest_target.lerp(skull_aim, 0.7)
 
-	# -- Skull: springs to rest offset from neck tip --
-	var skull_target: Vector2 = _neck[1] + _get_facing_offset(_skull_rest)
-	# Also track target with head
-	if is_instance_valid(_target) and not _head_severed:
-		var to_target: Vector2 = _target.global_position - global_position
-		var look_dir: Vector2 = to_target.normalized()
-		skull_target += look_dir * 6.0
-	_skull = _skull.lerp(skull_target, s_clamp)
+		# Neck tip bends toward skull — positioned between spine[0] and skull
+		var neck_toward_skull: Vector2 = (skull_rest_target - _spine[0]).normalized()
+		var neck_aim: Vector2 = _spine[0] + neck_toward_skull * NECK_LEN
+		# Blend with rest pose so neck doesn't fully collapse
+		neck_rest_target = neck_rest_target.lerp(neck_aim, 0.6)
+
+	_neck[1] = _neck[1].lerp(neck_rest_target, minf(HEAD_TRACK_SPEED * delta, 1.0))
+	_skull = _skull.lerp(skull_rest_target, minf(HEAD_TRACK_SPEED * delta, 1.0))
 
 	# -- Jaw: springs from skull, opens for bite --
 	var jaw_offset: Vector2 = _get_facing_offset(_jaw_rest)
@@ -484,9 +486,11 @@ func _update_gait(delta: float) -> void:
 			_legs[li][2] = _foot_world[li] - global_position
 		# else: foot is mid-step, _animate_step handles it
 
-	# Each foot steps independently when it falls too far behind
-	for li in range(4):
-		_try_step(li)
+	# At most one front foot and one back foot step at a time.
+	# Within each pair (front 0/1, rear 2/3), only the one that's
+	# furthest behind can step — and only if the other is planted.
+	_try_step_pair(0, 1)  # Front legs
+	_try_step_pair(2, 3)  # Rear legs
 
 	# Animate active steps
 	for li in range(4):
@@ -501,12 +505,47 @@ func _is_leg_stepping(li: int) -> bool:
 	return not _foot_planted[li] and not _leg_severed[li]
 
 
+func _try_step_pair(a: int, b: int) -> void:
+	## Within a pair (e.g. front-left/front-right), only one can step at a time.
+	## The one furthest from its ideal position gets priority.
+	var a_stepping: bool = _is_leg_stepping(a)
+	var b_stepping: bool = _is_leg_stepping(b)
+
+	# If one is already mid-step, don't start another
+	if a_stepping or b_stepping:
+		return
+
+	var a_ok: bool = not _leg_severed[a] and _foot_planted[a]
+	var b_ok: bool = not _leg_severed[b] and _foot_planted[b]
+
+	if not a_ok and not b_ok:
+		return
+
+	# Measure how far behind each foot is
+	var a_dist: float = 0.0
+	var b_dist: float = 0.0
+	if a_ok:
+		a_dist = _foot_world[a].distance_to(_ideal_foot_world(a))
+	if b_ok:
+		b_dist = _foot_world[b].distance_to(_ideal_foot_world(b))
+
+	# Only step the one that's furthest behind (and past threshold)
+	if a_dist >= b_dist and a_dist > STEP_THRESHOLD:
+		_try_step(a)
+	elif b_dist > STEP_THRESHOLD:
+		_try_step(b)
+
+
 func _ideal_foot_world(li: int) -> Vector2:
-	## Where this foot SHOULD be in world space: below hip, on the floor, ahead of body.
+	## Where this foot SHOULD be in world space.
+	## Front legs reach AHEAD, rear legs trail BEHIND.
 	var hip_local: Vector2 = _legs[li][0]
 	var hip_world: Vector2 = global_position + hip_local
-	var stride_ahead: float = _want_direction * _move_speed * 0.35
-	var target_x: float = hip_world.x + stride_ahead
+	var stride: float = _want_direction * _move_speed * 0.35
+	if li >= 2:
+		# Rear legs: target behind the hip instead of ahead
+		stride *= -0.5
+	var target_x: float = hip_world.x + stride
 	var floor_y: float = _raycast_floor(Vector2(target_x - global_position.x, hip_local.y)) + global_position.y
 	return Vector2(target_x, floor_y)
 
@@ -1069,50 +1108,72 @@ func _draw_neck_head() -> void:
 		return
 
 	var neck_col := Color(0.33, 0.27, 0.22)
-	var f: float = _facing
 
-	# Neck: thick line from spine[0] through neck base to neck tip, then to skull
+	# Neck: thick line from spine[0] through neck tip to skull
 	draw_line(_neck[0], _neck[1], neck_col, 8.0, true)
-	draw_line(_neck[1], _skull, neck_col, 7.0, true)  # Connect neck to skull
+	draw_line(_neck[1], _skull, neck_col, 7.0, true)
 	draw_circle(_neck[0], 5.0, neck_col)
 	draw_circle(_neck[1], 4.5, neck_col)
 
-	# Skull (2x size)
-	var skull_col := Color(0.35, 0.28, 0.22)
-	var skull_pts := PackedVector2Array([
-		_skull + Vector2(-12 * f, -16),
-		_skull + Vector2(28 * f, -12),
-		_skull + Vector2(32 * f, 4),
-		_skull + Vector2(16 * f, 12),
-		_skull + Vector2(-8 * f, 8),
-	])
-	var skull_cols := PackedColorArray([skull_col, skull_col, skull_col, skull_col, skull_col])
-	draw_polygon(skull_pts, skull_cols)
+	# Head facing direction: derived from neck→skull vector
+	# All skull/jaw/eye points rotate to face this direction
+	var head_dir: Vector2 = (_skull - _neck[1]).normalized()
+	if head_dir.length_squared() < 0.01:
+		head_dir = Vector2(_facing, 0)
+	# Head-local coordinate system:
+	#   head_fwd  = direction skull faces (neck→skull)
+	#   head_up   = perpendicular, ALWAYS pointing screen-up (negative Y)
+	# When facing left, we need to mirror the "up" axis so the head doesn't flip.
+	var head_fwd: Vector2 = head_dir
+	var head_up: Vector2 = Vector2(-head_dir.y, head_dir.x)
+	# head_up should point screen-up (negative Y). If it doesn't, flip it.
+	if head_up.y > 0:
+		head_up = -head_up
 
-	# Eye (scaled up)
-	var eye_pos: Vector2 = _skull + Vector2(16 * f, -5)
+	# Skull polygon (x=forward toward snout, y=upward toward top of skull)
+	var skull_col := Color(0.35, 0.28, 0.22)
+	var skull_local := [
+		Vector2(-12, 16),   # Back-top
+		Vector2(28, 12),    # Front-top
+		Vector2(32, -4),    # Front snout
+		Vector2(16, -12),   # Front-bottom
+		Vector2(-8, -8),    # Back-bottom
+	]
+	var skull_pts := PackedVector2Array()
+	for pt in skull_local:
+		skull_pts.append(_skull + pt.x * head_fwd + pt.y * head_up)
+	draw_polygon(skull_pts, PackedColorArray([skull_col, skull_col, skull_col, skull_col, skull_col]))
+
+	# Eye
+	var eye_local := Vector2(16, 5)
+	var eye_pos: Vector2 = _skull + eye_local.x * head_fwd + eye_local.y * head_up
 	draw_circle(eye_pos, 4.0, Color(1.0, 0.2, 0.1))
 	draw_circle(eye_pos, 2.0, Color(1.0, 0.5, 0.2))
 
-	# Jaw (2x size)
+	# Jaw (opens downward = negative head_up direction)
 	var jaw_col := Color(0.3, 0.24, 0.19)
-	var jaw_pts := PackedVector2Array([
-		_skull + Vector2(-4 * f, 8),
-		_skull + Vector2(28 * f, 4 + _jaw_open * 16),
-		_jaw,
-		_skull + Vector2(-4 * f, 12 + _jaw_open * 8),
-	])
-	var jaw_cols := PackedColorArray([jaw_col, jaw_col, jaw_col, jaw_col])
-	draw_polygon(jaw_pts, jaw_cols)
+	var jaw_open_fwd: float = _jaw_open * 16.0
+	var jaw_open_down: float = _jaw_open * 8.0
+	var jaw_local := [
+		Vector2(-4, -8),                            # Back hinge
+		Vector2(28, -4 - jaw_open_fwd),             # Front tip
+		Vector2(20, -14 - jaw_open_fwd),            # Jaw tip far
+		Vector2(-4, -12 - jaw_open_down),           # Back bottom
+	]
+	var jaw_pts := PackedVector2Array()
+	for pt in jaw_local:
+		jaw_pts.append(_skull + pt.x * head_fwd + pt.y * head_up)
+	draw_polygon(jaw_pts, PackedColorArray([jaw_col, jaw_col, jaw_col, jaw_col]))
 
-	# Teeth (scaled up)
+	# Teeth (hang from upper jaw, pointing in -head_up direction)
 	var teeth_col := Color(0.9, 0.85, 0.7)
-	var tooth_count := 4
-	for i in range(tooth_count):
-		var t: float = float(i + 1) / float(tooth_count + 1)
-		var tooth_base: Vector2 = _skull.lerp(_skull + Vector2(28 * f, 4), t)
-		var tooth_tip: Vector2 = tooth_base + Vector2(0, 6 + _jaw_open * 5)
-		draw_line(tooth_base, tooth_tip, teeth_col, 2.0)
+	for i in range(4):
+		var t: float = float(i + 1) / 5.0
+		var base_local := Vector2(lerpf(4, 28, t), -4)
+		var tip_local := Vector2(base_local.x, base_local.y - 6 - _jaw_open * 5)
+		var base_pt: Vector2 = _skull + base_local.x * head_fwd + base_local.y * head_up
+		var tip_pt: Vector2 = _skull + tip_local.x * head_fwd + tip_local.y * head_up
+		draw_line(base_pt, tip_pt, teeth_col, 2.0)
 
 
 func _draw_debug() -> void:
@@ -1201,3 +1262,16 @@ func _draw_debug() -> void:
 	draw_string(font, info_pos + Vector2(0, 32), "Posture: %s  Vel: (%.0f,%.0f)" % ["QUAD" if _posture == Posture.QUADRUPED else "BIPED", velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f" % [str(is_on_floor()), _want_direction], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 52), "floorY: %.1f  global: (%.0f,%.0f)" % [floor_y, global_position.x, global_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+
+	# -- Target indicator: crosshair on the hunted player --
+	if is_instance_valid(_target):
+		var target_local: Vector2 = _target.global_position - global_position
+		var tgt_col := Color(1, 0, 0, 0.8)
+		# Crosshair
+		draw_line(target_local + Vector2(-16, 0), target_local + Vector2(16, 0), tgt_col, 2.0)
+		draw_line(target_local + Vector2(0, -16), target_local + Vector2(0, 16), tgt_col, 2.0)
+		draw_arc(target_local, 12.0, 0, TAU, 16, tgt_col, 1.5)
+		draw_arc(target_local, 20.0, 0, TAU, 16, Color(1, 0, 0, 0.3), 1.0)
+		draw_string(font, target_local + Vector2(14, -14), "TARGET P%d" % _target_player_index, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, tgt_col)
+		# Line from skull to target
+		draw_line(_skull, target_local, Color(1, 0.3, 0.1, 0.3), 1.0)
