@@ -57,6 +57,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.12
+**9/10 Baseline, IK Fixes, FPS Stability**
+- Automated baseline: 9/10 scenarios deal damage, min FPS 60 (never dips)
+- IK leg clamping: feet stay under the body, only corrected at 2x max reach
+- Async graph building: 5 pairs per frame, no single-frame stutter
+- Precog cooldown: 5s between triggers, prevents infinite loop FPS crash
+- Wonky leg detection: feet that reach to lower platforms are auto-corrected
+- Knee snap at 2x stiffness prevents oscillation/sticking
+- Step threshold 35px for responsive foot placement
+- Dummy player tracks HP/damage, displays on-screen, routes take_damage correctly
+- RCON: fps, hp, resethp commands for automated measurement
+
 ### v0.9.11
 **Speed Overhaul, Sprint Slash, Connected Hop-Up**
 - Ruthless panther: instant precog when target is on a different platform (no timer wait)
