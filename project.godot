@@ -29,6 +29,7 @@ AudioManager="*res://scripts/autoload/audio_manager.gd"
 PlayerHUD="*res://scripts/autoload/player_hud.gd"
 LevelConfig="*res://scripts/autoload/level_config.gd"
 Version="*res://scripts/autoload/version.gd"
+Rcon="*res://scripts/autoload/rcon.gd"
 
 [display]
 

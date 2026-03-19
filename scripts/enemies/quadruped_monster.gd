@@ -63,9 +63,9 @@ const LEAP_COOLDOWN := 8.0     # Seconds between leaps
 const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
 const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
 const LEAP_ARRIVAL_SAMPLES := 12  # Number of arrival angles to test around target
-const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
-const LEAP_FLIGHT_TIME_MIN := 0.3 # Shortest flight time to test
-const LEAP_FLIGHT_TIME_MAX := 1.0 # Longest flight time to test
+const LEAP_FLIGHT_TIMES := 7      # Number of flight durations to try per arrival point
+const LEAP_FLIGHT_TIME_MIN := 0.2 # Shortest flight time to test
+const LEAP_FLIGHT_TIME_MAX := 1.5 # Longest flight time to test (higher arcs)
 const LEAP_ARC_STEPS := 40        # Simulation steps per arc
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.04         # Simulation timestep
@@ -76,12 +76,17 @@ const HEAD_HEALTH := 60
 const TAIL_HEALTH := 50
 const LEG_HEALTH := 40
 
+# Pre-cognition (two-hop leap chaining)
+const PRECOG_TRIGGER_TIME := 5.0   # Seconds without landing a hit before pre-cognition
+const PRECOG_GRID_SPACING := 50.0  # Drop a ball every 50px across the entire map
+const PRECOG_CLUSTER_RADIUS := 40.0 # Landed balls closer than this are merged into one cluster
+
 # -- Enums ---------------------------------------------------------------------
 
 enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
 			 ATTACK_LUNGE, ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
-			 TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
+			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
 enum Posture { QUADRUPED, BIPEDAL }
 
 # -- Skeleton arrays -----------------------------------------------------------
@@ -154,6 +159,21 @@ var _leap_slash_count: int = 0  # Slashes delivered so far
 var _leap_thrash_count: int = 0 # Thrashes delivered so far
 var _leap_slash_side: int = 1   # Alternating slash direction
 var _slash_effects: Array = []  # Active slash visual effects
+
+# Pre-cognition state
+var _time_since_strike_range: float = 0.0  # How long since last successful hit
+var _precog_phase: int = 0  # 0=ball drop, 1=build graph, 2=pathfind, 3=execute
+var _precog_ball_lands: Array[Vector2] = []  # World positions where balls landed (raw)
+var _precog_platforms: Array = []  # [{pos, weight, min_x, max_x}] — detected platforms
+var _precog_edges: Array = []  # [{from, to, launch_vel, arc_l, arc_r}] — leaps between platforms
+var _precog_path: Array = []  # Ordered list of platform indices to traverse
+var _precog_path_edges: Array = []  # The edge data for each hop in the path
+var _precog_current_hop: int = 0  # Which hop we're currently executing
+var _precog_has_waypoint: bool = false
+var _precog_waypoint: Vector2 = Vector2.ZERO  # Where to walk before leaping
+var _precog_waypoint_edge: Dictionary = {}  # The leap to execute on arrival
+var _precog_process_i: int = 0  # Graph building: source platform index
+var _precog_process_j: int = 0  # Graph building: dest platform index
 
 # Target tracking
 var _target: Node2D = null
@@ -350,29 +370,33 @@ func _physics_process(delta: float) -> void:
 			_do_leap_strike(delta)
 		State.ATTACK_LEAP_THRASH:
 			_do_leap_thrash(delta)
+		State.PRECOGNITION:
+			_do_precognition(delta)
 		State.TRANSITION_BIPEDAL:
 			_do_transition_bipedal(delta)
 		State.TRANSITION_QUADRUPED:
 			_do_transition_quadruped(delta)
 
-	# Leap states handle their own skeleton — skip normal locomotion/pose
+	# Leap/precog states handle their own skeleton — skip normal locomotion/pose
 	var in_leap_flight: bool = (_state == State.ATTACK_LEAP_WINDUP
 		or _state == State.ATTACK_LEAP_AIRBORNE or _state == State.ATTACK_LEAP_STRIKE
 		or _state == State.ATTACK_LEAP_THRASH)
+	var in_precog: bool = (_state == State.PRECOGNITION)
 
 	if in_leap_flight:
 		_update_leap_collision(delta)
-	else:
-		_update_foot_push(delta)  # PLAN state still walks to launch position
+	elif not in_precog:
+		_update_foot_push(delta)
 
 	move_and_slide()
 
 	if in_leap_flight:
 		_update_leap_pose(delta)
-	else:
+	elif not in_precog:
 		_update_spine()
 		_update_gait(delta)
 		_solve_pose(delta)
+	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
 
 	_update_hitbox_positions()
 
@@ -738,10 +762,76 @@ func _do_chase(_delta: float) -> void:
 
 	_pick_target()  # Check aggro switch
 
+	# If we have a precog waypoint, walk there then leap
+	# Reset the no-hit timer while executing a precog plan (don't re-trigger)
+	if _precog_has_waypoint or not _precog_path_edges.is_empty():
+		_time_since_strike_range = 0.0
+
+	if _precog_has_waypoint:
+		var to_waypoint: Vector2 = _precog_waypoint - global_position
+		var waypoint_dist: float = absf(to_waypoint.x)
+		if Engine.get_frames_drawn() % 30 == 0:
+			print("PRECOG WALK: wpt=(%.0f,%.0f) me=(%.0f,%.0f) dx=%.0f edge_empty=%s" % [
+				_precog_waypoint.x, _precog_waypoint.y,
+				global_position.x, global_position.y,
+				waypoint_dist, str(_precog_waypoint_edge.is_empty())])
+		_facing = signf(to_waypoint.x) if absf(to_waypoint.x) > 5.0 else _facing
+		_want_direction = signf(to_waypoint.x)
+		_move_speed = SPEED_FAST
+
+		if waypoint_dist < 10.0:
+			_precog_has_waypoint = false
+			var has_vel: bool = _precog_waypoint_edge.has("launch_vel")
+			var vel_val: String = str(_precog_waypoint_edge.get("launch_vel", "NONE"))
+			var has_arcs: bool = _precog_waypoint_edge.has("arc_l") and _precog_waypoint_edge.has("arc_r")
+			print("PRECOG: ARRIVED. has_vel=%s vel=%s has_arcs=%s edge_keys=%s" % [
+				str(has_vel), vel_val, str(has_arcs), str(_precog_waypoint_edge.keys())])
+
+			if not _precog_waypoint_edge.is_empty() and _precog_waypoint_edge.has("launch_vel"):
+				# Use the pre-computed velocity — the arrival threshold ensures
+				# we're close enough to the planned launch point.
+				var edge: Dictionary = _precog_waypoint_edge
+				print("PRECOG: EXECUTING leap vel=(%.0f,%.0f)" % [edge["launch_vel"].x, edge["launch_vel"].y])
+
+				if is_instance_valid(_target):
+					_leap_target_pos = _target.global_position
+				else:
+					_leap_target_pos = edge.get("arrival", global_position)
+				set_meta("_leap_chosen_vel", edge["launch_vel"])
+				_leap_launch_pos = global_position
+				_leap_chosen_arc_l = edge["arc_l"]
+				_leap_chosen_arc_r = edge["arc_r"]
+				_leap_found_path = true
+				_leap_plan_results.clear()
+				_leap_plan_results.append({
+					"pos": global_position,
+					"arc_l": edge["arc_l"],
+					"arc_r": edge["arc_r"],
+					"clear": true,
+					"arc_ratio": 0.5,
+					"launch_vel": edge["launch_vel"],
+				})
+				_state = State.ATTACK_LEAP_WINDUP
+				_attack_timer = 0.0
+				_leap_ik_off = true
+				_leap_cooldown = LEAP_COOLDOWN
+				velocity.x = 0
+			else:
+				_leap_cooldown = 0.0
+		return
+
 	var to_target: Vector2 = _target.global_position - global_position
 	_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
 	_want_direction = _facing
 	var dist: float = absf(to_target.x)
+
+	# Track time since last successful hit on any player
+	_time_since_strike_range += _delta
+
+	# Pre-cognition: curl up and plan if we haven't hit anything in too long
+	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
+		_start_precognition()
+		return
 
 	# Speed based on distance
 	if dist > 200.0:
@@ -1209,6 +1299,27 @@ func _simulate_leap_paths() -> void:
 			_leap_phase1_near_misses.resize(6)
 
 
+func _has_lateral_clearance(world_pos: Vector2) -> bool:
+	## Check if there's enough space on both sides AND above the launch point.
+	## Checks at multiple heights to ensure the initial arc has room.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	var min_clearance: float = LEAP_BODY_RADIUS * 1.2  # ~26px each side — tight, precise launch
+
+	# Check at 3 heights: surface, mid-body, and above (initial arc)
+	for check_y in [world_pos.y - 15.0, world_pos.y - 40.0]:
+		for dir in [-1.0, 1.0]:
+			var from: Vector2 = Vector2(world_pos.x, check_y)
+			var to: Vector2 = Vector2(world_pos.x + dir * min_clearance, check_y)
+			var query := PhysicsRayQueryParameters2D.create(from, to, 1)
+			query.exclude = [get_rid()]
+			if not space.intersect_ray(query).is_empty():
+				return false
+
+	return true
+
+
 func _is_point_in_solid(world_pos: Vector2) -> bool:
 	## Check if a world-space point is inside solid geometry.
 	var space := get_world_2d().direct_space_state
@@ -1322,6 +1433,542 @@ func _find_wall_x(direction: int) -> float:
 	return result["position"].x
 
 
+# -- Pre-cognition (two-hop leap chaining) -------------------------------------
+
+func _start_precognition() -> void:
+	_state = State.PRECOGNITION
+	_attack_timer = 0.0
+	_precog_phase = 0
+	_precog_ball_lands.clear()
+	_precog_platforms.clear()
+	_precog_edges.clear()
+	_precog_path.clear()
+	_precog_path_edges.clear()
+	_precog_current_hop = 0
+	_precog_has_waypoint = false
+	_precog_process_i = 0
+	_precog_process_j = 1
+	_time_since_strike_range = 0.0
+	velocity.x = 0
+
+
+func _do_precognition(delta: float) -> void:
+	## Multi-phase thinking while curled up:
+	## Phase 0: drop balls, detect platforms
+	## Phase 1: build connectivity graph (one edge per frame)
+	## Phase 2: find shortest path from monster's platform to target's platform
+	## Phase 3: execute path (walk + leap for each hop)
+	_attack_timer += delta
+	velocity.x = 0
+	_want_direction = 0.0
+	_apply_curl_pose(delta)
+
+	match _precog_phase:
+		0:
+			_precog_drop_and_detect()
+			print("PRECOG DETECT: %d balls → %d platforms" % [_precog_ball_lands.size(), _precog_platforms.size()])
+			for i in range(_precog_platforms.size()):
+				var p: Dictionary = _precog_platforms[i]
+				print("  P%d: (%.0f,%.0f) x=[%.0f..%.0f] w=%d %s" % [i, p["pos"].x, p["pos"].y, p["min_x"], p["max_x"], p["weight"], p["label"]])
+			_precog_phase = 1
+			_precog_process_i = 0
+			_precog_process_j = 1
+		1:
+			_precog_build_graph_step()
+		2:
+			print("PRECOG GRAPH DONE: %d edges" % _precog_edges.size())
+			for e in _precog_edges:
+				print("  P%d → P%d from=(%.0f,%.0f)" % [e["from"], e["to"], e["from_pos"].x, e["from_pos"].y])
+			_precog_find_path()
+			print("PRECOG PATH: %s (len=%d)" % [str(_precog_path), _precog_path_edges.size()])
+			_precog_phase = 3
+		3:
+			_precog_start_execution()
+
+
+func _precog_drop_and_detect() -> void:
+	## Drop balls in a 2D grid, deduplicate landings, detect platforms.
+	_precog_ball_lands.clear()
+	_precog_platforms.clear()
+
+	var bounds_left: float = _find_wall_x(-1) + 10
+	var bounds_right: float = _find_wall_x(1) - 10
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return
+
+	var bounds_top: float = 10.0
+	var bounds_bottom: float = 950.0
+	var y: float = bounds_top
+	while y <= bounds_bottom:
+		var x: float = bounds_left
+		while x <= bounds_right:
+			var drop_pos := Vector2(x, y)
+			if not _is_point_in_solid(drop_pos):
+				var query := PhysicsRayQueryParameters2D.create(drop_pos, drop_pos + Vector2(0, 2000), 1)
+				query.exclude = [get_rid()]
+				var result: Dictionary = space.intersect_ray(query)
+				if not result.is_empty():
+					_precog_ball_lands.append(result["position"])
+			x += PRECOG_GRID_SPACING
+		y += PRECOG_GRID_SPACING
+
+	_precog_detect_platforms()
+
+	# Add special platforms for monster and target positions
+	_precog_add_entity_platform(global_position, "monster")
+	if is_instance_valid(_target):
+		_precog_add_entity_platform(_target.global_position, "target")
+
+
+func _precog_detect_platforms() -> void:
+	## Detect platforms from ball landings:
+	## 1. Snap all Y values to a coarse grid (15px) so a flat surface = one Y level
+	## 2. Deduplicate by snapped position
+	## 3. Group by Y level, then by X connectivity within each level
+	## Result: one platform per contiguous horizontal surface
+	if _precog_ball_lands.is_empty():
+		return
+
+	var y_snap: float = 15.0
+	var x_snap: float = PRECOG_GRID_SPACING
+
+	# Snap Y, deduplicate
+	var seen: Dictionary = {}
+	var snapped: Array[Vector2] = []
+	for pos in _precog_ball_lands:
+		var sy: float = roundf(pos.y / y_snap) * y_snap
+		var key: String = "%d,%d" % [int(pos.x / x_snap), int(sy / y_snap)]
+		if not seen.has(key):
+			seen[key] = true
+			snapped.append(Vector2(pos.x, sy))
+
+	if snapped.is_empty():
+		return
+
+	# Group by Y level
+	var by_y: Dictionary = {}
+	for pt in snapped:
+		var y_key: int = int(pt.y)
+		if not by_y.has(y_key):
+			by_y[y_key] = []
+		by_y[y_key].append(pt.x)
+
+	# For each Y level, sort X and find contiguous runs (platforms)
+	for y_key in by_y:
+		var x_vals: Array = by_y[y_key]
+		x_vals.sort()
+		var y_val: float = float(y_key)
+
+		var run_start: float = x_vals[0]
+		var run_end: float = x_vals[0]
+
+		for i in range(1, x_vals.size()):
+			if x_vals[i] - run_end <= PRECOG_GRID_SPACING * 1.5:
+				run_end = x_vals[i]
+			else:
+				# Only emit platforms wider than a single point
+				if run_end - run_start >= PRECOG_GRID_SPACING:
+					_precog_platforms.append({
+						"pos": Vector2((run_start + run_end) * 0.5, y_val),
+						"min_x": run_start,
+						"max_x": run_end,
+						"weight": int((run_end - run_start) / PRECOG_GRID_SPACING) + 1,
+						"label": "",
+					})
+				run_start = x_vals[i]
+				run_end = x_vals[i]
+
+		if run_end - run_start >= PRECOG_GRID_SPACING:
+			_precog_platforms.append({
+				"pos": Vector2((run_start + run_end) * 0.5, y_val),
+				"min_x": run_start,
+				"max_x": run_end,
+				"weight": int((run_end - run_start) / PRECOG_GRID_SPACING) + 1,
+				"label": "",
+			})
+
+
+
+func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
+	## Ensure there's a platform entry for the monster/target's current position.
+	## If they're standing on an existing platform, tag it. Otherwise add one.
+	## Uses generous Y tolerance since platform Y is snapped and entity Y is exact.
+	# Use the floor under the entity, not its body position, for matching
+	var floor_y: float = _raycast_floor(world_pos - global_position) + global_position.y
+	for plat in _precog_platforms:
+		if absf(floor_y - plat["pos"].y) < 30.0 and world_pos.x >= plat["min_x"] - 40 and world_pos.x <= plat["max_x"] + 40:
+			plat["label"] = label
+			return
+	# Not on a known platform — add a point platform
+	var floor_y: float = _raycast_floor(world_pos - global_position) + global_position.y
+	_precog_platforms.append({
+		"pos": Vector2(world_pos.x, floor_y),
+		"min_x": world_pos.x - 10,
+		"max_x": world_pos.x + 10,
+		"weight": 1,
+		"label": label,
+	})
+
+
+func _precog_build_graph_step() -> void:
+	## Test one pair of platforms per frame for leap connectivity.
+	## Uses the existing ball landing positions on the source platform
+	## as launch candidates — they already cover every grid point.
+	var n: int = _precog_platforms.size()
+	if _precog_process_i >= n:
+		_precog_phase = 2
+		return
+
+	if _precog_process_i != _precog_process_j:
+		var plat_from: Dictionary = _precog_platforms[_precog_process_i]
+		var plat_to: Dictionary = _precog_platforms[_precog_process_j]
+		var from_y: float = plat_from["pos"].y
+		var from_min_x: float = plat_from["min_x"]
+		var from_max_x: float = plat_from["max_x"]
+
+		# Collect ball landings that are on this platform
+		var launch_points: Array[Vector2] = []
+		for pos in _precog_ball_lands:
+			if absf(pos.y - from_y) < 15.0 and pos.x >= from_min_x - 5 and pos.x <= from_max_x + 5:
+				launch_points.append(pos)
+
+		if _precog_process_i == 0 and _precog_process_j == 1:
+			print("PRECOG GRAPH: P%d->P%d launches=%d from=(%.0f,%.0f) to=(%.0f,%.0f)" % [
+				_precog_process_i, _precog_process_j, launch_points.size(),
+				plat_from["pos"].x, plat_from["pos"].y,
+				plat_to["pos"].x, plat_to["pos"].y])
+
+		# Deduplicate by X (keep one per grid cell)
+		var seen_x: Dictionary = {}
+		var unique_launches: Array[Vector2] = []
+		for pos in launch_points:
+			var kx: int = int(pos.x / PRECOG_GRID_SPACING)
+			if not seen_x.has(kx):
+				seen_x[kx] = true
+				unique_launches.append(pos)
+
+		var best_edge: Dictionary = {}
+		var best_score: float = INF
+
+		for launch_pos in unique_launches:
+			if not _has_lateral_clearance(launch_pos):
+				continue
+
+			# Reject launch points directly under the destination platform —
+			# the arc would immediately hit it from below.
+			var to_y: float = plat_to["pos"].y
+			# Also check ALL platforms above the launch point, not just the destination
+			# Target the platform surface directly (not strike-reach circle)
+			var result: Dictionary = _plan_leap_to_surface(launch_pos, plat_to)
+			if not result.is_empty():
+				var score: float = result["arrival"].distance_to(plat_to["pos"])
+				if score < best_score:
+					best_score = score
+					best_edge = result
+					best_edge["from_pos"] = launch_pos
+
+		if not best_edge.is_empty():
+			best_edge["from"] = _precog_process_i
+			best_edge["to"] = _precog_process_j
+			_precog_edges.append(best_edge)
+
+	_precog_process_j += 1
+	if _precog_process_j >= n:
+		_precog_process_i += 1
+		_precog_process_j = 0
+
+
+func _precog_find_path() -> void:
+	## Dijkstra from monster's platform to target's platform using the edge graph.
+	var n: int = _precog_platforms.size()
+	var monster_plat: int = -1
+	var target_plat: int = -1
+
+	for i in range(n):
+		if _precog_platforms[i]["label"] == "monster":
+			monster_plat = i
+		if _precog_platforms[i]["label"] == "target":
+			target_plat = i
+
+	print("PRECOG PATHFIND: monster=P%d target=P%d" % [monster_plat, target_plat])
+	if monster_plat < 0 or target_plat < 0:
+		print("PRECOG PATHFIND: FAILED — monster or target not on a platform")
+		_precog_path.clear()
+		return
+	if monster_plat == target_plat:
+		print("PRECOG PATHFIND: same platform — no leap needed")
+		_precog_path.clear()
+		return
+
+	# Build adjacency: for each platform, list of {to, edge_idx, cost}
+	var adj: Array = []
+	adj.resize(n)
+	for i in range(n):
+		adj[i] = []
+	for ei in range(_precog_edges.size()):
+		var e: Dictionary = _precog_edges[ei]
+		var cost: float = _precog_platforms[e["from"]]["pos"].distance_to(_precog_platforms[e["to"]]["pos"])
+		adj[e["from"]].append({"to": e["to"], "edge_idx": ei, "cost": cost})
+
+	# Dijkstra
+	var dist: Array[float] = []
+	var prev_node: Array[int] = []
+	var prev_edge: Array[int] = []
+	var visited: Array[bool] = []
+	dist.resize(n)
+	prev_node.resize(n)
+	prev_edge.resize(n)
+	visited.resize(n)
+	for i in range(n):
+		dist[i] = INF
+		prev_node[i] = -1
+		prev_edge[i] = -1
+		visited[i] = false
+	dist[monster_plat] = 0.0
+
+	for _iter in range(n):
+		# Find unvisited node with smallest distance
+		var u: int = -1
+		var u_dist: float = INF
+		for i in range(n):
+			if not visited[i] and dist[i] < u_dist:
+				u = i
+				u_dist = dist[i]
+		if u < 0:
+			break
+		visited[u] = true
+
+		if u == target_plat:
+			break
+
+		for neighbor in adj[u]:
+			var v: int = neighbor["to"]
+			var new_dist: float = dist[u] + neighbor["cost"]
+			if new_dist < dist[v]:
+				dist[v] = new_dist
+				prev_node[v] = u
+				prev_edge[v] = neighbor["edge_idx"]
+
+	# Reconstruct path
+	_precog_path.clear()
+	_precog_path_edges.clear()
+	if dist[target_plat] == INF:
+		return  # No path found
+
+	var current: int = target_plat
+	var path_nodes: Array[int] = []
+	var path_edges: Array[int] = []
+	while current != monster_plat:
+		path_nodes.push_front(current)
+		path_edges.push_front(prev_edge[current])
+		current = prev_node[current]
+	path_nodes.push_front(monster_plat)
+
+	_precog_path = path_nodes
+	for ei in path_edges:
+		_precog_path_edges.append(_precog_edges[ei])
+
+
+func _precog_start_execution() -> void:
+	## Start executing the path: walk to first hop's launch point, then leap.
+	if _precog_path.size() < 2 or _precog_path_edges.is_empty():
+		_state = State.CHASE
+		_time_since_strike_range = 0.0
+		return
+
+	_precog_current_hop = 0
+	_precog_start_next_hop()
+
+
+func _precog_start_next_hop() -> void:
+	## Set up the waypoint for the current hop in the path.
+	if _precog_current_hop >= _precog_path_edges.size():
+		# All hops complete — chase the target normally
+		_precog_has_waypoint = false
+		_state = State.CHASE
+		_time_since_strike_range = 0.0
+		return
+
+	var edge: Dictionary = _precog_path_edges[_precog_current_hop]
+	_precog_waypoint = edge.get("from_pos", _precog_platforms[_precog_path[_precog_current_hop]]["pos"])
+	_precog_waypoint_edge = edge
+	_precog_has_waypoint = true
+	_state = State.CHASE
+	_time_since_strike_range = 0.0
+
+	print("PRECOG: hop %d/%d → walk to (%.0f,%.0f) then leap" % [
+		_precog_current_hop + 1, _precog_path_edges.size(),
+		_precog_waypoint.x, _precog_waypoint.y])
+
+
+func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
+	## Plan a leap to land ON a platform surface.
+	## Samples landing points along the platform's top surface.
+	var best: Dictionary = {}
+	var best_score: float = INF
+	var plat_y: float = plat["pos"].y
+	var plat_min_x: float = plat["min_x"]
+	var plat_max_x: float = plat["max_x"]
+
+	# Sample landing points along the platform surface (slightly above it)
+	var landing_y: float = plat_y - 5.0  # Just above the surface
+	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / PRECOG_GRID_SPACING) + 1)
+	sample_count = mini(sample_count, 7)
+
+	for si in range(sample_count):
+		var t: float = float(si) / float(sample_count - 1) if sample_count > 1 else 0.5
+		# Inset from edges so the body fits on the platform
+		var inset: float = LEAP_BODY_RADIUS
+		var landing_x: float = lerpf(plat_min_x + inset, plat_max_x - inset, t)
+		var arrival := Vector2(landing_x, landing_y)
+
+		if _is_point_in_solid(arrival):
+			continue
+
+		for fi in range(LEAP_FLIGHT_TIMES):
+			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
+				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+
+			var dx: float = arrival.x - from_pos.x
+			var dy: float = arrival.y - from_pos.y
+			var launch_vx: float = dx / t_flight
+			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+
+			var launch_vel := Vector2(launch_vx, launch_vy)
+			var speed: float = launch_vel.length()
+			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+				continue
+			if launch_vy > -50:
+				continue
+
+			var launch_dir: Vector2 = launch_vel.normalized()
+			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
+			if launch_perp.y > 0:
+				launch_perp = -launch_perp
+
+			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
+			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+
+			# Check clearance but ignore hits near the destination platform
+			# (the arc is SUPPOSED to land there)
+			var dest_rect := Rect2(plat_min_x - 10, plat_y - 30, plat_max_x - plat_min_x + 20, 40)
+			if not (_check_arc_clear_ignore(arc_c, dest_rect) and _check_arc_clear_ignore(arc_l, dest_rect) and _check_arc_clear_ignore(arc_r, dest_rect)):
+				continue
+
+			# Score: prefer landing near platform center
+			var center_dist: float = absf(landing_x - plat["pos"].x)
+			var time_penalty: float = absf(t_flight - 0.6) * 20.0
+			var score: float = center_dist + time_penalty
+			if score < best_score:
+				best_score = score
+				best = {
+					"arrival": arrival,
+					"launch_vel": launch_vel,
+					"arc_l": arc_l,
+					"arc_r": arc_r,
+					"from_pos": from_pos,
+				}
+
+	return best
+
+
+func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
+	## Run the reverse leap planner between two arbitrary world positions.
+	## Returns the best clear result, or empty dict if none found.
+	var best: Dictionary = {}
+	var best_score: float = INF
+
+	# Sample arrival points: circle around target + direct landing on target surface
+	var arrivals: Array[Vector2] = []
+	for ai in range(LEAP_ARRIVAL_SAMPLES):
+		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
+		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * LEAP_STRIKE_REACH)
+	# Also try landing directly on the target (important for platform-to-platform)
+	arrivals.append(to_pos)
+	arrivals.append(to_pos + Vector2(-40, 0))
+	arrivals.append(to_pos + Vector2(40, 0))
+
+	for arrival in arrivals:
+		if _is_point_in_solid(arrival):
+			continue
+
+		for fi in range(LEAP_FLIGHT_TIMES):
+			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
+				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+
+			var dx: float = arrival.x - from_pos.x
+			var dy: float = arrival.y - from_pos.y
+			var launch_vx: float = dx / t_flight
+			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+
+			var launch_vel := Vector2(launch_vx, launch_vy)
+			var speed: float = launch_vel.length()
+			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+				continue
+			if launch_vy > -50:
+				continue
+
+			var launch_dir: Vector2 = launch_vel.normalized()
+			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
+			if launch_perp.y > 0:
+				launch_perp = -launch_perp
+
+			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
+			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+
+			if not (_check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)):
+				continue
+
+			var time_penalty: float = absf(t_flight - 0.5) * 20.0
+			var score: float = arrival.distance_to(to_pos) + time_penalty
+			if score < best_score:
+				best_score = score
+				best = {
+					"arrival": arrival,
+					"launch_vel": launch_vel,
+					"arc_l": arc_l,
+					"arc_r": arc_r,
+					"from_pos": from_pos,
+				}
+
+	return best
+
+
+func _apply_curl_pose(delta: float) -> void:
+	## Curl up on the ground: compress body, tuck all limbs, lower head.
+	var s: float = minf(6.0 * delta, 1.0)
+	var body_y: float = _raycast_floor(Vector2(0, -30))
+
+	_spine[0] = _spine[0].lerp(Vector2(12 * _facing, body_y - 15), s)
+	_spine[1] = _spine[1].lerp(Vector2(0, body_y - 13), s)
+	_spine[2] = _spine[2].lerp(Vector2(-12 * _facing, body_y - 15), s)
+
+	_neck[0] = _spine[0]
+	_neck[1] = _neck[1].lerp(_spine[0] + Vector2(8 * _facing, -5), s)
+	_skull = _skull.lerp(_neck[1] + Vector2(4 * _facing, 3), s)
+	_jaw = _jaw.lerp(_skull + Vector2(2 * _facing, 5), s)
+
+	if not _tail_severed:
+		var tail_start: Vector2 = _spine[2]
+		for i in range(5):
+			var curl_angle: float = PI * 0.8 + float(i) * 0.3 * _facing
+			var curl_target: Vector2 = tail_start + Vector2(cos(curl_angle) * (i + 1) * 8, sin(curl_angle) * (i + 1) * 4 - 5)
+			_tail[i] = _tail[i].lerp(curl_target, s)
+
+	for li in range(4):
+		if _leg_severed[li]:
+			continue
+		var hip_spine: Vector2 = _spine[0] if li < 2 else _spine[2]
+		_legs[li][0] = hip_spine + Vector2(0, 4)
+		_legs[li][2] = _legs[li][2].lerp(hip_spine + Vector2(0, 10), s)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+		_foot_planted[li] = false
+
+
+
 func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
 	## Simulate a parabolic arc from start with launch_vel, returning world-space points.
 	## Stops early if the arc descends past the starting height (landed).
@@ -1345,13 +1992,35 @@ func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
 	return points
 
 
-func _check_arc_clear(arc: PackedVector2Array) -> bool:
-	## Raycast along each segment of the arc. If any hit, path is blocked.
+func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> bool:
+	## Like _check_arc_clear but ignores hits within ignore_rect (the destination platform).
 	var space := get_world_2d().direct_space_state
 	if not space:
-		return true  # Can't check, assume clear
+		return true
 
 	for i in range(arc.size() - 1):
+		var from: Vector2 = arc[i]
+		var to: Vector2 = arc[i + 1]
+		var query := PhysicsRayQueryParameters2D.create(from, to, 1)
+		query.exclude = [get_rid()]
+		var result: Dictionary = space.intersect_ray(query)
+		if not result.is_empty():
+			# If the hit is within the destination rect, ignore it
+			if ignore_rect.has_point(result["position"]):
+				continue
+			return false
+	return true
+
+
+func _check_arc_clear(arc: PackedVector2Array) -> bool:
+	## Raycast along each segment of the arc. If any hit, path is blocked.
+	## Skip only the very last segment (the touchdown).
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+
+	var check_count: int = maxi(1, arc.size() - 3)  # Skip last 2 segments (landing approach)
+	for i in range(check_count):
 		var from: Vector2 = arc[i]
 		var to: Vector2 = arc[i + 1]
 		var query := PhysicsRayQueryParameters2D.create(from, to, 1)  # Mask 1 = world
@@ -1590,22 +2259,29 @@ func _end_leap() -> void:
 	_jaw_open = 0.0
 	_posture_blend = 0.0
 	_tail_whipping = false
-	_leap_ik_off = false  # Re-enable IK
+	_leap_ik_off = false
 	_leap_body_angle = 0.0
 	_leap_plan_results.clear()
 	_leap_chosen_arc_l.clear()
 	_leap_chosen_arc_r.clear()
-	_state = State.CHASE
 	_attack_timer = 0.0
-	# Reset collision shape to normal horizontal orientation
 	if _body_collision:
 		_body_collision.rotation = PI / 2.0
 		_body_collision.position = Vector2(0, -10.0)
-	# Re-plant feet at current positions
 	for li in range(4):
 		if not _leg_severed[li]:
 			_foot_planted[li] = true
 			_foot_world[li] = global_position + _legs[li][2]
+
+	# If we have more hops in the precog path, start the next one
+	if _precog_current_hop < _precog_path_edges.size() - 1:
+		_precog_current_hop += 1
+		_precog_start_next_hop()
+	else:
+		_precog_path.clear()
+		_precog_path_edges.clear()
+		_state = State.CHASE
+		_time_since_strike_range = 0.0
 
 
 func _spawn_slash_effect(local_pos: Vector2) -> void:
@@ -1682,6 +2358,7 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 		if world_pos.distance_to(node.global_position) < radius:
 			var pi: int = node.get("player_index")
 			PlayerManager.damage_player(pi, damage)
+			_time_since_strike_range = 0.0  # Reset precog timer on successful hit
 			# Knockback
 			var kb_dir: Vector2 = (node.global_position - world_pos).normalized()
 			node.velocity += kb_dir * 250.0
@@ -2068,13 +2745,23 @@ func _draw_debug() -> void:
 
 	# -- State info (top-left of creature) --
 	var info_pos := _spine[0] + Vector2(-40, -60)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "->BIPED", "->QUAD", "HURT", "DEAD"]
+	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
 	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 22), "HP: %d  Legs: %d" % [health, _count_active_legs()], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	draw_string(font, info_pos + Vector2(0, 32), "Posture: %s  Vel: (%.0f,%.0f)" % ["QUAD" if _posture == Posture.QUADRUPED else "BIPED", velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f" % [str(is_on_floor()), _want_direction], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
+	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f  noHit: %.0fs/%.0f%s" % [str(is_on_floor()), _want_direction, _time_since_strike_range, PRECOG_TRIGGER_TIME, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+
+	# Draw waypoint marker if active
+	if _precog_has_waypoint:
+		var wpt_local: Vector2 = _precog_waypoint - global_position
+		draw_circle(wpt_local, 10.0, Color(1, 0.5, 0, 0.6))
+		draw_arc(wpt_local, 14.0, 0, TAU, 16, Color(1, 0.5, 0, 0.8), 2.0)
+		draw_string(font, wpt_local + Vector2(16, -4), "WAYPOINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.5, 0))
+		# Line from monster to waypoint
+		draw_line(Vector2.ZERO, wpt_local, Color(1, 0.5, 0, 0.4), 1.5)
 	draw_string(font, info_pos + Vector2(0, 52), "floorY: %.1f  global: (%.0f,%.0f)" % [floor_y, global_position.x, global_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 
 	# -- Target indicator: crosshair on the hunted player --
@@ -2143,3 +2830,67 @@ func _draw_debug() -> void:
 				var peak_l: Vector2 = _leap_chosen_arc_l[5] - global_position
 				var peak_r: Vector2 = _leap_chosen_arc_r[5] - global_position
 				draw_line(peak_l, peak_r, Color(0, 1, 0.5, 0.5), 1.0)
+
+	# -- Pre-cognition visualization --
+	if _state == State.PRECOGNITION or not _precog_platforms.is_empty():
+		var precog_info: Vector2 = _spine[0] + Vector2(-40, -95)
+		var phase_labels := ["DETECT", "GRAPH", "PATH", "EXEC"]
+		var phase_lbl: String = phase_labels[_precog_phase] if _precog_phase < phase_labels.size() else "?"
+		draw_string(font, precog_info, "PRECOG: %s  plats:%d  edges:%d  path:%d  hop:%d/%d" % [
+			phase_lbl, _precog_platforms.size(), _precog_edges.size(),
+			_precog_path.size(), _precog_current_hop + 1, _precog_path_edges.size()
+		], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.8, 0.4, 1))
+
+		# Draw ball landings (dim dots)
+		for pos in _precog_ball_lands:
+			draw_circle(pos - global_position, 1.5, Color(0.5, 0.3, 0.8, 0.2))
+
+		# Draw platforms (horizontal bars)
+		for i in range(_precog_platforms.size()):
+			var plat: Dictionary = _precog_platforms[i]
+			var p_local: Vector2 = plat["pos"] - global_position
+			var half_w: float = (plat["max_x"] - plat["min_x"]) * 0.5
+			var bar_l: Vector2 = Vector2(p_local.x - half_w, p_local.y)
+			var bar_r: Vector2 = Vector2(p_local.x + half_w, p_local.y)
+			var plat_col: Color = Color(0.7, 0.3, 1, 0.6)
+			if plat["label"] == "monster":
+				plat_col = Color(0, 1, 0.5, 0.8)
+			elif plat["label"] == "target":
+				plat_col = Color(1, 0.2, 0.2, 0.8)
+			draw_line(bar_l, bar_r, plat_col, 3.0)
+			draw_circle(p_local, 4.0, plat_col)
+			var lbl: String = "P%d" % i
+			if plat["label"] != "":
+				lbl += " [%s]" % plat["label"]
+			draw_string(font, p_local + Vector2(6, -6), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, plat_col)
+
+		# Draw edges (leap connections between platforms)
+		for edge in _precog_edges:
+			var from_local: Vector2 = edge["from_pos"] - global_position
+			var arc_l: PackedVector2Array = edge["arc_l"]
+			var arc_r: PackedVector2Array = edge["arc_r"]
+			var edge_col := Color(0.3, 0.6, 1, 0.25)
+			for ei in range(arc_l.size() - 1):
+				draw_line(arc_l[ei] - global_position, arc_l[ei + 1] - global_position, edge_col, 1.0)
+			for ei in range(arc_r.size() - 1):
+				draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, edge_col, 1.0)
+
+		# Draw the chosen path (bright, thick)
+		if _precog_path.size() >= 2:
+			var path_col := Color(1, 0.8, 0, 0.8)
+			for pi in range(_precog_path.size() - 1):
+				var a_local: Vector2 = _precog_platforms[_precog_path[pi]]["pos"] - global_position
+				var b_local: Vector2 = _precog_platforms[_precog_path[pi + 1]]["pos"] - global_position
+				draw_line(a_local, b_local, path_col, 2.0)
+				draw_circle(a_local, 6.0, path_col)
+			draw_circle(_precog_platforms[_precog_path[_precog_path.size() - 1]]["pos"] - global_position, 6.0, path_col)
+
+			# Draw path edge arcs (bright)
+			for pe in _precog_path_edges:
+				var pe_col := Color(0, 1, 0.3, 0.6)
+				var pe_l: PackedVector2Array = pe["arc_l"]
+				var pe_r: PackedVector2Array = pe["arc_r"]
+				for ei in range(pe_l.size() - 1):
+					draw_line(pe_l[ei] - global_position, pe_l[ei + 1] - global_position, pe_col, 2.0)
+				for ei in range(pe_r.size() - 1):
+					draw_line(pe_r[ei] - global_position, pe_r[ei + 1] - global_position, pe_col, 2.0)

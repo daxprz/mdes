@@ -41,7 +41,11 @@
       "Bash(pip3 install:*)",
       "Bash(cd:*)",
       "WebFetch(domain:80.lv)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(echo:*)",
+      "Bash(/Users/jeremy/dev/dax/test123/scripts/test_precog.sh 2>&1 | head -80)",
+      "Bash(/Users/jeremy/dev/dax/test123/scripts/test_precog.sh 2>&1)",
+      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_precog.sh 2>&1)"
     ]
   }
 }
