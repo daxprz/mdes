@@ -1,6 +1,6 @@
 #!/bin/bash
-# FULL TEST SUITE: baseline + edge cases + cliff attacks
-# Scores: DMG, 1stHIT, FPS, BALL, IK, THRASH
+# FULL TEST SUITE with title cards for recording
+# Each test shows a big title on screen (hold 1s, fade 1s)
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -11,7 +11,7 @@ sleep 1
 sleep 5
 
 run_scenario() {
-    local LABEL=$1 DX=$2 DY=$3 MX=$4 MY=$5 FORCE_PRECOG=$6
+    local TITLE=$1 LABEL=$2 DX=$3 DY=$4 MX=$5 MY=$6 FORCE_PRECOG=$7
 
     R "clear" > /dev/null 2>&1
     R "clearplayers" > /dev/null 2>&1
@@ -19,6 +19,9 @@ run_scenario() {
     R "spawn dummy $DX $DY" > /dev/null 2>&1
     sleep 0.5
     R "spawn monster $MX $MY" > /dev/null 2>&1
+    sleep 1
+    R "tab 1" > /dev/null 2>&1
+    R "title $TITLE" > /dev/null 2>&1
     sleep 2
     R "resethp" > /dev/null 2>&1
     R "ikreset" > /dev/null 2>&1
@@ -48,7 +51,6 @@ run_scenario() {
     local HPLINE=$(R "hp")
     local DMG=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
     DMG=${DMG:-0}
-    local MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
     local BALLLINE=$(R "ball")
     local BALL_PK=$(printf "%s" "$BALLLINE" | grep -o 'ball_peak=[0-9]*' | cut -d= -f2)
     BALL_PK=${BALL_PK:-0}
@@ -59,34 +61,38 @@ run_scenario() {
     local THRASH=$(printf "%s" "$THRASHLINE" | grep -o 'thrash=[0-9]*' | cut -d= -f2)
     THRASH=${THRASH:-0}
 
-    printf "%-22s %5d %5ss %5d %5d %5d %5d\n" "$LABEL" "$DMG" "$FIRST_HIT" "$SCENARIO_MIN_FPS" "$BALL_PK" "$IK_PK" "$THRASH"
+    printf "%-30s %5d %5ss %5d %5d %5d %5d\n" "$LABEL" "$DMG" "$FIRST_HIT" "$SCENARIO_MIN_FPS" "$BALL_PK" "$IK_PK" "$THRASH"
 }
 
-printf "%-22s %5s %6s %5s %5s %5s %5s\n" "SCENARIO" "DMG" "1stHIT" "mnFPS" "BALL" "IK" "THRSH"
-printf "%-22s %5s %6s %5s %5s %5s %5s\n" "--------" "---" "------" "-----" "----" "--" "-----"
+printf "%-30s %5s %6s %5s %5s %5s %5s\n" "SCENARIO" "DMG" "1stHIT" "mnFPS" "BALL" "IK" "THRSH"
+printf "%-30s %5s %6s %5s %5s %5s %5s\n" "------------------------------" "---" "------" "-----" "----" "--" "-----"
 
-printf "\n=== BASELINE (monster at 960,880) ===\n"
-run_scenario "same_floor_near"    800  885  960 880  0
-run_scenario "same_floor_far"     200  885  960 880  0
-run_scenario "on_P1"              550  745  960 880  1
-run_scenario "on_P2"              1400 745  960 880  1
-run_scenario "on_P3"              670  525  960 880  1
-run_scenario "on_P4"              1250 525  960 880  1
-run_scenario "floor_to_P3"        670  525  960 880  1
-run_scenario "cross_P1_to_P2"     1400 745  960 880  1
-run_scenario "P1_to_P3"           670  525  960 880  1
-run_scenario "P2_to_P4"           1250 525  960 880  1
+printf "\n=== SAME FLOOR COMBAT ===\n"
+run_scenario "Close Range - Same Floor"     "close_same_floor"      800  885  960 880  0
+run_scenario "Long Range - Same Floor"      "far_same_floor"        200  885  960 880  0
 
-printf "\n=== EDGE CASES ===\n"
-run_scenario "corner_left"        220  870  500 870  0
-run_scenario "corner_right"       1700 870  1400 870 0
-run_scenario "near_corner_left"   250  870  260 870  0
-run_scenario "near_corner_right"  1680 870  1670 870 0
-run_scenario "near_cliff_left"    220  580  250 750  0
-run_scenario "near_cliff_right"   1700 580  1680 750 0
+printf "\n=== PLATFORM HUNTING ===\n"
+run_scenario "Hunt to Lower-Left Platform"  "hunt_P1"               550  745  960 880  1
+run_scenario "Hunt to Lower-Right Platform" "hunt_P2"               1400 745  960 880  1
+run_scenario "Hunt to Upper-Left Platform"  "hunt_P3"               670  525  960 880  1
+run_scenario "Hunt to Upper-Right Platform" "hunt_P4"               1250 525  960 880  1
 
-printf "\n=== CLIFF LEDGES ===\n"
-run_scenario "cliff_left"         60   500  960 880  1
-run_scenario "cliff_right"        1860 500  960 880  1
+printf "\n=== CROSS-PLATFORM PURSUIT ===\n"
+run_scenario "Floor to Upper Platform"      "floor_to_upper"        670  525  960 880  1
+run_scenario "Cross Lower Platforms"        "cross_lower"           1400 745  960 880  1
+run_scenario "Lower-Left to Upper-Left"     "P1_to_P3"             670  525  960 880  1
+run_scenario "Lower-Right to Upper-Right"   "P2_to_P4"             1250 525  960 880  1
 
-printf "\n=== DONE ===\n"
+printf "\n=== CORNER TRAPPING ===\n"
+run_scenario "Corner Trap - Left Wall"      "corner_left"           220  870  500 870  0
+run_scenario "Corner Trap - Right Wall"     "corner_right"          1700 870  1400 870 0
+run_scenario "Overlap - Left Corner"        "overlap_left"          250  870  260 870  0
+run_scenario "Overlap - Right Corner"       "overlap_right"         1680 870  1670 870 0
+
+printf "\n=== CLIFF EDGE ASSAULT ===\n"
+run_scenario "Near Left Cliff Edge"         "near_cliff_left"       220  580  250 750  0
+run_scenario "Near Right Cliff Edge"        "near_cliff_right"      1700 580  1680 750 0
+run_scenario "Left Cliff Ledge Assault"     "cliff_ledge_left"      60   500  960 880  1
+run_scenario "Right Cliff Ledge Assault"    "cliff_ledge_right"     1860 500  960 880  1
+
+printf "\n=== COMPLETE ===\n"

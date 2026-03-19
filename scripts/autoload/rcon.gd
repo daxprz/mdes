@@ -8,6 +8,7 @@ const PORT := 9999
 
 var _server: TCPServer = null
 var _clients: Array = []  # Array of StreamPeerTCP
+var _title_layer: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -191,6 +192,13 @@ func _execute(command: String) -> String:
 					e._ik_score_avg = 0.0
 					e._ik_score_samples = 0
 			return "OK: reset IK scores"
+
+		"title":
+			if parts.size() < 2:
+				return "ERR: usage: title <text>"
+			var title_text: String = command.substr(6).strip_edges()
+			_show_title(title_text)
+			return "OK: showing '%s'" % title_text
 
 		"debugdraw":
 			for e in get_tree().get_nodes_in_group("enemies"):
@@ -416,3 +424,36 @@ func _cmd_status() -> String:
 	if is_instance_valid(PlayerHUD.debug_selected_enemy):
 		sel = PlayerHUD.debug_selected_enemy.name
 	return "status: debug=%s enemies=%d players=%d selected=%s" % [str(debug), enemies, players, sel]
+
+
+func _show_title(text: String) -> void:
+	## Show a big title on screen: hold 1s, fade out 1s.
+	if not _title_layer:
+		_title_layer = CanvasLayer.new()
+		_title_layer.layer = 100
+		add_child(_title_layer)
+
+	var lbl := Label.new()
+	lbl.text = text
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_font_size_override("font_size", 48)
+	lbl.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+	lbl.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.8))
+	lbl.add_theme_constant_override("shadow_offset_x", 2)
+	lbl.add_theme_constant_override("shadow_offset_y", 2)
+	lbl.anchors_preset = Control.PRESET_CENTER
+	lbl.anchor_left = 0.5
+	lbl.anchor_right = 0.5
+	lbl.anchor_top = 0.3
+	lbl.anchor_bottom = 0.3
+	lbl.offset_left = -400
+	lbl.offset_right = 400
+	lbl.offset_top = -30
+	lbl.offset_bottom = 30
+	_title_layer.add_child(lbl)
+
+	var tween := lbl.create_tween()
+	tween.tween_interval(1.0)
+	tween.tween_property(lbl, "modulate:a", 0.0, 1.0)
+	tween.tween_callback(lbl.queue_free)
