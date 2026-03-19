@@ -200,6 +200,22 @@ func _execute(command: String) -> String:
 			_show_title(title_text)
 			return "OK: showing '%s'" % title_text
 
+		"score":
+			# Show score card: score <title>|<dmg>|<time>|<fps>|<ik>|<thrash>
+			if parts.size() < 2:
+				return "ERR: usage: score <title>|<dmg>|<time>|<fps>|<ik>|<thrash>"
+			var score_text: String = command.substr(6).strip_edges()
+			_show_score_card(score_text)
+			return "OK: showing score"
+
+		"grid":
+			# Show final results grid: grid <line1>|<line2>|...
+			if parts.size() < 2:
+				return "ERR: usage: grid <line1>|<line2>|..."
+			var grid_text: String = command.substr(5).strip_edges()
+			_show_results_grid(grid_text)
+			return "OK: showing grid"
+
 		"debugdraw":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "debug_draw_enabled" in e:
@@ -424,6 +440,118 @@ func _cmd_status() -> String:
 	if is_instance_valid(PlayerHUD.debug_selected_enemy):
 		sel = PlayerHUD.debug_selected_enemy.name
 	return "status: debug=%s enemies=%d players=%d selected=%s" % [str(debug), enemies, players, sel]
+
+
+func _color_for_value(value: int, good: int, warn: int) -> Color:
+	## Green if <= good, yellow if <= warn, red otherwise
+	if value <= good:
+		return Color(0.2, 1.0, 0.3)
+	elif value <= warn:
+		return Color(1.0, 0.9, 0.2)
+	else:
+		return Color(1.0, 0.3, 0.2)
+
+
+func _show_score_card(data: String) -> void:
+	## Show score card below the title. Format: title|dmg|time|fps|ik|thrash
+	var fields: PackedStringArray = data.split("|")
+	if fields.size() < 6:
+		return
+
+	if not _title_layer:
+		_title_layer = CanvasLayer.new()
+		_title_layer.layer = 100
+		add_child(_title_layer)
+
+	var title: String = fields[0]
+	var dmg: int = int(fields[1])
+	var time_str: String = fields[2]
+	var fps: int = int(fields[3])
+	var ik: int = int(fields[4])
+	var thrash: int = int(fields[5])
+
+	# Title
+	var title_lbl := Label.new()
+	title_lbl.text = title
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.add_theme_font_size_override("font_size", 36)
+	title_lbl.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+	title_lbl.anchor_left = 0.5; title_lbl.anchor_right = 0.5
+	title_lbl.anchor_top = 0.2; title_lbl.anchor_bottom = 0.2
+	title_lbl.offset_left = -300; title_lbl.offset_right = 300
+	_title_layer.add_child(title_lbl)
+
+	# Score rows
+	var rows := [
+		["Damage", str(dmg), _color_for_value(1000 - dmg, 0, 500)],
+		["Time to Hit", time_str, Color(0.2, 1.0, 0.3) if time_str != "NONE" else Color(1.0, 0.3, 0.2)],
+		["Min FPS", str(fps), _color_for_value(60 - fps, 0, 20)],
+		["IK Quality", str(ik), _color_for_value(ik, 100, 500)],
+		["Thrash", str(thrash), _color_for_value(thrash, 5, 15)],
+	]
+
+	var container := VBoxContainer.new()
+	container.anchor_left = 0.5; container.anchor_right = 0.5
+	container.anchor_top = 0.32; container.anchor_bottom = 0.32
+	container.offset_left = -200; container.offset_right = 200
+	_title_layer.add_child(container)
+
+	for row in rows:
+		var hbox := HBoxContainer.new()
+		hbox.add_theme_constant_override("separation", 20)
+		var name_lbl := Label.new()
+		name_lbl.text = row[0]
+		name_lbl.add_theme_font_size_override("font_size", 20)
+		name_lbl.add_theme_color_override("font_color", Color(0.7, 0.7, 0.7))
+		name_lbl.custom_minimum_size.x = 140
+		hbox.add_child(name_lbl)
+		var val_lbl := Label.new()
+		val_lbl.text = row[1]
+		val_lbl.add_theme_font_size_override("font_size", 20)
+		val_lbl.add_theme_color_override("font_color", row[2])
+		hbox.add_child(val_lbl)
+		container.add_child(hbox)
+
+	# Fade out after 3 seconds
+	var tween := title_lbl.create_tween()
+	tween.tween_interval(2.0)
+	tween.tween_property(title_lbl, "modulate:a", 0.0, 1.0)
+	tween.parallel().tween_property(container, "modulate:a", 0.0, 1.0)
+	tween.tween_callback(title_lbl.queue_free)
+	tween.tween_callback(container.queue_free)
+
+
+func _show_results_grid(data: String) -> void:
+	## Show final results grid. Format: line1|line2|line3|...
+	if not _title_layer:
+		_title_layer = CanvasLayer.new()
+		_title_layer.layer = 100
+		add_child(_title_layer)
+
+	var lines: PackedStringArray = data.split("|")
+
+	var container := VBoxContainer.new()
+	container.anchor_left = 0.5; container.anchor_right = 0.5
+	container.anchor_top = 0.1; container.anchor_bottom = 0.1
+	container.offset_left = -350; container.offset_right = 350
+	_title_layer.add_child(container)
+
+	for line in lines:
+		var lbl := Label.new()
+		lbl.text = line
+		lbl.add_theme_font_size_override("font_size", 16)
+		if line.begins_with("===") or line.begins_with("TOTAL"):
+			lbl.add_theme_color_override("font_color", Color(1, 0.9, 0.3))
+			lbl.add_theme_font_size_override("font_size", 20)
+		else:
+			lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
+		container.add_child(lbl)
+
+	# Hold for 8 seconds then fade
+	var tween := container.create_tween()
+	tween.tween_interval(8.0)
+	tween.tween_property(container, "modulate:a", 0.0, 2.0)
+	tween.tween_callback(container.queue_free)
 
 
 func _show_title(text: String) -> void:
