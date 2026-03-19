@@ -60,7 +60,7 @@ const LEAP_THRASH_COUNT := 3   # Number of thrash shakes
 const LEAP_COOLDOWN := 2.0     # Seconds between leaps (aggressive)
 
 # Leap planning
-const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
+const LEAP_BODY_RADIUS := 55.0    # Half-size of body for clearance checks (spine + legs + head)
 const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
 const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around target
 const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
@@ -1599,7 +1599,7 @@ func _has_lateral_clearance(world_pos: Vector2) -> bool:
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
-	var min_clearance: float = LEAP_BODY_RADIUS * 1.2  # ~26px each side — tight, precise launch
+	var min_clearance: float = LEAP_BODY_RADIUS  # Full body radius clearance on each side
 
 	# Check at 3 heights: surface, mid-body, and above (initial arc)
 	for check_y in [world_pos.y - 15.0, world_pos.y - 40.0]:
