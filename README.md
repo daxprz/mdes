@@ -54,6 +54,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.7
+**Rift Tentacle Physics**
+- Rift tentacle segments now resist movement with verlet drag (0.92 velocity retention per frame)
+- When attached to an enemy, only the anchor segment tracks it — the rest trail behind under physics
+- Bidirectional constraint solver (5 iterations, forward+reverse passes) propagates forces both ways along the chain
+- Pulling either end tugs the entire tentacle with visible lag and resistance
+- Rift orb draws at anchor segment, staying attached to the enemy as it moves
+
 ### v0.9.6
 **Migration Patterns**
 - Migration patterns: cyclic multi-phase species movement — wildlife migrates between configurable zones on a timer
