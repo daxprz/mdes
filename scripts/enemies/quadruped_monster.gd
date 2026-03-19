@@ -76,6 +76,14 @@ const HEAD_HEALTH := 60
 const TAIL_HEALTH := 50
 const LEG_HEALTH := 40
 
+# Death ball grab (close proximity)
+const GRAB_RANGE := 40.0          # Must be THIS close to initiate grab
+const GRAB_DURATION := 2.0        # Hold for 2 seconds
+const GRAB_KICK_DAMAGE := 10      # Per kick (multiple kicks during hold)
+const GRAB_BITE_DAMAGE := 20      # Bite damage during hold
+const GRAB_EJECT_SPEED := 400.0   # Fling speed on release
+const GRAB_KICK_INTERVAL := 0.25  # Time between kicks
+
 # Sprint slash (same-plane attack)
 const SPRINT_SPEED := 250.0       # Burst sprint speed
 const SPRINT_SLASH_DAMAGE := 18   # Per slash (3 slashes = 54 total)
@@ -95,7 +103,7 @@ const PRECOG_CLUSTER_RADIUS := 40.0 # Landed balls closer than this are merged i
 # -- Enums ---------------------------------------------------------------------
 
 enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
-			 ATTACK_LUNGE, ATTACK_SPRINT_SLASH, ATTACK_HOP_UP,
+			 ATTACK_LUNGE, ATTACK_SPRINT_SLASH, ATTACK_HOP_UP, ATTACK_GRAB,
 			 ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
 			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
@@ -172,6 +180,8 @@ var _leap_thrash_count: int = 0 # Thrashes delivered so far
 var _leap_slash_side: int = 1   # Alternating slash direction
 var _slash_effects: Array = []  # Active slash visual effects
 var _sprint_slash_count: int = 0  # Slashes delivered in sprint attack
+var _grab_kick_count: int = 0    # Kicks delivered during grab
+var _grab_target_node: Node2D = null  # The player being grabbed
 var _hop_up_target_y: float = 0.0  # Target platform Y for connected hop
 var _hop_up_start_pos: Vector2 = Vector2.ZERO  # Where the hop started
 
@@ -457,6 +467,8 @@ func _physics_process(delta: float) -> void:
 			_do_sprint_slash(delta)
 		State.ATTACK_HOP_UP:
 			_do_hop_up(delta)
+		State.ATTACK_GRAB:
+			_do_grab(delta)
 		State.ATTACK_LEAP_PLAN:
 			_do_leap_plan(delta)
 		State.ATTACK_LEAP_WINDUP:
@@ -1059,6 +1071,11 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var target_behind: bool = signf(to_target.x) != _facing
 	var height_diff: float = to_target.y  # Negative = target is above
 
+	# DEATH BALL GRAB: very close / overlapping — highest priority
+	if dist < GRAB_RANGE:
+		_start_grab()
+		return
+
 	# Tail whip if target is behind and close
 	if target_behind and dist < TAIL_RANGE and _posture == Posture.QUADRUPED and not _tail_severed:
 		_start_attack(State.ATTACK_TAIL)
@@ -1211,6 +1228,123 @@ func _do_lunge(delta: float) -> void:
 
 
 # -- Sprint Slash (same-plane charge + triple swipe) ---------------------------
+
+# -- Death Ball Grab (close proximity) -----------------------------------------
+
+func _start_grab() -> void:
+	_state = State.ATTACK_GRAB
+	_attack_timer = 0.0
+	_attack_cooldown = ATTACK_COOLDOWN
+	_grab_kick_count = 0
+	_grab_target_node = _target
+	_state_lock_timer = GRAB_DURATION + 1.0
+	velocity = Vector2.ZERO
+	# Enlarge body collision to trap the player
+	if _body_collision and _body_collision.shape is CircleShape2D:
+		(_body_collision.shape as CircleShape2D).radius = 30.0
+
+
+func _do_grab(delta: float) -> void:
+	## Death ball: curl around player, kick rapidly, bite, then eject.
+	_attack_timer += delta
+	velocity.x = 0
+
+	if not is_instance_valid(_grab_target_node):
+		_state = State.CHASE
+		return
+
+	var target_local: Vector2 = _grab_target_node.global_position - global_position
+	var t: float = clampf(_attack_timer / GRAB_DURATION, 0.0, 1.0)
+
+	# Phase 1 (0-0.2): curl into ball around the target
+	# Phase 2 (0.2-0.8): kick rapidly + bite
+	# Phase 3 (0.8-1.0): eject
+
+	# Center collision on the grabbed player
+	if _body_collision:
+		_body_collision.position = target_local
+
+	# Curl all body parts toward the target
+	var curl_strength: float = minf(_attack_timer * 5.0, 1.0)
+	var center: Vector2 = target_local
+
+	# Spine wraps around target
+	_spine[0] = _spine[0].lerp(center + Vector2(15 * _facing, -15), curl_strength * 8.0 * delta)
+	_spine[1] = _spine[1].lerp(center + Vector2(0, -20), curl_strength * 8.0 * delta)
+	_spine[2] = _spine[2].lerp(center + Vector2(-15 * _facing, -15), curl_strength * 8.0 * delta)
+
+	# Head bites down on target
+	_neck[0] = _spine[0]
+	_neck[1] = _neck[1].lerp(center + Vector2(10 * _facing, -8), curl_strength * 10.0 * delta)
+	_skull = _skull.lerp(center + Vector2(0, -5), curl_strength * 10.0 * delta)
+	_jaw = _jaw.lerp(center + Vector2(0, 5), curl_strength * 10.0 * delta)
+	_jaw_open = 0.3 * sin(_attack_timer * 15.0) + 0.3  # Chomping
+
+	# Front legs clasp around target
+	for li in [0, 1]:
+		if _leg_severed[li]:
+			continue
+		_legs[li][0] = _spine[0] + Vector2(0, 5)
+		var clasp_side: float = 12.0 if li == 0 else -12.0
+		_legs[li][2] = _legs[li][2].lerp(center + Vector2(clasp_side, 5), curl_strength * 10.0 * delta)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+		_foot_planted[li] = false
+
+	# Rear legs kick rapidly (scratching animation)
+	for li in [2, 3]:
+		if _leg_severed[li]:
+			continue
+		_legs[li][0] = _spine[2] + Vector2(0, 5)
+		var kick_phase: float = sin(_attack_timer * 20.0 + li * PI)
+		_legs[li][2] = center + Vector2(kick_phase * 15 * _facing, 10 + kick_phase * 8)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+		_foot_planted[li] = false
+
+	# Tail wraps around
+	if not _tail_severed:
+		_tail_whipping = true
+		for i in range(_tail.size()):
+			var tail_angle: float = PI * 0.5 + float(i) * 0.4
+			var tail_target: Vector2 = center + Vector2(cos(tail_angle) * (10 + i * 5), sin(tail_angle) * (8 + i * 4))
+			_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
+
+	# Phase 2: damage ticks
+	if t > 0.2 and t < 0.8:
+		var expected_kicks: int = int((_attack_timer - GRAB_DURATION * 0.2) / GRAB_KICK_INTERVAL)
+		while _grab_kick_count < expected_kicks:
+			_grab_kick_count += 1
+			var dmg_pos: Vector2 = _grab_target_node.global_position
+			# Alternate kicks and bites
+			if _grab_kick_count % 3 == 0:
+				_damage_players_in_range(dmg_pos, 30.0, GRAB_BITE_DAMAGE)
+				_spawn_blood_spatter(center)
+			else:
+				_damage_players_in_range(dmg_pos, 30.0, GRAB_KICK_DAMAGE)
+
+	# Phase 3: eject
+	if t >= 1.0:
+		# Fling the player in a random direction
+		if is_instance_valid(_grab_target_node):
+			var eject_angle: float = randf() * TAU
+			_grab_target_node.velocity = Vector2(cos(eject_angle), sin(eject_angle)) * GRAB_EJECT_SPEED
+			_grab_target_node.velocity.y = minf(_grab_target_node.velocity.y, -150.0)  # Some upward
+
+		_jaw_open = 0.0
+		_tail_whipping = false
+		_grab_target_node = null
+		# Restore normal body collision
+		if _body_collision and _body_collision.shape is CircleShape2D:
+			(_body_collision.shape as CircleShape2D).radius = 14.0
+		_state = State.CHASE
+
+		# Re-plant feet
+		for li in range(4):
+			if not _leg_severed[li]:
+				var hip: Vector2 = _spine[0] if li < 2 else _spine[2]
+				_legs[li][2] = Vector2(hip.x, _raycast_floor(hip))
+				_foot_planted[li] = true
+				_foot_world[li] = global_position + _legs[li][2]
+
 
 func _start_sprint_slash() -> void:
 	_state = State.ATTACK_SPRINT_SLASH
@@ -3257,7 +3391,7 @@ func _draw_debug() -> void:
 	var info_pos := Vector2(text_x, -global_position.y + 50)
 	# Faint line connecting text to creature
 	draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
+	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	var dy: int = 0
 	draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
