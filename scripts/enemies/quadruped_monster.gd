@@ -494,9 +494,9 @@ func _solve_pose(delta: float) -> void:
 			parent = _tail[i]
 
 	# -- Legs: 2-bone IK from hip to foot, knee solved --
+	var max_leg_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
 	for li in range(4):
 		if _leg_severed[li]:
-			# Severed legs fall with gravity
 			for j in range(3):
 				_legs[li][j].y += GRAVITY * delta * 0.3
 			continue
@@ -507,23 +507,41 @@ func _solve_pose(delta: float) -> void:
 		# Hip: pinned to spine
 		_legs[li][0] = hip_spine + _get_facing_offset(rest[0])
 
-		# When IK is off (during leap), legs are positioned manually — skip IK
 		if _leap_ik_off:
 			continue
 
-		# Foot position is set by _update_gait (world→local).
-		# IK solves the knee to connect hip to wherever the foot is.
+		# Sanity check: clamp foot if it's too far from hip (wonky leg detection)
+		var hip: Vector2 = _legs[li][0]
+		var foot: Vector2 = _legs[li][2]
+		var hip_to_foot: float = hip.distance_to(foot)
+		if hip_to_foot > max_leg_reach * 1.1:
+			# Foot is unreachable — snap it to directly below the hip
+			var clamped_foot: Vector2 = hip + (foot - hip).normalized() * max_leg_reach * 0.9
+			_legs[li][2] = clamped_foot
+			# Also re-plant at the corrected world position
+			_foot_world[li] = global_position + clamped_foot
+			_foot_planted[li] = true
 
-		# Knee: solved via 2-bone IK (hip → knee → foot)
-		# Mammal anatomy: front elbows bend BACKWARD, rear knees bend FORWARD
+		# Additional check: foot should not be on a wildly different Y level
+		# (e.g., foot dangling to a platform 200px below)
+		if _foot_planted[li] and absf(foot.y - hip.y) > max_leg_reach * 1.2:
+			# Foot is on a different level — force replant at current floor
+			var floor_y: float = _raycast_floor(hip)
+			var fixed_foot := Vector2(hip.x, minf(floor_y, hip.y + max_leg_reach * 0.9))
+			_legs[li][2] = fixed_foot
+			_foot_world[li] = global_position + fixed_foot
+			_foot_planted[li] = true
+
+		# Knee: solved via 2-bone IK — snap quickly (no slow lerp)
 		var bend_dir: float = 1.0 if li < 2 else -1.0
-		bend_dir *= _facing  # Flip with facing
+		bend_dir *= _facing
 		var knee_pos: Vector2 = _solve_leg_ik(
 			_legs[li][0], _legs[li][2],
 			LEG_UPPER_LEN, LEG_LOWER_LEN,
 			bend_dir
 		)
-		_legs[li][1] = _legs[li][1].lerp(knee_pos, s_clamp)
+		# Snap knee to IK solution (fast lerp to prevent sticking)
+		_legs[li][1] = _legs[li][1].lerp(knee_pos, minf(s * 2.0, 1.0))
 
 	# -- Floor constraints (raycast-based) --
 	if not _tail_severed:
@@ -606,13 +624,34 @@ func _update_gait(delta: float) -> void:
 		_spine[i].y += breathe_offset * delta * 4.0
 
 	# Convert planted feet from world space to local space for rendering/IK
+	var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
 		if _foot_planted[li]:
-			# Foot stays fixed in world space — convert to local for drawing
-			_legs[li][2] = _foot_world[li] - global_position
-		# else: foot is mid-step, _animate_step handles it
+			var local_foot: Vector2 = _foot_world[li] - global_position
+			var hip: Vector2 = _legs[li][0]
+			var hip_to_foot_dist: float = hip.distance_to(local_foot)
+
+			# Clamp: foot must stay within leg reach
+			if hip_to_foot_dist > max_reach * 0.95:
+				# Pull foot toward hip — keep it reachable
+				local_foot = hip + (local_foot - hip).normalized() * max_reach * 0.9
+				_foot_world[li] = global_position + local_foot
+
+			# Clamp: foot must not be more than leg-length below the hip
+			# (prevents foot reaching down to a lower platform)
+			if local_foot.y > hip.y + max_reach:
+				local_foot.y = hip.y + max_reach
+				_foot_world[li] = global_position + local_foot
+
+			# Clamp: foot must stay roughly under the body (not spread too wide)
+			var max_spread: float = max_reach * 0.8
+			if absf(local_foot.x - hip.x) > max_spread:
+				local_foot.x = hip.x + signf(local_foot.x - hip.x) * max_spread
+				_foot_world[li] = global_position + local_foot
+
+			_legs[li][2] = local_foot
 
 	# At most one front foot and one back foot step at a time.
 	# Within each pair (front 0/1, rear 2/3), only the one that's
