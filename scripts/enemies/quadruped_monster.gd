@@ -62,11 +62,11 @@ const LEAP_COOLDOWN := 4.0     # Seconds between leaps
 # Leap planning
 const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
 const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
-const LEAP_ARRIVAL_SAMPLES := 12  # Number of arrival angles to test around target
-const LEAP_FLIGHT_TIMES := 7      # Number of flight durations to try per arrival point
-const LEAP_FLIGHT_TIME_MIN := 0.2 # Shortest flight time to test
-const LEAP_FLIGHT_TIME_MAX := 1.5 # Longest flight time to test (higher arcs)
-const LEAP_ARC_STEPS := 40        # Simulation steps per arc
+const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around target
+const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
+const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
+const LEAP_FLIGHT_TIME_MAX := 1.2 # Longest flight time to test
+const LEAP_ARC_STEPS := 24        # Simulation steps per arc
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.04         # Simulation timestep
 
@@ -205,7 +205,8 @@ var _head_severed: bool = false
 # Hitbox nodes (assigned in _ready from scene tree or created dynamically)
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
-var debug_draw_enabled: bool = false  # Visual debug rendering (heavy — disable for perf)
+var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
+var debug_draw_lite: bool = true      # Lightweight debug (state, platforms, waypoint, target)
 
 
 func _ready() -> void:
@@ -414,6 +415,10 @@ func _physics_process(delta: float) -> void:
 		or _state == State.ATTACK_LEAP_AIRBORNE or _state == State.ATTACK_LEAP_STRIKE
 		or _state == State.ATTACK_LEAP_THRASH)
 	var in_precog: bool = (_state == State.PRECOGNITION)
+
+	# Async graph building (2 pairs per frame)
+	if _precog_graph_building:
+		_precog_build_graph_tick()
 
 	if in_leap_flight:
 		_update_leap_collision(delta)
@@ -1643,21 +1648,37 @@ func _find_wall_x(direction: int) -> float:
 # -- Pre-cognition (two-hop leap chaining) -------------------------------------
 
 func _precache_platforms() -> void:
-	## Pre-compute platform map and full connectivity graph at spawn time.
-	## This is expensive (~50ms) but only runs once. After this, precog
-	## just needs to tag entities and run Dijkstra (instant).
-	_precog_platforms_cached = false  # Force fresh scan
+	## Pre-compute platform map, then build graph edges across multiple frames.
+	_precog_platforms_cached = false
 	_precog_drop_and_detect()
-	# Build full graph
 	_precog_edges.clear()
+	# Start async graph building
+	_precog_graph_building = true
+	_precog_process_i = 0
+	_precog_process_j = 1
+	print("PRECOG PRECACHE: %d platforms detected, building graph..." % _precog_platforms.size())
+
+
+var _precog_graph_building: bool = false
+
+func _precog_build_graph_tick() -> void:
+	## Build 2 edges per frame to avoid stutter.
+	if not _precog_graph_building:
+		return
 	var n: int = _precog_platforms.size()
-	for pi in range(n):
-		for pj in range(n):
-			if pi != pj:
-				_precog_process_i = pi
-				_precog_process_j = pj
-				_precog_build_one_edge(pi, pj)
-	print("PRECOG PRECACHE: %d platforms, %d edges (computed at spawn)" % [n, _precog_edges.size()])
+	var pairs_this_frame: int = 0
+	while pairs_this_frame < 2:
+		if _precog_process_i >= n:
+			_precog_graph_building = false
+			print("PRECOG GRAPH READY: %d edges" % _precog_edges.size())
+			return
+		if _precog_process_i != _precog_process_j:
+			_precog_build_one_edge(_precog_process_i, _precog_process_j)
+			pairs_this_frame += 1
+		_precog_process_j += 1
+		if _precog_process_j >= n:
+			_precog_process_i += 1
+			_precog_process_j = 0
 
 
 func _start_precognition() -> void:
@@ -1693,6 +1714,9 @@ func _do_precognition(delta: float) -> void:
 			# Build graph if not cached yet
 			if _precog_edges.is_empty() or _precog_platforms.size() < 3:
 				_precache_platforms()
+			# Wait for async graph building to complete
+			if _precog_graph_building:
+				return  # Still building — wait
 			# Re-tag entity positions
 			for plat in _precog_platforms:
 				plat["label"] = ""
@@ -2048,7 +2072,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 	# Sample landing points along the platform surface (slightly above it)
 	var landing_y: float = plat_y - 5.0  # Just above the surface
 	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / PRECOG_GRID_SPACING) + 1)
-	sample_count = mini(sample_count, 7)
+	sample_count = mini(sample_count, 5)
 
 	for si in range(sample_count):
 		var t: float = float(si) / float(sample_count - 1) if sample_count > 1 else 0.5
@@ -2766,8 +2790,9 @@ func _draw() -> void:
 	_draw_tail()
 	_draw_legs()
 	_draw_neck_head()
-	if debug_draw_enabled and PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
-		_draw_debug()
+	if PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
+		if debug_draw_lite or debug_draw_enabled:
+			_draw_debug()
 
 
 func _draw_body() -> void:
@@ -3058,16 +3083,17 @@ func _draw_debug() -> void:
 		var phase_str: String = "P1" if _leap_plan_phase <= 1 else "P1+P2"
 		draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), LEAP_ARRIVAL_SAMPLES], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
 
-		# Draw all arcs (dim)
-		for result in _leap_plan_results:
-			var is_clear: bool = result["clear"]
-			var arc_col: Color = Color(0, 0.7, 0, 0.2) if is_clear else Color(0.7, 0, 0, 0.08)
-			var arc_l: PackedVector2Array = result["arc_l"]
-			var arc_r: PackedVector2Array = result["arc_r"]
-			for i in range(arc_l.size() - 1):
-				draw_line(arc_l[i] - global_position, arc_l[i + 1] - global_position, arc_col, 1.0)
-			for i in range(arc_r.size() - 1):
-				draw_line(arc_r[i] - global_position, arc_r[i + 1] - global_position, arc_col, 1.0)
+		# All arcs (heavy — only when full debug is on)
+		if debug_draw_enabled:
+			for result in _leap_plan_results:
+				var is_clear: bool = result["clear"]
+				var arc_col: Color = Color(0, 0.7, 0, 0.2) if is_clear else Color(0.7, 0, 0, 0.08)
+				var al: PackedVector2Array = result["arc_l"]
+				var ar: PackedVector2Array = result["arc_r"]
+				for i in range(al.size() - 1):
+					draw_line(al[i] - global_position, al[i + 1] - global_position, arc_col, 1.0)
+				for i in range(ar.size() - 1):
+					draw_line(ar[i] - global_position, ar[i + 1] - global_position, arc_col, 1.0)
 
 		# Highlight the chosen path
 		if _leap_found_path:
@@ -3118,16 +3144,16 @@ func _draw_debug() -> void:
 				lbl += " [%s]" % plat["label"]
 			draw_string(font, p_local + Vector2(6, -6), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, plat_col)
 
-		# Draw edges (leap connections between platforms)
-		for edge in _precog_edges:
-			var from_local: Vector2 = edge["from_pos"] - global_position
-			var arc_l: PackedVector2Array = edge["arc_l"]
-			var arc_r: PackedVector2Array = edge["arc_r"]
-			var edge_col := Color(0.3, 0.6, 1, 0.25)
-			for ei in range(arc_l.size() - 1):
-				draw_line(arc_l[ei] - global_position, arc_l[ei + 1] - global_position, edge_col, 1.0)
-			for ei in range(arc_r.size() - 1):
-				draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, edge_col, 1.0)
+		# Draw edges (heavy — only when full debug is on)
+		if debug_draw_enabled:
+			for edge in _precog_edges:
+				var arc_l: PackedVector2Array = edge["arc_l"]
+				var arc_r: PackedVector2Array = edge["arc_r"]
+				var edge_col := Color(0.3, 0.6, 1, 0.25)
+				for ei in range(arc_l.size() - 1):
+					draw_line(arc_l[ei] - global_position, arc_l[ei + 1] - global_position, edge_col, 1.0)
+				for ei in range(arc_r.size() - 1):
+					draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, edge_col, 1.0)
 
 		# Draw the chosen path (bright, thick)
 		if _precog_path.size() >= 2:
