@@ -57,6 +57,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.13
+**Realistic Trajectory Clearance, IK Scoring, 1395 Total Damage**
+- LEAP_BODY_RADIUS increased from 22px to 55px — trajectories now account for the creature's actual size
+- Creature no longer clips platforms mid-flight or squeezes through gaps it can't fit
+- IK quality scoring system: spread (2pts/px over 30), stretch (5pts/px over max), hover (3pts/px above floor)
+- IK score displayed in debug (green/yellow/red) and queryable via RCON (`ik`, `ikreset`)
+- Automated baseline: 9/10 scenarios deal damage, 1395 total, same-floor-near deals 905
+- FPS stable at 54-99 without debug draw (debug draw toggleable via RCON `debugdraw`)
+- Async graph building (5 pairs/frame), precog cooldown (2s), leap cooldown (2s)
+- Sprint slash, connected hop-up, direct leap all tuned for appropriate scenarios
+- Foot landing re-raycasts floor to prevent floating feet after steps
+- Out-of-bounds teleport recovery
+
 ### v0.9.12
 **9/10 Baseline, IK Fixes, FPS Stability**
 - Automated baseline: 9/10 scenarios deal damage, min FPS 60 (never dips)
