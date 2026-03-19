@@ -53,11 +53,11 @@ const AGGRO_SWITCH_HITS := 3
 # Vertical leap
 const LEAP_RANGE := 500.0      # Distance at which leap is considered
 const LEAP_WINDUP_TIME := 0.6  # Seconds to coil up before launch (fast panther)
-const LEAP_LAUNCH_SPEED := 900.0  # Launch velocity magnitude
+const LEAP_LAUNCH_SPEED := 1000.0 # Launch velocity magnitude (powerful)
 const LEAP_SLASH_DAMAGE := 15  # Per slash (6 total = 90 max)
 const LEAP_BITE_DAMAGE := 30   # Bite + thrash
 const LEAP_THRASH_COUNT := 3   # Number of thrash shakes
-const LEAP_COOLDOWN := 4.0     # Seconds between leaps
+const LEAP_COOLDOWN := 2.0     # Seconds between leaps (aggressive)
 
 # Leap planning
 const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
@@ -66,7 +66,7 @@ const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around targ
 const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
 const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
 const LEAP_FLIGHT_TIME_MAX := 1.2 # Longest flight time to test
-const LEAP_ARC_STEPS := 24        # Simulation steps per arc
+const LEAP_ARC_STEPS := 16        # Simulation steps per arc (fast)
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.04         # Simulation timestep
 
@@ -850,7 +850,7 @@ func _do_chase(_delta: float) -> void:
 		_want_direction = signf(to_waypoint.x)
 		_move_speed = SPEED_FAST
 
-		if waypoint_dist < 10.0:
+		if waypoint_dist < 25.0:
 			_precog_has_waypoint = false
 			var has_vel: bool = _precog_waypoint_edge.has("launch_vel")
 			var vel_val: String = str(_precog_waypoint_edge.get("launch_vel", "NONE"))
@@ -896,9 +896,23 @@ func _do_chase(_delta: float) -> void:
 	_want_direction = _facing
 	var dist: float = absf(to_target.x)
 
-	# If target is on a different platform AND we can't walk to them,
-	# immediately use precog pathfinding (don't wait for timeout)
-	var target_above: bool = to_target.y < -80.0   # Must be significantly above
+	# Speed based on distance
+	if dist > 200.0:
+		_move_speed = SPEED_FAST
+	elif dist > 80.0:
+		_move_speed = SPEED_MEDIUM
+	else:
+		_move_speed = SPEED_SLOW
+
+	# Try direct attacks first (includes direct leap with mid-air strike)
+	if _attack_cooldown <= 0.0:
+		_choose_attack(dist, to_target)
+		if _state != State.CHASE:
+			return  # Attack was chosen — don't fall through to precog
+
+	# If target is on a different platform and no direct attack was chosen,
+	# use precog pathfinding to route there
+	var target_above: bool = to_target.y < -80.0
 	var target_far_below: bool = to_target.y > 120.0
 	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
 		_start_precognition()
@@ -909,18 +923,6 @@ func _do_chase(_delta: float) -> void:
 	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
 		_start_precognition()
 		return
-
-	# Speed based on distance
-	if dist > 200.0:
-		_move_speed = SPEED_FAST
-	elif dist > 80.0:
-		_move_speed = SPEED_MEDIUM
-	else:
-		_move_speed = SPEED_SLOW
-
-	# Choose attack when in range
-	if _attack_cooldown <= 0.0:
-		_choose_attack(dist, to_target)
 
 
 func _choose_attack(dist: float, to_target: Vector2) -> void:
@@ -1721,7 +1723,7 @@ func _start_precognition() -> void:
 	if _precog_cooldown > 0.0:
 		_state = State.CHASE
 		return
-	_precog_cooldown = 5.0  # Don't re-enter precog for 5 seconds
+	_precog_cooldown = 2.0  # Quick retry if leap misses
 	_state = State.PRECOGNITION
 	_attack_timer = 0.0
 	_precog_phase = 0
