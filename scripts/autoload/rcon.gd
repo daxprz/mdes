@@ -116,6 +116,13 @@ func _execute(command: String) -> String:
 				return "ERR: usage: tp <x> <y> or tp <player_index> <x> <y>"
 			return _cmd_teleport(parts)
 
+		"clearplayers":
+			var cleared_p: int = 0
+			for p in get_tree().get_nodes_in_group("players"):
+				p.queue_free()
+				cleared_p += 1
+			return "OK: cleared %d players" % cleared_p
+
 		"clear":
 			var cleared: int = 0
 			for e in get_tree().get_nodes_in_group("enemies"):
@@ -164,6 +171,12 @@ func _execute(command: String) -> String:
 				if "_ik_score" in e:
 					return "ik_now=%.0f ik_avg=%.0f ik_peak=%.0f" % [e._ik_score, e._ik_score_avg, e._ik_score_peak]
 			return "ERR: no enemy with IK score"
+
+		"thrash":
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if "_strategy_changes" in e:
+					return "thrash=%d plan_attempts=%d/%d" % [e._strategy_changes, e._plan_attempts, e.MAX_PLAN_ATTEMPTS]
+			return "ERR: no enemy with thrash score"
 
 		"ikreset":
 			for e in get_tree().get_nodes_in_group("enemies"):

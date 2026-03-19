@@ -214,6 +214,13 @@ var _ik_score_avg: float = 0.0     # Rolling average
 var _ik_score_peak: float = 0.0    # Worst score seen
 var _ik_score_samples: int = 0
 
+# Strategy thrash scoring (lower = better)
+var _last_state: int = -1          # Previous frame's state
+var _strategy_changes: int = 0     # State changes since dummy last moved
+var _last_target_pos: Vector2 = Vector2.ZERO  # Dummy position last check
+var _plan_attempts: int = 0        # How many times we've tried the current plan
+const MAX_PLAN_ATTEMPTS := 3      # Commit to a plan for this many attempts before changing
+
 
 func _ready() -> void:
 	add_to_group("enemies")
@@ -445,6 +452,7 @@ func _physics_process(delta: float) -> void:
 
 	_update_hitbox_positions()
 	_score_ik_quality()
+	_score_strategy_thrash()
 
 	queue_redraw()
 
@@ -591,6 +599,20 @@ func _score_ik_quality() -> void:
 	_ik_score_avg = lerpf(_ik_score_avg, score, 0.05)  # Exponential moving average
 	if score > _ik_score_peak:
 		_ik_score_peak = score
+
+
+func _score_strategy_thrash() -> void:
+	## Track strategy changes. Reset when the target moves significantly.
+	if is_instance_valid(_target):
+		var target_moved: float = _target.global_position.distance_to(_last_target_pos)
+		if target_moved > 30.0:
+			_strategy_changes = 0
+			_last_target_pos = _target.global_position
+
+	var current: int = _state
+	if current != _last_state:
+		_strategy_changes += 1
+		_last_state = current
 
 
 func _get_facing_offset(offset: Vector2) -> Vector2:
@@ -1781,7 +1803,13 @@ func _start_precognition() -> void:
 	if _precog_cooldown > 0.0:
 		_state = State.CHASE
 		return
-	_precog_cooldown = 2.0  # Quick retry if leap misses
+	_plan_attempts += 1
+	if _plan_attempts < MAX_PLAN_ATTEMPTS and _precog_has_waypoint:
+		# Still committed to current plan — don't re-plan yet
+		_state = State.CHASE
+		return
+	_plan_attempts = 0
+	_precog_cooldown = 2.0
 	_state = State.PRECOGNITION
 	_attack_timer = 0.0
 	_precog_phase = 0
@@ -3161,6 +3189,9 @@ func _draw_debug() -> void:
 	# IK quality score
 	var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
 	draw_string(font, info_pos + Vector2(0, 52), "IK: now=%.0f avg=%.0f peak=%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
+	# Strategy thrash score
+	var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
+	draw_string(font, info_pos + Vector2(0, 62), "Thrash: %d  planAttempts: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
 
 	# Draw waypoint marker if active
 	if _precog_has_waypoint:
