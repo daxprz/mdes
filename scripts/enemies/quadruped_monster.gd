@@ -864,8 +864,8 @@ func _do_chase(_delta: float) -> void:
 
 	# If target is on a different platform AND we can't walk to them,
 	# immediately use precog pathfinding (don't wait for timeout)
-	var target_above: bool = to_target.y < -40.0
-	var target_far_below: bool = to_target.y > 100.0
+	var target_above: bool = to_target.y < -80.0   # Must be significantly above
+	var target_far_below: bool = to_target.y > 120.0
 	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
 		_start_precognition()
 		return
