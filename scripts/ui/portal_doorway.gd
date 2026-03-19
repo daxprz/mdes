@@ -214,6 +214,31 @@ func _ready() -> void:
 	_fog_overlay.set_script(null)
 	add_child(_fog_overlay)
 	_fog_overlay.draw.connect(_draw_fog_on_overlay)
+	# Keystone platform: standable surface on top of the arch
+	_create_keystone_platform()
+
+
+func _create_keystone_platform() -> void:
+	## Add a StaticBody2D at the top of the keystone so players can stand on it.
+	var half_w: float = DOORWAY_WIDTH / 2.0
+	var stone_w: float = 22.0
+	var ks_top_w: float = 24.0
+	var ks_h: float = stone_w + 10.0
+	var ks_cy: float = -DOORWAY_HEIGHT - half_w - stone_w / 2.0
+	var ks_top: float = ks_cy - ks_h / 2.0
+
+	var platform := StaticBody2D.new()
+	platform.collision_layer = 1  # World
+	platform.collision_mask = 0
+	platform.position = Vector2(0, ks_top)
+
+	var shape := RectangleShape2D.new()
+	shape.size = Vector2(ks_top_w * 2.0, 8.0)
+	var col := CollisionShape2D.new()
+	col.shape = shape
+	col.position = Vector2(0, 4.0)  # Top surface at y=0, body extends 8px down
+	platform.add_child(col)
+	add_child(platform)
 
 
 func _draw_back_layer() -> void:

@@ -50,6 +50,15 @@ const TAIL_RANGE := 90.0
 const ATTACK_COOLDOWN := 1.5
 const AGGRO_SWITCH_HITS := 3
 
+# Vertical leap
+const LEAP_RANGE := 500.0      # Distance at which leap is considered
+const LEAP_WINDUP_TIME := 1.2  # Seconds to coil up before launch
+const LEAP_LAUNCH_SPEED := 900.0  # Launch velocity magnitude
+const LEAP_SLASH_DAMAGE := 15  # Per slash (6 total = 90 max)
+const LEAP_BITE_DAMAGE := 30   # Bite + thrash
+const LEAP_THRASH_COUNT := 3   # Number of thrash shakes
+const LEAP_COOLDOWN := 8.0     # Seconds between leaps
+
 # Health
 const MAX_HEALTH := 200
 const HEAD_HEALTH := 60
@@ -59,7 +68,9 @@ const LEG_HEALTH := 40
 # -- Enums ---------------------------------------------------------------------
 
 enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
-			 ATTACK_LUNGE, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
+			 ATTACK_LUNGE, ATTACK_LEAP_WINDUP, ATTACK_LEAP_AIRBORNE,
+			 ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
+			 TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
 enum Posture { QUADRUPED, BIPEDAL }
 
 # -- Skeleton arrays -----------------------------------------------------------
@@ -116,6 +127,14 @@ var _posture_blend: float = 0.0  # 0=quadruped, 1=bipedal
 var _breathe_time: float = 0.0  # Idle breathing phase
 var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
 var _initialized: bool = false  # First-frame init flag
+var _leap_cooldown: float = 0.0  # Cooldown between leaps
+var _leap_ik_off: bool = false   # Disable leg IK during leap (legs positioned manually)
+var _leap_phase: float = 0.0    # Sub-phase progress within leap states
+var _leap_target_pos: Vector2 = Vector2.ZERO  # Where we're leaping to
+var _leap_slash_count: int = 0  # Slashes delivered so far
+var _leap_thrash_count: int = 0 # Thrashes delivered so far
+var _leap_slash_side: int = 1   # Alternating slash direction
+var _slash_effects: Array = []  # Active slash visual effects
 
 # Target tracking
 var _target: Node2D = null
@@ -279,9 +298,12 @@ func _physics_process(delta: float) -> void:
 	_timer += delta
 	if _attack_cooldown > 0.0:
 		_attack_cooldown -= delta
+	if _leap_cooldown > 0.0:
+		_leap_cooldown -= delta
 
-	# Gravity
-	velocity.y += GRAVITY * delta
+	# Gravity (skip during airborne leap — handled by leap physics)
+	if _state != State.ATTACK_LEAP_AIRBORNE:
+		velocity.y += GRAVITY * delta
 
 	# State machine (sets _want_direction and _move_speed)
 	_want_direction = 0.0
@@ -298,14 +320,24 @@ func _physics_process(delta: float) -> void:
 			_do_tail_whip(delta)
 		State.ATTACK_LUNGE:
 			_do_lunge(delta)
+		State.ATTACK_LEAP_WINDUP:
+			_do_leap_windup(delta)
+		State.ATTACK_LEAP_AIRBORNE:
+			_do_leap_airborne(delta)
+		State.ATTACK_LEAP_STRIKE:
+			_do_leap_strike(delta)
+		State.ATTACK_LEAP_THRASH:
+			_do_leap_thrash(delta)
 		State.TRANSITION_BIPEDAL:
 			_do_transition_bipedal(delta)
 		State.TRANSITION_QUADRUPED:
 			_do_transition_quadruped(delta)
 
-	# FOOT-DRIVEN LOCOMOTION:
-	# Planted feet push the body. The body does NOT move on its own.
-	_update_foot_push(delta)
+	# FOOT-DRIVEN LOCOMOTION (skip during leap)
+	var in_leap: bool = (_state == State.ATTACK_LEAP_WINDUP or _state == State.ATTACK_LEAP_AIRBORNE
+		or _state == State.ATTACK_LEAP_STRIKE or _state == State.ATTACK_LEAP_THRASH)
+	if not in_leap:
+		_update_foot_push(delta)
 
 	move_and_slide()
 
@@ -382,6 +414,10 @@ func _solve_pose(delta: float) -> void:
 
 		# Hip: pinned to spine
 		_legs[li][0] = hip_spine + _get_facing_offset(rest[0])
+
+		# When IK is off (during leap), legs are positioned manually — skip IK
+		if _leap_ik_off:
+			continue
 
 		# Foot position is set by _update_gait (world→local).
 		# IK solves the knee to connect hip to wherever the foot is.
@@ -699,6 +735,11 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		_start_attack(State.ATTACK_TAIL)
 		return
 
+	# VERTICAL LEAP at leap range (priority over lunge)
+	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
+		_start_leap()
+		return
+
 	# Lunge at medium distance
 	if dist > 80.0 and dist < 200.0 and randf() < 0.3:
 		_start_attack(State.ATTACK_LUNGE)
@@ -847,6 +888,300 @@ func _do_transition_quadruped(delta: float) -> void:
 		_posture = Posture.QUADRUPED
 		_posture_blend = 0.0
 		_state = State.CHASE
+
+
+# -- Vertical Leap Attack ------------------------------------------------------
+
+func _start_leap() -> void:
+	_state = State.ATTACK_LEAP_WINDUP
+	_attack_timer = 0.0
+	_attack_cooldown = ATTACK_COOLDOWN
+	_leap_cooldown = LEAP_COOLDOWN
+	_leap_phase = 0.0
+	_leap_slash_count = 0
+	_leap_thrash_count = 0
+	_leap_slash_side = 1
+	_leap_ik_off = false  # IK still on during early windup for rear legs
+	velocity.x = 0
+	if is_instance_valid(_target):
+		_leap_target_pos = _target.global_position
+
+
+func _do_leap_windup(delta: float) -> void:
+	## Coiling phase: body tilts up, front legs retract, tail plants, rear compresses.
+	_attack_timer += delta
+	velocity.x = 0
+	var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
+
+	# Update target tracking during windup
+	if is_instance_valid(_target):
+		_leap_target_pos = _target.global_position
+
+	# Phase 1 (0-0.3): front legs lift off ground, body starts tilting
+	# Phase 2 (0.3-0.6): tail lowers, last 3 segments touch ground one at a time
+	# Phase 3 (0.6-1.0): rear legs compress, spine goes near-vertical, front legs tuck
+
+	# Tilt spine: front rises, back stays
+	_posture_blend = t * 0.8  # Re-use posture blend for spine tilt
+
+	# Front legs retract toward chest (pull feet up and inward)
+	if not _leg_severed[0]:
+		var tuck: Vector2 = _spine[0] + Vector2(0, 10)
+		_legs[0][2] = _legs[0][2].lerp(tuck, t * 3.0 * delta)
+		_foot_planted[0] = false
+	if not _leg_severed[1]:
+		var tuck: Vector2 = _spine[0] + Vector2(0, 10)
+		_legs[1][2] = _legs[1][2].lerp(tuck, t * 3.0 * delta)
+		_foot_planted[1] = false
+
+	# Tail lowers: last 3 segments plant one at a time
+	if not _tail_severed:
+		var tail_floor: float = _raycast_floor(_tail[4])
+		if t > 0.3:
+			_tail[4].y = lerpf(_tail[4].y, tail_floor, minf((t - 0.3) * 5.0 * delta, 1.0))
+		if t > 0.45:
+			_tail[3].y = lerpf(_tail[3].y, tail_floor, minf((t - 0.45) * 5.0 * delta, 1.0))
+		if t > 0.6:
+			_tail[2].y = lerpf(_tail[2].y, tail_floor, minf((t - 0.6) * 5.0 * delta, 1.0))
+
+	# Rear legs compress (feet move closer to hips)
+	if t > 0.6:
+		var compress: float = (t - 0.6) / 0.4
+		for li in [2, 3]:
+			if _leg_severed[li]:
+				continue
+			var hip: Vector2 = _legs[li][0]
+			var compressed_foot: Vector2 = hip + Vector2(0, (LEG_UPPER_LEN + LEG_LOWER_LEN) * (1.0 - compress * 0.4))
+			_legs[li][2] = _legs[li][2].lerp(compressed_foot, 4.0 * delta)
+
+	# LAUNCH at end of windup
+	if _attack_timer >= LEAP_WINDUP_TIME:
+		_state = State.ATTACK_LEAP_AIRBORNE
+		_attack_timer = 0.0
+		_leap_ik_off = true  # All legs positioned manually from here
+		# Update target one last time
+		if is_instance_valid(_target):
+			_leap_target_pos = _target.global_position
+		# Launch: strong parabolic arc aimed at target
+		var to_target: Vector2 = _leap_target_pos - global_position
+		var dist: float = to_target.length()
+		# Calculate launch angle for a nice arc — more horizontal for close, more vertical for far
+		var arc_ratio: float = clampf(dist / 400.0, 0.3, 0.8)
+		velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * (1.0 - arc_ratio * 0.5)
+		velocity.y = -LEAP_LAUNCH_SPEED * arc_ratio
+		# Unplant all feet
+		for li in range(4):
+			_foot_planted[li] = false
+		# Tail whips straight (release)
+		_tail_whipping = true
+
+
+func _do_leap_airborne(delta: float) -> void:
+	## Parabolic flight. Body aligns toward target. Gravity applies.
+	_attack_timer += delta
+
+	# Apply gravity for parabolic arc
+	velocity.y += GRAVITY * delta
+
+	# Align spine toward target (body aims like a missile)
+	var fly_dir: Vector2 = velocity.normalized() if velocity.length() > 10 else Vector2(_facing, 0)
+	var body_aim: Vector2 = fly_dir
+	if is_instance_valid(_target):
+		var to_target: Vector2 = (_target.global_position - global_position).normalized()
+		body_aim = body_aim.lerp(to_target, 0.6)  # Blend flight dir with target aim
+
+	# Position spine along the aim direction
+	var spine_center: Vector2 = (_spine[0] + _spine[2]) * 0.5
+	_spine[0] = _spine[0].lerp(spine_center + body_aim * SPINE_SEG_LEN, 8.0 * delta)
+	_spine[2] = _spine[2].lerp(spine_center - body_aim * SPINE_SEG_LEN, 8.0 * delta)
+
+	# Rear legs extend to full stretch behind (pushing off)
+	for li in [2, 3]:
+		if _leg_severed[li]:
+			continue
+		var hip: Vector2 = _legs[li][0]
+		var stretch_dir: Vector2 = -body_aim  # Behind the body
+		var stretched: Vector2 = hip + stretch_dir * (LEG_UPPER_LEN + LEG_LOWER_LEN - 2)
+		_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
+		# Knee midway along the stretch
+		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * LEG_UPPER_LEN, 8.0 * delta)
+
+	# Front legs stay tucked against chest
+	for li in [0, 1]:
+		if _leg_severed[li]:
+			continue
+		var hip: Vector2 = _legs[li][0]
+		var tuck: Vector2 = hip + Vector2(body_aim.y * 5, -body_aim.x * 5)  # Tucked perpendicular
+		_legs[li][2] = _legs[li][2].lerp(tuck, 10.0 * delta)
+		_legs[li][1] = _legs[li][1].lerp((hip + tuck) * 0.5, 10.0 * delta)
+
+	# Tail straightens behind (release energy)
+	if not _tail_severed:
+		var tail_dir: Vector2 = -body_aim
+		for i in range(5):
+			var tail_target: Vector2 = _spine[2] + tail_dir * TAIL_SEG_LEN * (i + 1)
+			_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
+
+	# Check if we've reached the target
+	if is_instance_valid(_target):
+		var dist_to_target: float = global_position.distance_to(_target.global_position)
+		if dist_to_target < 60.0:
+			_state = State.ATTACK_LEAP_STRIKE
+			_attack_timer = 0.0
+			_leap_slash_count = 0
+			_leap_slash_side = 1
+			velocity = Vector2.ZERO
+			_tail_whipping = false
+			return
+
+	# Timeout / hit ground fallback
+	if _attack_timer > 2.5 or (is_on_floor() and _attack_timer > 0.3):
+		_end_leap()
+
+
+func _do_leap_strike(delta: float) -> void:
+	## Double-time slash attack: 2 groups of 3 slashes (6 total).
+	_attack_timer += delta
+	velocity.x = 0
+	velocity.y = 0
+
+	# Slash timing: 6 slashes at ~0.08s intervals (double-time)
+	var slash_interval: float = 0.08
+	var expected_slashes: int = mini(int(_attack_timer / slash_interval), 6)
+
+	while _leap_slash_count < expected_slashes:
+		_leap_slash_count += 1
+		_leap_slash_side *= -1
+
+		# Swing the appropriate front leg
+		var slash_leg: int = 0 if _leap_slash_side > 0 else 1
+		if _leg_severed[slash_leg]:
+			slash_leg = 1 - slash_leg
+		if not _leg_severed[slash_leg]:
+			# Claw swipe arc
+			var swipe_end: Vector2 = _skull + Vector2(_facing * 30, _leap_slash_side * 25)
+			_legs[slash_leg][2] = swipe_end
+
+			# Damage check
+			var claw_world: Vector2 = global_position + swipe_end
+			_damage_players_in_range(claw_world, 35.0, LEAP_SLASH_DAMAGE)
+
+			# Spawn slash effect
+			_spawn_slash_effect(swipe_end)
+
+	# After all 6 slashes: transition to bite+thrash
+	if _leap_slash_count >= 6 and _attack_timer > 6 * slash_interval + 0.1:
+		_state = State.ATTACK_LEAP_THRASH
+		_attack_timer = 0.0
+		_leap_thrash_count = 0
+		# Open jaw for bite
+		_jaw_open = 1.0
+
+
+func _do_leap_thrash(delta: float) -> void:
+	## Bite the player and thrash back-and-forth 3 times, then fling.
+	_attack_timer += delta
+	velocity.x = 0
+
+	if not is_instance_valid(_target):
+		_end_leap()
+		return
+
+	# Bite damage on first frame
+	if _leap_thrash_count == 0 and _attack_timer < delta * 2:
+		var bite_world: Vector2 = global_position + _skull
+		_damage_players_in_range(bite_world, 35.0, LEAP_BITE_DAMAGE)
+		_spawn_blood_spatter(_skull)
+
+	# Thrash: shake the skull side-to-side, dragging the player
+	var thrash_interval: float = 0.2
+	var expected_thrashes: int = mini(int(_attack_timer / thrash_interval), LEAP_THRASH_COUNT)
+
+	if expected_thrashes > _leap_thrash_count:
+		_leap_thrash_count = expected_thrashes
+		_leap_slash_side *= -1
+		# Damage each thrash
+		var bite_world: Vector2 = global_position + _skull
+		_damage_players_in_range(bite_world, 35.0, LEAP_BITE_DAMAGE / 2)
+		_spawn_blood_spatter(_skull)
+		# Knock target sideways
+		if is_instance_valid(_target):
+			_target.velocity.x = _leap_slash_side * 300.0
+
+	# Skull thrashes side-to-side
+	var thrash_offset: float = sin(_attack_timer * 25.0) * 20.0
+	# Apply thrash to skull drawing (offset applied in _solve_pose won't work — do it here)
+	_skull.y += thrash_offset * delta * 5.0
+
+	# Close jaw during thrash
+	_jaw_open = 0.1
+
+	# After 3 thrashes: fling player and end
+	if _leap_thrash_count >= LEAP_THRASH_COUNT and _attack_timer > LEAP_THRASH_COUNT * thrash_interval + 0.15:
+		# Fling the target
+		if is_instance_valid(_target):
+			var fling_dir: Vector2 = Vector2(_facing * _leap_slash_side, -0.6).normalized()
+			_target.velocity = fling_dir * 600.0
+
+		_end_leap()
+
+
+func _end_leap() -> void:
+	_jaw_open = 0.0
+	_posture_blend = 0.0
+	_tail_whipping = false
+	_leap_ik_off = false  # Re-enable IK
+	_state = State.CHASE
+	_attack_timer = 0.0
+	# Re-plant feet at current positions
+	for li in range(4):
+		if not _leg_severed[li]:
+			_foot_planted[li] = true
+			_foot_world[li] = global_position + _legs[li][2]
+
+
+func _spawn_slash_effect(local_pos: Vector2) -> void:
+	## 3 diagonal slash lines that fade out quickly.
+	var parent: Node = get_parent()
+	if not parent:
+		return
+	var world_pos: Vector2 = global_position + local_pos
+	for i in range(3):
+		var slash := ColorRect.new()
+		slash.color = Color(1, 0.9, 0.8, 0.9)
+		slash.size = Vector2(28 + i * 6, 3)
+		slash.rotation = _facing * (0.5 + i * 0.3)
+		slash.z_index = 10
+		slash.position = world_pos + Vector2(randf_range(-8, 8), -10 + i * 10)
+		parent.add_child(slash)
+		var tween := slash.create_tween()
+		tween.tween_property(slash, "modulate:a", 0.0, 0.15)
+		tween.tween_callback(slash.queue_free)
+
+
+func _spawn_blood_spatter(local_pos: Vector2) -> void:
+	## Small blood particles spraying from bite point.
+	var parent: Node = get_parent()
+	if not parent:
+		return
+	var world_pos: Vector2 = global_position + local_pos
+	for i in range(8):
+		var drop := ColorRect.new()
+		drop.color = Color(0.7, 0.05, 0.05, 0.8)
+		drop.size = Vector2(4, 4)
+		drop.z_index = 10
+		drop.position = world_pos
+		parent.add_child(drop)
+		var angle: float = randf() * TAU
+		var dist: float = 20.0 + randf() * 40.0
+		var target_pos: Vector2 = world_pos + Vector2(cos(angle), sin(angle)) * dist
+		var tween := drop.create_tween()
+		tween.set_parallel(true)
+		tween.tween_property(drop, "position", target_pos, 0.3)
+		tween.tween_property(drop, "modulate:a", 0.0, 0.5)
+		tween.tween_property(drop, "scale", Vector2(0.3, 0.3), 0.4)
+		tween.set_parallel(false)
+		tween.tween_callback(drop.queue_free)
 
 
 # -- Hit detection -------------------------------------------------------------
@@ -1254,7 +1589,7 @@ func _draw_debug() -> void:
 
 	# -- State info (top-left of creature) --
 	var info_pos := _spine[0] + Vector2(-40, -60)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "->BIPED", "->QUAD", "HURT", "DEAD"]
+	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
 	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
@@ -1272,6 +1607,7 @@ func _draw_debug() -> void:
 		draw_line(target_local + Vector2(0, -16), target_local + Vector2(0, 16), tgt_col, 2.0)
 		draw_arc(target_local, 12.0, 0, TAU, 16, tgt_col, 1.5)
 		draw_arc(target_local, 20.0, 0, TAU, 16, Color(1, 0, 0, 0.3), 1.0)
-		draw_string(font, target_local + Vector2(14, -14), "TARGET P%d" % _target_player_index, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, tgt_col)
+		var target_dist: float = target_local.length()
+		draw_string(font, target_local + Vector2(14, -14), "TARGET P%d  dist:%.0f" % [_target_player_index, target_dist], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, tgt_col)
 		# Line from skull to target
 		draw_line(_skull, target_local, Color(1, 0.3, 0.1, 0.3), 1.0)
