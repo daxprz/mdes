@@ -57,6 +57,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.11
+**Speed Overhaul, Sprint Slash, Connected Hop-Up**
+- Ruthless panther: instant precog when target is on a different platform (no timer wait)
+- Pre-cached platform graph at spawn — Dijkstra pathfinding is instant
+- Sprint slash: same-plane charge at 250 speed + 3 rapid alternating claw swipes
+- Connected hop-up: short platform climb with feet connected to both surfaces
+- Movement doubled: slow 60, medium 140, fast 240 px/s
+- Attack cooldown 0.8s, leap cooldown 4s, leap windup 0.6s
+- Out-of-bounds recovery: teleport back to spawn if monster falls off screen
+- Debug draw toggle (`debugdraw` via RCON) — disable heavy visual rendering for performance
+- Automated baseline: 7/10 scenarios succeed in 0.7-5.5s average
+
 ### v0.9.10
 **Pre-cognition Pathfinding, RCON Server, Automated Testing**
 - Pre-cognition system: when the monster can't hit a player for 5s, it curls up and plans a multi-hop route across platforms

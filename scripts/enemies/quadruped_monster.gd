@@ -205,6 +205,7 @@ var _head_severed: bool = false
 # Hitbox nodes (assigned in _ready from scene tree or created dynamically)
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
+var debug_draw_enabled: bool = false  # Visual debug rendering (heavy — disable for perf)
 
 
 func _ready() -> void:
@@ -2761,7 +2762,7 @@ func _draw() -> void:
 	_draw_tail()
 	_draw_legs()
 	_draw_neck_head()
-	if PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
+	if debug_draw_enabled and PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
 		_draw_debug()
 
 

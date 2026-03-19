@@ -134,11 +134,16 @@ func _execute(command: String) -> String:
 			return "OK: cleared %d enemies, disabled respawning" % cleared
 
 		"precog":
-			# Force precognition on all quadruped monsters
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if e.has_method("_start_precognition"):
 					e._start_precognition()
 			return "OK: forced precognition"
+
+		"debugdraw":
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if "debug_draw_enabled" in e:
+					e.debug_draw_enabled = not e.debug_draw_enabled
+			return "OK: toggled debug draw"
 
 		"test":
 			# Automated test: teleport player to various spots, force precog each time
