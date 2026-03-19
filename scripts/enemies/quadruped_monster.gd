@@ -350,18 +350,22 @@ func _make_circle_collider(radius: float) -> CollisionShape2D:
 
 func _update_collision_positions() -> void:
 	## Move the 5 collision circles to follow the skeleton each frame.
+	## During leaps, shrink colliders so the body can pass through tight gaps.
+	var in_flight: bool = _leap_ik_off
 	if _col_skull:
 		_col_skull.position = _skull
+		(_col_skull.shape as CircleShape2D).radius = 6.0 if in_flight else 12.0
 	if _col_shoulder:
 		_col_shoulder.position = _spine[0]
+		(_col_shoulder.shape as CircleShape2D).radius = 8.0 if in_flight else 14.0
 	if _col_body_center:
-		# Body center positioned between spine and floor for ground contact
-		# Spine is at ~y=-50, floor at ~y=0, so center at ~y=-16 (radius 16 reaches floor)
 		var spine_mid_x: float = _spine[1].x
 		var spine_y: float = _spine[1].y
-		_col_body_center.position = Vector2(spine_mid_x, spine_y * 0.3)  # ~30% of way to floor
+		_col_body_center.position = Vector2(spine_mid_x, spine_y * 0.3)
+		(_col_body_center.shape as CircleShape2D).radius = 10.0 if in_flight else 16.0
 	if _col_hip:
 		_col_hip.position = _spine[2]
+		(_col_hip.shape as CircleShape2D).radius = 8.0 if in_flight else 14.0
 	if _col_tail and not _tail_severed and _tail.size() > 4:
 		_col_tail.position = _tail[4]
 	elif _col_tail:
