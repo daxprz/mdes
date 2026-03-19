@@ -322,16 +322,61 @@ func _init_part_health() -> void:
 
 
 func _init_collision() -> void:
-	# Single capsule for physics — reliable floor contact + platform interaction
-	# 4 circle colliders were tried but caused body/skeleton desync
-	var shape := CapsuleShape2D.new()
-	shape.radius = 10.0
-	shape.height = SPINE_SEG_LEN * 2.0 + shape.radius * 2.0
+	# PRIMARY collider: circle (sphere) rigidly attached to torso like a belly.
+	# Circle prevents corner-catching at odd angles.
+	# Position tracks spine[1] + downward offset each frame.
+	var shape := CircleShape2D.new()
+	shape.radius = 14.0  # Belly sphere — big enough for floor contact
 	_body_collision = CollisionShape2D.new()
 	_body_collision.shape = shape
-	_body_collision.rotation = PI / 2.0
-	_body_collision.position = Vector2(0, -10.0)
+	_body_collision.position = Vector2(0, -10.0)  # Initial; updated each frame
 	add_child(_body_collision)
+
+
+func _constrain_skeleton_to_world() -> void:
+	## After skeleton is solved, push skull/tail/spine out of geometry.
+	## This prevents body parts from clipping through floors and platforms.
+	## Does NOT use CollisionShape2D — uses raycasts to detect penetration
+	## and pushes the skeleton point upward.
+	var space := get_world_2d().direct_space_state
+	if not space or _leap_ik_off:
+		return  # Don't constrain during leaps (body is flying through air)
+
+	# Skull: must not go below the floor beneath it
+	var skull_world: Vector2 = global_position + _skull
+	var skull_floor_q := PhysicsRayQueryParameters2D.create(
+		skull_world + Vector2(0, -5), skull_world + Vector2(0, 15), 1)
+	skull_floor_q.exclude = [get_rid()]
+	var skull_hit: Dictionary = space.intersect_ray(skull_floor_q)
+	if not skull_hit.is_empty():
+		var floor_local_y: float = skull_hit["position"].y - global_position.y
+		if _skull.y > floor_local_y - 8:
+			_skull.y = floor_local_y - 8
+			_jaw.y = minf(_jaw.y, floor_local_y - 4)
+
+	# Tail tip: must not go below floor
+	if not _tail_severed and _tail.size() > 4:
+		var tail_world: Vector2 = global_position + _tail[4]
+		var tail_floor_q := PhysicsRayQueryParameters2D.create(
+			tail_world + Vector2(0, -5), tail_world + Vector2(0, 15), 1)
+		tail_floor_q.exclude = [get_rid()]
+		var tail_hit: Dictionary = space.intersect_ray(tail_floor_q)
+		if not tail_hit.is_empty():
+			var floor_local_y: float = tail_hit["position"].y - global_position.y
+			if _tail[4].y > floor_local_y - 3:
+				_tail[4].y = floor_local_y - 3
+
+	# Spine points: must not penetrate platforms from above
+	for i in range(3):
+		var sp_world: Vector2 = global_position + _spine[i]
+		var sp_floor_q := PhysicsRayQueryParameters2D.create(
+			sp_world + Vector2(0, -5), sp_world + Vector2(0, 15), 1)
+		sp_floor_q.exclude = [get_rid()]
+		var sp_hit: Dictionary = space.intersect_ray(sp_floor_q)
+		if not sp_hit.is_empty():
+			var floor_local_y: float = sp_hit["position"].y - global_position.y
+			if _spine[i].y > floor_local_y - 10:
+				_spine[i].y = floor_local_y - 10
 
 
 
@@ -453,6 +498,13 @@ func _physics_process(delta: float) -> void:
 		_update_gait(delta)
 		_solve_pose(delta)
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
+
+	# Affix body collider to torso center (like a hanging belly)
+	if _body_collision:
+		_body_collision.position = _spine[1] + Vector2(0, 10)  # Below spine midpoint
+
+	# Prevent skull/tail/spine from clipping through geometry
+	_constrain_skeleton_to_world()
 
 	_update_hitbox_positions()
 	_score_ik_quality()
@@ -3138,13 +3190,11 @@ func _draw_debug() -> void:
 	draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
 	draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
-	# -- Collision capsule --
+	# -- Body collision sphere (belly) --
 	if _body_collision:
 		var col_col := Color(1, 0, 1, 0.3)
-		var cp: Vector2 = _body_collision.position
-		var cr: float = 10.0
-		var cw: float = SPINE_SEG_LEN * 2.0 + cr * 2.0
-		draw_rect(Rect2(cp.x - cw / 2.0, cp.y - cr, cw, cr * 2.0), col_col, false, 1.0)
+		draw_arc(_body_collision.position, 14.0, 0, TAU, 16, col_col, 1.5)
+		draw_string(font, _body_collision.position + Vector2(-12, -18), "BELLY", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
 
 	# -- Spine points --
 	for i in range(_spine.size()):
