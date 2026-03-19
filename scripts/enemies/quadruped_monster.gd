@@ -1304,17 +1304,17 @@ func _do_grab(delta: float) -> void:
 	# Phase 2 (0.2-0.8): kick rapidly + bite
 	# Phase 3 (0.8-1.0): eject
 
+	var center: Vector2 = target_local
+	var ball_r: float = 40.0  # Orbit radius — big enough to see the player inside
+	var spin: float = _attack_timer * 4.0  # Spin speed (rad/s)
+	var curl: float = clampf(_attack_timer * 6.0, 0.0, 1.0)  # Fast curl-in (0.17s)
+
 	# Center collision on the grabbed player — expand to cover the full ball + tail
 	if _body_collision:
 		_body_collision.position = target_local
 		var max_tail_r: float = ball_r + 5.0 * (TAIL_SEG_LEN * 0.6)
 		if _body_collision.shape is CircleShape2D:
 			(_body_collision.shape as CircleShape2D).radius = max_tail_r
-
-	var center: Vector2 = target_local
-	var ball_r: float = 40.0  # Orbit radius — big enough to see the player inside
-	var spin: float = _attack_timer * 4.0  # Spin speed (rad/s)
-	var curl: float = clampf(_attack_timer * 6.0, 0.0, 1.0)  # Fast curl-in (0.17s)
 
 	# Helper: place a point on the ball. During curl-in, blend from current to target.
 	# Once curled (curl=1), SET directly — no lerp, fully rigid.
