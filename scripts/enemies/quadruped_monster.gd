@@ -342,6 +342,14 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
+	# Out-of-bounds recovery: teleport back to spawn area
+	if global_position.y > 1200 or global_position.y < -200 or global_position.x < -100 or global_position.x > 2020:
+		print("MONSTER: out of bounds at (%.0f,%.0f) — teleporting back" % [global_position.x, global_position.y])
+		global_position = Vector2(960, 850)
+		velocity = Vector2.ZERO
+		_end_leap()
+		_state = State.CHASE
+
 	# First-frame: plant feet. Precache runs after a short delay (2 frames)
 	# to ensure the physics space has all StaticBody2D nodes registered.
 	if not _initialized:
@@ -2490,6 +2498,7 @@ func _end_leap() -> void:
 	_leap_chosen_arc_l.clear()
 	_leap_chosen_arc_r.clear()
 	_attack_timer = 0.0
+	velocity = Vector2.ZERO  # Kill all momentum on landing
 	if _body_collision:
 		_body_collision.rotation = PI / 2.0
 		_body_collision.position = Vector2(0, -10.0)
