@@ -1265,57 +1265,79 @@ func _do_grab(delta: float) -> void:
 		_body_collision.position = target_local
 
 	var center: Vector2 = target_local
-	var ball_radius: float = 25.0  # How far segments orbit from center
-	var spin: float = _attack_timer * 3.0  # Rotation speed — the ball spins
-	var curl: float = clampf(_attack_timer * 4.0, 0.0, 1.0)  # 0→1 curl-in
+	var ball_r: float = 25.0  # Orbit radius
+	var spin: float = _attack_timer * 4.0  # Spin speed (rad/s)
+	var curl: float = clampf(_attack_timer * 6.0, 0.0, 1.0)  # Fast curl-in (0.17s)
 
-	# RIGID BALL POSE: all segments placed at computed positions on a circle
-	# The spine forms the top arc, tail wraps the bottom, legs grip the sides
+	# Helper: place a point on the ball. During curl-in, blend from current to target.
+	# Once curled (curl=1), SET directly — no lerp, fully rigid.
 
-	# Spine: 3 points across the top of the ball
-	_spine[0] = _spine[0].lerp(center + Vector2(cos(spin + 0.8), sin(spin + 0.8)) * ball_radius, curl * 12.0 * delta)
-	_spine[1] = _spine[1].lerp(center + Vector2(cos(spin), sin(spin)) * (ball_radius - 5), curl * 12.0 * delta)
-	_spine[2] = _spine[2].lerp(center + Vector2(cos(spin - 0.8), sin(spin - 0.8)) * ball_radius, curl * 12.0 * delta)
+	# SPINE: arc across the top of the ball
+	var sp0: Vector2 = center + Vector2(cos(spin + 0.9), sin(spin + 0.9)) * ball_r
+	var sp1: Vector2 = center + Vector2(cos(spin), sin(spin)) * (ball_r - 5)
+	var sp2: Vector2 = center + Vector2(cos(spin - 0.9), sin(spin - 0.9)) * ball_r
+	if curl >= 1.0:
+		_spine[0] = sp0
+		_spine[1] = sp1
+		_spine[2] = sp2
+	else:
+		_spine[0] = _spine[0].lerp(sp0, curl * 20.0 * delta)
+		_spine[1] = _spine[1].lerp(sp1, curl * 20.0 * delta)
+		_spine[2] = _spine[2].lerp(sp2, curl * 20.0 * delta)
 
-	# Head: skull jams into the player, jaw chomps
+	# HEAD: skull bites into center, jaw chomps
 	_neck[0] = _spine[0]
-	var skull_target: Vector2 = center + Vector2(cos(spin + 1.5), sin(spin + 1.5)) * (ball_radius * 0.6)
-	_neck[1] = _neck[1].lerp((_spine[0] + skull_target) * 0.5, curl * 12.0 * delta)
-	_skull = _skull.lerp(skull_target, curl * 12.0 * delta)
-	var chomp: float = absf(sin(_attack_timer * 12.0))
-	_jaw_open = chomp * 0.6
-	_jaw = _jaw.lerp(_skull + Vector2(cos(spin + 1.5), sin(spin + 1.5)) * (8 + chomp * 6), curl * 12.0 * delta)
+	var skull_pos: Vector2 = center + Vector2(cos(spin + 1.6), sin(spin + 1.6)) * (ball_r * 0.5)
+	var neck_pos: Vector2 = (_spine[0] + skull_pos) * 0.5
+	var chomp: float = absf(sin(_attack_timer * 14.0))
+	_jaw_open = chomp * 0.7
+	var jaw_pos: Vector2 = skull_pos + Vector2(cos(spin + 1.6), sin(spin + 1.6)) * (6 + chomp * 8)
+	if curl >= 1.0:
+		_neck[1] = neck_pos
+		_skull = skull_pos
+		_jaw = jaw_pos
+	else:
+		_neck[1] = _neck[1].lerp(neck_pos, curl * 20.0 * delta)
+		_skull = _skull.lerp(skull_pos, curl * 20.0 * delta)
+		_jaw = _jaw.lerp(jaw_pos, curl * 20.0 * delta)
 
-	# Front legs: clasp onto the player (grip positions on the ball)
+	# FRONT LEGS: clasp — feet lock onto player, hips follow spine
 	for li in [0, 1]:
 		if _leg_severed[li]:
 			continue
 		_foot_planted[li] = false
-		var leg_angle: float = spin + PI * 0.5 + float(li) * 0.6
+		var grip_angle: float = spin + PI * 0.5 + float(li) * 0.7
+		var foot_pos: Vector2 = center + Vector2(cos(grip_angle), sin(grip_angle)) * 6
 		_legs[li][0] = _spine[0] + Vector2(0, 3)
-		# Feet grip inward toward center
-		_legs[li][2] = _legs[li][2].lerp(center + Vector2(cos(leg_angle), sin(leg_angle)) * 8, curl * 15.0 * delta)
+		if curl >= 1.0:
+			_legs[li][2] = foot_pos
+		else:
+			_legs[li][2] = _legs[li][2].lerp(foot_pos, curl * 20.0 * delta)
 		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
 
-	# Rear legs: rapid kicking (scratching at the player)
+	# REAR LEGS: rapid scratch-kick (oscillate violently)
 	for li in [2, 3]:
 		if _leg_severed[li]:
 			continue
 		_foot_planted[li] = false
 		_legs[li][0] = _spine[2] + Vector2(0, 3)
-		var kick: float = sin(_attack_timer * 25.0 + float(li) * PI) * 12.0
-		var kick_angle: float = spin - PI * 0.4 + float(li - 2) * 0.5
-		_legs[li][2] = center + Vector2(cos(kick_angle) * kick, sin(kick_angle) * kick + 5)
+		var kick_phase: float = sin(_attack_timer * 30.0 + float(li) * PI)
+		var kick_angle: float = spin - PI * 0.5 + float(li - 2) * 0.6
+		var kick_pos: Vector2 = center + Vector2(cos(kick_angle) * kick_phase * 14, sin(kick_angle) * kick_phase * 14)
+		_legs[li][2] = kick_pos
 		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
 
-	# Tail: spirals around the bottom of the ball
+	# TAIL: tight spiral around the bottom
 	if not _tail_severed:
 		_tail_whipping = true
 		for i in range(_tail.size()):
-			var tail_angle: float = spin - PI * 0.8 - float(i) * 0.5
-			var tail_r: float = ball_radius + float(i) * 3
-			var tail_target: Vector2 = center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
-			_tail[i] = _tail[i].lerp(tail_target, curl * 10.0 * delta)
+			var tail_angle: float = spin - PI - float(i) * 0.6
+			var tail_r: float = ball_r + float(i) * 2.5
+			var tail_pos: Vector2 = center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
+			if curl >= 1.0:
+				_tail[i] = tail_pos
+			else:
+				_tail[i] = _tail[i].lerp(tail_pos, curl * 15.0 * delta)
 
 	# Phase 2: damage ticks
 	if t > 0.2 and t < 0.8:
