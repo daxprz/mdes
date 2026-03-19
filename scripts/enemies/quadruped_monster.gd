@@ -3195,7 +3195,13 @@ func _draw_debug() -> void:
 		draw_string(font, leg[2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
 
 	# -- State info (top-left of creature) --
-	var info_pos := _spine[0] + Vector2(-40, -60)
+	# Draw debug text far from the creature so collision circles are visible
+	# Position on the opposite side of the screen from the creature
+	var screen_x: float = global_position.x
+	var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
+	var info_pos := Vector2(text_x, -global_position.y + 50)
+	# Faint line connecting text to creature
+	draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
 	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
