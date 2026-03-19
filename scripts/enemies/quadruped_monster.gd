@@ -1628,7 +1628,7 @@ func _simulate_leap_paths() -> void:
 				for pt in arc_c:
 					if pt.y < peak_y:
 						peak_y = pt.y
-				if peak_y > target_floor_y - LEAP_BODY_RADIUS:
+				if peak_y > target_floor_y:
 					clear = false  # Arc peaks below the platform — attacking from underneath
 
 			var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
@@ -2306,7 +2306,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 			for pt in arc_c:
 				if pt.y < peak_y:
 					peak_y = pt.y
-			if peak_y > plat_y - LEAP_BODY_RADIUS:
+			if peak_y > plat_y:
 				continue  # Arc never rises above the platform — attacking from below
 
 			# Score: prefer landing near platform center
@@ -2394,8 +2394,8 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 			for pt in arc_c:
 				if pt.y < peak_y:
 					peak_y = pt.y
-			if peak_y > to_floor_y - LEAP_BODY_RADIUS:
-				continue
+			if peak_y > to_floor_y:
+				continue  # Arc never rises above target — attacking from underneath
 
 			var time_penalty: float = absf(t_flight - 0.5) * 20.0
 			var score: float = arrival.distance_to(to_pos) + time_penalty
