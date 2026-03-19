@@ -2134,16 +2134,16 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 		var best_edge: Dictionary = {}
 		var best_score: float = INF
 
+		# Down-jump: source is above destination — gravity helps, loosen constraints
+		var is_down_jump: bool = plat_from["pos"].y < plat_to["pos"].y - 20
+
 		for launch_pos in unique_launches:
-			if not _has_lateral_clearance(launch_pos):
+			# Skip lateral clearance for down-jumps (can drop through narrow gaps)
+			if not is_down_jump and not _has_lateral_clearance(launch_pos):
 				continue
 
-			# Reject launch points directly under the destination platform —
-			# the arc would immediately hit it from below.
-			var to_y: float = plat_to["pos"].y
-			# Also check ALL platforms above the launch point, not just the destination
-			# Target the platform surface directly (not strike-reach circle)
-			var result: Dictionary = _plan_leap_to_surface(launch_pos, plat_to)
+			# Target the platform surface directly
+			var result: Dictionary = _plan_leap_to_surface(launch_pos, plat_to, is_down_jump)
 			if not result.is_empty():
 				var score: float = result["arrival"].distance_to(plat_to["pos"])
 				if score < best_score:
@@ -2280,24 +2280,25 @@ func _precog_start_next_hop() -> void:
 		_precog_waypoint.x, _precog_waypoint.y])
 
 
-func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
+func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool = false) -> Dictionary:
 	## Plan a leap to land ON a platform surface.
-	## Samples landing points along the platform's top surface.
+	## down_jump=true loosens body radius constraints (gravity helps).
 	var best: Dictionary = {}
 	var best_score: float = INF
 	var plat_y: float = plat["pos"].y
 	var plat_min_x: float = plat["min_x"]
 	var plat_max_x: float = plat["max_x"]
 
-	# Sample landing points along the platform surface (slightly above it)
-	var landing_y: float = plat_y - 5.0  # Just above the surface
+	# For down-jumps: smaller effective body radius (can curl up and drop)
+	var effective_radius: float = LEAP_BODY_RADIUS * 0.4 if down_jump else LEAP_BODY_RADIUS
+
+	var landing_y: float = plat_y - 5.0
 	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / PRECOG_GRID_SPACING) + 1)
 	sample_count = mini(sample_count, 5)
 
 	for si in range(sample_count):
 		var t: float = float(si) / float(sample_count - 1) if sample_count > 1 else 0.5
-		# Inset from edges so the body fits on the platform
-		var inset: float = LEAP_BODY_RADIUS
+		var inset: float = effective_radius
 		var landing_x: float = lerpf(plat_min_x + inset, plat_max_x - inset, t)
 		var arrival := Vector2(landing_x, landing_y)
 
@@ -2315,10 +2316,11 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 
 			var launch_vel := Vector2(launch_vx, launch_vy)
 			var speed: float = launch_vel.length()
-			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+			var min_speed: float = 50.0 if down_jump else 200.0  # Down-jumps can be gentle
+			if speed < min_speed or speed > LEAP_LAUNCH_SPEED * 1.5:
 				continue
-			if launch_vy > -50:
-				continue
+			if not down_jump and launch_vy > -50:
+				continue  # Up-jumps must launch upward; down-jumps can go any direction
 
 			var launch_dir: Vector2 = launch_vel.normalized()
 			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
@@ -2326,8 +2328,8 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 				launch_perp = -launch_perp
 
 			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
-			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
-			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * effective_radius, launch_vel)
+			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * effective_radius, launch_vel)
 
 			# Check clearance but ignore hits near the destination platform
 			var dest_rect := Rect2(plat_min_x - 10, plat_y - 30, plat_max_x - plat_min_x + 20, 40)
