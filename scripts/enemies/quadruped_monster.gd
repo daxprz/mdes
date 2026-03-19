@@ -1404,8 +1404,11 @@ func _do_grab(delta: float) -> void:
 			if _grab_kick_count % 3 == 0:
 				_damage_players_in_range(dmg_pos, 30.0, GRAB_BITE_DAMAGE)
 				_spawn_blood_spatter(center)
+				_spawn_slash_effect(center)  # Slash visual in center of ball
 			else:
 				_damage_players_in_range(dmg_pos, 30.0, GRAB_KICK_DAMAGE)
+				if _grab_kick_count % 2 == 0:
+					_spawn_slash_effect(center)  # Periodic slashes
 
 	# Phase 3: eject
 	if t >= 1.0:
@@ -2890,10 +2893,14 @@ func _do_leap_airborne(delta: float) -> void:
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
 		if dist_to_target < LEAP_STRIKE_REACH:
-			_state = State.ATTACK_LEAP_STRIKE
-			_attack_timer = 0.0
-			_leap_slash_count = 0
-			_leap_slash_side = 1
+			# 25% chance: transition to grab-ball instead of normal slash
+			if randf() < 0.25:
+				_start_grab()
+			else:
+				_state = State.ATTACK_LEAP_STRIKE
+				_attack_timer = 0.0
+				_leap_slash_count = 0
+				_leap_slash_side = 1
 			velocity = Vector2.ZERO
 			_tail_whipping = false
 			return
