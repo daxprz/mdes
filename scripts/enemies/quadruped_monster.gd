@@ -220,6 +220,7 @@ var _strategy_changes: int = 0     # State changes since dummy last moved
 var _last_target_pos: Vector2 = Vector2.ZERO  # Dummy position last check
 var _plan_attempts: int = 0        # How many times we've tried the current plan
 const MAX_PLAN_ATTEMPTS := 3      # Commit to a plan for this many attempts before changing
+var _state_lock_timer: float = 0.0 # Don't change state until this expires
 
 
 func _ready() -> void:
@@ -418,6 +419,8 @@ func _physics_process(delta: float) -> void:
 		_leap_cooldown -= delta
 	if _precog_cooldown > 0.0:
 		_precog_cooldown -= delta
+	if _state_lock_timer > 0.0:
+		_state_lock_timer -= delta
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
@@ -1010,6 +1013,11 @@ func _do_chase(_delta: float) -> void:
 	else:
 		_move_speed = SPEED_SLOW
 
+	# Don't change strategy while locked (prevents thrashing)
+	if _state_lock_timer > 0.0:
+		# Just chase — don't trigger precog or change attack strategy
+		return
+
 	# If target is on a different platform, use precog pathfinding
 	var target_above: bool = to_target.y < -80.0
 	var target_far_below: bool = to_target.y > 120.0
@@ -1071,6 +1079,7 @@ func _start_attack(attack_state: State) -> void:
 	_state = attack_state
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
+	_state_lock_timer = 1.5  # Commit to this attack
 
 
 func _count_front_legs() -> int:
@@ -1839,6 +1848,7 @@ func _start_precognition() -> void:
 		return
 	_plan_attempts = 0
 	_precog_cooldown = 2.0
+	_state_lock_timer = 3.0  # Commit to precog for at least 3 seconds
 	_state = State.PRECOGNITION
 	_attack_timer = 0.0
 	_precog_phase = 0
