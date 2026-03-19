@@ -206,7 +206,7 @@ var _head_severed: bool = false
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
-var debug_draw_lite: bool = true      # Lightweight debug (state, platforms, waypoint, target)
+var debug_draw_lite: bool = false     # Lightweight debug (state, platforms, waypoint, target)
 
 
 func _ready() -> void:
@@ -1667,7 +1667,7 @@ func _precog_build_graph_tick() -> void:
 		return
 	var n: int = _precog_platforms.size()
 	var pairs_this_frame: int = 0
-	while pairs_this_frame < 2:
+	while pairs_this_frame < 5:
 		if _precog_process_i >= n:
 			_precog_graph_building = false
 			print("PRECOG GRAPH READY: %d edges" % _precog_edges.size())
