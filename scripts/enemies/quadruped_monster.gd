@@ -206,7 +206,7 @@ var _head_severed: bool = false
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
-var debug_draw_lite: bool = false     # Lightweight debug (state, platforms, waypoint, target)
+var debug_draw_lite: bool = true      # Lightweight debug (state, platforms, waypoint, target)
 
 
 func _ready() -> void:
