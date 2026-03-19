@@ -76,6 +76,17 @@ const HEAD_HEALTH := 60
 const TAIL_HEALTH := 50
 const LEG_HEALTH := 40
 
+# Sprint slash (same-plane attack)
+const SPRINT_SPEED := 250.0       # Burst sprint speed
+const SPRINT_SLASH_DAMAGE := 18   # Per slash (3 slashes = 54 total)
+const SPRINT_SLASH_RANGE := 70.0  # Must be within this to start slashing
+const SPRINT_SLASH_INTERVAL := 0.1  # Time between slashes
+
+# Connected hop-up (short platform climb)
+const HOP_UP_MAX_HEIGHT := 140.0  # Max height difference for a connected hop (vs full leap)
+const HOP_UP_DURATION := 0.6      # Time to complete the hop
+const HOP_UP_DAMAGE := 12         # Landing impact damage
+
 # Pre-cognition (two-hop leap chaining)
 const PRECOG_TRIGGER_TIME := 5.0   # Seconds without landing a hit before pre-cognition
 const PRECOG_GRID_SPACING := 50.0  # Drop a ball every 50px across the entire map
@@ -84,7 +95,8 @@ const PRECOG_CLUSTER_RADIUS := 40.0 # Landed balls closer than this are merged i
 # -- Enums ---------------------------------------------------------------------
 
 enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
-			 ATTACK_LUNGE, ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
+			 ATTACK_LUNGE, ATTACK_SPRINT_SLASH, ATTACK_HOP_UP,
+			 ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
 			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
 enum Posture { QUADRUPED, BIPEDAL }
@@ -159,6 +171,9 @@ var _leap_slash_count: int = 0  # Slashes delivered so far
 var _leap_thrash_count: int = 0 # Thrashes delivered so far
 var _leap_slash_side: int = 1   # Alternating slash direction
 var _slash_effects: Array = []  # Active slash visual effects
+var _sprint_slash_count: int = 0  # Slashes delivered in sprint attack
+var _hop_up_target_y: float = 0.0  # Target platform Y for connected hop
+var _hop_up_start_pos: Vector2 = Vector2.ZERO  # Where the hop started
 
 # Pre-cognition state
 var _time_since_strike_range: float = 0.0  # How long since last successful hit
@@ -360,6 +375,10 @@ func _physics_process(delta: float) -> void:
 			_do_tail_whip(delta)
 		State.ATTACK_LUNGE:
 			_do_lunge(delta)
+		State.ATTACK_SPRINT_SLASH:
+			_do_sprint_slash(delta)
+		State.ATTACK_HOP_UP:
+			_do_hop_up(delta)
 		State.ATTACK_LEAP_PLAN:
 			_do_leap_plan(delta)
 		State.ATTACK_LEAP_WINDUP:
@@ -848,13 +867,24 @@ func _do_chase(_delta: float) -> void:
 
 func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var target_behind: bool = signf(to_target.x) != _facing
+	var height_diff: float = to_target.y  # Negative = target is above
 
-	# Tail whip if target is behind
+	# Tail whip if target is behind and close
 	if target_behind and dist < TAIL_RANGE and _posture == Posture.QUADRUPED and not _tail_severed:
 		_start_attack(State.ATTACK_TAIL)
 		return
 
-	# VERTICAL LEAP at leap range (priority over lunge)
+	# CONNECTED HOP-UP: target is on a platform just above (short climb)
+	if height_diff < -20.0 and absf(height_diff) < HOP_UP_MAX_HEIGHT and absf(to_target.x) < 150.0:
+		_start_hop_up(to_target)
+		return
+
+	# SPRINT SLASH: same level, medium range — charge and slash
+	if absf(height_diff) < 30.0 and dist > BITE_RANGE and dist < 200.0 and _count_front_legs() >= 1:
+		_start_sprint_slash()
+		return
+
+	# VERTICAL LEAP: significant distance or height difference
 	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
 		_start_leap()
 		return
@@ -864,7 +894,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		_start_attack(State.ATTACK_LUNGE)
 		return
 
-	# Close range
+	# Close range: bite or standing swipe
 	if dist < BITE_RANGE:
 		if randf() < 0.6 or _count_front_legs() == 0:
 			_start_attack(State.ATTACK_BITE)
@@ -987,6 +1017,164 @@ func _do_lunge(delta: float) -> void:
 	else:
 		velocity.x = 0
 		_state = State.CHASE
+
+
+# -- Sprint Slash (same-plane charge + triple swipe) ---------------------------
+
+func _start_sprint_slash() -> void:
+	_state = State.ATTACK_SPRINT_SLASH
+	_attack_timer = 0.0
+	_attack_cooldown = ATTACK_COOLDOWN
+	_sprint_slash_count = 0
+
+
+func _do_sprint_slash(delta: float) -> void:
+	## Sprint toward the target, then unleash 3 rapid slashes.
+	_attack_timer += delta
+
+	if not is_instance_valid(_target):
+		_state = State.CHASE
+		return
+
+	var to_target: Vector2 = _target.global_position - global_position
+	var dist: float = to_target.length()
+	_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
+
+	if _sprint_slash_count == 0:
+		# Phase 1: Sprint toward target
+		_want_direction = _facing
+		_move_speed = SPRINT_SPEED
+
+		if dist < SPRINT_SLASH_RANGE:
+			# Close enough — start slashing
+			_sprint_slash_count = 1
+			_attack_timer = 0.0
+			velocity.x *= 0.3  # Decelerate on contact
+	else:
+		# Phase 2: Triple slash — alternate front legs
+		velocity.x = _facing * 40.0  # Slight forward push during slashes
+		_want_direction = 0.0
+
+		var slash_time: float = _attack_timer
+		var expected: int = mini(int(slash_time / SPRINT_SLASH_INTERVAL) + 1, 3)
+
+		while _sprint_slash_count <= expected and _sprint_slash_count <= 3:
+			var slash_leg: int = 0 if _sprint_slash_count % 2 == 1 else 1
+			if _leg_severed[slash_leg]:
+				slash_leg = 1 - slash_leg
+
+			if not _leg_severed[slash_leg]:
+				# Swipe arc: extend leg forward-downward
+				var swipe_dir: float = _facing * (20.0 + _sprint_slash_count * 8.0)
+				var swipe_y: float = -15.0 + _sprint_slash_count * 12.0
+				_legs[slash_leg][2] = _skull + Vector2(swipe_dir, swipe_y)
+
+				# Damage
+				var claw_world: Vector2 = global_position + _legs[slash_leg][2]
+				_damage_players_in_range(claw_world, 35.0, SPRINT_SLASH_DAMAGE)
+
+				# Visual slash lines
+				_spawn_slash_effect(_legs[slash_leg][2])
+
+			_sprint_slash_count += 1
+
+		# Done after 3 slashes + recovery
+		if _attack_timer > 3 * SPRINT_SLASH_INTERVAL + 0.2:
+			_state = State.CHASE
+
+	# Timeout safety
+	if _attack_timer > 3.0:
+		_state = State.CHASE
+
+
+# -- Connected Hop-Up (short platform climb) -----------------------------------
+
+func _start_hop_up(to_target: Vector2) -> void:
+	_state = State.ATTACK_HOP_UP
+	_attack_timer = 0.0
+	_attack_cooldown = ATTACK_COOLDOWN
+	_hop_up_start_pos = global_position
+	# Find the platform surface above by raycasting
+	var check_pos: Vector2 = Vector2(global_position.x + to_target.x * 0.5, global_position.y + to_target.y)
+	_hop_up_target_y = check_pos.y
+
+
+func _do_hop_up(delta: float) -> void:
+	## Connected hop: rear legs push, body rises, front legs reach up and grab
+	## the platform edge. Feet stay connected to surfaces throughout.
+	_attack_timer += delta
+	var t: float = clampf(_attack_timer / HOP_UP_DURATION, 0.0, 1.0)
+	velocity.x = 0
+
+	var height_to_climb: float = global_position.y - _hop_up_target_y
+	if height_to_climb < 10:
+		height_to_climb = HOP_UP_MAX_HEIGHT * 0.5
+
+	# Phase 1 (0-0.3): rear legs compress, body tilts up, front legs reach upward
+	# Phase 2 (0.3-0.7): rear legs push, body rises, front feet plant on upper surface
+	# Phase 3 (0.7-1.0): pull body up, rear feet release and swing up
+
+	if t < 0.3:
+		# Tilt up: spine front rises
+		_posture_blend = t / 0.3 * 0.6
+		# Front legs reach up
+		for li in [0, 1]:
+			if _leg_severed[li]:
+				continue
+			var reach: Vector2 = _spine[0] + Vector2(_facing * 15, -height_to_climb * t / 0.3)
+			_legs[li][2] = _legs[li][2].lerp(reach, 6.0 * delta)
+			_foot_planted[li] = false
+
+	elif t < 0.7:
+		# Push up: move body upward
+		var rise_t: float = (t - 0.3) / 0.4
+		velocity.y = -height_to_climb * 2.0 * (1.0 - rise_t)
+		_posture_blend = 0.6 * (1.0 - rise_t * 0.5)
+
+		# Front feet try to plant on the upper surface
+		for li in [0, 1]:
+			if _leg_severed[li]:
+				continue
+			var upper_floor: float = _raycast_floor(Vector2(_legs[li][0].x, _legs[li][0].y - height_to_climb))
+			_legs[li][2] = Vector2(_legs[li][0].x, upper_floor)
+			_foot_planted[li] = false
+
+		# Rear legs stay planted on original surface, stretching
+		for li in [2, 3]:
+			if _leg_severed[li]:
+				continue
+			# Keep feet at the start position (world space)
+			_legs[li][2] = _hop_up_start_pos + Vector2(_legs[li][0].x, 0) - global_position
+			_foot_planted[li] = false
+
+	else:
+		# Pull up: body reaches top, rear legs release and tuck
+		var finish_t: float = (t - 0.7) / 0.3
+		velocity.y = -height_to_climb * 0.5 * (1.0 - finish_t)
+		_posture_blend = lerpf(0.3, 0.0, finish_t)
+
+		# Rear legs swing up to the new surface
+		for li in [2, 3]:
+			if _leg_severed[li]:
+				continue
+			var upper_floor: float = _raycast_floor(Vector2(_legs[li][0].x, _spine[2].y))
+			_legs[li][2] = _legs[li][2].lerp(Vector2(_legs[li][0].x, upper_floor), 6.0 * delta)
+
+	# Landing impact when done
+	if t >= 1.0:
+		_posture_blend = 0.0
+		velocity.y = 0
+		# Re-plant all feet
+		for li in range(4):
+			if not _leg_severed[li]:
+				var foot_floor: float = _raycast_floor(_legs[li][0])
+				_legs[li][2] = Vector2(_legs[li][0].x, foot_floor)
+				_foot_planted[li] = true
+				_foot_world[li] = global_position + _legs[li][2]
+		# Impact damage in small radius
+		_damage_players_in_range(global_position, 40.0, HOP_UP_DAMAGE)
+		_state = State.CHASE
+		_attack_timer = 0.0
 
 
 func _do_transition_bipedal(delta: float) -> void:
@@ -2368,7 +2556,8 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 		if not node is CharacterBody2D:
 			continue
 		if world_pos.distance_to(node.global_position) < radius:
-			var pi: int = node.get("player_index")
+			var pi_val: Variant = node.get("player_index")
+			var pi: int = pi_val if pi_val is int else 0
 			PlayerManager.damage_player(pi, damage)
 			_time_since_strike_range = 0.0  # Reset precog timer on successful hit
 			# Knockback
@@ -2396,7 +2585,8 @@ func _pick_target() -> void:
 	# Find nearest player
 	_target = _find_nearest_player()
 	if _target:
-		_target_player_index = _target.get("player_index")
+		var pi_val: Variant = _target.get("player_index")
+		_target_player_index = pi_val if pi_val is int else 0
 
 
 func _find_nearest_player() -> Node2D:
@@ -2757,7 +2947,7 @@ func _draw_debug() -> void:
 
 	# -- State info (top-left of creature) --
 	var info_pos := _spine[0] + Vector2(-40, -60)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
+	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
 	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
