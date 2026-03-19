@@ -1621,6 +1621,16 @@ func _simulate_leap_paths() -> void:
 
 			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
+			# Reject arcs that never rise above the target's platform.
+			# The arc peak must be ABOVE target_floor_y to approach from above.
+			if clear:
+				var peak_y: float = INF
+				for pt in arc_c:
+					if pt.y < peak_y:
+						peak_y = pt.y
+				if peak_y > target_floor_y - LEAP_BODY_RADIUS:
+					clear = false  # Arc peaks below the platform — attacking from underneath
+
 			var arc_ratio: float = clampf(absf(launch_vy) / speed, 0.0, 1.0)
 
 			var result := {
@@ -2287,10 +2297,17 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary) -> Dictionary:
 			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
 
 			# Check clearance but ignore hits near the destination platform
-			# (the arc is SUPPOSED to land there)
 			var dest_rect := Rect2(plat_min_x - 10, plat_y - 30, plat_max_x - plat_min_x + 20, 40)
 			if not (_check_arc_clear_ignore(arc_c, dest_rect) and _check_arc_clear_ignore(arc_l, dest_rect) and _check_arc_clear_ignore(arc_r, dest_rect)):
 				continue
+
+			# Reject arcs that peak below the destination platform
+			var peak_y: float = INF
+			for pt in arc_c:
+				if pt.y < peak_y:
+					peak_y = pt.y
+			if peak_y > plat_y - LEAP_BODY_RADIUS:
+				continue  # Arc never rises above the platform — attacking from below
 
 			# Score: prefer landing near platform center
 			var center_dist: float = absf(landing_x - plat["pos"].x)
@@ -2370,6 +2387,14 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
 
 			if not (_check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)):
+				continue
+
+			# Reject arcs that peak below the target's platform (attacking from underneath)
+			var peak_y: float = INF
+			for pt in arc_c:
+				if pt.y < peak_y:
+					peak_y = pt.y
+			if peak_y > to_floor_y - LEAP_BODY_RADIUS:
 				continue
 
 			var time_penalty: float = absf(t_flight - 0.5) * 20.0
