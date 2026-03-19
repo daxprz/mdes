@@ -2267,8 +2267,21 @@ func _end_leap() -> void:
 	if _body_collision:
 		_body_collision.rotation = PI / 2.0
 		_body_collision.position = Vector2(0, -10.0)
+
+	# Reset skeleton to standing pose — spine horizontal, feet on the ground
+	var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)
+	_spine[0] = Vector2(SPINE_SEG_LEN * _facing, body_y)
+	_spine[1] = Vector2(0, body_y)
+	_spine[2] = Vector2(-SPINE_SEG_LEN * _facing, body_y)
+
+	# Plant feet at floor level below each hip
 	for li in range(4):
 		if not _leg_severed[li]:
+			var hip_spine: Vector2 = _spine[0] if li < 2 else _spine[2]
+			var rest: Array = _leg_rest[li]
+			_legs[li][0] = hip_spine + _get_facing_offset(rest[0])
+			var foot_floor_y: float = _raycast_floor(_legs[li][0])
+			_legs[li][2] = Vector2(_legs[li][0].x, foot_floor_y)
 			_foot_planted[li] = true
 			_foot_world[li] = global_position + _legs[li][2]
 
