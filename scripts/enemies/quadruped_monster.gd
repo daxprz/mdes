@@ -1304,9 +1304,12 @@ func _do_grab(delta: float) -> void:
 	# Phase 2 (0.2-0.8): kick rapidly + bite
 	# Phase 3 (0.8-1.0): eject
 
-	# Center collision on the grabbed player
+	# Center collision on the grabbed player — expand to cover the full ball + tail
 	if _body_collision:
 		_body_collision.position = target_local
+		var max_tail_r: float = ball_r + 5.0 * (TAIL_SEG_LEN * 0.6)
+		if _body_collision.shape is CircleShape2D:
+			(_body_collision.shape as CircleShape2D).radius = max_tail_r
 
 	var center: Vector2 = target_local
 	var ball_r: float = 40.0  # Orbit radius — big enough to see the player inside
@@ -1371,12 +1374,16 @@ func _do_grab(delta: float) -> void:
 		_legs[li][2] = kick_pos
 		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
 
-	# TAIL: tight spiral around the bottom
+	# TAIL: starts from spine[2], spirals outward proportionally
 	if not _tail_severed:
 		_tail_whipping = true
+		# First tail segment starts right next to spine[2] (same angle, slightly further)
+		var spine2_angle: float = (_spine[2] - center).angle()
 		for i in range(_tail.size()):
-			var tail_angle: float = spin - PI - float(i) * 0.6
-			var tail_r: float = ball_r + float(i) * 2.5
+			# Continue from spine[2]'s angle, each segment steps further around
+			var tail_angle: float = spine2_angle - float(i + 1) * 0.5
+			# Radius grows proportionally: starts at spine[2] distance, grows by TAIL_SEG_LEN fraction
+			var tail_r: float = ball_r + float(i + 1) * (TAIL_SEG_LEN * 0.6)
 			var tail_pos: Vector2 = center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
 			if curl >= 1.0:
 				_tail[i] = tail_pos
