@@ -325,14 +325,17 @@ var _col_shoulder: CollisionShape2D = null
 var _col_hip: CollisionShape2D = null
 var _col_tail: CollisionShape2D = null
 
+var _col_body_center: CollisionShape2D = null  # Floor contact
+
 func _init_collision() -> void:
-	# 4 circle colliders that follow the skeleton:
-	# skull (leads during leaps), shoulders (spine[0]), hips (spine[2]), tail tip
+	# 5 circle colliders that follow the skeleton:
+	# skull, shoulders, body center (floor contact), hips, tail tip
 	_col_skull = _make_circle_collider(12.0)
 	_col_shoulder = _make_circle_collider(14.0)
-	_col_hip = _make_circle_collider(12.0)
+	_col_body_center = _make_circle_collider(16.0)  # Larger — primary floor contact
+	_col_hip = _make_circle_collider(14.0)
 	_col_tail = _make_circle_collider(6.0)
-	_body_collision = _col_shoulder  # Primary reference for leap rotation
+	_body_collision = _col_body_center
 
 
 func _make_circle_collider(radius: float) -> CollisionShape2D:
@@ -345,11 +348,17 @@ func _make_circle_collider(radius: float) -> CollisionShape2D:
 
 
 func _update_collision_positions() -> void:
-	## Move the 4 collision circles to follow the skeleton each frame.
+	## Move the 5 collision circles to follow the skeleton each frame.
 	if _col_skull:
 		_col_skull.position = _skull
 	if _col_shoulder:
 		_col_shoulder.position = _spine[0]
+	if _col_body_center:
+		# Body center positioned between spine and floor for ground contact
+		# Spine is at ~y=-50, floor at ~y=0, so center at ~y=-16 (radius 16 reaches floor)
+		var spine_mid_x: float = _spine[1].x
+		var spine_y: float = _spine[1].y
+		_col_body_center.position = Vector2(spine_mid_x, spine_y * 0.3)  # ~30% of way to floor
 	if _col_hip:
 		_col_hip.position = _spine[2]
 	if _col_tail and not _tail_severed and _tail.size() > 4:
@@ -3126,7 +3135,7 @@ func _draw_debug() -> void:
 
 	# -- 4 collision circles --
 	var col_col := Color(1, 0, 1, 0.4)
-	var col_labels := [["SKULL", _col_skull, 12.0], ["SHLDR", _col_shoulder, 14.0], ["HIP", _col_hip, 12.0], ["TAIL", _col_tail, 6.0]]
+	var col_labels := [["SKULL", _col_skull, 12.0], ["SHLDR", _col_shoulder, 14.0], ["BODY", _col_body_center, 16.0], ["HIP", _col_hip, 14.0], ["TAIL", _col_tail, 6.0]]
 	for cl in col_labels:
 		var lbl: String = cl[0]
 		var node: CollisionShape2D = cl[1]
