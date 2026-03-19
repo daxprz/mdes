@@ -1,5 +1,5 @@
 #!/bin/bash
-# Baseline: damage + FPS. Only force precog for cross-platform scenarios.
+# Baseline: damage + FPS + IK quality per scenario
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -29,7 +29,6 @@ sleep 2
 INIT_FPS=$(R "fps" | grep -o '[0-9]*')
 printf "Initial FPS: %s\n\n" "$INIT_FPS"
 
-# format: label:x:y:force_precog(1/0)
 SCENARIOS="
 same_floor_near:800:885:0
 same_floor_far:200:885:0
@@ -47,15 +46,17 @@ TOTAL_DMG=0
 PASS=0
 FAIL=0
 MIN_FPS=999
+WORST_IK=0
 
-printf "%-20s %5s %5s %5s %s\n" "SCENARIO" "DMG" "FPS" "minFPS" "MONSTER_POS"
-printf "%-20s %5s %5s %5s %s\n" "--------" "---" "---" "------" "-----------"
+printf "%-20s %5s %5s %5s %7s %s\n" "SCENARIO" "DMG" "FPS" "mnFPS" "IK_AVG" "MONSTER_POS"
+printf "%-20s %5s %5s %5s %7s %s\n" "--------" "---" "---" "-----" "------" "-----------"
 
 for SCENE in $SCENARIOS; do
     IFS=: read -r LABEL X Y FORCE <<< "$SCENE"
 
     R "tp $X $Y" > /dev/null 2>&1
     R "resethp" > /dev/null 2>&1
+    R "ikreset" > /dev/null 2>&1
     : > /tmp/godot_baseline.log
     sleep 0.3
     if [ "$FORCE" = "1" ]; then
@@ -75,11 +76,17 @@ for SCENE in $SCENARIOS; do
     DMG=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
     DMG=${DMG:-0}
     MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
+    IKLINE=$(R "ik")
+    IK_AVG=$(printf "%s" "$IKLINE" | grep -o 'ik_avg=[0-9]*' | cut -d= -f2)
+    IK_AVG=${IK_AVG:-0}
+    IK_PEAK=$(printf "%s" "$IKLINE" | grep -o 'ik_peak=[0-9]*' | cut -d= -f2)
+    IK_PEAK=${IK_PEAK:-0}
 
     if [ "$DMG" -gt 0 ]; then PASS=$((PASS + 1)); else FAIL=$((FAIL + 1)); fi
     TOTAL_DMG=$((TOTAL_DMG + DMG))
+    if [ "$IK_PEAK" -gt "$WORST_IK" ]; then WORST_IK=$IK_PEAK; fi
 
-    printf "%-20s %5d %5s %5d %s\n" "$LABEL" "$DMG" "$(R 'fps' | grep -o '[0-9]*')" "$SCENARIO_MIN_FPS" "monster=$MPOS"
+    printf "%-20s %5d %5s %5d %4d/%d %s\n" "$LABEL" "$DMG" "$(R 'fps' | grep -o '[0-9]*')" "$SCENARIO_MIN_FPS" "$IK_AVG" "$IK_PEAK" "monster=$MPOS"
 done
 
-printf "\n=== SUMMARY: %d/%d passed, total_dmg=%d, min_fps=%d ===\n" "$PASS" "$((PASS + FAIL))" "$TOTAL_DMG" "$MIN_FPS"
+printf "\n=== SUMMARY: %d/%d hit, dmg=%d, min_fps=%d, worst_ik=%d ===\n" "$PASS" "$((PASS + FAIL))" "$TOTAL_DMG" "$MIN_FPS" "$WORST_IK"

@@ -159,6 +159,20 @@ func _execute(command: String) -> String:
 		"fps":
 			return "fps=%.0f" % Engine.get_frames_per_second()
 
+		"ik":
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if "_ik_score" in e:
+					return "ik_now=%.0f ik_avg=%.0f ik_peak=%.0f" % [e._ik_score, e._ik_score_avg, e._ik_score_peak]
+			return "ERR: no enemy with IK score"
+
+		"ikreset":
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if "_ik_score_peak" in e:
+					e._ik_score_peak = 0.0
+					e._ik_score_avg = 0.0
+					e._ik_score_samples = 0
+			return "OK: reset IK scores"
+
 		"debugdraw":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "debug_draw_enabled" in e:

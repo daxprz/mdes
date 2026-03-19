@@ -208,6 +208,12 @@ var _body_collision: CollisionShape2D = null  # Main body collision shape
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
 var debug_draw_lite: bool = true      # Lightweight debug (state, platforms, waypoint, target)
 
+# IK quality scoring (lower = better)
+var _ik_score: float = 0.0         # Current frame IK quality score
+var _ik_score_avg: float = 0.0     # Rolling average
+var _ik_score_peak: float = 0.0    # Worst score seen
+var _ik_score_samples: int = 0
+
 
 func _ready() -> void:
 	add_to_group("enemies")
@@ -438,6 +444,7 @@ func _physics_process(delta: float) -> void:
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
 
 	_update_hitbox_positions()
+	_score_ik_quality()
 
 	queue_redraw()
 
@@ -542,6 +549,49 @@ func _solve_pose(delta: float) -> void:
 		_skull.y = head_floor - 4.0
 	if _jaw.y > head_floor - 2.0:
 		_jaw.y = head_floor - 2.0
+
+
+func _score_ik_quality() -> void:
+	## Score how "good" the IK looks this frame. Lower = better.
+	## Components:
+	##   spread:    horizontal distance from foot to its hip (penalty > 30px)
+	##   hover:     distance from planted foot to the floor beneath it (penalty > 5px)
+	##   stretch:   hip-to-foot distance exceeding max reach (any excess = bad)
+	if _leap_ik_off or _state == State.PRECOGNITION:
+		return  # Don't score during leap/precog (legs are manually positioned)
+
+	var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
+	var score: float = 0.0
+
+	for li in range(4):
+		if _leg_severed[li]:
+			continue
+
+		var hip: Vector2 = _legs[li][0]
+		var foot: Vector2 = _legs[li][2]
+
+		# Spread: horizontal distance from foot to hip
+		var spread: float = absf(foot.x - hip.x)
+		if spread > 30.0:
+			score += (spread - 30.0) * 2.0  # 2 points per px over 30
+
+		# Stretch: hip-to-foot total distance vs max reach
+		var dist: float = hip.distance_to(foot)
+		if dist > max_reach:
+			score += (dist - max_reach) * 5.0  # 5 points per px over max
+
+		# Hover: planted foot distance from floor
+		if _foot_planted[li]:
+			var floor_y: float = _raycast_floor(foot)
+			var hover: float = floor_y - foot.y  # Positive = foot is above floor
+			if hover > 5.0:
+				score += hover * 3.0  # 3 points per px of hover
+
+	_ik_score = score
+	_ik_score_samples += 1
+	_ik_score_avg = lerpf(_ik_score_avg, score, 0.05)  # Exponential moving average
+	if score > _ik_score_peak:
+		_ik_score_peak = score
 
 
 func _get_facing_offset(offset: Vector2) -> Vector2:
@@ -3071,6 +3121,10 @@ func _draw_debug() -> void:
 	draw_string(font, info_pos + Vector2(0, 32), "Posture: %s  Vel: (%.0f,%.0f)" % ["QUAD" if _posture == Posture.QUADRUPED else "BIPED", velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 	var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
 	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f  noHit: %.0fs/%.0f%s" % [str(is_on_floor()), _want_direction, _time_since_strike_range, PRECOG_TRIGGER_TIME, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+
+	# IK quality score
+	var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
+	draw_string(font, info_pos + Vector2(0, 52), "IK: now=%.0f avg=%.0f peak=%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
 
 	# Draw waypoint marker if active
 	if _precog_has_waypoint:
