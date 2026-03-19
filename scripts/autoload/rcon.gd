@@ -116,6 +116,23 @@ func _execute(command: String) -> String:
 				return "ERR: usage: tp <x> <y> or tp <player_index> <x> <y>"
 			return _cmd_teleport(parts)
 
+		"clear":
+			var cleared: int = 0
+			for e in get_tree().get_nodes_in_group("enemies"):
+				e.queue_free()
+				cleared += 1
+			# Disable bat/firefly spawning by removing their managers
+			var scene: Node = get_tree().current_scene
+			if scene:
+				# Stop bat respawn timer
+				if "_bat_spawn_timer" in scene:
+					scene._bat_max = 0
+				# Remove firefly manager
+				if "_firefly_manager" in scene and is_instance_valid(scene._firefly_manager):
+					scene._firefly_manager.queue_free()
+					scene._firefly_manager = null
+			return "OK: cleared %d enemies, disabled respawning" % cleared
+
 		"precog":
 			# Force precognition on all quadruped monsters
 			for e in get_tree().get_nodes_in_group("enemies"):

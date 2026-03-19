@@ -1600,8 +1600,7 @@ func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 		if absf(floor_y - plat["pos"].y) < 30.0 and world_pos.x >= plat["min_x"] - 40 and world_pos.x <= plat["max_x"] + 40:
 			plat["label"] = label
 			return
-	# Not on a known platform — add a point platform
-	var floor_y: float = _raycast_floor(world_pos - global_position) + global_position.y
+	# Not on a known platform — add a point platform (reuse floor_y from above)
 	_precog_platforms.append({
 		"pos": Vector2(world_pos.x, floor_y),
 		"min_x": world_pos.x - 10,
