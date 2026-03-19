@@ -57,6 +57,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.15
+**Death Ball Grab, Down-Jump Loosening, Edge Case 8/8**
+- Death ball grab attack: monster curls around player, clasps with front legs, kicks with rear, bites repeatedly, ejects after 2s
+- Body collision enlarges during grab to trap the player (30px radius centered on target)
+- Down-jump constraints loosened: 40% body radius, skip lateral clearance, gentle drops allowed
+- Edge cases: 8/8 scenarios hit (was 5/8), time-to-first-hit 1.1-3.2s
+- Baseline: 7-10/10 hit, 1055 total damage
+- I key toggles debug draw on all enemies (no prerequisites)
+- Debug text: compact layout, positioned opposite side of screen, no overlap
+- Skeleton-to-world constraints prevent skull/tail clipping through geometry
+
 ### v0.9.14
 **10/10 Hit Rate, Belly Sphere Collider, Skeleton World Constraints**
 - Achieved 10/10 baseline hit rate (all scenarios deal damage)
