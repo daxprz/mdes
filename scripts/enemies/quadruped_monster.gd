@@ -904,14 +904,7 @@ func _do_chase(_delta: float) -> void:
 	else:
 		_move_speed = SPEED_SLOW
 
-	# Try direct attacks first (includes direct leap with mid-air strike)
-	if _attack_cooldown <= 0.0:
-		_choose_attack(dist, to_target)
-		if _state != State.CHASE:
-			return  # Attack was chosen — don't fall through to precog
-
-	# If target is on a different platform and no direct attack was chosen,
-	# use precog pathfinding to route there
+	# If target is on a different platform, use precog pathfinding
 	var target_above: bool = to_target.y < -80.0
 	var target_far_below: bool = to_target.y > 120.0
 	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
@@ -923,6 +916,10 @@ func _do_chase(_delta: float) -> void:
 	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
 		_start_precognition()
 		return
+
+	# Choose attack when in range (same level / close enough)
+	if _attack_cooldown <= 0.0:
+		_choose_attack(dist, to_target)
 
 
 func _choose_attack(dist: float, to_target: Vector2) -> void:
@@ -944,12 +941,10 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		_start_sprint_slash()
 		return
 
-	# VERTICAL LEAP: only when target is roughly on the same level
-	# (cross-platform routing is handled by precog)
+	# VERTICAL LEAP: significant distance
 	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
-		if absf(height_diff) < 60.0:  # Same level — direct leap with mid-air attack
-			_start_leap()
-			return
+		_start_leap()
+		return
 
 	# Lunge at medium distance
 	if dist > 80.0 and dist < 200.0 and randf() < 0.3:
