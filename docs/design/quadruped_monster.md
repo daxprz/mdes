@@ -2,7 +2,9 @@
 
 ## Overview
 
-A physics-based procedurally animated quadruped enemy. No sprites — entirely vector-rendered via `_draw()`. All movement is driven by verlet physics with constraint solving, producing organic locomotion. Multiple independently damageable/severable body parts, each eligible for rift tentacle attachment.
+A procedurally animated quadruped enemy. No sprites — entirely vector-rendered via `_draw()`. Movement is pose-driven with 2-bone IK legs and foot-driven locomotion. The creature's feet grip the ground and push its body forward. Its head actively tracks its target. Multiple independently damageable/severable body parts, each eligible for rift tentacle attachment.
+
+**File:** `scripts/enemies/quadruped_monster.gd` (~2000 lines, self-contained)
 
 ## Skeleton Layout
 
@@ -18,118 +20,177 @@ A physics-based procedurally animated quadruped enemy. No sprites — entirely v
                                      -- leg3
 ```
 
-| Chain       | Segments | Anchor Point | Notes                          |
-|-------------|----------|--------------|--------------------------------|
-| Spine       | 3        | Body center  | Near-rigid, drives everything  |
-| Neck        | 1        | spine[0]     | Connects head to body          |
-| Head        | 2 points | neck tip     | Skull + jaw (jaw hinges open)  |
-| Tail        | 5        | spine[2]     | Tapers, high drag              |
-| Front legs  | 3 each   | spine[0]     | Upper leg, lower leg, foot     |
-| Rear legs   | 3 each   | spine[2]     | Upper leg, lower leg, foot     |
+| Chain       | Points | Anchor Point | Notes                          |
+|-------------|--------|--------------|--------------------------------|
+| Spine       | 3      | Body center  | Pose-driven, idle breathing    |
+| Neck        | 2      | spine[0]     | Bends to follow head aim       |
+| Head        | 2      | neck tip     | Skull + jaw (jaw hinges open)  |
+| Tail        | 5      | spine[2]     | Rigid (stiffness 14), loose only during whip |
+| Front legs  | 3 each | spine[0]     | Upper leg, lower leg, foot     |
+| Rear legs   | 3 each | spine[2]     | Upper leg, lower leg, foot     |
 
-## Physics
+## Pose-Driven Physics
 
-### Verlet Integration
+The skeleton is **not** verlet-based. Every segment has a rest pose relative to its parent and springs toward it each frame with configurable stiffness (`STIFFNESS = 12.0`). No gravity on skeleton segments — only the `CharacterBody2D` gets gravity for floor collision.
 
-Same pattern as `rift_tentacle.gd`: each point stores current and previous position. Per-frame update:
+The tail is rigid by default (`TAIL_STIFFNESS = 14.0`), only loosening to `2.0` during whip attacks.
 
-```
-velocity = (current - previous) * DRAG
-previous = current
-current += velocity + gravity * delta
-```
+## Foot-Driven Locomotion
 
-Drag constants per chain:
-- Spine: 0.98 (very stiff)
-- Legs: 0.94 (moderate)
-- Tail: 0.88 (heavy, sluggish)
-- Neck/Head: 0.92
+The body does **not** move itself. Instead:
 
-### Constraints
+1. **AI sets `_want_direction`** (-1, 0, or +1) and `_move_speed`
+2. **Planted feet push**: Each planted foot exerts `FOOT_PUSH_FORCE` (120) in the desired direction. More planted feet = more traction.
+3. **Body moves as a result** of foot push forces, with grip damping (`FOOT_GRIP = 0.92`) to prevent sliding
+4. **Feet are fixed in world space** while planted — the body moves past them
+5. **When a foot falls too far behind** (>`STEP_THRESHOLD` = 60px from its ideal position), it lifts in a **quadratic bezier arc** to a new position with 25% overshoot
+6. **Paired stepping**: Only one front foot and one rear foot can step at a time. Within each pair, the foot furthest behind gets priority. This ensures maximum spread.
+7. **Rear legs trail**: Front legs target ahead of the hip (`stride * 0.35`), rear legs target behind (`stride * -0.5 * 0.35`)
 
-Distance constraints enforce segment lengths. Forward + reverse passes (5 iterations) propagate forces bidirectionally — same solver as the rift tentacle.
+### World-Space Floor Raycasting
 
-Spine segments are near-rigid: very short max length, high iteration count.
+Feet find the real floor via `_raycast_floor()`, which casts 200px downward on collision layer 1 (world). This means feet land on platforms, cave walls, slopes — any physical surface.
 
-### Foot Targeting (Procedural Walk)
+## 2-Bone IK (Legs)
 
-Each foot has a world-space target position. A spring force pulls the foot toward its target before constraints run. When the foot drifts too far from its ideal ground position, a new step is initiated (the foot lifts and moves to the new target over ~0.15s).
-
-Diagonal gait: front-left and rear-right step together, then front-right and rear-left. Gait phase is a continuous 0..1 cycle. Speed tiers control phase advancement rate and body velocity.
-
-## Hitboxes
-
-7 independently damageable zones, each an Area2D repositioned per-frame to match its segment positions:
-
-| Part   | Health | Severable | Rift Attachable |
-|--------|--------|-----------|-----------------|
-| Body   | 200    | No (main) | Yes             |
-| Head   | 60     | Yes       | Yes             |
-| Tail   | 50     | Yes       | Yes             |
-| Leg x4 | 40 ea  | Yes       | Yes             |
-
-### Severing
-
-When a part reaches 0 health, it detaches:
-- Constraint to parent is removed
-- Segments fall under gravity with high drag (crumple)
-- Hitbox disabled, visual becomes a fading stump
-- Missing legs degrade movement (slower, wobble, limp)
-- Missing tail removes tail whip attack
-- Missing head triggers death
-
-## Postures
+Given a hip position (pinned to spine) and foot position (driven by gait), the knee is solved analytically using the **law of cosines**:
 
 ```
-enum Posture { QUADRUPED, BIPEDAL }
+cos(angle) = (L1² + d² - L2²) / (2 * L1 * d)
+knee = hip + Vector2(cos(knee_angle), sin(knee_angle)) * L1
 ```
 
-- **QUADRUPED**: all 4 feet on ground, spine horizontal. Can bite, tail whip, lunge.
-- **BIPEDAL**: front legs off ground, spine tilted up. Can swipe. Tail immobilized.
+**Mammal anatomy**: Front elbows bend backward, rear knees bend forward. The `bend_dir` parameter controls which side of the hip-foot line the knee appears on.
 
-Transition takes ~0.4s. Spine[0] raises/lowers, rear legs widen stance.
+IK is disabled during leap attacks (`_leap_ik_off = true`) — legs are positioned manually.
+
+## Head Tracking
+
+The skull actively aims at the target. The neck bends to follow:
+
+1. Skull position is placed along the aim direction from `spine[0]` at `NECK_LEN + skull_offset` distance
+2. Neck tip is positioned between `spine[0]` and skull, creating a natural bend
+3. Smoothed via `HEAD_TRACK_SPEED` (6.0/s) exponential interpolation
+
+### Head Rotation for Drawing
+
+All head parts (skull polygon, eye, jaw, teeth) are drawn in **head-local coordinates**:
+- `head_fwd` = direction from neck tip to skull (the facing direction)
+- `head_up` = perpendicular to `head_fwd`, forced to always point screen-up (`if head_up.y > 0: flip`)
+
+This means the head rotates to face the target — looking up, down, or sideways — and stays right-side-up when the creature turns around.
+
+## Idle Breathing
+
+Sinusoidal vertical offset on all spine points: `sin(time * 2.0) * 1.5`. Always running, creates subtle "living" motion even when stationary.
 
 ## Attacks
 
-| Attack     | Posture   | Range | Damage | Description                           |
-|------------|-----------|-------|--------|---------------------------------------|
-| Bite       | Quadruped | Close | 25     | Head lunges, jaw snaps                |
-| Tail Whip  | Quadruped | Rear  | 18     | Tail swings through arc, knockback    |
-| Lunge      | Quadruped | Mid   | 20     | Two-leg push, body launches forward   |
-| Claw Swipe | Bipedal   | Close | 20     | Front leg arcs downward, knockback    |
+| Attack        | State                  | Posture   | Range  | Damage        |
+|---------------|------------------------|-----------|--------|---------------|
+| Bite          | ATTACK_BITE            | Quadruped | Close  | 25            |
+| Tail Whip     | ATTACK_TAIL            | Quadruped | Rear   | 18 + knockback|
+| Claw Swipe    | ATTACK_SWIPE           | Bipedal   | Close  | 20 + knockback|
+| Lunge         | ATTACK_LUNGE           | Quadruped | Mid    | 20            |
+| Vertical Leap | ATTACK_LEAP_* (5 states)| Special  | 80-500 | 90+30+thrash  |
+
+### Vertical Leap (5-Phase Attack)
+
+The most complex attack. Uses reverse trajectory planning to find a clear flight path.
+
+#### Phase 1: PLAN (`ATTACK_LEAP_PLAN`)
+
+**Reverse trajectory planning** — starts at the target, works backward to the monster:
+
+1. **Find the strike zone**: Sample 12 arrival angles on a circle of `LEAP_STRIKE_REACH` (80px) around the target
+2. **Filter to open air**: Each arrival point is tested with 4-directional raycasts (`_is_point_in_solid`). Points inside walls/platforms are rejected. Points below the target are rejected (can't attack from below).
+3. **Reverse-solve launch velocities**: For each valid arrival point, try 5 flight times (0.3s to 1.0s). The required launch velocity is computed analytically:
+   ```
+   Vx = (arrival.x - monster.x) / t_flight
+   Vy = (arrival.y - monster.y - 0.5 * gravity * t²) / t_flight
+   ```
+4. **Body-width clearance**: Simulate 3 parallel arcs (center, left edge, right edge at `LEAP_BODY_RADIUS` = 22px). All 3 must be clear of obstacles.
+5. **Scoring**: Clear paths are scored by `arrival_distance_to_target + flight_time_penalty`. Moderate flight times (0.5s) are preferred.
+
+**Phase 2 refinement**: If phase 1 finds no clear path, the best near-miss arrival points are refined with 5 nearby launch positions × 7 flight times centered on the candidate.
+
+#### Phase 2: WINDUP (`ATTACK_LEAP_WINDUP`, 1.2s)
+
+The creature coils up for launch:
+- **0.0-0.3s**: Front legs lift off ground, retract toward chest. Body starts tilting toward target.
+- **0.3-0.6s**: Tail lowers, last 3 segments plant on the ground one at a time (stabilization).
+- **0.6-1.0s**: Rear legs compress (feet move closer to hips). Spine tilts near-vertical.
+- **1.0-1.2s**: Full coil. Head locked on target.
+
+IK is disabled from the start of windup. All legs are positioned manually.
+
+At the end of windup, the pre-computed launch velocity from the PLAN phase is applied. The horizontal direction is adjusted for the target's current position (allows tracking a moving target), but the arc angle is committed.
+
+#### Phase 3: AIRBORNE (`ATTACK_LEAP_AIRBORNE`)
+
+Parabolic flight with full body alignment:
+- **Body aims like a missile**: Spine rotates to align with a blend of velocity direction (60%) and target direction (40%)
+- **Collision shape rotates** to match body angle
+- **Rear legs fully stretched behind** (pushing-off pose)
+- **Front legs tucked against chest**
+- **Tail streams straight behind**
+- Gravity applies normally for parabolic arc
+
+Transitions to STRIKE when within `LEAP_STRIKE_REACH` of target. Times out after 2.5s or on floor landing.
+
+#### Phase 4: STRIKE (`ATTACK_LEAP_STRIKE`)
+
+Double-time slash barrage:
+- **6 slashes** at 0.08s intervals (alternating front legs)
+- Each slash spawns **3 diagonal slash lines** that fade (visual effect)
+- `LEAP_SLASH_DAMAGE` = 15 per slash (90 total if all connect)
+- Body velocity zeroed (hovering during strike)
+
+#### Phase 5: THRASH (`ATTACK_LEAP_THRASH`)
+
+Bite and shake:
+- Jaw bites (`LEAP_BITE_DAMAGE` = 30)
+- **3 thrash shakes** at 0.2s intervals with blood spatter particles
+- Target knocked sideways each thrash
+- Final thrash **flings the player** at 600 speed in the direction of the last swing
+
+## Hitboxes & Severing
+
+7 independently damageable zones, each an `Area2D` repositioned per-frame:
+
+| Part   | Health | Severable | Effect of Severing              |
+|--------|--------|-----------|---------------------------------|
+| Body   | 200    | No (main) | Death at 0                      |
+| Head   | 60     | Yes       | Instant death                   |
+| Tail   | 50     | Yes       | Removes tail whip attack        |
+| Leg ×4 | 40 ea  | Yes       | Degraded movement (75/40/15/5%) |
+
+Part damage also deals half damage to the main health pool.
+
+Severed limbs fall under gravity. Stumps are drawn as red circles at the attachment point.
 
 ## AI / Behavior
 
-- Picks nearest player as target on spawn
-- Chases target relentlessly (no detection range — always knows where target is)
-- If a different player hits the monster 3+ times, switches target to that player
-- Hit counter resets on target switch
-- Attack selection based on distance, target position (in front vs behind), and posture
+- **Target selection**: Picks nearest player. Relentless — always knows where target is.
+- **Aggro switch**: If a different player hits the monster 3+ times (`AGGRO_SWITCH_HITS`), switches target. Hit counter resets on switch.
+- **Speed tiers**: Slow (30, patrol), Medium (80, chase), Fast (160, charge) — based on distance to target.
+- **Attack selection**: Tail whip if target behind, vertical leap at 80-500px (8s cooldown), lunge at 80-200px, bite or swipe at close range.
 
-## Movement
+## Debug Inspector
 
-| Speed  | Body Velocity | Gait Rate | When           |
-|--------|---------------|-----------|----------------|
-| Slow   | 30 px/s       | 0.5x      | Patrol/idle    |
-| Medium | 80 px/s       | 1.0x      | Chase          |
-| Fast   | 160 px/s      | 2.0x      | Charge/closing |
+When the quadruped is TAB-selected in debug mode (Ctrl+D):
 
-### Degraded Movement (Missing Legs)
-
-- 3 legs: 75% speed, slight limp
-- 2 legs: 40% speed, heavy wobble
-- 1 leg: 15% speed, drags body
-- 0 legs: 5% speed, crawl
-
-## Rendering
-
-All custom `_draw()`, no sprites. Dark organic color palette:
-- Body/spine: thick lines (8-10px), Color(0.3, 0.25, 0.2)
-- Legs: medium lines (5-6px), triangular claw at foot
-- Tail: tapering 6px→2px
-- Head: polygon skull, hinged polygon jaw
-- Eyes: bright red dots on skull
-- Severed stumps: ragged zigzag edge, red tint
+- **Red crosshair** at origin (0,0)
+- **Rotated purple rectangle**: collision shape (rotates during leap)
+- **Yellow floor line**: raycast floor position
+- **Green dots**: spine segments with coordinates
+- **Cyan dots**: neck/skull/jaw
+- **Orange dots**: tail segments
+- **Colored leg dots** (FL/FR/RL/RR): joints, foot positions, world targets (X), ideal positions (circles), planted/stepping state
+- **Red crosshair on target**: "TARGET P# dist:###"
+- **Aim line**: skull to target
+- **State info panel**: state, facing, speed, HP, legs, posture, velocity, floor status
+- **Leap planning**: yellow strike zone circle, arrival point markers (green=open/red=blocked), all tested arcs (dim), chosen trajectory (bright green), phase summary
 
 ## Integration
 
@@ -137,4 +198,5 @@ All custom `_draw()`, no sprites. Dark organic color palette:
 - Standard interface: `take_damage()`, `apply_knockback()`, `died` signal
 - Rift tentacle absorption via meta (per-part, multiple tentacles possible)
 - `mass = 200.0` (very heavy — knockback barely moves it)
-- Self-contained: no changes to any existing file
+- Debug spawn: press M in debug mode on title screen
+- Self-contained: no changes to any existing file (except title_screen.gd for M key)

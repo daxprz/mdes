@@ -56,6 +56,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.9
+**Quadruped Leap Planning, Head Pivot, Cave Walls, Keystone Platform**
+- Vertical leap attack with reverse trajectory planning: finds open-air strike zones around the target, then reverse-solves parabolic launch velocities to reach them
+- Two-phase planning: broad search (12 arrivals × 5 flight times) then refinement around near-misses (5 positions × 7 times)
+- 5-stage leap sequence: plan → windup (coil/compress) → airborne (missile alignment) → 6-slash barrage → bite+thrash+fling
+- Body-width clearance: 3 parallel arc raycasts (left, center, right edge) ensure the creature fits through gaps
+- Head pivot: skull/jaw/eye/teeth rotate in head-local space to face the target; stays upright on direction flip
+- Paired stepping: one front + one rear foot at a time, rear legs trail behind the body
+- Foot-driven locomotion: feet grip ground in world space and push the body via force
+- 2-bone IK with mammal anatomy (front elbows backward, rear knees forward)
+- Cave walls with CollisionPolygon2D: curved floor-to-wall transitions, flat ledge shelf at 1/3 height
+- Portal keystone is a standable platform (48px wide StaticBody2D)
+- Debug entity inspector: TAB cycles enemies, shows skeleton, strike zone, trajectory planning, target crosshair with distance
+- Comprehensive design doc at docs/design/quadruped_monster.md
+
 ### v0.9.8
 **Quadruped Monster, Cave Walls, Debug Inspector**
 - Quadruped monster: procedurally animated 23-point skeleton with foot-driven locomotion
