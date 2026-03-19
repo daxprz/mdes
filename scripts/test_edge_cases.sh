@@ -1,5 +1,5 @@
 #!/bin/bash
-# Edge case tests: corners + cliff edges. Full map reset each scenario.
+# Edge case tests: measure TIME TO FIRST DAMAGE + total damage
 set -e
 
 R() { printf "%s\n" "$1" | nc -w 2 localhost 9999; }
@@ -8,11 +8,6 @@ pkill -9 -f "Godot.*dax" 2>/dev/null || true
 sleep 1
 /Applications/Godot.app/Contents/MacOS/Godot --path "/Users/jeremy/dev/dax/test123" > /tmp/godot_edge.log 2>&1 &
 sleep 5
-
-# Positions: cave wall curve starts ~180px from edges
-# Cliff ledge at ~1/3 height (y~600) on each side
-# Floor corners where cave wall meets floor (x~200, y~880)
-# Monster starts on floor center, must reach target
 
 SCENARIOS="
 floor_corner_left:220:870:500:870
@@ -25,8 +20,8 @@ near_cliff_left:220:580:250:750
 near_cliff_right:1700:580:1680:750
 "
 
-printf "%-22s %5s %5s %5s %s\n" "SCENARIO" "DMG" "FPS" "mnFPS" "MONSTER"
-printf "%-22s %5s %5s %5s %s\n" "--------" "---" "---" "-----" "-------"
+printf "%-22s %5s %7s %5s %s\n" "SCENARIO" "DMG" "1stHIT" "FPS" "MONSTER"
+printf "%-22s %5s %7s %5s %s\n" "--------" "---" "------" "---" "-------"
 
 for SCENE in $SCENARIOS; do
     IFS=: read -r LABEL DX DY MX MY <<< "$SCENE"
@@ -41,12 +36,18 @@ for SCENE in $SCENARIOS; do
     R "resethp" > /dev/null 2>&1
     : > /tmp/godot_edge.log
 
-    SCENARIO_MIN_FPS=999
-    for I in $(seq 1 15); do
+    START=$(python3 -c "import time; print(time.time())")
+    FIRST_HIT="NONE"
+
+    for I in $(seq 1 20); do
         sleep 1
-        FPS=$(R "fps" | grep -o '[0-9]*')
-        FPS=${FPS:-0}
-        if [ "$FPS" -lt "$SCENARIO_MIN_FPS" ]; then SCENARIO_MIN_FPS=$FPS; fi
+        HPLINE=$(R "hp")
+        DMG_NOW=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
+        DMG_NOW=${DMG_NOW:-0}
+        if [ "$DMG_NOW" -gt 0 ] && [ "$FIRST_HIT" = "NONE" ]; then
+            NOW=$(python3 -c "import time; print(time.time())")
+            FIRST_HIT=$(python3 -c "print('%.1f' % ($NOW - $START))")
+        fi
     done
 
     HPLINE=$(R "hp")
@@ -55,9 +56,7 @@ for SCENE in $SCENARIOS; do
     MPOS=$(R "enemies" | tail -1 | grep -o '([0-9]*,[0-9]*)' | head -1)
     END_FPS=$(R "fps" | grep -o '[0-9]*')
 
-    printf "%-22s %5d %5s %5d %s\n" "$LABEL" "$DMG" "$END_FPS" "$SCENARIO_MIN_FPS" "monster=$MPOS"
-    grep -a "PATHFIND\|EXECUTING\|ARRIVED\|hop\|SPRINT" /tmp/godot_edge.log | tail -3
-    printf "\n"
+    printf "%-22s %5d %6ss %5s %s\n" "$LABEL" "$DMG" "$FIRST_HIT" "$END_FPS" "monster=$MPOS"
 done
 
-printf "=== DONE ===\n"
+printf "\n=== DONE ===\n"
