@@ -28,16 +28,16 @@ const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
 # Foot-driven locomotion
 const STEP_THRESHOLD := 60.0   # How far behind a foot gets before it steps
-const STEP_DURATION := 0.2     # Seconds to complete a step
+const STEP_DURATION := 0.12    # Seconds to complete a step (quick feet)
 const STEP_HEIGHT := 28.0      # How high foot lifts during step
 const STEP_OVERSHOOT := 0.25   # Overshoot fraction past target
-const FOOT_PUSH_FORCE := 120.0 # Force each planted foot exerts to push body
+const FOOT_PUSH_FORCE := 200.0 # Force each planted foot exerts to push body
 const FOOT_GRIP := 0.92        # How well planted feet hold ground (velocity damping)
 
 # Speed tiers (desired speed — foot push force is modulated to achieve this)
-const SPEED_SLOW := 30.0
-const SPEED_MEDIUM := 80.0
-const SPEED_FAST := 160.0
+const SPEED_SLOW := 60.0
+const SPEED_MEDIUM := 140.0
+const SPEED_FAST := 240.0
 
 # Combat
 const BITE_DAMAGE := 25
@@ -47,17 +47,17 @@ const LUNGE_DAMAGE := 20
 const LUNGE_SPEED := 300.0
 const BITE_RANGE := 60.0
 const TAIL_RANGE := 90.0
-const ATTACK_COOLDOWN := 1.5
+const ATTACK_COOLDOWN := 0.8  # Fast attack cycling
 const AGGRO_SWITCH_HITS := 3
 
 # Vertical leap
 const LEAP_RANGE := 500.0      # Distance at which leap is considered
-const LEAP_WINDUP_TIME := 1.2  # Seconds to coil up before launch
+const LEAP_WINDUP_TIME := 0.6  # Seconds to coil up before launch (fast panther)
 const LEAP_LAUNCH_SPEED := 900.0  # Launch velocity magnitude
 const LEAP_SLASH_DAMAGE := 15  # Per slash (6 total = 90 max)
 const LEAP_BITE_DAMAGE := 30   # Bite + thrash
 const LEAP_THRASH_COUNT := 3   # Number of thrash shakes
-const LEAP_COOLDOWN := 8.0     # Seconds between leaps
+const LEAP_COOLDOWN := 4.0     # Seconds between leaps
 
 # Leap planning
 const LEAP_BODY_RADIUS := 22.0    # Half-width of body for clearance checks (includes legs)
@@ -84,11 +84,11 @@ const SPRINT_SLASH_INTERVAL := 0.1  # Time between slashes
 
 # Connected hop-up (short platform climb)
 const HOP_UP_MAX_HEIGHT := 140.0  # Max height difference for a connected hop (vs full leap)
-const HOP_UP_DURATION := 0.6      # Time to complete the hop
+const HOP_UP_DURATION := 0.4      # Time to complete the hop (fast)
 const HOP_UP_DAMAGE := 12         # Landing impact damage
 
 # Pre-cognition (two-hop leap chaining)
-const PRECOG_TRIGGER_TIME := 5.0   # Seconds without landing a hit before pre-cognition
+const PRECOG_TRIGGER_TIME := 3.0   # Seconds without landing a hit before pre-cognition
 const PRECOG_GRID_SPACING := 50.0  # Drop a ball every 50px across the entire map
 const PRECOG_CLUSTER_RADIUS := 40.0 # Landed balls closer than this are merged into one cluster
 
@@ -180,6 +180,7 @@ var _time_since_strike_range: float = 0.0  # How long since last successful hit
 var _precog_phase: int = 0  # 0=ball drop, 1=build graph, 2=pathfind, 3=execute
 var _precog_ball_lands: Array[Vector2] = []  # World positions where balls landed (raw)
 var _precog_platforms: Array = []  # [{pos, weight, min_x, max_x}] — detected platforms
+var _precog_platforms_cached: bool = false  # Platforms only need to be detected once
 var _precog_edges: Array = []  # [{from, to, launch_vel, arc_l, arc_r}] — leaps between platforms
 var _precog_path: Array = []  # Ordered list of platform indices to traverse
 var _precog_path_edges: Array = []  # The edge data for each hop in the path
@@ -341,7 +342,8 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
-	# First-frame: plant feet at current world position
+	# First-frame: plant feet. Precache runs after a short delay (2 frames)
+	# to ensure the physics space has all StaticBody2D nodes registered.
 	if not _initialized:
 		_initialized = true
 		for li in range(4):
@@ -349,6 +351,8 @@ func _physics_process(delta: float) -> void:
 			_foot_world[li] = global_position + Vector2(hip_local.x, _raycast_floor(hip_local))
 			_step_targets[li] = _foot_world[li]
 			_step_origins[li] = _foot_world[li]
+		if not _precog_platforms_cached:
+			get_tree().create_timer(0.1).timeout.connect(_precache_platforms)
 
 	_timer += delta
 	if _attack_cooldown > 0.0:
@@ -844,10 +848,16 @@ func _do_chase(_delta: float) -> void:
 	_want_direction = _facing
 	var dist: float = absf(to_target.x)
 
-	# Track time since last successful hit on any player
-	_time_since_strike_range += _delta
+	# If target is on a different platform AND we can't walk to them,
+	# immediately use precog pathfinding (don't wait for timeout)
+	var target_above: bool = to_target.y < -40.0
+	var target_far_below: bool = to_target.y > 100.0
+	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
+		_start_precognition()
+		return
 
-	# Pre-cognition: curl up and plan if we haven't hit anything in too long
+	# Fallback: if we haven't hit anything for a while, also use precog
+	_time_since_strike_range += _delta
 	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
 		_start_precognition()
 		return
@@ -1623,6 +1633,24 @@ func _find_wall_x(direction: int) -> float:
 
 # -- Pre-cognition (two-hop leap chaining) -------------------------------------
 
+func _precache_platforms() -> void:
+	## Pre-compute platform map and full connectivity graph at spawn time.
+	## This is expensive (~50ms) but only runs once. After this, precog
+	## just needs to tag entities and run Dijkstra (instant).
+	_precog_platforms_cached = false  # Force fresh scan
+	_precog_drop_and_detect()
+	# Build full graph
+	_precog_edges.clear()
+	var n: int = _precog_platforms.size()
+	for pi in range(n):
+		for pj in range(n):
+			if pi != pj:
+				_precog_process_i = pi
+				_precog_process_j = pj
+				_precog_build_one_edge(pi, pj)
+	print("PRECOG PRECACHE: %d platforms, %d edges (computed at spawn)" % [n, _precog_edges.size()])
+
+
 func _start_precognition() -> void:
 	_state = State.PRECOGNITION
 	_attack_timer = 0.0
@@ -1653,57 +1681,61 @@ func _do_precognition(delta: float) -> void:
 
 	match _precog_phase:
 		0:
-			_precog_drop_and_detect()
-			print("PRECOG DETECT: %d balls → %d platforms" % [_precog_ball_lands.size(), _precog_platforms.size()])
-			for i in range(_precog_platforms.size()):
-				var p: Dictionary = _precog_platforms[i]
-				print("  P%d: (%.0f,%.0f) x=[%.0f..%.0f] w=%d %s" % [i, p["pos"].x, p["pos"].y, p["min_x"], p["max_x"], p["weight"], p["label"]])
-			_precog_phase = 1
-			_precog_process_i = 0
-			_precog_process_j = 1
-		1:
-			_precog_build_graph_step()
-		2:
-			print("PRECOG GRAPH DONE: %d edges" % _precog_edges.size())
-			for e in _precog_edges:
-				print("  P%d → P%d from=(%.0f,%.0f)" % [e["from"], e["to"], e["from_pos"].x, e["from_pos"].y])
+			# Build graph if not cached yet
+			if _precog_edges.is_empty() or _precog_platforms.size() < 3:
+				_precache_platforms()
+			# Re-tag entity positions
+			for plat in _precog_platforms:
+				plat["label"] = ""
+			_precog_add_entity_platform(global_position, "monster")
+			if is_instance_valid(_target):
+				_precog_add_entity_platform(_target.global_position, "target")
 			_precog_find_path()
-			print("PRECOG PATH: %s (len=%d)" % [str(_precog_path), _precog_path_edges.size()])
+			print("PRECOG: path=%s (len=%d) [%d plats, %d edges]" % [
+				str(_precog_path), _precog_path_edges.size(),
+				_precog_platforms.size(), _precog_edges.size()])
 			_precog_phase = 3
 		3:
 			_precog_start_execution()
 
 
 func _precog_drop_and_detect() -> void:
-	## Drop balls in a 2D grid, deduplicate landings, detect platforms.
-	_precog_ball_lands.clear()
-	_precog_platforms.clear()
+	## Drop balls and detect platforms — cached after first run since
+	## the level geometry doesn't change.
+	if not _precog_platforms_cached:
+		_precog_ball_lands.clear()
+		_precog_platforms.clear()
 
-	var bounds_left: float = _find_wall_x(-1) + 10
-	var bounds_right: float = _find_wall_x(1) - 10
-	var space := get_world_2d().direct_space_state
-	if not space:
-		return
+		var bounds_left: float = _find_wall_x(-1) + 10
+		var bounds_right: float = _find_wall_x(1) - 10
+		var space := get_world_2d().direct_space_state
+		if not space:
+			return
 
-	var bounds_top: float = 10.0
-	var bounds_bottom: float = 950.0
-	var y: float = bounds_top
-	while y <= bounds_bottom:
-		var x: float = bounds_left
-		while x <= bounds_right:
-			var drop_pos := Vector2(x, y)
-			if not _is_point_in_solid(drop_pos):
-				var query := PhysicsRayQueryParameters2D.create(drop_pos, drop_pos + Vector2(0, 2000), 1)
-				query.exclude = [get_rid()]
-				var result: Dictionary = space.intersect_ray(query)
-				if not result.is_empty():
-					_precog_ball_lands.append(result["position"])
-			x += PRECOG_GRID_SPACING
-		y += PRECOG_GRID_SPACING
+		var bounds_top: float = 10.0
+		var bounds_bottom: float = 950.0
+		var y: float = bounds_top
+		while y <= bounds_bottom:
+			var x: float = bounds_left
+			while x <= bounds_right:
+				var drop_pos := Vector2(x, y)
+				if not _is_point_in_solid(drop_pos):
+					var query := PhysicsRayQueryParameters2D.create(drop_pos, drop_pos + Vector2(0, 2000), 1)
+					query.exclude = [get_rid()]
+					var result: Dictionary = space.intersect_ray(query)
+					if not result.is_empty():
+						_precog_ball_lands.append(result["position"])
+				x += PRECOG_GRID_SPACING
+			y += PRECOG_GRID_SPACING
 
-	_precog_detect_platforms()
+		_precog_detect_platforms()
+		_precog_platforms_cached = true
 
-	# Add special platforms for monster and target positions
+	# Clear entity labels (monster/target move between precog cycles)
+	for plat in _precog_platforms:
+		plat["label"] = ""
+
+	# Re-tag entity positions
 	_precog_add_entity_platform(global_position, "monster")
 	if is_instance_valid(_target):
 		_precog_add_entity_platform(_target.global_position, "target")
@@ -1799,15 +1831,26 @@ func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 
 
 func _precog_build_graph_step() -> void:
-	## Test one pair of platforms per frame for leap connectivity.
-	## Uses the existing ball landing positions on the source platform
-	## as launch candidates — they already cover every grid point.
+	## Build the ENTIRE connectivity graph in one frame.
+	## With ~5 platforms this is ~20 pairs — fast enough.
 	var n: int = _precog_platforms.size()
-	if _precog_process_i >= n:
-		_precog_phase = 2
-		return
 
-	if _precog_process_i != _precog_process_j:
+	for pi in range(n):
+		for pj in range(n):
+			if pi == pj:
+				continue
+			_precog_process_i = pi
+			_precog_process_j = pj
+			_precog_build_one_edge(pi, pj)
+
+	_precog_phase = 2
+	return
+
+
+func _precog_build_one_edge(pi: int, pj: int) -> void:
+	## Test one pair of platforms for leap connectivity.
+	var n: int = _precog_platforms.size()
+	if true:
 		var plat_from: Dictionary = _precog_platforms[_precog_process_i]
 		var plat_to: Dictionary = _precog_platforms[_precog_process_j]
 		var from_y: float = plat_from["pos"].y
@@ -1856,14 +1899,9 @@ func _precog_build_graph_step() -> void:
 					best_edge["from_pos"] = launch_pos
 
 		if not best_edge.is_empty():
-			best_edge["from"] = _precog_process_i
-			best_edge["to"] = _precog_process_j
+			best_edge["from"] = pi
+			best_edge["to"] = pj
 			_precog_edges.append(best_edge)
-
-	_precog_process_j += 1
-	if _precog_process_j >= n:
-		_precog_process_i += 1
-		_precog_process_j = 0
 
 
 func _precog_find_path() -> void:
