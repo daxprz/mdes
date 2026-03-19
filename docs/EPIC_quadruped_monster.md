@@ -133,20 +133,25 @@ A physics-based procedurally animated quadruped monster that hunts players acros
 
 ---
 
-## Current Baseline (v0.9.13+)
+## Current Baseline (v0.9.17)
 
 ```
-SUMMARY: 7/10 hit, dmg=460, min_fps=14, worst_ik=1911, worst_thrash=31
+FULL SUITE: 17/18 hit, dmg=3812, min_fps=50, worst_ik=1996, worst_thrash=24
 ```
 
-| Metric | Current | Target |
-|--------|---------|--------|
-| Hit rate | 7/10 | 10/10 |
-| Total damage | 460 | > 1000 |
-| Min FPS (debug on) | 14 | > 30 |
-| Min FPS (debug off) | 54 | > 50 ✓ |
-| Worst IK peak | 1911 | < 100 |
-| Worst thrash | 31 | < 5 |
+| Metric | v0.9.13 | v0.9.17 | Target |
+|--------|---------|---------|--------|
+| Hit rate (baseline) | 7/10 | **10/10** ✓ | 10/10 |
+| Hit rate (full suite) | — | **17/18** | 18/18 |
+| Total damage | 460 | **3812** | > 1000 ✓ |
+| Min FPS | 14 | **50** | > 50 ✓ |
+| Worst IK peak | 1911 | **1996** | < 100 |
+| Worst thrash | 31 | **24** | < 5 |
+| Ball quality | — | **46** | < 50 ✓ |
+| Time to first hit | — | **1.1s** best | < 3s |
+| Attack types | 5 | **8** | — |
+| Edge cases | 0/8 | **8/8** ✓ | 8/8 |
+| Cliff ledges | 0/2 | **1/2** | 2/2 |
 
 ---
 

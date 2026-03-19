@@ -57,6 +57,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.17
+**17/18 Test Suite, Score Cards, Cliff Aerial Strike, 3812 Damage**
+- Full 18-scenario test suite with on-screen title cards and colored score tables
+- 17/18 scenarios deal damage (3812 total), only cliff_ledge_right fails
+- Raw ballistic aerial strike after precog hops reaches cave wall cliff ledges
+- Score cards: green/yellow/red for damage, time, FPS, IK, thrash per test
+- Final results grid rendered on screen after all tests (8s hold)
+- Post-grab teleport to player position (no more popping back to pre-grab spot)
+- Skeleton-to-world constraints prevent skull/tail clipping through floors
+- Test categories: Same Floor, Platform Hunting, Cross-Platform Pursuit, Corner Trapping, Cliff Edge Assault
+- RCON commands: title, score, grid for recording-friendly test visualization
+
 ### v0.9.16
 **10/10 Baseline, Rigid Spinning Ball, Safe Landing, Thrash=8**
 - 10/10 baseline hit rate, 1175 total damage, worst thrash 8 (was 29)
