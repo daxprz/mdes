@@ -944,10 +944,12 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		_start_sprint_slash()
 		return
 
-	# VERTICAL LEAP: significant distance or height difference
+	# VERTICAL LEAP: only when target is roughly on the same level
+	# (cross-platform routing is handled by precog)
 	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
-		_start_leap()
-		return
+		if absf(height_diff) < 60.0:  # Same level — direct leap with mid-air attack
+			_start_leap()
+			return
 
 	# Lunge at medium distance
 	if dist > 80.0 and dist < 200.0 and randf() < 0.3:
