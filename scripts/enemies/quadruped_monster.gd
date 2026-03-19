@@ -27,10 +27,10 @@ const TAIL_WHIP_STIFFNESS := 2.0  # Loose only during whip
 const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
 # Foot-driven locomotion
-const STEP_THRESHOLD := 35.0   # How far behind a foot gets before it steps (tight)
+const STEP_THRESHOLD := 25.0   # How far behind a foot gets before it steps
 const STEP_DURATION := 0.12    # Seconds to complete a step (quick feet)
 const STEP_HEIGHT := 28.0      # How high foot lifts during step
-const STEP_OVERSHOOT := 0.25   # Overshoot fraction past target
+const STEP_OVERSHOOT := 0.1    # Small overshoot — feet stay close to ideal position
 const FOOT_PUSH_FORCE := 200.0 # Force each planted foot exerts to push body
 const FOOT_GRIP := 0.92        # How well planted feet hold ground (velocity damping)
 
@@ -621,16 +621,24 @@ func _update_gait(delta: float) -> void:
 			var hip: Vector2 = _legs[li][0]
 			var hip_to_foot_dist: float = hip.distance_to(local_foot)
 
-			# Only clamp if the foot is wildly out of range (> 2x leg length)
-			# or on a different platform level (> 1.5x leg length below hip)
-			if hip_to_foot_dist > max_reach * 2.0:
+			# Clamp: foot must not be wildly far from hip
+			if hip_to_foot_dist > max_reach * 1.5:
 				local_foot = hip + (local_foot - hip).normalized() * max_reach
 				_foot_world[li] = global_position + local_foot
+				_foot_planted[li] = false  # Force a new step to correct
 
-			# Prevent foot from reaching down to a much lower platform
-			if local_foot.y > hip.y + max_reach * 1.5:
+			# Clamp: foot must not reach down to a lower platform
+			if local_foot.y > hip.y + max_reach * 1.3:
 				local_foot.y = hip.y + max_reach
 				_foot_world[li] = global_position + local_foot
+				_foot_planted[li] = false
+
+			# Clamp: foot must stay roughly under the body horizontally
+			var max_x_offset: float = 40.0  # Max horizontal distance from hip
+			if absf(local_foot.x - hip.x) > max_x_offset:
+				local_foot.x = hip.x + signf(local_foot.x - hip.x) * max_x_offset
+				_foot_world[li] = global_position + local_foot
+				_foot_planted[li] = false
 
 			_legs[li][2] = local_foot
 
@@ -685,14 +693,15 @@ func _try_step_pair(a: int, b: int) -> void:
 
 
 func _ideal_foot_world(li: int) -> Vector2:
-	## Where this foot SHOULD be in world space.
-	## Front legs reach AHEAD, rear legs trail BEHIND.
+	## Where this foot SHOULD be in world space: directly below the hip
+	## with a small forward offset based on movement direction.
 	var hip_local: Vector2 = _legs[li][0]
 	var hip_world: Vector2 = global_position + hip_local
-	var stride: float = _want_direction * _move_speed * 0.35
+	# Small stride offset — keeps feet mostly under the body
+	var stride: float = _want_direction * minf(_move_speed * 0.1, 20.0)
 	if li >= 2:
-		# Rear legs: target behind the hip instead of ahead
-		stride *= -0.5
+		# Rear legs: slightly behind
+		stride *= -0.3
 	var target_x: float = hip_world.x + stride
 	var floor_y: float = _raycast_floor(Vector2(target_x - global_position.x, hip_local.y)) + global_position.y
 	return Vector2(target_x, floor_y)
