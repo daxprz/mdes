@@ -1959,13 +1959,18 @@ func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 	var best_plat: Dictionary = {}
 	var best_dist: float = INF
 	for plat in _precog_platforms:
-		var d: float = world_pos.distance_to(plat["pos"])
+		var d: float = Vector2(world_pos.x, floor_y).distance_to(plat["pos"])
 		if d < best_dist:
 			best_dist = d
 			best_plat = plat
 
 	if not best_plat.is_empty():
 		best_plat["label"] = label
+		print("PRECOG ENTITY: %s at (%.0f,%.0f) floor=%.0f → nearest P '%s' at (%.0f,%.0f) dist=%.0f" % [
+			label, world_pos.x, world_pos.y, floor_y,
+			best_plat.get("label", ""), best_plat["pos"].x, best_plat["pos"].y, best_dist])
+	else:
+		print("PRECOG ENTITY: %s at (%.0f,%.0f) — NO platforms at all!" % [label, world_pos.x, world_pos.y])
 
 
 func _precog_build_graph_step() -> void:

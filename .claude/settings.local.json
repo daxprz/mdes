@@ -47,7 +47,8 @@
       "Bash(/Users/jeremy/dev/dax/test123/scripts/test_precog.sh 2>&1)",
       "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_precog.sh 2>&1)",
       "Bash(printf:*)",
-      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_baseline.sh 2>&1)"
+      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_baseline.sh 2>&1)",
+      "Bash(bash /Users/jeremy/dev/dax/test123/scripts/test_upper_platforms.sh 2>&1)"
     ]
   }
 }
