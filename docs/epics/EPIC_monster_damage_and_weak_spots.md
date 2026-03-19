@@ -130,22 +130,23 @@ A new test entity that actively attacks the monster. Placeable via RCON, configu
 
 ### Tasks
 
-- [ ] **5.1** New script: `scripts/testing/attack_dummy.gd` — `CharacterBody2D` with gravity, collision, rendered as an orange circle with a weapon indicator
-- [ ] **5.2** Configurable target: `set_target(enemy: Node2D)` — the dummy faces and aims at this enemy
-- [ ] **5.3** Configurable body part targeting: `set_target_part(part_name: String)` — aims at a specific hitbox/attachment point on the target. Default `""` = aim at body center.
-- [ ] **5.4** Weapon: Ranger bow — fires projectile at target part on a cooldown. Projectile uses existing `projectile.gd` or a simplified version. Deals configurable damage on hit.
-- [ ] **5.5** Weapon: Balloonist balloons — fires balloon darts (`balloon_dart.gd`) at the target part on a cooldown. Darts attach on hit and cause floating.
-- [ ] **5.6** Weapon switching: `set_weapon(weapon_name: String)` — `"bow"` or `"balloon"`
-- [ ] **5.7** RCON commands:
-  - `spawn attacker [x y]` — spawn an attack dummy at position (default: 400, 850)
+- [x] **5.1** New script: `scripts/testing/attack_dummy.gd` — `CharacterBody2D` with gravity, collision, rendered as an orange circle with a weapon indicator
+- [x] **5.2** Configurable target: `set_target(enemy: Node2D)` — the dummy faces and aims at this enemy
+- [x] **5.3** Configurable body part targeting: `set_target_part(part_name: String)` — aims at a specific hitbox/attachment point on the target. Default `""` = aim at body center.
+- [x] **5.4** Weapon: Ranger bow — fires arc projectile at target part on a cooldown. Inline script with proximity hit detection against hitboxes.
+- [x] **5.5** Weapon: Balloonist balloons — fires balloon darts (`balloon_dart.gd`) at the target part on a cooldown. Darts attach on hit and cause floating.
+- [x] **5.6** Weapon switching: `set_weapon(weapon_name: String)` — `"bow"` or `"balloon"`
+- [x] **5.7** RCON commands:
+  - `spawn attacker [x y]` — spawn an attack dummy at position (default: 960, 750)
   - `attacker target <enemy_index>` — set target to an enemy by index
   - `attacker part <part_name>` — aim at a specific body part (`head`, `eye`, `tail`, `torso`, `leg0`, etc.)
   - `attacker weapon <name>` — switch weapon (`bow`, `balloon`)
   - `attacker rate <seconds>` — set attack cooldown
   - `attacker stop` — stop attacking (idle)
   - `attacker start` — resume attacking
-- [ ] **5.8** Debug draw: when in debug mode, draw aim line from dummy to target part, show weapon name and attack rate
-- [ ] **5.9** Attack dummy does not take damage and cannot be targeted by the monster (not in `players` group)
+  - `attacker stats` — show shots/hits/targeting info
+- [x] **5.8** Debug draw: aim line from dummy to target part, weapon name, shot/hit stats displayed
+- [x] **5.9** Attack dummy does not take damage and cannot be targeted by the monster (not in `players` group, collision_layer=0)
 
 ---
 
@@ -155,13 +156,13 @@ A test mode where the monster becomes passive — stops attacking, stops moving,
 
 ### Tasks
 
-- [ ] **6.1** New state: `State.STANDDOWN` — monster enters idle pose, all attack/chase/precog logic skipped
-- [ ] **6.2** In stand-down: monster still runs skeleton physics (breathing, IK, foot planting) so it looks alive and hitboxes are positioned correctly
-- [ ] **6.3** In stand-down: `take_damage` and `take_part_damage` still function — damage states update, blood effects trigger, gameplay penalties apply
-- [ ] **6.4** In stand-down: attachment points active — items can attach and physics forces apply
-- [ ] **6.5** RCON command: `standdown` — toggle stand-down mode on all quadruped monsters
-- [ ] **6.6** RCON command: `standdown on` / `standdown off` — explicit set
-- [ ] **6.7** Visual indicator: when in stand-down, draw a white flag icon or "STANDDOWN" text above the monster
+- [x] **6.1** New state: `State.STANDDOWN` — monster enters idle pose, all attack/chase/precog logic skipped
+- [x] **6.2** In stand-down: monster still runs skeleton physics (breathing, IK, foot planting) so it looks alive and hitboxes are positioned correctly
+- [x] **6.3** In stand-down: `take_damage` and `take_part_damage` still function — damage states update, blood effects trigger, gameplay penalties apply
+- [ ] **6.4** In stand-down: attachment points active — items can attach and physics forces apply *(blocked on Story 1)*
+- [x] **6.5** RCON command: `standdown` — toggle stand-down mode on all quadruped monsters
+- [x] **6.6** RCON command: `standdown on` / `standdown off` — explicit set
+- [x] **6.7** Visual indicator: when in stand-down, draw white flag + "STANDDOWN" text above the monster
 
 ---
 
@@ -250,10 +251,11 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 | File | Status | Purpose |
 |------|--------|---------|
 | `scripts/enemies/quadruped_monster.gd` | Modified | Attachment points, weak spots, damage states, weight system, stand-down |
-| `scripts/testing/attack_dummy.gd` | **New** | Attack dummy entity |
-| `scripts/autoload/rcon.gd` | Modified | New commands: partstatus, partdmg, standdown, spawn attacker, attacker *, weight, attach, detach |
-| `scripts/test_damage.sh` | **New** | Automated damage/weak spot test |
-| `scripts/test_attachments.sh` | **New** | Automated attachment physics test |
+| `scripts/testing/attack_dummy.gd` | **New** | Attack dummy entity (bow + balloon weapons, body part targeting) |
+| `scripts/autoload/rcon.gd` | Modified | New commands: standdown, spawn attacker, attacker *, (future: partstatus, partdmg, weight, attach, detach) |
+| `scripts/test_attack_dummy.sh` | **New** | Automated attack dummy + stand-down test (7 scenarios) |
+| `scripts/test_damage.sh` | **New** | *(future)* Automated damage/weak spot test |
+| `scripts/test_attachments.sh` | **New** | *(future)* Automated attachment physics test |
 | `docs/epics/EPIC_monster_damage_and_weak_spots.md` | **New** | This document |
 
 ---

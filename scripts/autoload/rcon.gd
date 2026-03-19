@@ -64,7 +64,7 @@ func _execute(command: String) -> String:
 
 	match cmd:
 		"help":
-			return "Commands: help, debug, spawn <monster|dummy> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, status, quit"
+			return "Commands: help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <target|part|weapon|rate|stop|start|stats>, status, quit"
 
 		"debug":
 			PlayerHUD._debug_mode = not PlayerHUD._debug_mode
@@ -228,6 +228,12 @@ func _execute(command: String) -> String:
 				return "ERR: usage: test precog"
 			return _cmd_test(parts[1])
 
+		"standdown":
+			return _cmd_standdown(parts)
+
+		"attacker":
+			return _cmd_attacker(parts)
+
 		"quit":
 			get_tree().quit()
 			return "OK: quitting"
@@ -358,8 +364,17 @@ func take_damage(amount: int, _source: int = -1) -> void:
 			dummy.queue_redraw()
 			return "OK: spawned dummy player at (%.0f, %.0f)" % [x, y]
 
+		"attacker":
+			var script := load("res://scripts/testing/attack_dummy.gd")
+			var attacker := CharacterBody2D.new()
+			attacker.set_script(script)
+			attacker.name = "AttackDummy"
+			attacker.global_position = Vector2(x, y)
+			container.add_child(attacker)
+			return "OK: spawned attacker at (%.0f, %.0f)" % [x, y]
+
 		_:
-			return "ERR: unknown spawn type '%s'. Try: monster, dummy" % what
+			return "ERR: unknown spawn type '%s'. Try: monster, dummy, attacker" % what
 
 
 func _cmd_key(key_str: String) -> String:
@@ -585,3 +600,100 @@ func _show_title(text: String) -> void:
 	tween.tween_interval(1.0)
 	tween.tween_property(lbl, "modulate:a", 0.0, 1.0)
 	tween.tween_callback(lbl.queue_free)
+
+
+func _cmd_standdown(parts: PackedStringArray) -> String:
+	## Toggle or set stand-down mode on all quadruped monsters.
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	var count: int = 0
+	var new_state: Variant = null  # null = toggle
+
+	if parts.size() > 1:
+		match parts[1].to_lower():
+			"on": new_state = true
+			"off": new_state = false
+
+	for e in enemies:
+		if "_standdown" in e:
+			if new_state != null:
+				e._standdown = new_state as bool
+			else:
+				e._standdown = not e._standdown
+			count += 1
+
+	if count == 0:
+		return "ERR: no monsters with standdown support"
+	var state_str: String = ""
+	if count > 0:
+		state_str = str(enemies[0]._standdown) if "_standdown" in enemies[0] else "?"
+	return "OK: standdown=%s on %d monsters" % [state_str, count]
+
+
+func _cmd_attacker(parts: PackedStringArray) -> String:
+	## Control attack dummies: attacker <subcommand> [args]
+	var attackers: Array = get_tree().get_nodes_in_group("attack_dummies")
+	if attackers.is_empty():
+		return "ERR: no attack dummies spawned. Use: spawn attacker [x y]"
+
+	if parts.size() < 2:
+		return "ERR: usage: attacker <target|part|weapon|rate|stop|start|stats>"
+
+	var subcmd: String = parts[1].to_lower()
+	match subcmd:
+		"target":
+			# attacker target <enemy_index>
+			var idx: int = int(parts[2]) if parts.size() > 2 else 0
+			var enemies: Array = get_tree().get_nodes_in_group("enemies")
+			if idx >= enemies.size():
+				return "ERR: enemy index %d not found (have %d)" % [idx, enemies.size()]
+			for a in attackers:
+				a.set_target(enemies[idx])
+			return "OK: targeting %s" % enemies[idx].name
+
+		"part":
+			# attacker part <part_name>
+			var part_name: String = parts[2] if parts.size() > 2 else ""
+			for a in attackers:
+				a.set_target_part(part_name)
+			return "OK: targeting part '%s'" % part_name
+
+		"weapon":
+			# attacker weapon <bow|balloon>
+			if parts.size() < 3:
+				return "ERR: usage: attacker weapon <bow|balloon>"
+			var weapon: String = parts[2].to_lower()
+			for a in attackers:
+				a.set_weapon(weapon)
+			return "OK: weapon=%s" % weapon
+
+		"rate":
+			# attacker rate <seconds>
+			if parts.size() < 3:
+				return "ERR: usage: attacker rate <seconds>"
+			var rate: float = float(parts[2])
+			for a in attackers:
+				a.set_rate(rate)
+			return "OK: attack rate=%.1fs" % rate
+
+		"stop":
+			for a in attackers:
+				a._attacking = false
+			return "OK: attackers stopped"
+
+		"start":
+			for a in attackers:
+				a._attacking = true
+			return "OK: attackers started"
+
+		"stats":
+			var lines: Array[String] = ["attack_dummies: %d" % attackers.size()]
+			for a in attackers:
+				var target_name: String = a._target.name if is_instance_valid(a._target) else "none"
+				lines.append("  %s at (%.0f,%.0f) weapon=%s part=%s attacking=%s shots=%d hits=%d" % [
+					a.name, a.global_position.x, a.global_position.y,
+					a._weapon, a._target_part, str(a._attacking),
+					a._shots_fired, a._hits_landed])
+			return "\n".join(lines)
+
+		_:
+			return "ERR: unknown attacker subcommand '%s'. Try: target, part, weapon, rate, stop, start, stats" % subcmd

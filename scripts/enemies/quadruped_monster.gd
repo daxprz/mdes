@@ -106,7 +106,8 @@ enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
 			 ATTACK_LUNGE, ATTACK_SPRINT_SLASH, ATTACK_HOP_UP, ATTACK_GRAB,
 			 ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
-			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD }
+			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD,
+			 STANDDOWN }
 enum Posture { QUADRUPED, BIPEDAL }
 
 # -- Skeleton arrays -----------------------------------------------------------
@@ -152,6 +153,7 @@ var _step_center: Array[Vector2] = []    # Bezier control point (world)
 var health: int = MAX_HEALTH
 var mass: float = MASS
 var _dead := false
+var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _state: State = State.PATROL
 var _posture: Posture = Posture.QUADRUPED
 var _facing: float = 1.0  # 1=right, -1=left
@@ -416,6 +418,12 @@ func _physics_process(delta: float) -> void:
 	if _dead:
 		return
 
+	# Stand-down mode: force STANDDOWN state, override any transition
+	if _standdown and _state != State.STANDDOWN:
+		_state = State.STANDDOWN
+		_want_direction = 0.0
+		velocity.x = 0.0
+
 	# Out-of-bounds recovery: teleport back to spawn area
 	if global_position.y > 1200 or global_position.y < -200 or global_position.x < -100 or global_position.x > 2020:
 		print("MONSTER: out of bounds at (%.0f,%.0f) — teleporting back" % [global_position.x, global_position.y])
@@ -487,6 +495,8 @@ func _physics_process(delta: float) -> void:
 			_do_transition_bipedal(delta)
 		State.TRANSITION_QUADRUPED:
 			_do_transition_quadruped(delta)
+		State.STANDDOWN:
+			pass  # No AI — just idle in place, skeleton still runs
 
 	# Leap/precog states handle their own skeleton — skip normal locomotion/pose
 	var in_leap_flight: bool = (_state == State.ATTACK_LEAP_WINDUP
@@ -3298,6 +3308,15 @@ func _draw() -> void:
 	_draw_tail()
 	_draw_legs()
 	_draw_neck_head()
+	if _standdown:
+		# White flag / STANDDOWN indicator above the monster
+		var flag_pos: Vector2 = _spine[1] + Vector2(0, -40)
+		draw_string(ThemeDB.fallback_font, flag_pos, "STANDDOWN", HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(1, 1, 1, 0.8))
+		# Small white flag triangle
+		var fp: Vector2 = flag_pos + Vector2(-20, -12)
+		draw_line(fp, fp + Vector2(0, 14), Color.WHITE, 1.5)
+		var flag_pts := PackedVector2Array([fp, fp + Vector2(10, 3), fp + Vector2(0, 6)])
+		draw_polygon(flag_pts, PackedColorArray([Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7)]))
 	if PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
 		if debug_draw_lite or debug_draw_enabled:
 			_draw_debug()
