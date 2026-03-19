@@ -17,6 +17,7 @@ sleep 5
 
 R "debug"
 R "clear"
+R "clearplayers"
 sleep 2
 
 # Spawn monster and dummy player (monster needs a target to stay alive)

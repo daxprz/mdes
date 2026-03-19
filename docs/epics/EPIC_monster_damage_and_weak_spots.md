@@ -209,10 +209,10 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 
 ### Tasks
 
-- [ ] **9.1** Run `scripts/test_all.sh` and capture: hit rate, total damage, min FPS, worst IK, worst thrash, ball quality
-- [ ] **9.2** Run `scripts/test_baseline.sh` and capture all 10 scenario results
-- [ ] **9.3** Run `scripts/test_edge_cases.sh` and capture all 8 edge case results
-- [ ] **9.4** Record results in the Baseline History table below as the "Pre-EPIC" row
+- [x] **9.1** Run `scripts/test_all.sh` — 17/18 hit, 3757 dmg, min_fps=19, worst_ik=1996, worst_thrash=24, ball=46
+- [x] **9.2** Run `scripts/test_baseline.sh` — 5/10 hit, 865 dmg, min_fps=23, worst_ik=1997, worst_thrash=5 (debug draw ON)
+- [x] **9.3** Run `scripts/test_edge_cases.sh` — 8/8 hit, worst_ik=1185
+- [x] **9.4** Record results in the Baseline History table below as the "Pre-EPIC" row
 - [ ] **9.5** After each story completes, add a new row with updated metrics
 
 ---
@@ -222,7 +222,7 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 | Checkpoint | Hit Rate | Damage | Min FPS | Worst IK | Worst Thrash | Ball | Notes |
 |------------|----------|--------|---------|----------|--------------|------|-------|
 | v0.9.17 (from prior EPIC) | 17/18 | 3812 | 50 | 1996 | 24 | 46 | Last recorded baseline |
-| Pre-EPIC (run Story 9) | — | — | — | — | — | — | Capture before any changes |
+| Pre-EPIC (Story 9) | 17/18 | 3757 | 19 | 1997 | 24 | 46 | test_all: 17/18 3757dmg; baseline: 5/10 865dmg (debug on); edge: 8/8 |
 | After Story 2 (Weak Spots) | — | — | — | — | — | — | |
 | After Story 6 (Stand-Down) | — | — | — | — | — | — | |
 | After Story 5 (Attack Dummy) | — | — | — | — | — | — | |
