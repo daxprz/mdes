@@ -192,11 +192,87 @@ When the quadruped is TAB-selected in debug mode (Ctrl+D):
 - **State info panel**: state, facing, speed, HP, legs, posture, velocity, floor status
 - **Leap planning**: yellow strike zone circle, arrival point markers (green=open/red=blocked), all tested arcs (dim), chosen trajectory (bright green), phase summary
 
+## Pre-cognition (Multi-Hop Platform Pathfinding)
+
+When the monster hasn't landed a hit on any player for `PRECOG_TRIGGER_TIME` (5s), it curls up and enters a thinking phase that solves how to reach the target across arbitrary platform layouts.
+
+### Phase 0 — Platform Detection
+
+1. **Ball drop**: Virtual balls are dropped in a 2D grid (`PRECOG_GRID_SPACING` = 50px) covering the entire screen. Each ball falls straight down via raycast until it hits a surface.
+2. **Y-snap**: All landing Y values are snapped to a 15px grid so flat surfaces become one Y level.
+3. **Deduplication**: Identical snapped positions are merged.
+4. **Surface grouping**: Within each Y level, adjacent X values (gap ≤ 1.5× grid spacing) are grouped into a single platform.
+5. **Entity tagging**: The monster's and target's current platforms are identified by raycasting the floor beneath them and matching to the nearest platform (±30px Y, ±40px X tolerance).
+
+Result: typically 5-8 platforms on the title screen (floor, 2 lower platforms, 2 upper platforms, cave ledges).
+
+### Phase 1 — Graph Building (one pair per frame)
+
+For every pair of platforms (i, j), the system tries to find a leap trajectory:
+
+1. **Launch points**: All ball landing positions on platform i are used as candidates (already computed).
+2. **Lateral clearance**: Launch points too close to walls (< `LEAP_BODY_RADIUS * 1.2` = 26px) are rejected.
+3. **Trajectory planning**: For each launch point, `_plan_leap_to_surface` targets the destination platform's surface directly (y = plat_y - 5, sampled across the platform width with body-radius inset from edges).
+4. **Reverse kinematics**: For each (launch, arrival) pair and each of 7 flight times (0.2s-1.5s), the required launch velocity is computed analytically: `Vx = dx/t`, `Vy = (dy - ½gt²)/t`.
+5. **Arc clearance**: 3 parallel arcs (center, left, right at body radius) are simulated and raycasted. Hits within the destination platform rect are ignored (`_check_arc_clear_ignore`).
+6. **Best edge**: The launch point with the best score (closest arrival to platform center + flight time preference) becomes the graph edge.
+
+### Phase 2 — Dijkstra Pathfinding
+
+Standard Dijkstra from the monster's platform to the target's platform on the edge graph. Edge cost = distance between platform centers. Produces an ordered sequence of hops.
+
+### Phase 3 — Execution
+
+1. The first hop's launch position becomes the **waypoint**. The monster walks there using foot-driven locomotion.
+2. On arrival (within 10px horizontally), the pre-computed launch velocity is applied — the monster enters `ATTACK_LEAP_WINDUP`.
+3. After landing (`_end_leap`), the skeleton resets to standing pose (spine horizontal, feet raycast to floor).
+4. If more hops remain in the path, the next waypoint is set automatically.
+5. If no more hops, normal chase resumes.
+
+### Debug Visualization
+
+When TAB-selected in debug mode:
+- **Purple dots**: raw ball landings
+- **Colored horizontal bars**: detected platforms (green = monster, red = target, purple = other) with P# labels
+- **Blue arcs**: all viable edges in the connectivity graph
+- **Yellow lines + circles**: the chosen Dijkstra path
+- **Green arcs**: leap trajectories along the chosen path
+- **Orange circle + "WAYPOINT"**: current walk destination
+- **Status line**: `PRECOG: GRAPH plats:5 edges:20 path:2 hop:1/1`
+
+## RCON Server
+
+TCP server on port 9999 for external tool control. Enables automated testing without a controller.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `help` | List all commands |
+| `debug` | Toggle debug mode |
+| `spawn monster [x y]` | Spawn quadruped at position |
+| `spawn dummy [x y]` | Spawn controllerless dummy player |
+| `tp <x> <y>` | Teleport first player to position |
+| `tab [n]` | Cycle debug selection n times |
+| `key <name>` | Simulate key press (e.g. `key ctrl+d`) |
+| `clear` | Remove all enemies, disable respawning |
+| `precog` | Force precognition on all quadrupeds |
+| `enemies` | List all enemies with positions |
+| `players` | List all players with positions |
+| `status` | Show debug state, counts, selection |
+| `quit` | Exit game |
+
+### Dummy Player
+
+A `CharacterBody2D` in the `players` group with gravity, collision, and green circle rendering. Has `player_index = 0`. Teleportable via RCON `tp` command. No controller required — the monster targets it like a real player.
+
 ## Integration
 
 - `add_to_group("enemies")` — standard enemy group
 - Standard interface: `take_damage()`, `apply_knockback()`, `died` signal
 - Rift tentacle absorption via meta (per-part, multiple tentacles possible)
 - `mass = 200.0` (very heavy — knockback barely moves it)
-- Debug spawn: press M in debug mode on title screen
-- Self-contained: no changes to any existing file (except title_screen.gd for M key)
+- Debug spawn: press M in debug mode on title screen, or via RCON `spawn monster`
+- RCON server: autoload, port 9999, `scripts/autoload/rcon.gd`
+- Automated test: `scripts/test_precog.sh` — spawns dummy + monster, teleports to 6 positions, verifies path + leap execution
+- Self-contained: no changes to existing gameplay files

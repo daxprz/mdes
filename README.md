@@ -19,8 +19,9 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 - **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
 - **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
 - **Migration patterns** — cyclic multi-phase movement sequences that drive wildlife across the level
-- **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, and head tracking
+- **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, head tracking, and pre-cognition pathfinding
 - **Cave walls** — curved floor-to-wall transitions with collision, undulation, and standing ledges
+- **RCON server** (port 9999) — remote console for automated testing, spawning, teleporting, debug control
 
 ## How to Play
 
@@ -55,6 +56,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.10
+**Pre-cognition Pathfinding, RCON Server, Automated Testing**
+- Pre-cognition system: when the monster can't hit a player for 5s, it curls up and plans a multi-hop route across platforms
+- Ball-drop platform detection: grid of virtual balls covers the entire map, landings are Y-snapped and grouped into surfaces
+- Dijkstra pathfinding across the platform connectivity graph to find shortest route from monster to target
+- Destination-aware arc clearance: ignores hits on the landing platform so upward leaps aren't falsely rejected
+- IK skeleton reset after landing: spine returns to horizontal, feet raycast to floor
+- RCON server (TCP port 9999): debug, spawn monster/dummy, teleport, tab, key simulation, clear enemies, force precog, status
+- Dummy player: controllerless target with gravity and collision for automated testing
+- Automated test script (`scripts/test_precog.sh`): 6/6 positions with successful pathfind + leap execution
+- Debug visualization: platform bars, graph edges, Dijkstra path, waypoint markers, precog phase status
 
 ### v0.9.9
 **Quadruped Leap Planning, Head Pivot, Cave Walls, Keystone Platform**
