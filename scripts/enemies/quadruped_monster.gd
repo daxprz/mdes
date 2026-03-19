@@ -206,7 +206,7 @@ var _head_severed: bool = false
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
-var debug_draw_lite: bool = true      # Lightweight debug (state, platforms, waypoint, target)
+var debug_draw_lite: bool = true     # Lightweight debug (state, platforms, waypoint, target)
 
 # IK quality scoring (lower = better)
 var _ik_score: float = 0.0         # Current frame IK quality score
@@ -1944,23 +1944,28 @@ func _precog_detect_platforms() -> void:
 
 
 func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
-	## Ensure there's a platform entry for the monster/target's current position.
-	## If they're standing on an existing platform, tag it. Otherwise add one.
-	## Uses generous Y tolerance since platform Y is snapped and entity Y is exact.
-	# Use the floor under the entity, not its body position, for matching
+	## Tag the platform the entity is standing on.
+	## First tries exact match (on the platform), then falls back to
+	## the NEAREST known platform (never creates new disconnected platforms).
 	var floor_y: float = _raycast_floor(world_pos - global_position) + global_position.y
+
+	# Try exact match first
 	for plat in _precog_platforms:
 		if absf(floor_y - plat["pos"].y) < 30.0 and world_pos.x >= plat["min_x"] - 40 and world_pos.x <= plat["max_x"] + 40:
 			plat["label"] = label
 			return
-	# Not on a known platform — add a point platform (reuse floor_y from above)
-	_precog_platforms.append({
-		"pos": Vector2(world_pos.x, floor_y),
-		"min_x": world_pos.x - 10,
-		"max_x": world_pos.x + 10,
-		"weight": 1,
-		"label": label,
-	})
+
+	# No exact match — find the nearest platform (by 2D distance)
+	var best_plat: Dictionary = {}
+	var best_dist: float = INF
+	for plat in _precog_platforms:
+		var d: float = world_pos.distance_to(plat["pos"])
+		if d < best_dist:
+			best_dist = d
+			best_plat = plat
+
+	if not best_plat.is_empty():
+		best_plat["label"] = label
 
 
 func _precog_build_graph_step() -> void:
