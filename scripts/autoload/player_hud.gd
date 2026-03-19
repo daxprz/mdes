@@ -668,6 +668,14 @@ func _input(event: InputEvent) -> void:
 	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
 		_debug_cycle_enemy()
 
+	# I toggles debug draw on selected enemy
+	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_I:
+		if is_instance_valid(debug_selected_enemy):
+			if "debug_draw_lite" in debug_selected_enemy:
+				debug_selected_enemy.debug_draw_lite = not debug_selected_enemy.debug_draw_lite
+			if "debug_draw_enabled" in debug_selected_enemy:
+				debug_selected_enemy.debug_draw_enabled = not debug_selected_enemy.debug_draw_enabled
+
 	# SEL toggles HUD popup
 	if event.is_action_pressed("debug_toggle"):
 		var device_id_sel := _get_device_from_event(event)

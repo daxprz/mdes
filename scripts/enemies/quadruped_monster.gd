@@ -3259,19 +3259,21 @@ func _draw_debug() -> void:
 	draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
 	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
 	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
-	draw_string(font, info_pos, "State: %s" % state_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, dbg)
-	draw_string(font, info_pos + Vector2(0, 12), "Facing: %s  Speed: %.0f" % ["R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	draw_string(font, info_pos + Vector2(0, 22), "HP: %d  Legs: %d" % [health, _count_active_legs()], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	draw_string(font, info_pos + Vector2(0, 32), "Posture: %s  Vel: (%.0f,%.0f)" % ["QUAD" if _posture == Posture.QUADRUPED else "BIPED", velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	var dy: int = 0
+	draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	dy += 12
+	draw_string(font, info_pos + Vector2(0, dy), "HP: %d  Legs: %d  Vel: (%.0f,%.0f)" % [health, _count_active_legs(), velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	dy += 12
 	var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
-	draw_string(font, info_pos + Vector2(0, 42), "onFloor: %s  wantDir: %.1f  noHit: %.0fs/%.0f%s" % [str(is_on_floor()), _want_direction, _time_since_strike_range, PRECOG_TRIGGER_TIME, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-
-	# IK quality score
+	draw_string(font, info_pos + Vector2(0, dy), "Floor: %s  noHit: %.0fs%s" % [str(is_on_floor()), _time_since_strike_range, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	dy += 12
+	draw_string(font, info_pos + Vector2(0, dy), "Pos: (%.0f,%.0f)  floorY: %.1f" % [global_position.x, global_position.y, floor_y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+	dy += 14
 	var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
-	draw_string(font, info_pos + Vector2(0, 52), "IK: now=%.0f avg=%.0f peak=%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
-	# Strategy thrash score
+	draw_string(font, info_pos + Vector2(0, dy), "IK: %.0f avg:%.0f pk:%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
+	dy += 12
 	var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
-	draw_string(font, info_pos + Vector2(0, 62), "Thrash: %d  planAttempts: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
+	draw_string(font, info_pos + Vector2(0, dy), "Thrash: %d  plan: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
 
 	# Draw waypoint marker if active
 	if _precog_has_waypoint:
@@ -3281,7 +3283,6 @@ func _draw_debug() -> void:
 		draw_string(font, wpt_local + Vector2(16, -4), "WAYPOINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.5, 0))
 		# Line from monster to waypoint
 		draw_line(Vector2.ZERO, wpt_local, Color(1, 0.5, 0, 0.4), 1.5)
-	draw_string(font, info_pos + Vector2(0, 52), "floorY: %.1f  global: (%.0f,%.0f)" % [floor_y, global_position.x, global_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 
 	# -- Target indicator: crosshair on the hunted player --
 	if is_instance_valid(_target):
