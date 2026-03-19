@@ -349,23 +349,44 @@ func _make_circle_collider(radius: float) -> CollisionShape2D:
 
 
 func _update_collision_positions() -> void:
-	## Move the 5 collision circles to follow the skeleton each frame.
-	## During leaps, shrink colliders so the body can pass through tight gaps.
+	## Move the 5 collision circles to follow the skeleton.
+	## During normal movement: skull/shoulder/hip follow spine, body center near floor.
+	## During leaps: all follow skeleton with smaller radii.
 	var in_flight: bool = _leap_ik_off
-	if _col_skull:
-		_col_skull.position = _skull
-		(_col_skull.shape as CircleShape2D).radius = 6.0 if in_flight else 12.0
-	if _col_shoulder:
-		_col_shoulder.position = _spine[0]
-		(_col_shoulder.shape as CircleShape2D).radius = 8.0 if in_flight else 14.0
-	if _col_body_center:
-		var spine_mid_x: float = _spine[1].x
-		var spine_y: float = _spine[1].y
-		_col_body_center.position = Vector2(spine_mid_x, spine_y * 0.3)
-		(_col_body_center.shape as CircleShape2D).radius = 10.0 if in_flight else 16.0
-	if _col_hip:
-		_col_hip.position = _spine[2]
-		(_col_hip.shape as CircleShape2D).radius = 8.0 if in_flight else 14.0
+
+	if in_flight:
+		# During flight: compact circles following skeleton
+		if _col_skull:
+			_col_skull.position = _skull
+			(_col_skull.shape as CircleShape2D).radius = 6.0
+		if _col_shoulder:
+			_col_shoulder.position = _spine[0]
+			(_col_shoulder.shape as CircleShape2D).radius = 8.0
+		if _col_body_center:
+			_col_body_center.position = _spine[1]
+			(_col_body_center.shape as CircleShape2D).radius = 8.0
+		if _col_hip:
+			_col_hip.position = _spine[2]
+			(_col_hip.shape as CircleShape2D).radius = 8.0
+	else:
+		# Ground movement: circles positioned for proper floor contact
+		# Body center low enough to touch the floor (y = -8, r = 10 → reaches y=2)
+		if _col_body_center:
+			_col_body_center.position = Vector2(0, -10.0)
+			(_col_body_center.shape as CircleShape2D).radius = 12.0
+		# Shoulder and hip at spine level (handle platform edge contact)
+		if _col_shoulder:
+			_col_shoulder.position = _spine[0]
+			(_col_shoulder.shape as CircleShape2D).radius = 10.0
+		if _col_hip:
+			_col_hip.position = _spine[2]
+			(_col_hip.shape as CircleShape2D).radius = 10.0
+		# Skull follows head
+		if _col_skull:
+			_col_skull.position = _skull
+			(_col_skull.shape as CircleShape2D).radius = 8.0
+
+	# Tail always follows
 	if _col_tail and not _tail_severed and _tail.size() > 4:
 		_col_tail.position = _tail[4]
 	elif _col_tail:
