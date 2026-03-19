@@ -499,9 +499,10 @@ func _physics_process(delta: float) -> void:
 		_solve_pose(delta)
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
 
-	# Affix body collider to torso center (like a hanging belly)
+	# Affix body collider to torso — hanging belly that reaches the floor
+	# Spine is at ~y=-50, floor at ~y=0. Belly at y=-14 with r=14 reaches y=0.
 	if _body_collision:
-		_body_collision.position = _spine[1] + Vector2(0, 10)  # Below spine midpoint
+		_body_collision.position = Vector2(_spine[1].x, -14.0)
 
 	# Prevent skull/tail/spine from clipping through geometry
 	_constrain_skeleton_to_world()
