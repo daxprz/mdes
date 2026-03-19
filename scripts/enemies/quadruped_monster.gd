@@ -27,9 +27,9 @@ const TAIL_WHIP_STIFFNESS := 2.0  # Loose only during whip
 const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
 # Foot-driven locomotion
-const STEP_THRESHOLD := 30.0   # How far behind a foot gets before it steps
-const STEP_DURATION := 0.15    # Seconds to complete a step
-const STEP_HEIGHT := 18.0      # How high foot lifts during step
+const STEP_THRESHOLD := 60.0   # How far behind a foot gets before it steps
+const STEP_DURATION := 0.2     # Seconds to complete a step
+const STEP_HEIGHT := 28.0      # How high foot lifts during step
 const STEP_OVERSHOOT := 0.25   # Overshoot fraction past target
 const FOOT_PUSH_FORCE := 120.0 # Force each planted foot exerts to push body
 const FOOT_GRIP := 0.92        # How well planted feet hold ground (velocity damping)
@@ -159,13 +159,13 @@ func _init_skeleton() -> void:
 	# Neck: extends forward-up from spine[0]
 	_neck.resize(2)
 	_neck[0] = _spine[0]
-	_neck_rest = Vector2(NECK_LEN * 0.8 * _facing, -NECK_LEN * 0.6)
+	_neck_rest = Vector2(NECK_LEN * 0.8 * _facing, -NECK_LEN * 0.7)
 	_neck[1] = _spine[0] + _neck_rest
 
-	# Head
-	_skull_rest = Vector2(12 * _facing, -4)
+	# Head: skull connects directly to neck tip (no gap), 2x size
+	_skull_rest = Vector2(14 * _facing, -8)
 	_skull = _neck[1] + _skull_rest
-	_jaw_rest = Vector2(4 * _facing, JAW_LEN * 0.3)
+	_jaw_rest = Vector2(8 * _facing, JAW_LEN * 0.6)
 	_jaw = _skull + _jaw_rest
 
 	# Tail: extends backward from spine[2], slightly raised (rigid)
@@ -385,8 +385,8 @@ func _solve_pose(delta: float) -> void:
 		# IK solves the knee to connect hip to wherever the foot is.
 
 		# Knee: solved via 2-bone IK (hip → knee → foot)
-		# Front legs bend forward (+1), rear legs bend backward (-1)
-		var bend_dir: float = -1.0 if li < 2 else 1.0
+		# Mammal anatomy: front elbows bend BACKWARD, rear knees bend FORWARD
+		var bend_dir: float = 1.0 if li < 2 else -1.0
 		bend_dir *= _facing  # Flip with facing
 		var knee_pos: Vector2 = _solve_leg_ik(
 			_legs[li][0], _legs[li][2],
@@ -484,17 +484,9 @@ func _update_gait(delta: float) -> void:
 			_legs[li][2] = _foot_world[li] - global_position
 		# else: foot is mid-step, _animate_step handles it
 
-	# Check if any feet need to step (they've fallen too far behind the body)
-	# Diagonal pair locking: only one pair steps at a time
-	var pair_a_stepping: bool = _is_leg_stepping(0) or _is_leg_stepping(3)
-	var pair_b_stepping: bool = _is_leg_stepping(1) or _is_leg_stepping(2)
-
-	if not pair_b_stepping:
-		_try_step(0)
-		_try_step(3)
-	if not pair_a_stepping:
-		_try_step(1)
-		_try_step(2)
+	# Each foot steps independently when it falls too far behind
+	for li in range(4):
+		_try_step(li)
 
 	# Animate active steps
 	for li in range(4):
@@ -513,7 +505,7 @@ func _ideal_foot_world(li: int) -> Vector2:
 	## Where this foot SHOULD be in world space: below hip, on the floor, ahead of body.
 	var hip_local: Vector2 = _legs[li][0]
 	var hip_world: Vector2 = global_position + hip_local
-	var stride_ahead: float = _want_direction * _move_speed * 0.2
+	var stride_ahead: float = _want_direction * _move_speed * 0.35
 	var target_x: float = hip_world.x + stride_ahead
 	var floor_y: float = _raycast_floor(Vector2(target_x - global_position.x, hip_local.y)) + global_position.y
 	return Vector2(target_x, floor_y)
@@ -1077,47 +1069,50 @@ func _draw_neck_head() -> void:
 		return
 
 	var neck_col := Color(0.33, 0.27, 0.22)
-	# Neck
-	draw_line(_neck[0], _neck[1], neck_col, 6.0, true)
-	draw_circle(_neck[0], 4.0, neck_col)
+	var f: float = _facing
 
-	# Skull
+	# Neck: thick line from spine[0] through neck base to neck tip, then to skull
+	draw_line(_neck[0], _neck[1], neck_col, 8.0, true)
+	draw_line(_neck[1], _skull, neck_col, 7.0, true)  # Connect neck to skull
+	draw_circle(_neck[0], 5.0, neck_col)
+	draw_circle(_neck[1], 4.5, neck_col)
+
+	# Skull (2x size)
 	var skull_col := Color(0.35, 0.28, 0.22)
-	var skull_size := Vector2(18 * _facing, -12)
 	var skull_pts := PackedVector2Array([
-		_skull + Vector2(-6 * _facing, -8),
-		_skull + Vector2(14 * _facing, -6),
-		_skull + Vector2(16 * _facing, 2),
-		_skull + Vector2(8 * _facing, 6),
-		_skull + Vector2(-4 * _facing, 4),
+		_skull + Vector2(-12 * f, -16),
+		_skull + Vector2(28 * f, -12),
+		_skull + Vector2(32 * f, 4),
+		_skull + Vector2(16 * f, 12),
+		_skull + Vector2(-8 * f, 8),
 	])
 	var skull_cols := PackedColorArray([skull_col, skull_col, skull_col, skull_col, skull_col])
 	draw_polygon(skull_pts, skull_cols)
 
-	# Eye
-	var eye_pos: Vector2 = _skull + Vector2(8 * _facing, -3)
-	draw_circle(eye_pos, 2.5, Color(1.0, 0.2, 0.1))
-	draw_circle(eye_pos, 1.2, Color(1.0, 0.5, 0.2))
+	# Eye (scaled up)
+	var eye_pos: Vector2 = _skull + Vector2(16 * f, -5)
+	draw_circle(eye_pos, 4.0, Color(1.0, 0.2, 0.1))
+	draw_circle(eye_pos, 2.0, Color(1.0, 0.5, 0.2))
 
-	# Jaw
+	# Jaw (2x size)
 	var jaw_col := Color(0.3, 0.24, 0.19)
 	var jaw_pts := PackedVector2Array([
-		_skull + Vector2(-2 * _facing, 4),
-		_skull + Vector2(14 * _facing, 2 + _jaw_open * 8),
+		_skull + Vector2(-4 * f, 8),
+		_skull + Vector2(28 * f, 4 + _jaw_open * 16),
 		_jaw,
-		_skull + Vector2(-2 * _facing, 6 + _jaw_open * 4),
+		_skull + Vector2(-4 * f, 12 + _jaw_open * 8),
 	])
 	var jaw_cols := PackedColorArray([jaw_col, jaw_col, jaw_col, jaw_col])
 	draw_polygon(jaw_pts, jaw_cols)
 
-	# Teeth (small triangles along jaw edge)
+	# Teeth (scaled up)
 	var teeth_col := Color(0.9, 0.85, 0.7)
-	var tooth_count := 3
+	var tooth_count := 4
 	for i in range(tooth_count):
 		var t: float = float(i + 1) / float(tooth_count + 1)
-		var tooth_base: Vector2 = _skull.lerp(_skull + Vector2(14 * _facing, 2), t)
-		var tooth_tip: Vector2 = tooth_base + Vector2(0, 4 + _jaw_open * 3)
-		draw_line(tooth_base, tooth_tip, teeth_col, 1.5)
+		var tooth_base: Vector2 = _skull.lerp(_skull + Vector2(28 * f, 4), t)
+		var tooth_tip: Vector2 = tooth_base + Vector2(0, 6 + _jaw_open * 5)
+		draw_line(tooth_base, tooth_tip, teeth_col, 2.0)
 
 
 func _draw_debug() -> void:
