@@ -52,9 +52,25 @@ var _hit := false  # Prevent double-damage from body + area overlap
 func _on_body_entered(body: Node2D) -> void:
 	if _hit:
 		return
-	# Skip enemies with hitbox parts — let _on_area_entered handle them
-	if body.has_method("take_part_damage"):
+	# Enemy with hitbox parts: find the nearest hitbox and damage that part
+	if body.has_method("take_part_damage") and "_hitboxes" in body:
+		_hit = true
+		var best_part: String = "body"
+		var best_dist: float = 999.0
+		for part_name in body._hitboxes:
+			var hitbox: Area2D = body._hitboxes[part_name]
+			var hitbox_world: Vector2 = body.global_position + hitbox.position
+			var d: float = global_position.distance_to(hitbox_world)
+			if d < best_dist:
+				best_dist = d
+				best_part = part_name
+		body.take_part_damage(best_part, damage, owner_index)
+		if projectile_type == "muffin_grenade":
+			_explode()
+		else:
+			queue_free()
 		return
+
 	if body.has_method("take_damage"):
 		_hit = true
 		body.take_damage(damage, owner_index)

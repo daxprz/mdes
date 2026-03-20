@@ -3595,14 +3595,14 @@ func _spawn_blood(world_pos: Vector2, count: int, spread_mode: String) -> void:
 		else:
 			var angle: float = randf() * TAU
 			dir = Vector2(cos(angle), sin(angle))
-		var speed: float = randf_range(40.0, 120.0)
-		var life: float = randf_range(0.4, 0.8)
+		var speed: float = randf_range(60.0, 180.0)
+		var life: float = randf_range(0.8, 1.5)
 		_blood_particles.append({
 			"pos": world_pos,
 			"vel": dir * speed,
 			"life": life,
 			"max_life": life,
-			"color": Color(0.7, 0.05, 0.05, 0.9),
+			"color": Color(0.8, 0.05, 0.05, 1.0),
 		})
 
 
@@ -3633,8 +3633,8 @@ func _draw_blood_particles() -> void:
 		var local_pos: Vector2 = p["pos"] - global_position
 		var alpha: float = clampf(p["life"] / p["max_life"], 0.0, 1.0)
 		var col: Color = p["color"]
-		col.a = alpha * 0.9
-		var size: float = lerpf(1.5, 3.5, 1.0 - alpha)
+		col.a = alpha
+		var size: float = lerpf(2.5, 5.0, 1.0 - alpha)
 		draw_circle(local_pos, size, col)
 
 
