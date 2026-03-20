@@ -52,6 +52,10 @@ Extend the grapple state machine to support tether mode with L2 as the second-po
 - [ ] **1.5** On second hook connect → `TETHER_ACTIVE`: player detaches from rope, rope stays between anchor A and anchor B
 - [ ] **1.6** Store tether data: anchor A (position, body, offset, part), anchor B (same), target length (from D-pad adjustment in step 3)
 - [ ] **1.7** Move existing L2 boost/shrink functionality to a different binding (or disable during grapple connected state)
+- [ ] **1.8** Tether inventory: max 5 active tethers per player. Track in `_active_tethers: Array` (max size 5). New tether refused if 5 already active.
+- [ ] **1.9** Broken/severed tethers are automatically reclaimed — removed from `_active_tethers`, freeing a slot
+- [ ] **1.10** On second hook connect: player DROPS from the rope (velocity preserved, normal gravity resumes). Rope becomes standalone tether entity between A and B.
+- [ ] **1.11** Self-tether: if player aims second hook at nothing / presses a cancel, anchor B = player. Player is now tethered to anchor A (bound by tether length, can still walk/jump within radius).
 
 ---
 
@@ -133,35 +137,49 @@ Visual rendering of the spinning second hook, thrown rope, and active tether.
 
 ---
 
-## STORY 7: Attack Dummy Tether Support
+## STORY 7: Tether HUD — Inventory Dots
+
+5 brown dots on the Ranger's HUD showing available tether slots.
+
+### Tasks
+
+- [ ] **7.1** Draw 5 small dots near the Ranger's grapple UI area
+- [ ] **7.2** Solid brown dot = tether available. Empty/outline dot = tether in use.
+- [ ] **7.3** When a tether is severed/broken, its dot transitions from empty → solid (reclaimed)
+- [ ] **7.4** When a tether is created, a dot transitions from solid → empty
+- [ ] **7.5** Subtle animation on transitions (pulse on reclaim, fade on use)
+
+---
+
+## STORY 8: Attack Dummy Tether Support
 
 The attack dummy can simulate tether actions for automated testing — aim at attachment points, fire grapple hooks, create tethers.
 
 ### Tasks
 
-- [ ] **7.1** New weapon for attack dummy: `"tether"` — fires a grapple-like hook at the target
-- [ ] **7.2** Tether weapon flow: dummy aims at target enemy attachment point → fires hook → on connect, fires second hook straight down (to floor) or to a specified second target
-- [ ] **7.3** Configurable tether length on dummy: `set_tether_length(px: float)`
-- [ ] **7.4** Configurable second target: `set_tether_target_b(target: Node2D, part: String)` or `"floor"` for ground anchor
-- [ ] **7.5** RCON: `attacker weapon tether` — switch to tether weapon
-- [ ] **7.6** RCON: `attacker tether_length <px>` — set tether length
-- [ ] **7.7** RCON: `attacker tether_b floor` or `attacker tether_b enemy <idx> <part>` — set second anchor target
+- [ ] **8.1** New weapon for attack dummy: `"tether"` — fires a grapple-like hook at the target
+- [ ] **8.2** Tether weapon flow: dummy aims at target enemy attachment point → fires hook → on connect, fires second hook straight down (to floor) or to a specified second target
+- [ ] **8.3** Configurable tether length on dummy: `set_tether_length(px: float)`
+- [ ] **8.4** Configurable second target: `set_tether_target_b(target: Node2D, part: String)` or `"floor"` for ground anchor
+- [ ] **8.5** RCON: `attacker weapon tether` — switch to tether weapon
+- [ ] **8.6** RCON: `attacker tether_length <px>` — set tether length
+- [ ] **8.7** RCON: `attacker tether_b floor` or `attacker tether_b enemy <idx> <part>` — set second anchor target
 
 ---
 
-## STORY 8: RCON & Automated Tests
+## STORY 9: RCON & Automated Tests
 
 RCON commands and test scripts for tether verification.
 
 ### Tasks
 
-- [ ] **8.1** RCON: `tether <enemy_idx> <point> floor` — create tether from enemy body part to floor directly below
-- [ ] **8.2** RCON: `tether <enemy_idx1> <point1> <enemy_idx2> <point2>` — tether two enemy body parts
-- [ ] **8.3** RCON: `tether wall <x1> <y1> <x2> <y2>` — tether between two wall positions
-- [ ] **8.4** RCON: `tether length <px>` — set length on most recent tether
-- [ ] **8.5** RCON: `tether cut` — sever all active tethers
-- [ ] **8.6** RCON: `tether status` — show all active tethers: anchors, length, tension, HP
-- [ ] **8.7** `scripts/test_tether.sh` — automated tests:
+- [ ] **9.1** RCON: `tether <enemy_idx> <point> floor` — create tether from enemy body part to floor directly below
+- [ ] **9.2** RCON: `tether <enemy_idx1> <point1> <enemy_idx2> <point2>` — tether two enemy body parts
+- [ ] **9.3** RCON: `tether wall <x1> <y1> <x2> <y2>` — tether between two wall positions
+- [ ] **9.4** RCON: `tether length <px>` — set length on most recent tether
+- [ ] **9.5** RCON: `tether cut` — sever all active tethers
+- [ ] **9.6** RCON: `tether status` — show all active tethers: anchors, length, tension, HP
+- [ ] **9.7** `scripts/test_tether.sh` — automated tests:
   - Create tether enemy↔floor, verify enemy can't move past length
   - Create tether enemy↔enemy, verify pull forces
   - Attach balloons to tethered enemy, verify tether holds it down
@@ -172,14 +190,15 @@ RCON commands and test scripts for tether verification.
 
 ## Implementation Priority
 
-1. **Story 1 (State Machine)** — Foundation. L1 first hook, L2 second hook.
-2. **Story 2 (Tether Entity)** — Core. Rope physics between two anchors.
-3. **Story 6 (Rendering)** — Need to see what's happening.
-4. **Story 3 (Length Control)** — Player agency via D-pad.
-5. **Story 4 (Body Part Targeting)** — Leverages existing attachment system.
-6. **Story 7 (Attack Dummy)** — Automated testing capability.
-7. **Story 5 (Severing)** — Gameplay interaction.
-8. **Story 8 (RCON/Tests)** — Automation.
+1. **Story 2 (Tether Entity)** — Core. Standalone rope entity with physics. Can test via RCON before player controls exist.
+2. **Story 6 (Rendering)** — Need to see what's happening.
+3. **Story 9 (RCON/Tests)** — Create tethers programmatically, verify physics.
+4. **Story 1 (State Machine)** — Player controls: L1 first hook, L2 second hook, drop on connect.
+5. **Story 3 (Length Control)** — Player agency via D-pad.
+6. **Story 7 (HUD)** — 5 tether dots.
+7. **Story 4 (Body Part Targeting)** — Leverages existing attachment system.
+8. **Story 8 (Attack Dummy)** — Automated testing with tether weapon.
+9. **Story 5 (Severing)** — Gameplay interaction.
 
 ---
 
@@ -197,8 +216,8 @@ RCON commands and test scripts for tether verification.
 
 ---
 
-## Open Questions
+## Answered Questions
 
-- **Multiple tethers**: Can the player have more than one active tether at a time? (fire-and-forget, then start another?)
-- **Self-tether**: Can the player tether themselves to something? (Would that be different from normal grapple swing?)
-- **Player swing + second hook**: While the player is swinging on the first rope, the second hook spins at anchor A. Can the player still swing/move during this, or are they locked?
+- **Multiple tethers**: Yes — max 5 active tethers per player. UI: 5 brown dots on Ranger HUD (solid = available, empty = in use). Broken tethers are reclaimed (dot becomes solid again).
+- **Self-tether**: Yes — player can be anchor A or anchor B. This is different from normal swing: the tether persists, player is physically bound to the anchor point.
+- **Player swing + second hook**: Player swings freely while L2 spins/throws the second hook. On second hook connect, player DROPS from the rope and the tether becomes a standalone rope between anchor A and anchor B.
