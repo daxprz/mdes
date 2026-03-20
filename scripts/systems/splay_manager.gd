@@ -71,7 +71,9 @@ func save_pose(pose: Dictionary) -> void:
 
 
 func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, behavior: String = "asleep") -> Dictionary:
-	## Spawn a splay instance: creature + tethers. Returns instance data dict.
+	## Spawn a splay instance: creature(s) + tethers. Returns instance data dict.
+	## Supports single-creature (legacy "creature" + "connections" keys) and
+	## multi-creature ("creatures" array) pose formats.
 	var pose: Dictionary = load_pose(pose_name)
 	if pose.is_empty():
 		push_warning("SplayManager: pose '%s' not found" % pose_name)
@@ -83,10 +85,33 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 	var rotation_rad: float = deg_to_rad(rotation_deg)
 
-	# Spawn the creature
-	var creature_type: String = pose.get("creature", "quadruped")
-	var creature: Node2D = _spawn_creature(creature_type, pos)
-	if not creature:
+	# Determine creature list — support both single and multi formats
+	var creature_defs: Array = []
+	if pose.has("creatures"):
+		creature_defs = pose["creatures"]
+	else:
+		# Legacy single-creature format
+		creature_defs = [{
+			"creature_type": pose.get("creature", "quadruped"),
+			"offset": [0, 0],
+			"connections": pose.get("connections", []),
+			"behavior": behavior,
+		}]
+
+	# Spawn all creatures
+	var creatures: Array = []
+	for cdef in creature_defs:
+		var c_type: String = cdef.get("creature_type", "quadruped")
+		var c_offset_arr: Array = cdef.get("offset", [0, 0])
+		var c_offset := Vector2(c_offset_arr[0], c_offset_arr[1])
+		if rotation_rad != 0.0:
+			c_offset = c_offset.rotated(rotation_rad)
+		var c_behavior: String = cdef.get("behavior", behavior)
+		var creature: Node2D = _spawn_creature(c_type, pos + c_offset)
+		if creature:
+			creatures.append({"node": creature, "def": cdef, "behavior": c_behavior})
+
+	if creatures.is_empty():
 		return {}
 
 	# Wait a frame for physics to initialize
@@ -94,55 +119,78 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
 	var tethers: Array = []
-	var connections: Array = pose.get("connections", [])
+	var all_creatures_nodes: Array = []
+	for c in creatures:
+		all_creatures_nodes.append(c["node"])
 
-	for conn in connections:
-		var point_name: String = conn.get("point", "")
-		var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
-		var cast_dir_arr: Array = conn.get("cast_dir", [0, -1])
+	# Create tethers for each creature's connections
+	for ci in range(creatures.size()):
+		var c: Dictionary = creatures[ci]
+		var creature: Node2D = c["node"]
+		var connections: Array = c["def"].get("connections", [])
 
-		var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
-		var cast_dir := Vector2(cast_dir_arr[0], cast_dir_arr[1]).normalized()
+		for conn in connections:
+			var point_name: String = conn.get("point", "")
+			var target: String = conn.get("target", "world")  # "world" or "creature:<idx>:<point>"
 
-		# Apply rotation
-		if rotation_rad != 0.0:
-			rel_pos = rel_pos.rotated(rotation_rad)
-			cast_dir = cast_dir.rotated(rotation_rad)
+			if target.begins_with("creature:"):
+				# Inter-creature tether: creature:<index>:<attachment_point>
+				var parts: PackedStringArray = target.split(":")
+				if parts.size() >= 3:
+					var target_ci: int = int(parts[1])
+					var target_point: String = parts[2]
+					if target_ci < creatures.size():
+						var target_creature: Node2D = creatures[target_ci]["node"]
+						var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
+						var anchor_b: Dictionary = TetherScript.make_anchor_body(target_creature, target_point)
+						var dist: float = TetherScript.get_anchor_world_pos(anchor_a).distance_to(TetherScript.get_anchor_world_pos(anchor_b))
+						var tether := Node2D.new()
+						tether.set_script(TetherScript)
+						tether.setup(anchor_a, anchor_b, dist)
+						scene_root.add_child(tether)
+						tethers.append(tether)
+			else:
+				# World tether: raycast in cast direction
+				var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
+				var cast_dir_arr: Array = conn.get("cast_dir", [0, -1])
+				var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
+				var cast_dir := Vector2(cast_dir_arr[0], cast_dir_arr[1]).normalized()
 
-		var cast_origin: Vector2 = pos + rel_pos
-		var cast_end: Vector2 = cast_origin + cast_dir * TETHER_CAST_MAX_DIST
+				if rotation_rad != 0.0:
+					rel_pos = rel_pos.rotated(rotation_rad)
+					cast_dir = cast_dir.rotated(rotation_rad)
 
-		# Raycast to find surface
-		var space := creature.get_world_2d().direct_space_state
-		var query := PhysicsRayQueryParameters2D.create(cast_origin, cast_end, 1)  # World layer
-		var result: Dictionary = space.intersect_ray(query)
+				var cast_origin: Vector2 = pos + rel_pos
+				var cast_end: Vector2 = cast_origin + cast_dir * TETHER_CAST_MAX_DIST
 
-		if not result:
-			push_warning("SplayManager: raycast miss for point '%s' in pose '%s'" % [point_name, pose_name])
-			continue
+				var space := creature.get_world_2d().direct_space_state
+				var query := PhysicsRayQueryParameters2D.create(cast_origin, cast_end, 1)
+				var result: Dictionary = space.intersect_ray(query)
 
-		var surface_pos: Vector2 = result["position"]
+				if not result:
+					push_warning("SplayManager: raycast miss for point '%s' in pose '%s'" % [point_name, pose_name])
+					continue
 
-		# Create tether: creature attachment point → surface
-		var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
-		var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
-		var length: float = cast_origin.distance_to(surface_pos)
+				var surface_pos: Vector2 = result["position"]
+				var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
+				var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
+				var length: float = cast_origin.distance_to(surface_pos)
 
-		var tether := Node2D.new()
-		tether.set_script(TetherScript)
-		tether.setup(anchor_a, anchor_b, length)
-		scene_root.add_child(tether)
-		tethers.append(tether)
+				var tether := Node2D.new()
+				tether.set_script(TetherScript)
+				tether.setup(anchor_a, anchor_b, length)
+				scene_root.add_child(tether)
+				tethers.append(tether)
 
-	# Set behavior
-	_apply_behavior(creature, behavior)
+		# Set behavior per creature
+		_apply_behavior(creature, c["behavior"])
 
-	# Set pose overrides for IK
-	_apply_pose_overrides(creature, pose, rotation_rad)
+		# Set pose overrides for IK
+		_apply_pose_overrides(creature, c["def"], rotation_rad)
 
 	# Track instance
 	var instance: Dictionary = {
-		"creatures": [creature],
+		"creatures": all_creatures_nodes,
 		"tethers": tethers,
 		"pose_name": pose_name,
 		"pos": pos,

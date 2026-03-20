@@ -4,9 +4,9 @@ extends CanvasLayer
 ## Modes: spawn areas, seeds, platforms, portal.
 ## Mouse-driven vertex editing, saves to user://levels/.
 
-enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL, MIGRATION, SPLAY }
+enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL, MIGRATION, SPLAY, SPLAY_EDIT }
 
-const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal", "Migration", "Splay"]
+const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal", "Migration", "Splay", "Splay Edit"]
 const MODE_COLORS := [
 	Color(1.0, 0.9, 0.2, 0.3),   # Spawn areas: yellow
 	Color(0.2, 0.9, 0.5, 0.3),   # Seeds: green
@@ -202,6 +202,31 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_B:
 				_splay_cycle_behavior()
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_E:
+				# Enter pose edit mode for selected splay
+				if _selected_idx >= 0:
+					_splay_edit_pose_idx = _selected_idx
+					_mode = Mode.SPLAY_EDIT
+					_selected_idx = -1
+					_update_display()
+				get_viewport().set_input_as_handled()
+		elif _mode == Mode.SPLAY_EDIT:
+			if event.keycode == KEY_ESCAPE:
+				# Exit pose edit, back to SPLAY mode
+				_mode = Mode.SPLAY
+				_selected_idx = _splay_edit_pose_idx
+				_splay_edit_pose_idx = -1
+				_update_display()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_N:
+				_splay_edit_add_connection()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+				_splay_edit_delete_connection()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_S and event.ctrl_pressed:
+				_splay_edit_save_pose()
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -211,10 +236,21 @@ func _input(event: InputEvent) -> void:
 			else:
 				_stop_drag()
 			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_RIGHT and _mode == Mode.SPLAY_EDIT:
+			if event.pressed:
+				_splay_edit_dragging_cast = true
+				_try_select_splay_connection(_get_world_pos(event.position))
+			else:
+				_splay_edit_dragging_cast = false
+			get_viewport().set_input_as_handled()
 
-	if event is InputEventMouseMotion and _dragging:
-		_do_drag(event.position)
-		get_viewport().set_input_as_handled()
+	if event is InputEventMouseMotion:
+		if _dragging:
+			_do_drag(event.position)
+			get_viewport().set_input_as_handled()
+		elif _splay_edit_dragging_cast and _mode == Mode.SPLAY_EDIT and _selected_idx >= 0:
+			_splay_edit_update_cast_dir(_get_world_pos(event.position))
+			get_viewport().set_input_as_handled()
 
 
 func _update_display() -> void:
@@ -262,6 +298,8 @@ func _start_drag(screen_pos: Vector2) -> void:
 			_try_select_migration(world_pos)
 		Mode.SPLAY:
 			_try_select_splay(world_pos)
+		Mode.SPLAY_EDIT:
+			_try_select_splay_connection(world_pos)
 
 
 func _stop_drag() -> void:
@@ -290,6 +328,8 @@ func _do_drag(screen_pos: Vector2) -> void:
 			_drag_migration(world_pos)
 		Mode.SPLAY:
 			_drag_splay(world_pos)
+		Mode.SPLAY_EDIT:
+			_drag_splay_connection(world_pos)
 
 
 # -- Spawn Area editing --------------------------------------------------------
@@ -652,6 +692,8 @@ func _draw_overlay() -> void:
 			_draw_migration_overlay()
 		Mode.SPLAY:
 			_draw_splay_overlay()
+		Mode.SPLAY_EDIT:
+			_draw_splay_edit_overlay()
 
 
 func _draw_spawn_zones() -> void:
@@ -811,6 +853,9 @@ func _draw_migration_overlay() -> void:
 # -- Splay editing -------------------------------------------------------------
 
 var _splay_available_poses: Array[String] = []
+var _splay_edit_pose_idx: int = -1  # Which splay instance we're editing the pose of
+var _splay_edit_dragging_cast: bool = false  # True when right-dragging to set cast direction
+var _splay_edit_pose_data: Dictionary = {}  # Loaded pose data being edited
 
 func _get_splays() -> Array:
 	if not _config.has("splays"):
@@ -960,5 +1005,191 @@ func _draw_splay_overlay() -> void:
 
 	# Help text
 	if _active:
-		var help := "SPLAY: N=add  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  Drag=move"
+		var help := "SPLAY: N=add  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  E=edit pose  Drag=move"
 		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))
+
+
+# -- Splay Pose Editing (SPLAY_EDIT mode) -------------------------------------
+
+func _get_editing_pose() -> Dictionary:
+	## Get the pose data for the splay instance being edited.
+	if _splay_edit_pose_idx < 0:
+		return {}
+	var splays: Array = _get_splays()
+	if _splay_edit_pose_idx >= splays.size():
+		return {}
+	var splay_inst: Dictionary = splays[_splay_edit_pose_idx]
+	var pose_name: String = splay_inst.get("pose", "")
+	if _splay_edit_pose_data.is_empty() or _splay_edit_pose_data.get("name", "") != pose_name:
+		# Load the pose
+		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+		var temp := Node.new()
+		temp.set_script(mgr_script)
+		add_child(temp)
+		_splay_edit_pose_data = temp.load_pose(pose_name).duplicate(true)
+		temp.queue_free()
+	return _splay_edit_pose_data
+
+
+func _get_editing_origin() -> Vector2:
+	var splays: Array = _get_splays()
+	if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays.size():
+		var p: Array = splays[_splay_edit_pose_idx].get("pos", [960, 500])
+		return Vector2(p[0], p[1])
+	return Vector2(960, 500)
+
+
+func _try_select_splay_connection(world_pos: Vector2) -> void:
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var origin: Vector2 = _get_editing_origin()
+	var connections: Array = pose.get("connections", [])
+	for i in range(connections.size()):
+		var rel: Array = connections[i].get("relative_pos", [0, 0])
+		var conn_world: Vector2 = origin + Vector2(rel[0], rel[1])
+		if world_pos.distance_to(conn_world) < 20.0:
+			_selected_idx = i
+			_dragging = true
+			return
+	_selected_idx = -1
+
+
+func _drag_splay_connection(world_pos: Vector2) -> void:
+	if _selected_idx < 0:
+		return
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var origin: Vector2 = _get_editing_origin()
+	var connections: Array = pose.get("connections", [])
+	if _selected_idx < connections.size():
+		var rel: Vector2 = world_pos - origin
+		connections[_selected_idx]["relative_pos"] = [rel.x, rel.y]
+
+
+func _splay_edit_add_connection() -> void:
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var connections: Array = pose.get("connections", [])
+	# Find an attachment point not yet used
+	var all_points := ["head", "tail_tip", "shoulders", "waist"]
+	var used: Array[String] = []
+	for c in connections:
+		used.append(c.get("point", ""))
+	var new_point: String = ""
+	for p in all_points:
+		if p not in used:
+			new_point = p
+			break
+	if new_point.is_empty():
+		return  # All points already used
+	connections.append({
+		"point": new_point,
+		"relative_pos": [0, 0],
+		"cast_dir": [0, -1],
+	})
+	_selected_idx = connections.size() - 1
+	_update_display()
+
+
+func _splay_edit_delete_connection() -> void:
+	if _selected_idx < 0:
+		return
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var connections: Array = pose.get("connections", [])
+	if _selected_idx < connections.size():
+		connections.remove_at(_selected_idx)
+		_selected_idx = -1
+		_update_display()
+
+
+func _splay_edit_update_cast_dir(world_pos: Vector2) -> void:
+	## Right-drag: set cast direction on selected connection point.
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty() or _selected_idx < 0:
+		return
+	var origin: Vector2 = _get_editing_origin()
+	var connections: Array = pose.get("connections", [])
+	if _selected_idx >= connections.size():
+		return
+	var rel: Array = connections[_selected_idx].get("relative_pos", [0, 0])
+	var conn_pos: Vector2 = origin + Vector2(rel[0], rel[1])
+	var dir: Vector2 = (world_pos - conn_pos).normalized()
+	if dir.length() < 0.1:
+		dir = Vector2(0, -1)
+	connections[_selected_idx]["cast_dir"] = [dir.x, dir.y]
+	_update_display()
+
+
+func _splay_edit_save_pose() -> void:
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+	var temp := Node.new()
+	temp.set_script(mgr_script)
+	add_child(temp)
+	temp.save_pose(pose)
+	temp.queue_free()
+	print("EDITOR: saved splay pose '%s'" % pose.get("name", "?"))
+
+
+func _draw_splay_edit_overlay() -> void:
+	var pose: Dictionary = _get_editing_pose()
+	if pose.is_empty():
+		return
+	var origin: Vector2 = _get_editing_origin()
+	var connections: Array = pose.get("connections", [])
+
+	# Draw origin marker
+	_overlay.draw_circle(origin, 8.0, Color(0.9, 0.5, 0.2, 0.5))
+	_overlay.draw_arc(origin, 8.0, 0, TAU, 16, Color(0.9, 0.5, 0.2, 0.8), 1.5)
+	_overlay.draw_string(ThemeDB.fallback_font, origin + Vector2(-20, -14), pose.get("name", "?"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.8, 0.3))
+
+	var conn_col := Color(0.3, 0.8, 1.0, 0.8)
+	var sel_col := Color(1.0, 1.0, 0.3, 1.0)
+	var cast_col := Color(1.0, 0.4, 0.3, 0.5)
+
+	for i in range(connections.size()):
+		var c: Dictionary = connections[i]
+		var rel: Array = c.get("relative_pos", [0, 0])
+		var cast: Array = c.get("cast_dir", [0, -1])
+		var point_name: String = c.get("point", "?")
+		var conn_pos: Vector2 = origin + Vector2(rel[0], rel[1])
+		var cast_dir: Vector2 = Vector2(cast[0], cast[1]).normalized()
+		var is_selected: bool = (i == _selected_idx)
+		var col: Color = sel_col if is_selected else conn_col
+
+		# Connection point handle
+		_overlay.draw_circle(conn_pos, 8.0 if is_selected else 6.0, col * Color(1, 1, 1, 0.5))
+		_overlay.draw_arc(conn_pos, 8.0, 0, TAU, 12, col, 1.5)
+
+		# Line from origin to connection
+		_overlay.draw_line(origin, conn_pos, col * Color(1, 1, 1, 0.3), 1.0)
+
+		# Cast direction arrow
+		var cast_end: Vector2 = conn_pos + cast_dir * 60.0
+		_overlay.draw_line(conn_pos, cast_end, cast_col, 2.0)
+		var perp: Vector2 = Vector2(-cast_dir.y, cast_dir.x)
+		_overlay.draw_line(cast_end, cast_end - cast_dir * 8 + perp * 4, cast_col, 1.5)
+		_overlay.draw_line(cast_end, cast_end - cast_dir * 8 - perp * 4, cast_col, 1.5)
+
+		# Cast direction dotted preview (where raycast would hit)
+		var dash_pos: float = 60.0
+		while dash_pos < 400.0:
+			var d_start: Vector2 = conn_pos + cast_dir * dash_pos
+			var d_end: Vector2 = conn_pos + cast_dir * minf(dash_pos + 6.0, 400.0)
+			_overlay.draw_line(d_start, d_end, cast_col * Color(1, 1, 1, 0.3), 1.0)
+			dash_pos += 12.0
+
+		# Label
+		_overlay.draw_string(ThemeDB.fallback_font, conn_pos + Vector2(-20, -14), point_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col)
+
+	# Help text
+	if _active:
+		var help := "SPLAY EDIT: Drag=move point  N=add  Del=delete  Ctrl+S=save pose  Esc=back"
+		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))
