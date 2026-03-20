@@ -761,6 +761,10 @@ func _physics_process(delta: float) -> void:
 	_score_ik_quality()
 	_score_strategy_thrash()
 
+	# Auto-dump: check for anomalies every 10th frame
+	if Engine.get_frames_drawn() % 10 == 5:
+		PlayerHUD.check_auto_dump_triggers(self)
+
 	queue_redraw()
 
 
@@ -3848,6 +3852,12 @@ func _draw() -> void:
 	_draw_legs()
 	_draw_neck_head()
 	_draw_blood_particles()
+	# Selection indicator: pulsing cyan ring when TAB-selected
+	if PlayerHUD.debug_selected_enemy == self:
+		var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
+		var sel_col := Color(0, 0.9, 1.0, pulse)
+		draw_arc(_spine[1], 30.0, 0, TAU, 24, sel_col, 2.0)
+		draw_string(ThemeDB.fallback_font, _spine[1] + Vector2(-20, -35), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, sel_col)
 	if _asleep:
 		# ZZZ indicator above head
 		var zzz_pos: Vector2 = _skull + Vector2(10, -20)

@@ -272,6 +272,18 @@ func _execute(command: String) -> String:
 		"detach":
 			return _cmd_detach(parts)
 
+		"dump":
+			# Dump skeleton JSON for selected or indexed enemy
+			var idx: int = int(parts[1]) if parts.size() > 1 else 0
+			var enemies: Array = get_tree().get_nodes_in_group("enemies")
+			if idx >= enemies.size():
+				return "ERR: enemy %d not found (have %d)" % [idx, enemies.size()]
+			var trigger_name: String = parts[2] if parts.size() > 2 else "rcon"
+			var data: Dictionary = PlayerHUD.dump_entity_skeleton(enemies[idx], trigger_name)
+			if data.is_empty():
+				return "ERR: dump failed"
+			return JSON.stringify(data, "\t")
+
 		"splay":
 			return _cmd_splay(parts)
 

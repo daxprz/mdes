@@ -668,6 +668,11 @@ func _input(event: InputEvent) -> void:
 	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
 		_debug_cycle_enemy()
 
+	# SPACEBAR dumps selected entity skeleton JSON
+	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
+		if is_instance_valid(debug_selected_enemy):
+			dump_entity_skeleton(debug_selected_enemy, "manual")
+
 	# I toggles debug draw on ALL enemies (no prerequisites)
 	if event is InputEventKey and event.pressed and event.keycode == KEY_I:
 		_debug_mode = true  # Ensure debug mode is on
@@ -950,3 +955,158 @@ func _cycle_class(player_index: int, direction: int, ignore_rift: bool = false) 
 		ProfileManager.save_profiles()
 
 	class_changed.emit(player_index, new_class)
+
+
+# -- Skeleton Dump System ------------------------------------------------------
+
+var _dump_count: int = 0
+var _last_auto_dump_time: float = 0.0
+const AUTO_DUMP_COOLDOWN := 2.0  # Min seconds between auto-dumps
+
+func dump_entity_skeleton(entity: Node2D, trigger: String = "manual") -> Dictionary:
+	## Dump full skeleton/pose data as a Dictionary. Also prints JSON and saves to file.
+	var data: Dictionary = {
+		"trigger": trigger,
+		"timestamp": Time.get_ticks_msec() / 1000.0,
+		"entity_name": entity.name,
+		"global_position": _v2d(entity.global_position),
+		"velocity": _v2d(entity.velocity) if "velocity" in entity else [0, 0],
+	}
+
+	if "_state" in entity:
+		data["state"] = entity._state
+	if "_standdown" in entity:
+		data["standdown"] = entity._standdown
+	if "_asleep" in entity:
+		data["asleep"] = entity._asleep
+	if "_facing" in entity:
+		data["facing"] = entity._facing
+
+	if "_spine" in entity:
+		data["spine"] = []
+		for pt in entity._spine:
+			data["spine"].append(_v2d(pt))
+
+	if "_neck" in entity:
+		data["neck"] = [_v2d(entity._neck[0]), _v2d(entity._neck[1])]
+	if "_skull" in entity:
+		data["skull"] = _v2d(entity._skull)
+	if "_jaw" in entity:
+		data["jaw"] = _v2d(entity._jaw)
+
+	if "_clavicles" in entity:
+		data["clavicles"] = [_v2d(entity._clavicles[0]), _v2d(entity._clavicles[1])]
+	if "_hip_bones" in entity:
+		data["hip_bones"] = [_v2d(entity._hip_bones[0]), _v2d(entity._hip_bones[1])]
+
+	if "_tail" in entity:
+		data["tail"] = []
+		for pt in entity._tail:
+			data["tail"].append(_v2d(pt))
+
+	if "_legs" in entity:
+		data["legs"] = []
+		for li in range(entity._legs.size()):
+			var leg_data: Dictionary = {
+				"hip": _v2d(entity._legs[li][0]),
+				"knee": _v2d(entity._legs[li][1]),
+				"foot": _v2d(entity._legs[li][2]),
+				"severed": entity._leg_severed[li] if "_leg_severed" in entity else false,
+			}
+			if "_foot_world" in entity:
+				leg_data["foot_world"] = _v2d(entity._foot_world[li])
+			if "_foot_planted" in entity:
+				leg_data["planted"] = entity._foot_planted[li]
+			data["legs"].append(leg_data)
+
+	# Distances for rigidity verification
+	data["distances"] = {}
+	if "_spine" in entity and entity._spine.size() >= 3:
+		data["distances"]["spine0_1"] = snappedf(entity._spine[0].distance_to(entity._spine[1]), 0.1)
+		data["distances"]["spine1_2"] = snappedf(entity._spine[1].distance_to(entity._spine[2]), 0.1)
+	if "_neck" in entity and "_spine" in entity:
+		data["distances"]["spine0_neck1"] = snappedf(entity._spine[0].distance_to(entity._neck[1]), 0.1)
+	if "_skull" in entity and "_neck" in entity:
+		data["distances"]["neck1_skull"] = snappedf(entity._neck[1].distance_to(entity._skull), 0.1)
+	if "_clavicles" in entity and "_spine" in entity:
+		data["distances"]["clav_l"] = snappedf(entity._spine[0].distance_to(entity._clavicles[0]), 0.1)
+		data["distances"]["clav_r"] = snappedf(entity._spine[0].distance_to(entity._clavicles[1]), 0.1)
+	if "_hip_bones" in entity and "_spine" in entity:
+		data["distances"]["hip_l"] = snappedf(entity._spine[2].distance_to(entity._hip_bones[0]), 0.1)
+		data["distances"]["hip_r"] = snappedf(entity._spine[2].distance_to(entity._hip_bones[1]), 0.1)
+	if "_legs" in entity:
+		for li in range(entity._legs.size()):
+			var leg: Array = entity._legs[li]
+			data["distances"]["leg%d_upper" % li] = snappedf(leg[0].distance_to(leg[1]), 0.1)
+			data["distances"]["leg%d_lower" % li] = snappedf(leg[1].distance_to(leg[2]), 0.1)
+
+	if "_ik_score" in entity:
+		data["ik_score"] = snappedf(entity._ik_score, 0.1)
+		data["ik_peak"] = snappedf(entity._ik_score_peak, 0.1)
+
+	if "_part_health" in entity:
+		data["part_health"] = {}
+		for pname in entity._part_health:
+			var p: Dictionary = entity._part_health[pname]
+			data["part_health"][pname] = { "hp": p["current_hp"], "max": p["max_hp"], "state": p["damage_state"] }
+
+	var json_str: String = JSON.stringify(data, "\t")
+	print("=== SKELETON DUMP [%s] ===" % trigger)
+	print(json_str)
+
+	_dump_count += 1
+	var path: String = "user://dumps/skeleton_%03d_%s.json" % [_dump_count, trigger]
+	DirAccess.make_dir_recursive_absolute("user://dumps")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		file.store_string(json_str)
+		file.close()
+		print("Saved to: %s" % path)
+
+	return data
+
+
+func check_auto_dump_triggers(entity: Node2D) -> void:
+	## Call periodically to check if any auto-dump rule fires.
+	var now: float = Time.get_ticks_msec() / 1000.0
+	if now - _last_auto_dump_time < AUTO_DUMP_COOLDOWN:
+		return
+
+	# Rule 1: IK score spike (> 500)
+	if "_ik_score" in entity and entity._ik_score > 500:
+		_last_auto_dump_time = now
+		dump_entity_skeleton(entity, "ik_spike_%.0f" % entity._ik_score)
+		return
+
+	# Rule 2: Spine stretched beyond 110%
+	if "_spine" in entity and entity._spine.size() >= 3:
+		for i in range(1, 3):
+			var dist: float = entity._spine[i].distance_to(entity._spine[i - 1])
+			if dist > 28.0 * 1.1:
+				_last_auto_dump_time = now
+				dump_entity_skeleton(entity, "spine_stretch_%.1f" % dist)
+				return
+
+	# Rule 3: Upper limb stretched beyond 105%
+	if "_legs" in entity:
+		for li in range(entity._legs.size()):
+			if "_leg_severed" in entity and entity._leg_severed[li]:
+				continue
+			var upper_dist: float = entity._legs[li][0].distance_to(entity._legs[li][1])
+			if upper_dist > 24.0 * 1.05:
+				_last_auto_dump_time = now
+				dump_entity_skeleton(entity, "limb_stretch_leg%d_%.1f" % [li, upper_dist])
+				return
+
+	# Rule 4: Clavicle/hip bone stretched beyond 110%
+	if "_clavicles" in entity and "_spine" in entity:
+		for ci in range(2):
+			var cdist: float = entity._spine[0].distance_to(entity._clavicles[ci])
+			if cdist > 12.0 * 1.1:
+				_last_auto_dump_time = now
+				dump_entity_skeleton(entity, "clav_stretch_%d_%.1f" % [ci, cdist])
+				return
+
+
+func _v2d(v: Vector2) -> Array:
+	return [snappedf(v.x, 0.1), snappedf(v.y, 0.1)]
