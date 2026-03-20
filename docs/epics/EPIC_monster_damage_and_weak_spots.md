@@ -50,33 +50,33 @@ Each part has configurable max HP. Damage states are determined by percentage of
 
 ### Tasks
 
-- [ ] **2.1** Replace the flat `_part_health` dictionary with a struct per part: `{ max_hp, current_hp, damage_state }` where `damage_state` is an enum `{ NONE, MEDIUM, HIGH }`
-- [ ] **2.2** On every `take_part_damage()` call, recalculate `damage_state` from `current_hp / max_hp` percentage (>0.66 = NONE, >0.33 = MEDIUM, else HIGH)
-- [ ] **2.3** **Head** weak spot — existing `_skull` hitbox
+- [x] **2.1** Replace the flat `_part_health` dictionary with a struct per part: `{ max_hp, current_hp, damage_state }` where `damage_state` is an enum `{ NONE, MEDIUM, HIGH }`
+- [x] **2.2** On every `take_part_damage()` call, recalculate `damage_state` from `current_hp / max_hp` percentage (>0.66 = NONE, >0.33 = MEDIUM, else HIGH)
+- [x] **2.3** **Head** weak spot — existing `_skull` hitbox
   - Blood particles spawn at `_skull` position, scaled to damage state (none=0, medium=3 particles, high=6 particles)
   - No gameplay penalty beyond damage to main health pool
-- [ ] **2.4** **Eye** weak spot — new tiny hitbox (r=3-4px) positioned at the eye render location on the skull
+- [x] **2.4** **Eye** weak spot — new tiny hitbox (r=4px) positioned at the eye render location on the skull
   - Hit = CRITICAL HIT: damage is applied to head part at 2x multiplier
-  - On hit: play audible PING sound effect
-  - On hit: blood squirts in 5 directions (72 degrees apart) from eye position, each a short-lived particle/line
+  - On hit: play audible PING sound effect (grapple_hit at high pitch)
+  - On hit: blood squirts in 5 directions (72 degrees apart) from eye position
   - Eye hitbox rotates with head (uses head-local coordinate transform)
-- [ ] **2.5** **Mid-tail** weak spot — hitbox at `_tail[2]` (existing tail hitbox position)
+- [x] **2.5** **Mid-tail** weak spot — hitbox at `_tail[2]` (existing tail hitbox position)
   - Blood particles at `_tail[2]`, scaled to damage state
-  - **High damage effect**: disables ATTACK_GRAB (roll/ball attack). Monster can no longer curl up. Set flag `_grab_disabled = true`, check in grab initiation.
-- [ ] **2.6** **Torso** weak spot — hitbox at `_spine[1]` (existing body hitbox position)
+  - **High damage effect**: disables ATTACK_GRAB (roll/ball attack). `_grab_disabled = true`, checked in both grab initiation points.
+- [x] **2.6** **Torso** weak spot — hitbox at `_spine[1]` (existing body hitbox position)
   - Blood particles at `_spine[1]`, scaled to damage state
-  - **High damage effect**: continuous blood drip — 1 blood particle per second from `_spine[1]`, persists until death or heal
-- [ ] **2.7** **Rear legs** (leg2, leg3) — each tracked individually, existing hitbox positions
+  - **High damage effect**: continuous blood drip — 2 blood particles per second from `_spine[1]`, persists until death
+- [x] **2.7** **Rear legs** (leg2, leg3) — each tracked individually, existing hitbox positions
   - Blood particles at knee joint, scaled to damage state
-  - **High damage on 1 rear leg**: reduce leap launch velocity by 25% (`LEAP_LAUNCH_SPEED *= 0.75`)
-  - **High damage on 2 rear legs**: reduce leap launch velocity by 50% (`LEAP_LAUNCH_SPEED *= 0.50`)
-- [ ] **2.8** **Front legs / arms** (leg0, leg1) — each tracked individually, existing hitbox positions
+  - **High damage on 1 rear leg**: reduce leap launch velocity by 25% via `get_leap_speed_multiplier()`
+  - **High damage on 2 rear legs**: reduce leap launch velocity by 50%
+- [x] **2.8** **Front legs / arms** (leg0, leg1) — each tracked individually, existing hitbox positions
   - Blood particles at knee joint, scaled to damage state
-  - **High damage on 1 arm**: reduce slash damage by 50% (SWIPE_DAMAGE, SPRINT_SLASH_DAMAGE, LEAP_SLASH_DAMAGE)
+  - **High damage on 1 arm**: reduce slash damage by 50% via `get_slash_damage_multiplier()` (SWIPE, SPRINT_SLASH, LEAP_SLASH)
   - **High damage on 2 arms**: reduce slash damage by 75%
-- [ ] **2.9** Blood particle system: reusable function `_spawn_blood(pos: Vector2, count: int, spread_mode: String)` where `spread_mode` is `"splash"` (random directions) or `"squirt"` (5 fixed directions for eye hit). Particles are short-lived lines/circles that fade and fall under gravity.
-- [ ] **2.10** RCON command: `partstatus` — print all parts with current HP, max HP, and damage state
-- [ ] **2.11** RCON command: `partdmg <part> <amount>` — deal damage to a specific part for testing
+- [x] **2.9** Blood particle system: `_spawn_blood(pos, count, spread_mode)` — "splash" (random) or "squirt" (5 fixed directions). Particles fall under gravity, fade, and are drawn as circles.
+- [x] **2.10** RCON command: `partstatus` — print all parts with current HP, max HP, damage state, grab_disabled, torso_bleeding, slash/leap multipliers
+- [x] **2.11** RCON command: `partdmg <part> <amount>` — deal damage to a specific part for testing
 
 ---
 
@@ -223,7 +223,7 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 |------------|----------|--------|---------|----------|--------------|------|-------|
 | v0.9.17 (from prior EPIC) | 17/18 | 3812 | 50 | 1996 | 24 | 46 | Last recorded baseline |
 | Pre-EPIC (Story 9) | 17/18 | 3757 | 19 | 1997 | 24 | 46 | test_all: 17/18 3757dmg; baseline: 5/10 865dmg (debug on); edge: 8/8 |
-| After Story 2 (Weak Spots) | — | — | — | — | — | — | |
+| After Story 2 (Weak Spots) | 17/18 | 3617 | 53 | 1680 | 24 | 46 | No regressions. Crash in title_screen.gd unrelated (controller disconnect) |
 | After Story 6 (Stand-Down) | — | — | — | — | — | — | |
 | After Story 5 (Attack Dummy) | — | — | — | — | — | — | |
 | After Story 1 (Attach Points) | — | — | — | — | — | — | |

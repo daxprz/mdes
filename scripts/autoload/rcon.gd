@@ -122,7 +122,10 @@ func _execute(command: String) -> String:
 			for p in get_tree().get_nodes_in_group("players"):
 				p.queue_free()
 				cleared_p += 1
-			return "OK: cleared %d players" % cleared_p
+			# Block controller re-joins and clear device tracking
+			PlayerManager.join_disabled = true
+			PlayerManager._joined_devices.clear()
+			return "OK: cleared %d players, joins disabled" % cleared_p
 
 		"clear":
 			var cleared: int = 0
@@ -227,6 +230,12 @@ func _execute(command: String) -> String:
 			if parts.size() < 2:
 				return "ERR: usage: test precog"
 			return _cmd_test(parts[1])
+
+		"partstatus":
+			return _cmd_partstatus()
+
+		"partdmg":
+			return _cmd_partdmg(parts)
 
 		"standdown":
 			return _cmd_standdown(parts)
@@ -600,6 +609,41 @@ func _show_title(text: String) -> void:
 	tween.tween_interval(1.0)
 	tween.tween_property(lbl, "modulate:a", 0.0, 1.0)
 	tween.tween_callback(lbl.queue_free)
+
+
+func _cmd_partstatus() -> String:
+	## Print all part health/damage states for the first quadruped monster.
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if "_part_health" in e:
+			var lines: Array[String] = ["partstatus:"]
+			var ph: Dictionary = e._part_health
+			for part_name in ph:
+				var p: Dictionary = ph[part_name]
+				var state_name: String = "NONE"
+				match p.get("damage_state", 0):
+					1: state_name = "MEDIUM"
+					2: state_name = "HIGH"
+				lines.append("  %s: %d/%d (%s)" % [part_name, p["current_hp"], p["max_hp"], state_name])
+			if "_grab_disabled" in e:
+				lines.append("  grab_disabled=%s" % str(e._grab_disabled))
+			if "_torso_bleeding" in e:
+				lines.append("  torso_bleeding=%s" % str(e._torso_bleeding))
+			lines.append("  slash_mult=%.2f leap_mult=%.2f" % [e.get_slash_damage_multiplier(), e.get_leap_speed_multiplier()])
+			return "\n".join(lines)
+	return "ERR: no enemy with part health"
+
+
+func _cmd_partdmg(parts: PackedStringArray) -> String:
+	## Deal damage to a specific part: partdmg <part> <amount>
+	if parts.size() < 3:
+		return "ERR: usage: partdmg <part_name> <amount>"
+	var part_name: String = parts[1]
+	var amount: int = int(parts[2])
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e.has_method("take_part_damage"):
+			e.take_part_damage(part_name, amount)
+			return "OK: dealt %d damage to %s" % [amount, part_name]
+	return "ERR: no enemy with take_part_damage"
 
 
 func _cmd_standdown(parts: PackedStringArray) -> String:

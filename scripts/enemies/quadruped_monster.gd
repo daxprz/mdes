@@ -109,6 +109,7 @@ enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
 			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD,
 			 STANDDOWN }
 enum Posture { QUADRUPED, BIPEDAL }
+enum DamageState { NONE, MEDIUM, HIGH }
 
 # -- Skeleton arrays -----------------------------------------------------------
 # Pose-driven: each point has a current position and a rest-pose offset from parent.
@@ -208,11 +209,15 @@ var _target: Node2D = null
 var _target_player_index: int = -1
 var _hit_tracker: Dictionary = {}  # player_index -> hit count
 
-# Part health
+# Part health — each part: { max_hp, current_hp, damage_state }
 var _part_health: Dictionary = {}
 var _leg_severed: Array[bool] = [false, false, false, false]
 var _tail_severed: bool = false
 var _head_severed: bool = false
+var _grab_disabled: bool = false       # Set when mid-tail reaches HIGH damage
+var _torso_bleeding: bool = false      # Set when torso reaches HIGH damage
+var _torso_bleed_timer: float = 0.0    # Timer for 1/s blood drip
+var _blood_particles: Array = []       # Active blood particles [{pos, vel, life, max_life, color}]
 
 # Hitbox nodes (assigned in _ready from scene tree or created dynamically)
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
@@ -325,13 +330,13 @@ func _init_skeleton() -> void:
 
 func _init_part_health() -> void:
 	_part_health = {
-		"body": MAX_HEALTH,
-		"head": HEAD_HEALTH,
-		"tail": TAIL_HEALTH,
-		"leg0": LEG_HEALTH,
-		"leg1": LEG_HEALTH,
-		"leg2": LEG_HEALTH,
-		"leg3": LEG_HEALTH,
+		"body": { "max_hp": MAX_HEALTH, "current_hp": MAX_HEALTH, "damage_state": DamageState.NONE },
+		"head": { "max_hp": HEAD_HEALTH, "current_hp": HEAD_HEALTH, "damage_state": DamageState.NONE },
+		"tail": { "max_hp": TAIL_HEALTH, "current_hp": TAIL_HEALTH, "damage_state": DamageState.NONE },
+		"leg0": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
+		"leg1": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
+		"leg2": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
+		"leg3": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
 	}
 
 
@@ -410,6 +415,20 @@ func _init_hitboxes() -> void:
 		area.add_child(shape)
 		add_child(area)
 		_hitboxes[part_name] = area
+
+	# Eye hitbox — tiny, rewards precision aim
+	var eye_area := Area2D.new()
+	eye_area.name = "Hitbox_eye"
+	eye_area.collision_layer = 0
+	eye_area.collision_mask = 2
+	eye_area.set_meta("part_name", "eye")
+	var eye_shape := CollisionShape2D.new()
+	var eye_circle := CircleShape2D.new()
+	eye_circle.radius = 4.0  # Roughly the size of the rendered eye
+	eye_shape.shape = eye_circle
+	eye_area.add_child(eye_shape)
+	add_child(eye_area)
+	_hitboxes["eye"] = eye_area
 
 
 # -- Physics -------------------------------------------------------------------
@@ -539,6 +558,7 @@ func _physics_process(delta: float) -> void:
 		_constrain_skeleton_to_world()
 
 	_update_hitbox_positions()
+	_update_blood_particles(delta)
 	_score_ik_quality()
 	_score_strategy_thrash()
 
@@ -1126,7 +1146,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var height_diff: float = to_target.y  # Negative = target is above
 
 	# DEATH BALL GRAB: very close / overlapping — highest priority
-	if dist < GRAB_RANGE:
+	if dist < GRAB_RANGE and not _grab_disabled:
 		_start_grab()
 		return
 
@@ -1510,9 +1530,9 @@ func _do_sprint_slash(delta: float) -> void:
 				var swipe_y: float = -15.0 + _sprint_slash_count * 12.0
 				_legs[slash_leg][2] = _skull + Vector2(swipe_dir, swipe_y)
 
-				# Damage
+				# Damage (reduced by arm damage)
 				var claw_world: Vector2 = global_position + _legs[slash_leg][2]
-				_damage_players_in_range(claw_world, 35.0, SPRINT_SLASH_DAMAGE)
+				_damage_players_in_range(claw_world, 35.0, int(SPRINT_SLASH_DAMAGE * get_slash_damage_multiplier()))
 
 				# Visual slash lines
 				_spawn_slash_effect(_legs[slash_leg][2])
@@ -2834,6 +2854,7 @@ func _do_leap_windup(delta: float) -> void:
 		_state = State.ATTACK_LEAP_AIRBORNE
 		_attack_timer = 0.0
 		_leap_ik_off = true
+		var leap_mult: float = get_leap_speed_multiplier()
 		# Use the pre-computed launch velocity from planning, adjusted for current target
 		if has_meta("_leap_chosen_vel"):
 			var planned_vel: Vector2 = get_meta("_leap_chosen_vel")
@@ -2842,12 +2863,12 @@ func _do_leap_windup(delta: float) -> void:
 				_leap_target_pos = _target.global_position
 				var to_target: Vector2 = _leap_target_pos - global_position
 				planned_vel.x = signf(to_target.x) * absf(planned_vel.x)
-			velocity = planned_vel
+			velocity = planned_vel * leap_mult
 		else:
 			# Fallback if no plan data
 			var to_target: Vector2 = _leap_target_pos - global_position
-			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7
-			velocity.y = -LEAP_LAUNCH_SPEED * 0.5
+			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7 * leap_mult
+			velocity.y = -LEAP_LAUNCH_SPEED * 0.5 * leap_mult
 		# Unplant all feet
 		for li in range(4):
 			_foot_planted[li] = false
@@ -2906,7 +2927,7 @@ func _do_leap_airborne(delta: float) -> void:
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
 		if dist_to_target < LEAP_STRIKE_REACH:
 			# 25% chance: transition to grab-ball instead of normal slash
-			if randf() < 0.25:
+			if randf() < 0.25 and not _grab_disabled:
 				_start_grab()
 			else:
 				_state = State.ATTACK_LEAP_STRIKE
@@ -2945,9 +2966,9 @@ func _do_leap_strike(delta: float) -> void:
 			var swipe_end: Vector2 = _skull + Vector2(_facing * 30, _leap_slash_side * 25)
 			_legs[slash_leg][2] = swipe_end
 
-			# Damage check
+			# Damage check (reduced by arm damage)
 			var claw_world: Vector2 = global_position + swipe_end
-			_damage_players_in_range(claw_world, 35.0, LEAP_SLASH_DAMAGE)
+			_damage_players_in_range(claw_world, 35.0, int(LEAP_SLASH_DAMAGE * get_slash_damage_multiplier()))
 
 			# Spawn slash effect
 			_spawn_slash_effect(swipe_end)
@@ -3127,7 +3148,7 @@ func _check_bite_hit() -> void:
 
 func _check_swipe_hit(leg_idx: int) -> void:
 	var claw_pos: Vector2 = global_position + _legs[leg_idx][2]
-	_damage_players_in_range(claw_pos, 25.0, SWIPE_DAMAGE)
+	_damage_players_in_range(claw_pos, 25.0, int(SWIPE_DAMAGE * get_slash_damage_multiplier()))
 
 
 func _check_tail_hit() -> void:
@@ -3231,16 +3252,113 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 func take_part_damage(part_name: String, amount: int, source_index: int = -1) -> void:
 	if _dead:
 		return
+
+	# Eye hit = critical hit on head
+	if part_name == "eye":
+		_on_eye_critical_hit()
+		# Apply 2x damage to head
+		take_part_damage("head", amount * 2, source_index)
+		return
+
 	if not _part_health.has(part_name):
 		take_damage(amount, source_index)
 		return
 
-	_part_health[part_name] -= amount
-	if _part_health[part_name] <= 0 and part_name != "body":
+	var part: Dictionary = _part_health[part_name]
+	part["current_hp"] -= amount
+	if part["current_hp"] < 0:
+		part["current_hp"] = 0
+
+	# Update damage state
+	var old_state: DamageState = part["damage_state"] as DamageState
+	var ratio: float = float(part["current_hp"]) / float(part["max_hp"])
+	if ratio > 0.66:
+		part["damage_state"] = DamageState.NONE
+	elif ratio > 0.33:
+		part["damage_state"] = DamageState.MEDIUM
+	else:
+		part["damage_state"] = DamageState.HIGH
+
+	# Spawn blood at the hit location
+	var blood_pos: Vector2 = _get_part_world_position(part_name)
+	var blood_count: int = 0
+	match part["damage_state"]:
+		DamageState.MEDIUM: blood_count = 3
+		DamageState.HIGH: blood_count = 6
+	if blood_count > 0:
+		_spawn_blood(blood_pos, blood_count, "splash")
+
+	# Apply gameplay penalties when transitioning to HIGH
+	if part["damage_state"] == DamageState.HIGH and old_state != DamageState.HIGH:
+		_on_part_high_damage(part_name)
+
+	# Sever at 0 HP
+	if part["current_hp"] <= 0 and part_name != "body":
 		_sever_part(part_name)
 
 	# Also damage main health pool
 	take_damage(amount / 2, source_index)
+
+
+func _on_part_high_damage(part_name: String) -> void:
+	## Apply gameplay penalties when a part reaches HIGH damage state.
+	if part_name == "tail":
+		_grab_disabled = true
+		print("MONSTER: tail HIGH damage — grab/roll attack DISABLED")
+	elif part_name == "body":
+		_torso_bleeding = true
+		_torso_bleed_timer = 0.0
+		print("MONSTER: torso HIGH damage — continuous bleeding")
+	elif part_name == "leg2" or part_name == "leg3":
+		print("MONSTER: rear leg %s HIGH damage — leap distance reduced" % part_name)
+	elif part_name == "leg0" or part_name == "leg1":
+		print("MONSTER: arm %s HIGH damage — slash damage reduced" % part_name)
+
+
+func _get_part_world_position(part_name: String) -> Vector2:
+	## Get the world position of a body part for blood effects.
+	match part_name:
+		"head": return global_position + _skull
+		"body": return global_position + _spine[1]
+		"tail": return global_position + _tail[2]
+		"leg0": return global_position + _legs[0][1]
+		"leg1": return global_position + _legs[1][1]
+		"leg2": return global_position + _legs[2][1]
+		"leg3": return global_position + _legs[3][1]
+	return global_position
+
+
+func _on_eye_critical_hit() -> void:
+	## Eye hit — PING sound + 5-directional blood squirt.
+	AudioManager.play("grapple_hit", 2.0, 2.0)  # High-pitched PING
+	var eye_world: Vector2 = global_position + _hitboxes["eye"].position if _hitboxes.has("eye") else global_position + _skull
+	_spawn_blood(eye_world, 5, "squirt")
+
+
+func get_slash_damage_multiplier() -> float:
+	## Returns damage multiplier based on arm (front leg) damage state.
+	var high_arms: int = 0
+	if _part_health.has("leg0") and _part_health["leg0"]["damage_state"] == DamageState.HIGH:
+		high_arms += 1
+	if _part_health.has("leg1") and _part_health["leg1"]["damage_state"] == DamageState.HIGH:
+		high_arms += 1
+	match high_arms:
+		1: return 0.5   # 50% damage
+		2: return 0.25  # 25% damage (75% reduction)
+	return 1.0
+
+
+func get_leap_speed_multiplier() -> float:
+	## Returns leap launch speed multiplier based on rear leg damage state.
+	var high_legs: int = 0
+	if _part_health.has("leg2") and _part_health["leg2"]["damage_state"] == DamageState.HIGH:
+		high_legs += 1
+	if _part_health.has("leg3") and _part_health["leg3"]["damage_state"] == DamageState.HIGH:
+		high_legs += 1
+	match high_legs:
+		1: return 0.75  # 25% reduction
+		2: return 0.50  # 50% reduction
+	return 1.0
 
 
 func _sever_part(part_name: String) -> void:
@@ -3252,11 +3370,15 @@ func _sever_part(part_name: String) -> void:
 			_hitboxes.erase(part_name)
 	elif part_name == "tail":
 		_tail_severed = true
+		_grab_disabled = true  # Tail gone = no grab
 		if _hitboxes.has("tail"):
 			_hitboxes["tail"].queue_free()
 			_hitboxes.erase("tail")
 	elif part_name == "head":
 		_head_severed = true
+		if _hitboxes.has("eye"):
+			_hitboxes["eye"].queue_free()
+			_hitboxes.erase("eye")
 		_die()  # Losing the head is fatal
 
 	# Adjust speed for missing legs
@@ -3291,12 +3413,79 @@ func _update_hitbox_positions() -> void:
 		_hitboxes["body"].position = _spine[1]
 	if _hitboxes.has("head"):
 		_hitboxes["head"].position = _skull
+	if _hitboxes.has("eye") and not _head_severed:
+		# Eye position matches _draw_neck_head eye rendering
+		var head_dir: Vector2 = (_skull - _neck[1]).normalized()
+		if head_dir.length_squared() < 0.01:
+			head_dir = Vector2(_facing, 0)
+		var head_fwd: Vector2 = head_dir
+		var head_up: Vector2 = Vector2(-head_dir.y, head_dir.x)
+		if head_up.y > 0:
+			head_up = -head_up
+		_hitboxes["eye"].position = _skull + 16.0 * head_fwd + 5.0 * head_up
 	if _hitboxes.has("tail") and not _tail_severed:
 		_hitboxes["tail"].position = _tail[2]  # Mid-tail
 	for li in range(4):
 		var key: String = "leg%d" % li
 		if _hitboxes.has(key) and not _leg_severed[li]:
 			_hitboxes[key].position = _legs[li][1]  # Knee area
+
+
+# -- Blood Particles -----------------------------------------------------------
+
+func _spawn_blood(world_pos: Vector2, count: int, spread_mode: String) -> void:
+	## Spawn blood particles at a world position.
+	## spread_mode: "splash" = random directions, "squirt" = 5 fixed directions (72 deg apart)
+	for i in range(count):
+		var dir: Vector2
+		if spread_mode == "squirt":
+			# 5 directions, evenly spaced
+			var angle: float = (TAU / 5.0) * i
+			dir = Vector2(cos(angle), sin(angle))
+		else:
+			var angle: float = randf() * TAU
+			dir = Vector2(cos(angle), sin(angle))
+		var speed: float = randf_range(40.0, 120.0)
+		var life: float = randf_range(0.4, 0.8)
+		_blood_particles.append({
+			"pos": world_pos,
+			"vel": dir * speed,
+			"life": life,
+			"max_life": life,
+			"color": Color(0.7, 0.05, 0.05, 0.9),
+		})
+
+
+func _update_blood_particles(delta: float) -> void:
+	## Update blood particle positions and remove expired ones.
+	var i: int = _blood_particles.size() - 1
+	while i >= 0:
+		var p: Dictionary = _blood_particles[i]
+		p["pos"] += p["vel"] * delta
+		p["vel"].y += 300.0 * delta  # Gravity on blood
+		p["vel"] *= 0.97  # Drag
+		p["life"] -= delta
+		if p["life"] <= 0:
+			_blood_particles.remove_at(i)
+		i -= 1
+
+	# Continuous torso bleeding
+	if _torso_bleeding:
+		_torso_bleed_timer -= delta
+		if _torso_bleed_timer <= 0.0:
+			_torso_bleed_timer = 1.0
+			var torso_world: Vector2 = global_position + _spine[1]
+			_spawn_blood(torso_world, 2, "splash")
+
+
+func _draw_blood_particles() -> void:
+	for p in _blood_particles:
+		var local_pos: Vector2 = p["pos"] - global_position
+		var alpha: float = clampf(p["life"] / p["max_life"], 0.0, 1.0)
+		var col: Color = p["color"]
+		col.a = alpha * 0.9
+		var size: float = lerpf(1.5, 3.5, 1.0 - alpha)
+		draw_circle(local_pos, size, col)
 
 
 # -- Drawing -------------------------------------------------------------------
@@ -3308,6 +3497,7 @@ func _draw() -> void:
 	_draw_tail()
 	_draw_legs()
 	_draw_neck_head()
+	_draw_blood_particles()
 	if _standdown:
 		# White flag / STANDDOWN indicator above the monster
 		var flag_pos: Vector2 = _spine[1] + Vector2(0, -40)

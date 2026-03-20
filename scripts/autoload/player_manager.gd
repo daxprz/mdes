@@ -107,6 +107,7 @@ var demo_napalm: bool = false
 
 ## Set of device IDs that have already joined.
 var _joined_devices: Dictionary = {}
+var join_disabled: bool = false  # When true, block new player joins (for automated testing)
 
 
 func _ready() -> void:
@@ -137,6 +138,8 @@ func _get_device_from_event(event: InputEvent) -> int:
 # -- Join / Leave Logic --------------------------------------------------------
 
 func _try_join(device_id: int) -> void:
+	if join_disabled:
+		return
 	if _joined_devices.has(device_id):
 		return
 
