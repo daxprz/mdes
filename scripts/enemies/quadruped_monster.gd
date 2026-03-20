@@ -71,10 +71,10 @@ const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.04         # Simulation timestep
 
 # Health
-const MAX_HEALTH := 200
-const HEAD_HEALTH := 60
-const TAIL_HEALTH := 50
-const LEG_HEALTH := 40
+const MAX_HEALTH := 1500
+const HEAD_HEALTH := 400
+const TAIL_HEALTH := 300
+const LEG_HEALTH := 250
 
 # Death ball grab (close proximity)
 const GRAB_RANGE := 40.0          # Must be THIS close to initiate grab
