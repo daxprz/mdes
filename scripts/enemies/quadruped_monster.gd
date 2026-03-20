@@ -19,6 +19,9 @@ const LEG_LOWER_LEN := 22.0
 const LEG_FOOT_LEN := 10.0
 const TAIL_SEG_LEN := 16.0
 const JAW_LEN := 14.0
+const CLAVICLE_LEN := 12.0   # Short rigid bone connecting shoulders to arm hips
+const HIP_BONE_LEN := 12.0   # Short rigid bone connecting waist to leg hips
+const LIMB_FLEX := 0.10      # ±10% flex allowed on lower limb segments
 
 # Pose stiffness (how fast segments spring back to rest pose, per second)
 const STIFFNESS := 12.0       # General stiffness
@@ -130,7 +133,17 @@ var _jaw_open: float = 0.0  # 0=closed, 1=fully open
 var _tail: Array[Vector2] = []
 var _tail_whipping: bool = false  # Loosens tail stiffness during whip
 
+# Clavicles: 2 short rigid bones from spine[0] to arm hip points
+# _clavicles[0] = left clavicle endpoint, _clavicles[1] = right clavicle endpoint
+var _clavicles: Array[Vector2] = []   # 2 points (endpoints where arms attach)
+var _clavicle_rest: Array[Vector2] = []  # Rest offsets from spine[0]
+
+# Hip bones: 2 short rigid bones from spine[2] to leg hip points
+var _hip_bones: Array[Vector2] = []   # 2 points (endpoints where legs attach)
+var _hip_bone_rest: Array[Vector2] = []  # Rest offsets from spine[2]
+
 # Legs: 4 legs, each with 3 points [hip, knee, foot]
+# Legs 0,1 (arms) attach to clavicle endpoints; legs 2,3 attach to hip bone endpoints
 var _legs: Array = []       # Array of Array[Vector2]
 
 # Rest pose offsets (relative to parent point) — computed once in _init
@@ -238,14 +251,19 @@ var _attachments: Dictionary = {}    # point_name -> Array[Node2D] (attached ite
 const SEGMENT_WEIGHTS: Dictionary = {
 	"head": 15.0,       # Skull + jaw (small, bony)
 	"neck": 10.0,       # 2 neck segments
-	"shoulders": 30.0,  # spine[0] — front of torso, arms attached
+	"shoulders": 30.0,  # spine[0] — front of torso, clavicles attached
 	"torso": 40.0,      # spine[1] — largest body section
-	"waist": 30.0,      # spine[2] — rear of torso, legs attached
+	"waist": 30.0,      # spine[2] — rear of torso, hip bones attached
 	"tail": 20.0,       # 5 tail segments (~4 each)
-	"leg0": 12.0,       # Front-left arm
-	"leg1": 12.0,       # Front-right arm
-	"leg2": 12.0,       # Rear-left leg
-	"leg3": 12.0,       # Rear-right leg
+	"tail_tip": 20.0,   # Alias for tail
+	"elbow_l": 8.0,     # Left arm elbow joint
+	"elbow_r": 8.0,     # Right arm elbow joint
+	"knee_l": 8.0,      # Left leg knee joint
+	"knee_r": 8.0,      # Right leg knee joint
+	"leg0": 12.0,       # Front-left arm (full limb)
+	"leg1": 12.0,       # Front-right arm (full limb)
+	"leg2": 12.0,       # Rear-left leg (full limb)
+	"leg3": 12.0,       # Rear-right leg (full limb)
 }
 var _attach_forces: Dictionary = {}  # point_name -> Vector2 (accumulated force from attached items)
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
@@ -318,7 +336,23 @@ func _init_skeleton() -> void:
 		else:
 			_tail[i] = _tail[i - 1] + _tail_rest[i]
 
-	# Legs
+	# Clavicles: short rigid bones from spine[0] outward to arm attachment points
+	_clavicles.resize(2)
+	_clavicle_rest.resize(2)
+	_clavicle_rest[0] = Vector2(-CLAVICLE_LEN * 0.5, CLAVICLE_LEN * 0.8)   # Left arm (toward front-left)
+	_clavicle_rest[1] = Vector2(CLAVICLE_LEN * 0.5, CLAVICLE_LEN * 0.8)    # Right arm (toward front-right)
+	_clavicles[0] = _spine[0] + _clavicle_rest[0]
+	_clavicles[1] = _spine[0] + _clavicle_rest[1]
+
+	# Hip bones: short rigid bones from spine[2] outward to leg attachment points
+	_hip_bones.resize(2)
+	_hip_bone_rest.resize(2)
+	_hip_bone_rest[0] = Vector2(-HIP_BONE_LEN * 0.5, HIP_BONE_LEN * 0.8)   # Left leg
+	_hip_bone_rest[1] = Vector2(HIP_BONE_LEN * 0.5, HIP_BONE_LEN * 0.8)    # Right leg
+	_hip_bones[0] = _spine[2] + _hip_bone_rest[0]
+	_hip_bones[1] = _spine[2] + _hip_bone_rest[1]
+
+	# Legs: arms (0,1) attach to clavicle endpoints, legs (2,3) attach to hip bone endpoints
 	_legs.resize(4)
 	_leg_rest.resize(4)
 	_foot_world.resize(4)
@@ -329,14 +363,18 @@ func _init_skeleton() -> void:
 	_step_center.resize(4)
 
 	for li in range(4):
-		var hip_anchor: Vector2 = _spine[0] if li < 2 else _spine[2]
+		var hip_anchor: Vector2
+		if li < 2:
+			hip_anchor = _clavicles[li]  # Arms attach to clavicle endpoints
+		else:
+			hip_anchor = _hip_bones[li - 2]  # Legs attach to hip bone endpoints
 		var side_x: float = 3.0 if (li % 2 == 0) else -3.0
 
 		var leg: Array[Vector2] = []
 		leg.resize(3)
-		leg[0] = hip_anchor + Vector2(side_x, 6)
-		leg[1] = hip_anchor + Vector2(side_x, 6 + LEG_UPPER_LEN)
-		leg[2] = Vector2(hip_anchor.x + side_x, 0)
+		leg[0] = hip_anchor
+		leg[1] = hip_anchor + Vector2(0, LEG_UPPER_LEN)
+		leg[2] = Vector2(hip_anchor.x, 0)
 		_legs[li] = leg
 
 		var rest: Array[Vector2] = []
@@ -466,6 +504,10 @@ func _init_attach_points() -> void:
 		"tail_tip": 30.0,   # Large generous target at tail end
 		"shoulders": 14.0,  # Matches spine[0] visual size (r=12 + margin)
 		"waist": 12.0,      # Matches spine[2] visual size (r=10 + margin)
+		"elbow_l": 8.0,     # Left arm knee/elbow joint
+		"elbow_r": 8.0,     # Right arm knee/elbow joint
+		"knee_l": 8.0,      # Left leg knee joint
+		"knee_r": 8.0,      # Right leg knee joint
 	}
 	for point_name in points:
 		var area := Area2D.new()
@@ -773,6 +815,37 @@ func _solve_pose(delta: float) -> void:
 			_tail[i] = _tail[i].lerp(rest_target, tail_s)
 			parent = _tail[i]
 
+	# -- Clavicles: short rigid bones from spine[0], perpendicular to spine --
+	# Derive orientation from spine direction so they rotate with the body
+	var spine_fwd: Vector2 = (_spine[0] - _spine[1]).normalized()
+	var spine_down: Vector2 = Vector2(-spine_fwd.y, spine_fwd.x)  # Perpendicular (body "down")
+	if spine_down.y < 0:
+		spine_down = -spine_down  # Ensure it points screen-downward
+	for ci in range(2):
+		var side: float = -1.0 if ci == 0 else 1.0
+		var rest_dir: Vector2 = (spine_down + spine_fwd * side * 0.3).normalized()
+		var rest_target: Vector2 = _spine[0] + rest_dir * CLAVICLE_LEN
+		_clavicles[ci] = _clavicles[ci].lerp(rest_target, s_clamp)
+		# Enforce rigid length
+		var dir: Vector2 = _clavicles[ci] - _spine[0]
+		if dir.length() > 0.01:
+			_clavicles[ci] = _spine[0] + dir.normalized() * CLAVICLE_LEN
+
+	# -- Hip bones: short rigid bones from spine[2], perpendicular to spine --
+	var spine_back: Vector2 = (_spine[2] - _spine[1]).normalized()
+	var spine_down2: Vector2 = Vector2(-spine_back.y, spine_back.x)
+	if spine_down2.y < 0:
+		spine_down2 = -spine_down2
+	for hi in range(2):
+		var side: float = -1.0 if hi == 0 else 1.0
+		var rest_dir: Vector2 = (spine_down2 + spine_back * side * 0.3).normalized()
+		var rest_target: Vector2 = _spine[2] + rest_dir * HIP_BONE_LEN
+		_hip_bones[hi] = _hip_bones[hi].lerp(rest_target, s_clamp)
+		# Enforce rigid length
+		var dir: Vector2 = _hip_bones[hi] - _spine[2]
+		if dir.length() > 0.01:
+			_hip_bones[hi] = _spine[2] + dir.normalized() * HIP_BONE_LEN
+
 	# -- Legs: 2-bone IK from hip to foot, knee solved --
 	var max_leg_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
 	for li in range(4):
@@ -781,11 +854,13 @@ func _solve_pose(delta: float) -> void:
 				_legs[li][j].y += GRAVITY * delta * 0.3
 			continue
 
-		var hip_spine: Vector2 = _spine[0] if li < 2 else _spine[2]
-		var rest: Array = _leg_rest[li]
-
-		# Hip: pinned to spine
-		_legs[li][0] = hip_spine + _get_facing_offset(rest[0])
+		# Hip: pinned to clavicle endpoint (arms) or hip bone endpoint (legs)
+		var hip_anchor: Vector2
+		if li < 2:
+			hip_anchor = _clavicles[li]
+		else:
+			hip_anchor = _hip_bones[li - 2]
+		_legs[li][0] = hip_anchor
 
 		if _leap_ik_off:
 			continue
@@ -810,6 +885,20 @@ func _solve_pose(delta: float) -> void:
 		)
 		# Snap knee to IK solution (fast lerp to prevent sticking)
 		_legs[li][1] = _legs[li][1].lerp(knee_pos, minf(s * 2.0, 1.0))
+
+		# -- Rigid upper limb: enforce exact LEG_UPPER_LEN from hip to knee --
+		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+		if upper_dir.length() > 0.01:
+			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+
+		# -- Flex lower limb: enforce LEG_LOWER_LEN ±10% from knee to foot --
+		var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
+		var lower_dist: float = lower_dir.length()
+		if lower_dist > 0.01:
+			var min_len: float = LEG_LOWER_LEN * (1.0 - LIMB_FLEX)
+			var max_len: float = LEG_LOWER_LEN * (1.0 + LIMB_FLEX)
+			var clamped_len: float = clampf(lower_dist, min_len, max_len)
+			_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped_len
 
 	# -- Pose overrides (splay system) --
 	if not _pose_overrides.is_empty():
@@ -947,13 +1036,12 @@ func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float
 
 
 func _enforce_spine_rigid() -> void:
-	## Enforce rigid distances between all connected spine/neck segments.
+	## Enforce rigid distances between all connected spine/neck/clavicle/hip segments.
 	## Called after pose solving to prevent stretching.
 	# Spine chain: spine[0] is the anchor
 	for i in range(1, 3):
 		var dir: Vector2 = (_spine[i] - _spine[i - 1])
-		var dist: float = dir.length()
-		if dist > 0.01:
+		if dir.length() > 0.01:
 			_spine[i] = _spine[i - 1] + dir.normalized() * SPINE_SEG_LEN
 
 	# Neck: neck[0] = spine[0], neck[1] at NECK_LEN from spine[0]
@@ -967,6 +1055,18 @@ func _enforce_spine_rigid() -> void:
 	var skull_dir: Vector2 = (_skull - _neck[1])
 	if skull_dir.length() > 0.01:
 		_skull = _neck[1] + skull_dir.normalized() * skull_dist
+
+	# Clavicles: rigid from spine[0]
+	for ci in range(2):
+		var cdir: Vector2 = _clavicles[ci] - _spine[0]
+		if cdir.length() > 0.01:
+			_clavicles[ci] = _spine[0] + cdir.normalized() * CLAVICLE_LEN
+
+	# Hip bones: rigid from spine[2]
+	for hi in range(2):
+		var hdir: Vector2 = _hip_bones[hi] - _spine[2]
+		if hdir.length() > 0.01:
+			_hip_bones[hi] = _spine[2] + hdir.normalized() * HIP_BONE_LEN
 
 
 # -- Spine & Posture ----------------------------------------------------------
@@ -3650,6 +3750,15 @@ func _update_hitbox_positions() -> void:
 		_attach_points["shoulders"].position = _spine[0]
 	if _attach_points.has("waist"):
 		_attach_points["waist"].position = _spine[2]
+	# Elbows/knees: positioned at the knee joint (legs[li][1])
+	if _attach_points.has("elbow_l") and not _leg_severed[0]:
+		_attach_points["elbow_l"].position = _legs[0][1]
+	if _attach_points.has("elbow_r") and not _leg_severed[1]:
+		_attach_points["elbow_r"].position = _legs[1][1]
+	if _attach_points.has("knee_l") and not _leg_severed[2]:
+		_attach_points["knee_l"].position = _legs[2][1]
+	if _attach_points.has("knee_r") and not _leg_severed[3]:
+		_attach_points["knee_r"].position = _legs[3][1]
 
 	# Update attached items to follow their attachment points
 	for point_name in _attachments:
@@ -3783,20 +3892,32 @@ func _draw_tail() -> void:
 
 
 func _draw_legs() -> void:
+	var bone_col := Color(0.35, 0.28, 0.22)
+
+	# Draw clavicles (spine[0] to arm hips)
+	for ci in range(2):
+		draw_line(_spine[0], _clavicles[ci], bone_col, 4.0, true)
+		draw_circle(_clavicles[ci], 3.0, bone_col)
+
+	# Draw hip bones (spine[2] to leg hips)
+	for hi in range(2):
+		draw_line(_spine[2], _hip_bones[hi], bone_col, 4.0, true)
+		draw_circle(_hip_bones[hi], 3.0, bone_col)
+
 	for li in range(4):
 		if _leg_severed[li]:
-			# Draw stump at hip
-			var hip_anchor: Vector2 = _spine[0] if li < 2 else _spine[2]
-			draw_circle(hip_anchor + Vector2(0, 6), 3.0, Color(0.5, 0.15, 0.1))
+			# Draw stump at clavicle/hip bone endpoint
+			var stump: Vector2 = _clavicles[li] if li < 2 else _hip_bones[li - 2]
+			draw_circle(stump, 3.0, Color(0.5, 0.15, 0.1))
 			continue
 
 		var leg: Array = _legs[li]
 		var leg_col := Color(0.32, 0.26, 0.2)
 		var claw_col := Color(0.25, 0.2, 0.18)
 
-		# Upper leg
+		# Upper leg (rigid)
 		draw_line(leg[0], leg[1], leg_col, 5.0, true)
-		# Lower leg
+		# Lower leg (±10% flex)
 		draw_line(leg[1], leg[2], leg_col, 4.0, true)
 		# Joint circles
 		draw_circle(leg[0], 4.0, leg_col)

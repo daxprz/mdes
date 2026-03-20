@@ -64,6 +64,10 @@ const CHAIN_LENGTHS: Dictionary = {
 	"waist": 28.0,        # spine[1] → spine[2]
 	"head": 68.0,         # spine[1] → spine[0] → neck → skull (28+22+18)
 	"tail_tip": 108.0,    # spine[1] → spine[2] → tail[0..4] (28+5*16)
+	"elbow_l": 64.0,      # spine[1] → spine[0] → clavicle → upper arm (28+12+24)
+	"elbow_r": 64.0,
+	"knee_l": 64.0,       # spine[1] → spine[2] → hip bone → upper leg (28+12+24)
+	"knee_r": 64.0,
 }
 
 # Maximum distances between any two attachment points (chain lengths between them)
