@@ -8,6 +8,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 
 - **12 playable classes** with unique mechanics: Melee, Ranged, Mage, Summoner, Rogue, Demolitionist, Healer, Tank, Ninja, Balloonist, Guitarist, Werewolf
 - **Physics-based grappling hook** (Ranger) with pendulum swing, rope slack, and Newtonian enemy tug
+- **Dual-grapple tether system** (Ranger) — connect two points with a physics rope that pulls to a chosen length, max 5 active tethers
 - **Parabolic arrow aiming** (Ranger) with arc solver, analog trigger power control, and power lock
 - **Rift tentacle system** — class changes spawn physics-based tentacles that hunt players and buff enemies
 - **4 bosses** with unique attack patterns and phases
@@ -19,7 +20,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 - **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
 - **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
 - **Migration patterns** — cyclic multi-phase movement sequences that drive wildlife across the level
-- **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, head tracking, and pre-cognition pathfinding
+- **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, head tracking, pre-cognition pathfinding, vulnerable body parts with tiered damage, and attachment points for balloons/tethers
 - **Cave walls** — curved floor-to-wall transitions with collision, undulation, and standing ledges
 - **RCON server** (port 9999) — remote console for automated testing, spawning, teleporting, debug control
 
@@ -34,8 +35,10 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 |-------|--------|
 | Square | Fire crossbow (uses ammo) |
 | L1 (hold/release) | Grappling hook windup and throw |
-| L1 (while connected) | Phase 1: pull to anchor. Phase 2: disconnect |
+| L1 (while connected) | Tether: second hook windup + throw (connects two points with rope) |
+| R1 (while connected) | Pull toward anchor |
 | Jump (while connected) | Disconnect + jump impulse in stick direction |
+| D-pad UP/DOWN (while swinging) | Adjust rope length (sets tether target length) |
 | L2 (hold) | Aim mode — reticle + pull strength builds |
 | R2 | Fire aimed arrow along solved parabolic arc |
 | RB (during L2) | Reverse power, release to lock power level |
@@ -56,6 +59,48 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.18
+**Monster Damage & Weak Spots, Dual-Grapple Tether System, Attack Dummy**
+
+**Monster Damage & Weak Spots:**
+- Tiered damage states per body part: NONE → MEDIUM → HIGH with blood effects
+- 7 vulnerable zones: head, eye, mid-tail, torso, 2 rear legs, 2 arms (front legs)
+- Eye critical hit: 2x damage to head + audible PING + 5-directional blood squirt
+- Gameplay penalties at HIGH damage: tail disables grab attack, torso drips blood continuously, rear legs reduce leap distance (25%/50%), arms reduce slash damage (50%/75%)
+- Blood particle system with splash and squirt modes, gravity, and fade
+- Part-specific arrow damage: arrows hit nearest body part hitbox
+- Monster HP increased: body 1500, head 400, tail 300, legs 250 each
+- 4 attachment points: head, tail tip, shoulders, waist — for balloons, tethers, grapple
+- Per-segment weight system (total ~193): head 15, torso 40, legs 12 each
+- RCON: partstatus, partdmg, weight, attach, detach
+
+**Dual-Grapple Tether System:**
+- L1 first hook → adjust rope length → L1 second hook → creates persistent tether between two points
+- Tether entity with strong pull physics (force 25000), mass-aware force distribution
+- Connects anything: enemy↔enemy, enemy↔wall, body part↔body part, wall↔wall
+- Max 5 active tethers per player, HUD dots show available slots
+- Body part targeting: hooks snap to nearest attachment point on enemies
+- Tether rendering: catenary sag when slack, straight when taut, red when over-stressed
+- Tether HP (100): severable by projectiles passing through the rope, visual fraying before snap
+- R1 pulls player to anchor (moved from L1 second press)
+- RCON: tether commands for creation, length adjustment, status, and cutting
+
+**Attack Dummy & Testing:**
+- New test entity: configurable orange circle that fires at enemies
+- 3 weapons: bow (arrows), balloon (darts), tether (creates tethers at targets)
+- Targets specific body parts by name, tracks shots/hits
+- Monster stand-down mode: passive, receives damage, skeleton still animates
+- Solo self-revive: press jump when dead with no teammates
+- RCON: spawn attacker, attacker target/part/weapon/rate/stop/start/stats
+- clearplayers blocks controller re-joins, enablejoins re-allows them
+- Balloons last forever (only removed by popping)
+
+**Test Suites:**
+- test_damage.sh: 6 tests for damage states, grab disable, bleeding, leap/slash reduction
+- test_attachments.sh: 6 tests for balloon attachment, stacking, detach, weight
+- test_tether.sh: 7 tests for tether creation, physics, balloon resistance, severing
+- Regression: 18/18 hit rate, 4513 total damage (best ever)
 
 ### v0.9.17
 **17/18 Test Suite, Score Cards, Cliff Aerial Strike, 3812 Damage**
