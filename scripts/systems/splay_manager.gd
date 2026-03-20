@@ -57,7 +57,79 @@ func get_all_pose_names() -> Array[String]:
 	return names
 
 
+# Skeleton chain distances from torso (spine[1]) to each attachment point
+# These define the maximum distance each point can be from the body origin.
+const CHAIN_LENGTHS: Dictionary = {
+	"shoulders": 28.0,    # spine[1] → spine[0]
+	"waist": 28.0,        # spine[1] → spine[2]
+	"head": 68.0,         # spine[1] → spine[0] → neck → skull (28+22+18)
+	"tail_tip": 108.0,    # spine[1] → spine[2] → tail[0..4] (28+5*16)
+}
+
+# Maximum distances between any two attachment points (chain lengths between them)
+const PAIR_MAX_DISTANCES: Dictionary = {
+	"shoulders-waist": 56.0,       # spine[0] → spine[1] → spine[2]
+	"shoulders-head": 40.0,        # spine[0] → neck → skull (22+18)
+	"shoulders-tail_tip": 136.0,   # spine[0] → spine[1] → spine[2] → tail (28+28+80)
+	"waist-head": 96.0,            # spine[2] → spine[1] → spine[0] → neck → skull (28+28+22+18)
+	"waist-tail_tip": 80.0,        # spine[2] → tail[0..4] (5*16)
+	"head-tail_tip": 176.0,        # full chain head → tail
+}
+
+
+static func get_max_distance_from_origin(point: String) -> float:
+	return CHAIN_LENGTHS.get(point, 100.0)
+
+
+static func get_max_distance_between(point_a: String, point_b: String) -> float:
+	var key1: String = point_a + "-" + point_b
+	var key2: String = point_b + "-" + point_a
+	if PAIR_MAX_DISTANCES.has(key1):
+		return PAIR_MAX_DISTANCES[key1]
+	if PAIR_MAX_DISTANCES.has(key2):
+		return PAIR_MAX_DISTANCES[key2]
+	return 200.0  # Generous fallback
+
+
+func validate_pose(pose: Dictionary) -> Dictionary:
+	## Validate and clamp connection relative_pos values to be reachable
+	## given the skeleton's rigid segment lengths. Returns the corrected pose.
+	var connections: Array = pose.get("connections", [])
+
+	# Clamp each point's distance from origin
+	for conn in connections:
+		var point: String = conn.get("point", "")
+		var rel: Array = conn.get("relative_pos", [0, 0])
+		var pos := Vector2(rel[0], rel[1])
+		var max_dist: float = get_max_distance_from_origin(point)
+		if pos.length() > max_dist:
+			pos = pos.normalized() * max_dist
+			conn["relative_pos"] = [pos.x, pos.y]
+
+	# Clamp pairwise distances between connection points
+	for i in range(connections.size()):
+		for j in range(i + 1, connections.size()):
+			var point_a: String = connections[i].get("point", "")
+			var point_b: String = connections[j].get("point", "")
+			var rel_a := Vector2(connections[i]["relative_pos"][0], connections[i]["relative_pos"][1])
+			var rel_b := Vector2(connections[j]["relative_pos"][0], connections[j]["relative_pos"][1])
+			var dist: float = rel_a.distance_to(rel_b)
+			var max_dist: float = get_max_distance_between(point_a, point_b)
+			if dist > max_dist:
+				# Pull both points toward their midpoint
+				var mid: Vector2 = (rel_a + rel_b) / 2.0
+				var dir_a: Vector2 = (rel_a - mid).normalized()
+				var dir_b: Vector2 = (rel_b - mid).normalized()
+				rel_a = mid + dir_a * (max_dist / 2.0)
+				rel_b = mid + dir_b * (max_dist / 2.0)
+				connections[i]["relative_pos"] = [rel_a.x, rel_a.y]
+				connections[j]["relative_pos"] = [rel_b.x, rel_b.y]
+
+	return pose
+
+
 func save_pose(pose: Dictionary) -> void:
+	pose = validate_pose(pose)
 	var name: String = pose.get("name", "")
 	if name.is_empty():
 		return
@@ -84,6 +156,9 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		return {}
 
 	var rotation_rad: float = deg_to_rad(rotation_deg)
+
+	# Validate pose constraints before spawning
+	pose = validate_pose(pose)
 
 	# Determine creature list — support both single and multi formats
 	var creature_defs: Array = []

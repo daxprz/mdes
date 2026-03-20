@@ -1126,6 +1126,12 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 	var connections: Array = pose.get("connections", [])
 	if _selected_idx < connections.size():
 		var rel: Vector2 = world_pos - origin
+		# Clamp to max chain distance from origin
+		var point_name: String = connections[_selected_idx].get("point", "")
+		var SplayMgr: GDScript = load("res://scripts/systems/splay_manager.gd")
+		var max_dist: float = SplayMgr.get_max_distance_from_origin(point_name)
+		if rel.length() > max_dist:
+			rel = rel.normalized() * max_dist
 		connections[_selected_idx]["relative_pos"] = [rel.x, rel.y]
 
 
