@@ -252,6 +252,18 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_S and event.ctrl_pressed:
 				_splay_edit_save_pose()
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_L:
+				_splay_edit_preset_pose("left")
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_R:
+				_splay_edit_preset_pose("right")
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_U:
+				_splay_edit_preset_pose("up")
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_D and not event.ctrl_pressed:
+				_splay_edit_preset_pose("down")
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -1120,9 +1132,11 @@ func _enter_splay_edit() -> void:
 		container.add_child(creature)
 		_splay_edit_creature = creature
 
-	# Freeze it
+	# Freeze it and lock the pose so editor controls the skeleton
 	if "_physics_frozen" in _splay_edit_creature:
 		_splay_edit_creature._physics_frozen = true
+	if "_pose_locked" in _splay_edit_creature:
+		_splay_edit_creature._pose_locked = true
 	if "_standdown" in _splay_edit_creature:
 		_splay_edit_creature._standdown = true
 
@@ -1135,16 +1149,41 @@ func _enter_splay_edit() -> void:
 			_splay_edit_all_points.append(point_name)
 	_splay_edit_all_points.sort()
 
-	# Initialize active state — always rebuild from creature's current skeleton positions
+	# Try to reload pose data from disk (in case it was saved previously)
+	if _splay_edit_pose_data.is_empty() or true:  # Always reload fresh
+		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+		var temp := Node.new()
+		temp.set_script(mgr_script)
+		add_child(temp)
+		# Try to load the pose associated with the selected splay instance
+		var pose_name: String = ""
+		var splays: Array = _get_splays()
+		if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays.size():
+			pose_name = splays[_splay_edit_pose_idx].get("pose", "")
+		if pose_name != "":
+			var loaded: Dictionary = temp.load_pose(pose_name)
+			if not loaded.is_empty():
+				_splay_edit_pose_data = loaded.duplicate(true)
+		temp.queue_free()
+
+	# Initialize active state — start from creature's live skeleton positions
 	_splay_edit_active.clear()
 	for point_name in _splay_edit_all_points:
-		var point_world: Vector2 = _get_splay_point_world(point_name)
+		var point_world: Vector2
+		if is_instance_valid(_splay_edit_creature) and "_attach_points" in _splay_edit_creature:
+			if _splay_edit_creature._attach_points.has(point_name):
+				point_world = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[point_name].position
+			else:
+				point_world = _splay_edit_origin
+		else:
+			point_world = _splay_edit_origin
 		_splay_edit_active[point_name] = {
 			"enabled": false,
 			"cast_end": Vector2.ZERO,
-			"pos_override": point_world,  # Start at creature's current skeleton position
+			"pos_override": point_world,
 		}
-	# Load enabled state + cast directions from existing pose data
+
+	# Load saved pose data: override positions and enabled state
 	if not _splay_edit_pose_data.is_empty():
 		for conn in _splay_edit_pose_data.get("connections", []):
 			var pn: String = conn.get("point", "")
@@ -1155,15 +1194,30 @@ func _enter_splay_edit() -> void:
 				_splay_edit_active[pn]["pos_override"] = conn_world
 				var cd: Array = conn.get("cast_dir", [0, -1])
 				_splay_edit_active[pn]["cast_end"] = conn_world + Vector2(cd[0], cd[1]) * 200.0
+				# Also apply to creature skeleton via IK so body shows the saved pose
+				if is_instance_valid(_splay_edit_creature):
+					var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
+					var target_local: Vector2 = conn_world - _splay_edit_creature.global_position
+					var chain_data: Dictionary = ChainIK.get_chain_for_point(pn, _splay_edit_creature)
+					if not chain_data.is_empty():
+						var solved: Array[Vector2] = ChainIK.solve(
+							chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
+							target_local, true
+						)
+						var apply_fn: Callable = chain_data["apply"]
+						apply_fn.call(solved)
 
 	_selected_idx = -1
 	_splay_edit_selected_point = ""
 
 
 func _exit_splay_edit() -> void:
-	# Unfreeze creature
-	if is_instance_valid(_splay_edit_creature) and "_physics_frozen" in _splay_edit_creature:
-		_splay_edit_creature._physics_frozen = false
+	# Unfreeze creature and unlock pose
+	if is_instance_valid(_splay_edit_creature):
+		if "_physics_frozen" in _splay_edit_creature:
+			_splay_edit_creature._physics_frozen = false
+		if "_pose_locked" in _splay_edit_creature:
+			_splay_edit_creature._pose_locked = false
 	_splay_edit_creature = null
 	_splay_edit_active.clear()
 
@@ -1242,6 +1296,8 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 		# Apply solved positions back to creature skeleton
 		var apply_fn: Callable = chain_data["apply"]
 		apply_fn.call(solved)
+		# Force creature to redraw with new skeleton positions
+		_splay_edit_creature.queue_redraw()
 		# Update the pos_override to match the solved endpoint
 		_splay_edit_active[_splay_edit_selected_point]["pos_override"] = _splay_edit_creature.global_position + solved[solved.size() - 1]
 
@@ -1267,12 +1323,13 @@ func _splay_edit_toggle_point() -> void:
 	var data: Dictionary = _splay_edit_active[_splay_edit_selected_point]
 	data["enabled"] = not data["enabled"]
 	if data["enabled"] and data["cast_end"] == Vector2.ZERO:
-		# Default cast endpoint: 200px directly away from origin
+		# Default cast endpoint: body-length radius straight out from origin through this point
+		var body_len: float = _splay_edit_get_body_length()
 		var point_world: Vector2 = data.get("pos_override", _get_splay_point_world(_splay_edit_selected_point))
 		var away: Vector2 = (point_world - _splay_edit_origin).normalized()
 		if away.length() < 0.1:
 			away = Vector2(0, -1)
-		data["cast_end"] = point_world + away * 200.0
+		data["cast_end"] = _splay_edit_origin + away * body_len
 
 
 func _splay_edit_move_endpoint(dir: Vector2) -> void:
@@ -1281,6 +1338,149 @@ func _splay_edit_move_endpoint(dir: Vector2) -> void:
 	var data: Dictionary = _splay_edit_active[_splay_edit_selected_point]
 	if data.get("enabled", false):
 		data["cast_end"] += dir * 5.0
+
+
+func _splay_edit_preset_pose(direction: String) -> void:
+	## Reset body to a cardinal preset pose. Generic for spine-based creatures.
+	## direction: "left" (head L, tail R), "right", "up" (head up), "down" (head down)
+	if not is_instance_valid(_splay_edit_creature):
+		return
+
+	var creature: Node2D = _splay_edit_creature
+	var origin: Vector2 = _splay_edit_origin
+	# Calculate in local space (relative to creature global_position, which == origin)
+	var local_origin: Vector2 = Vector2.ZERO  # spine[1] in local space
+
+	# Determine the spine axis direction based on preset
+	var head_dir: Vector2  # Direction from origin toward head
+	var perp_dir: Vector2  # Perpendicular (for limb placement)
+	match direction:
+		"left":
+			head_dir = Vector2(-1, 0)
+			perp_dir = Vector2(0, 1)
+		"right":
+			head_dir = Vector2(1, 0)
+			perp_dir = Vector2(0, 1)
+		"up":
+			head_dir = Vector2(0, -1)
+			perp_dir = Vector2(1, 0)
+		"down":
+			head_dir = Vector2(0, 1)
+			perp_dir = Vector2(-1, 0)
+		_:
+			head_dir = Vector2(1, 0)
+			perp_dir = Vector2(0, 1)
+
+	var tail_dir: Vector2 = -head_dir
+
+	# Segment lengths
+	var SPINE_L: float = 28.0
+	var NECK_L: float = 22.0
+	var SKULL_L: float = 16.0
+	var TAIL_L: float = 16.0
+	var CLAV_L: float = 12.0
+	var HIP_L: float = 12.0
+	var UPPER_L: float = 24.0
+	var LOWER_L: float = 22.0
+
+	# Place spine along axis
+	creature._spine[1] = local_origin
+	creature._spine[0] = local_origin + head_dir * SPINE_L
+	creature._spine[2] = local_origin + tail_dir * SPINE_L
+
+	# Neck + skull along head direction
+	creature._neck[0] = creature._spine[0]
+	creature._neck[1] = creature._spine[0] + head_dir * NECK_L
+	creature._skull = creature._neck[1] + head_dir * SKULL_L
+	creature._jaw = creature._skull + head_dir * 8 + perp_dir * 6
+
+	# Tail along tail direction
+	if "_tail" in creature:
+		var tail_start: Vector2 = creature._spine[2] + tail_dir * 4
+		for ti in range(creature._tail.size()):
+			creature._tail[ti] = tail_start + tail_dir * TAIL_L * (ti + 1)
+
+	# Clavicles: perpendicular from spine[0]
+	if "_clavicles" in creature:
+		creature._clavicles[0] = creature._spine[0] + perp_dir * CLAV_L
+		creature._clavicles[1] = creature._spine[0] - perp_dir * CLAV_L
+
+	# Hip bones: perpendicular from spine[2]
+	if "_hip_bones" in creature:
+		creature._hip_bones[0] = creature._spine[2] + perp_dir * HIP_L
+		creature._hip_bones[1] = creature._spine[2] - perp_dir * HIP_L
+
+	# Limbs: dangle in the perp direction (gravity-like)
+	# For "up"/"down", limbs go sideways; for "left"/"right", limbs dangle down
+	var dangle_dir: Vector2
+	if direction in ["left", "right"]:
+		dangle_dir = Vector2(0, 1)  # Dangle downward
+	else:
+		# For up/down poses, limbs go outward from the spine
+		dangle_dir = perp_dir  # Already set correctly
+
+	if "_legs" in creature:
+		# Front legs (arms) — attach to clavicles
+		for li in [0, 1]:
+			var clav: Vector2 = creature._clavicles[li] if "_clavicles" in creature else creature._spine[0]
+			creature._legs[li][0] = clav
+			creature._legs[li][1] = clav + dangle_dir * UPPER_L
+			creature._legs[li][2] = clav + dangle_dir * (UPPER_L + LOWER_L)
+		# Rear legs — attach to hip bones
+		for li in [2, 3]:
+			var hip: Vector2 = creature._hip_bones[li - 2] if "_hip_bones" in creature else creature._spine[2]
+			creature._legs[li][0] = hip
+			creature._legs[li][1] = hip + dangle_dir * UPPER_L
+			creature._legs[li][2] = hip + dangle_dir * (UPPER_L + LOWER_L)
+
+	# For "down" pose: mirror the legs (right on left, left on right)
+	if direction == "down" and "_legs" in creature and "_clavicles" in creature:
+		# Swap leg pairs side assignment
+		var temp_clav: Vector2 = creature._clavicles[0]
+		creature._clavicles[0] = creature._clavicles[1]
+		creature._clavicles[1] = temp_clav
+		if "_hip_bones" in creature:
+			var temp_hip: Vector2 = creature._hip_bones[0]
+			creature._hip_bones[0] = creature._hip_bones[1]
+			creature._hip_bones[1] = temp_hip
+		# Re-attach legs to swapped positions
+		for li in [0, 1]:
+			creature._legs[li][0] = creature._clavicles[li]
+			creature._legs[li][1] = creature._clavicles[li] + dangle_dir * UPPER_L
+			creature._legs[li][2] = creature._clavicles[li] + dangle_dir * (UPPER_L + LOWER_L)
+		for li in [2, 3]:
+			creature._legs[li][0] = creature._hip_bones[li - 2]
+			creature._legs[li][1] = creature._hip_bones[li - 2] + dangle_dir * UPPER_L
+			creature._legs[li][2] = creature._hip_bones[li - 2] + dangle_dir * (UPPER_L + LOWER_L)
+
+	# Update facing
+	creature._facing = -1.0 if direction == "left" else 1.0
+
+	# Unplant all feet
+	if "_foot_planted" in creature:
+		for li in range(creature._foot_planted.size()):
+			creature._foot_planted[li] = false
+
+	# Reset all connection points: disable, clear cast endpoints
+	for pn in _splay_edit_active:
+		_splay_edit_active[pn]["enabled"] = false
+		_splay_edit_active[pn]["cast_end"] = Vector2.ZERO
+		# Update pos_override from new skeleton position
+		_splay_edit_active[pn]["pos_override"] = _get_splay_point_world(pn)
+
+	# Force redraw
+	creature.queue_redraw()
+
+
+func _splay_edit_get_body_length() -> float:
+	## Total body length from skull to tail tip — used for cast endpoint default radius.
+	if not is_instance_valid(_splay_edit_creature):
+		return 200.0
+	var skull: Vector2 = _splay_edit_creature._skull if "_skull" in _splay_edit_creature else Vector2.ZERO
+	var tail_tip: Vector2 = Vector2.ZERO
+	if "_tail" in _splay_edit_creature and _splay_edit_creature._tail.size() > 0:
+		tail_tip = _splay_edit_creature._tail[_splay_edit_creature._tail.size() - 1]
+	return skull.distance_to(tail_tip)
 
 
 func _splay_edit_save_pose() -> void:
@@ -1402,5 +1602,5 @@ func _draw_splay_edit_overlay() -> void:
 	_overlay.draw_string(font, Vector2(10, 66), "Active points: %d / %d" % [active_count, _splay_edit_all_points.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.7, 0.7))
 
 	# Help text
-	var help := "SPLAY EDIT: Click=select  SPACE=toggle on/off  Drag endpoint=aim  Arrows=nudge  Ctrl+S=save  Esc=back"
+	var help := "SPLAY EDIT: Click=select  SPACE=toggle  Drag=IK  Arrows=nudge  L/R/U/D=preset pose  Ctrl+S=save  Esc=back"
 	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))

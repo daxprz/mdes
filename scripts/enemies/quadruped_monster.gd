@@ -175,6 +175,7 @@ var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
 var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
 var _physics_frozen := false  # When true, skip all physics/gravity (used during splay setup)
+var _pose_locked := false     # When true, skip _solve_pose — external system controls skeleton (splay editor)
 var territorial := false      # When true, attacks other monsters instead of/in addition to players
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
@@ -627,6 +628,10 @@ func _physics_process(delta: float) -> void:
 		return
 	if _physics_frozen:
 		velocity = Vector2.ZERO
+		if _pose_locked:
+			# Still draw, but skip all physics/pose solving — editor controls skeleton
+			queue_redraw()
+			return
 		return
 
 	# Stand-down mode: force STANDDOWN state, override any transition
