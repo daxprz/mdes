@@ -9,21 +9,24 @@ const MAX_ITERATIONS := 10
 const TOLERANCE := 0.5  # px — close enough to target
 
 
-static func solve(chain: Array[Vector2], lengths: Array[float], max_angles: Array[float], target: Vector2, pin_root: bool = true) -> Array[Vector2]:
+static func solve(chain: Array[Vector2], lengths: Array[float], max_angles: Array[float], target: Vector2, pin_root: bool = true, pinned: Array[bool] = []) -> Array[Vector2]:
 	## Solve IK for a chain of points.
 	## chain: array of Vector2 positions [root, joint1, joint2, ..., endpoint]
 	## lengths: array of segment lengths (chain.size() - 1 entries)
-	## max_angles: array of max bend angles in radians (chain.size() - 1 entries, angle relative to prev segment)
+	## max_angles: array of max bend angles in radians (chain.size() - 1 entries)
 	## target: desired position for the last point in the chain
 	## pin_root: if true, root stays fixed
+	## pinned: array of bools per joint — pinned joints don't move
 	## Returns: new chain positions
 
 	if chain.size() < 2:
 		return chain
 
 	var result: Array[Vector2] = []
+	var saved: Array[Vector2] = []  # Original positions for pinned joints
 	for pt in chain:
 		result.append(pt)
+		saved.append(pt)
 
 	var n: int = result.size()
 	var root: Vector2 = result[0]
@@ -36,6 +39,9 @@ static func solve(chain: Array[Vector2], lengths: Array[float], max_angles: Arra
 		# --- FORWARD pass: move endpoint to target, work backward ---
 		result[n - 1] = target
 		for i in range(n - 2, -1, -1):
+			if i < pinned.size() and pinned[i]:
+				result[i] = saved[i]  # Pinned — don't move
+				continue
 			var dir: Vector2 = (result[i] - result[i + 1])
 			if dir.length() < 0.001:
 				dir = Vector2(0, -1)
@@ -45,10 +51,18 @@ static func solve(chain: Array[Vector2], lengths: Array[float], max_angles: Arra
 		if pin_root:
 			result[0] = root
 		for i in range(1, n):
+			if i < pinned.size() and pinned[i]:
+				result[i] = saved[i]  # Pinned — don't move
+				continue
 			var dir: Vector2 = (result[i] - result[i - 1])
 			if dir.length() < 0.001:
 				dir = Vector2(0, 1)
 			result[i] = result[i - 1] + dir.normalized() * lengths[i - 1]
+
+		# --- Restore pinned positions ---
+		for i in range(n):
+			if i < pinned.size() and pinned[i]:
+				result[i] = saved[i]
 
 		# --- Angle constraint pass ---
 		_apply_angle_constraints(result, lengths, max_angles)

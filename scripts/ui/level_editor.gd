@@ -1358,9 +1358,24 @@ func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
 	var chain_data: Dictionary = ChainIK.get_chain_for_point(point_name, _splay_edit_creature)
 	if chain_data.is_empty():
 		return
+
+	# Build pinned array: map chain points to attachment point names and check pin state
+	var chain: Array[Vector2] = chain_data["chain"]
+	var pinned_arr: Array[bool] = []
+	# Root is always pinned
+	pinned_arr.append(true)
+	# Map intermediate chain points to attachment point names for pin lookup
+	var chain_point_names: Array[String] = _get_chain_point_names(point_name)
+	for i in range(1, chain.size()):
+		if i - 1 < chain_point_names.size():
+			var cpn: String = chain_point_names[i - 1]
+			pinned_arr.append(_splay_edit_pinned.get(cpn, false))
+		else:
+			pinned_arr.append(false)
+
 	var solved: Array[Vector2] = ChainIK.solve(
 		chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
-		target_local, true
+		target_local, true, pinned_arr
 	)
 	var apply_fn: Callable = chain_data["apply"]
 	apply_fn.call(solved)
@@ -1376,6 +1391,29 @@ func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
 		if pn != point_name and "_attach_points" in _splay_edit_creature:
 			if _splay_edit_creature._attach_points.has(pn):
 				_splay_edit_active[pn]["pos_override"] = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+
+
+func _get_chain_point_names(endpoint: String) -> Array[String]:
+	## Map chain indices (after root) to attachment point names for pin lookup.
+	## Chain is [origin(spine1), ..., endpoint]. Returns names for indices 1..N-1.
+	match endpoint:
+		"head":
+			return ["shoulders", "", "head"]  # spine[0]=shoulders, neck[1]=(no attach), skull=head
+		"tail_tip":
+			return ["waist", "", "", "", "", "tail_tip"]  # spine[2]=waist, tail[0..4], tail_tip
+		"shoulders":
+			return ["shoulders"]
+		"waist":
+			return ["waist"]
+		"elbow_l":
+			return ["shoulders", "", "", "elbow_l"]  # spine[0], clavicle, leg hip, knee
+		"elbow_r":
+			return ["shoulders", "", "", "elbow_r"]
+		"knee_l":
+			return ["waist", "", "", "knee_l"]
+		"knee_r":
+			return ["waist", "", "", "knee_r"]
+	return []
 
 
 func _splay_edit_toggle_pin() -> void:
