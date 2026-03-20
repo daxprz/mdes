@@ -88,10 +88,10 @@ Items that attach to the monster's attachment points and exert physics forces, i
 
 ### Tasks
 
-- [ ] **3.1** When a balloon dart hits an attachment point `Area2D`, call `attach_item()` with the attachment point name. The balloon attaches to that specific point (not just the monster's origin).
-- [ ] **3.2** Each balloon exerts an upward force. The force is applied at the attachment point's position, creating torque on the skeleton (head balloons tilt the front up, tail balloons tilt the rear up).
-- [ ] **3.3** Grapple hook attachment — when a grapple projectile hits an attachment point, it attaches and creates a pull force toward the grapple source. Force applied at the attachment point position.
-- [ ] **3.4** Multiple items can attach to the same point. Forces stack additively.
+- [x] **3.1** Balloon dart checks attachment point Area2Ds before body center. On hit: calls `attach_item()`, registers with attachment system, string anchors to attachment point position.
+- [x] **3.2** `get_attach_force()` method on balloon_dart returns upward force based on inflation. Force applied at attachment point via weight system — head balloons tilt front up, tail balloons tilt rear up.
+- [ ] **3.3** Grapple hook attachment — when a grapple projectile hits an attachment point, it attaches and creates a pull force toward the grapple source. *(Deferred — no grapple projectile exists yet)*
+- [x] **3.4** Multiple items attach to same point. Forces stack via `_accumulate_attach_forces()`. Proper cleanup on detach/free.
 
 ---
 
@@ -219,7 +219,7 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 | After Story 6 (Stand-Down) | — | — | — | — | — | — | |
 | After Story 5 (Attack Dummy) | — | — | — | — | — | — | |
 | After Story 1+4 (Attach+Weight) | 17/18 | 3488 | 54 | 1538 | 24 | 46 | No regressions |
-| After Story 3 (Items) | — | — | — | — | — | — | |
+| After Story 3 (Items) | 18/18 | 3851 | 53 | 1680 | 6 | 46 | Best run yet — 18/18 hit |
 
 ---
 

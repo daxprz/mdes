@@ -22,6 +22,7 @@ var _dart_pos: Vector2
 var _dart_vel: Vector2
 var _dart_active := true
 var _attached_to: Node2D = null
+var _attached_point: String = ""  # Attachment point name on the target (if using attachment system)
 
 var _string_points: Array[Vector2] = []
 var _balloon_pos: Vector2
@@ -99,10 +100,37 @@ func _update_dart(delta: float) -> void:
 		_dart_vel.y += 100.0 * delta  # Slight gravity on dart (side-view only)
 	_dart_pos += _dart_vel * delta
 
-	# Check for enemy hits
+	# Check for enemy hits — prefer attachment points for precise targeting
 	for body in get_tree().get_nodes_in_group("enemies"):
 		if not body is Node2D:
 			continue
+		# Check attachment points first (if monster has them)
+		var attached_to_point: bool = false
+		if "_attach_points" in body:
+			for point_name in body._attach_points:
+				var area: Area2D = body._attach_points[point_name]
+				var point_world: Vector2 = body.global_position + area.position
+				var point_radius: float = 16.0
+				if area.get_child_count() > 0:
+					var shape_node: CollisionShape2D = area.get_child(0) as CollisionShape2D
+					if shape_node and shape_node.shape is CircleShape2D:
+						point_radius = (shape_node.shape as CircleShape2D).radius
+				if _dart_pos.distance_to(point_world) < point_radius:
+					_dart_active = false
+					_attached_to = body
+					_attached_point = point_name
+					_balloon_inflating = true
+					_balloon_timer = 0.0
+					AudioManager.play("grapple_hit")
+					if body.has_method("attach_item"):
+						body.attach_item(point_name, self)
+					if body.has_method("take_damage"):
+						body.take_damage(DART_DAMAGE, owner_index)
+					attached_to_point = true
+					break
+			if attached_to_point:
+				return
+		# Fallback: hit body center
 		var dist: float = _dart_pos.distance_to(body.global_position)
 		var hit_radius: float = 50.0 if body.is_in_group("bosses") else 16.0
 		if dist < hit_radius:
@@ -202,10 +230,13 @@ func _update_balloon(delta: float) -> void:
 
 
 func _update_string_physics(delta: float) -> void:
-	# String anchor point: attached enemy or dart position
+	# String anchor point: attachment point on enemy, or dart position
 	var anchor: Vector2 = _dart_pos
 	if is_instance_valid(_attached_to):
-		anchor = _attached_to.global_position
+		if _attached_point != "" and _attached_to.has_method("get_attach_world_position"):
+			anchor = _attached_to.get_attach_world_position(_attached_point)
+		else:
+			anchor = _attached_to.global_position
 
 	# First point follows the anchor
 	_string_points[0] = anchor
@@ -707,8 +738,19 @@ func _update_shadow() -> void:
 	_shadow_node.scale = Vector2(shadow_scale, shadow_scale)
 
 
+func get_attach_force() -> Vector2:
+	## Returns the force this balloon exerts on its attachment point.
+	if not _balloon_inflating:
+		return Vector2.ZERO
+	var inflate_ratio: float = clampf(_balloon_timer / BALLOON_INFLATE_TIME, 0.0, 1.0)
+	return Vector2(0, BALLOON_FLOAT_FORCE * inflate_ratio * inflate_ratio)
+
+
 func _detach_and_free() -> void:
+	if is_instance_valid(_attached_to) and _attached_point != "" and _attached_to.has_method("detach_item"):
+		_attached_to.detach_item(_attached_point, self)
 	_attached_to = null
+	_attached_point = ""
 	_balloon_inflating = false
 	if is_instance_valid(_shadow_node):
 		_shadow_node.queue_free()
