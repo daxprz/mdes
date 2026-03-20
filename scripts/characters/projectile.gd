@@ -47,8 +47,16 @@ func _physics_process(delta: float) -> void:
 		position += direction * speed * delta
 
 
+var _hit := false  # Prevent double-damage from body + area overlap
+
 func _on_body_entered(body: Node2D) -> void:
+	if _hit:
+		return
+	# Skip enemies with hitbox parts — let _on_area_entered handle them
+	if body.has_method("take_part_damage"):
+		return
 	if body.has_method("take_damage"):
+		_hit = true
 		body.take_damage(damage, owner_index)
 
 	if projectile_type == "muffin_grenade":
@@ -58,8 +66,11 @@ func _on_body_entered(body: Node2D) -> void:
 
 
 func _on_area_entered(area: Area2D) -> void:
+	if _hit:
+		return
 	# Check if this is an enemy hitbox (e.g., monster body parts)
 	if area.has_meta("part_name"):
+		_hit = true
 		var part_name: String = area.get_meta("part_name")
 		var enemy: Node2D = area.get_parent()
 		if enemy and enemy.has_method("take_part_damage"):
