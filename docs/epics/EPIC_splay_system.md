@@ -13,6 +13,7 @@ A reusable template describing how a creature should be spread/positioned. Store
 {
   "name": "t-pose",
   "creature": "quadruped",
+  "breakaway_sound": "res://assets/sounds/quadruped_roar.wav",
   "connections": [
     {
       "point": "head",
@@ -269,8 +270,8 @@ When a splayed creature breaks free (all tethers severed), play a dramatic anima
 
 ### Tasks
 
-- [ ] **10.1** Track tether count per splayed creature. When count reaches 0, trigger breakaway sequence.
-- [ ] **10.2** Breakaway sound: loud roar/chain-snap sound effect
+- [ ] **10.1** Track aggregate tether durability per splay instance: sum all tether max HP = total durability. Sum all damage taken across tethers = total damage. When total damage > 50% of total durability → trigger breakaway (all tethers snap simultaneously).
+- [ ] **10.2** Breakaway sound: configurable per pose via `"breakaway_sound"` resource reference in the pose JSON (e.g., `"res://assets/sounds/monster_roar.wav"`). Fallback to a default chain-snap if not specified. Each creature type should have a unique default roar.
 - [ ] **10.3** Screen shake on breakaway (scaled by creature mass)
 - [ ] **10.4** Visual: tether snap particles burst outward from each former anchor point
 - [ ] **10.5** Visual: creature flashes bright for 0.3s, brief slow-motion (Engine.time_scale = 0.3 for 0.5s, then restore)
