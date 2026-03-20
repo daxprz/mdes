@@ -127,6 +127,11 @@ func _execute(command: String) -> String:
 			PlayerManager._joined_devices.clear()
 			return "OK: cleared %d players, joins disabled" % cleared_p
 
+		"enablejoins":
+			PlayerManager.join_disabled = false
+			PlayerManager._joined_devices.clear()
+			return "OK: joins enabled"
+
 		"clear":
 			var cleared: int = 0
 			for e in get_tree().get_nodes_in_group("enemies"):
@@ -166,6 +171,27 @@ func _execute(command: String) -> String:
 					p.health = p.max_health
 					p.damage_taken = 0
 			return "OK: reset HP"
+
+		"revive":
+			var revived: int = 0
+			# Revive real players (player_side.gd)
+			for node in get_tree().get_nodes_in_group("players"):
+				if "_is_dead" in node and node._is_dead and node.has_method("_revive"):
+					node._revive()
+					revived += 1
+			# Also check dead players not in "players" group (they remove themselves on death)
+			for node in get_tree().current_scene.get_children():
+				if "_is_dead" in node and node._is_dead and node.has_method("_revive"):
+					node._revive()
+					revived += 1
+			# Reset HP on all living players too
+			for node in get_tree().get_nodes_in_group("players"):
+				var p_data: Dictionary = {}
+				if "player_index" in node:
+					p_data = PlayerManager.get_player(node.player_index)
+				if not p_data.is_empty():
+					p_data["health"] = p_data.get("max_health", 100)
+			return "OK: revived %d, reset all HP" % revived
 
 		"fps":
 			return "fps=%.0f" % Engine.get_frames_per_second()
