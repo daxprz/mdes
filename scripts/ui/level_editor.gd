@@ -4,9 +4,9 @@ extends CanvasLayer
 ## Modes: spawn areas, seeds, platforms, portal.
 ## Mouse-driven vertex editing, saves to user://levels/.
 
-enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL, MIGRATION }
+enum Mode { SPAWN_AREAS, SPAWN_POSITIONS, SEEDS, PLATFORMS, PORTAL, MIGRATION, SPLAY }
 
-const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal", "Migration"]
+const MODE_NAMES := ["Spawn Areas", "Spawn Positions", "Seeds", "Platforms", "Portal", "Migration", "Splay"]
 const MODE_COLORS := [
 	Color(1.0, 0.9, 0.2, 0.3),   # Spawn areas: yellow
 	Color(0.2, 0.9, 0.5, 0.3),   # Seeds: green
@@ -180,6 +180,28 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_RIGHT:
 				_migration_adjust_cadence(1.0)
 				get_viewport().set_input_as_handled()
+		elif _mode == Mode.SPLAY:
+			if event.keycode == KEY_N:
+				_splay_add_instance()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
+				_splay_delete_selected()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_LEFT:
+				_splay_adjust_rotation(-15.0)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_RIGHT:
+				_splay_adjust_rotation(15.0)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_UP:
+				_splay_cycle_pose(1)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_DOWN:
+				_splay_cycle_pose(-1)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_B:
+				_splay_cycle_behavior()
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -238,6 +260,8 @@ func _start_drag(screen_pos: Vector2) -> void:
 			_try_select_portal(world_pos)
 		Mode.MIGRATION:
 			_try_select_migration(world_pos)
+		Mode.SPLAY:
+			_try_select_splay(world_pos)
 
 
 func _stop_drag() -> void:
@@ -264,6 +288,8 @@ func _do_drag(screen_pos: Vector2) -> void:
 			_drag_portal(world_pos)
 		Mode.MIGRATION:
 			_drag_migration(world_pos)
+		Mode.SPLAY:
+			_drag_splay(world_pos)
 
 
 # -- Spawn Area editing --------------------------------------------------------
@@ -624,6 +650,8 @@ func _draw_overlay() -> void:
 			_draw_portal_overlay()
 		Mode.MIGRATION:
 			_draw_migration_overlay()
+		Mode.SPLAY:
+			_draw_splay_overlay()
 
 
 func _draw_spawn_zones() -> void:
@@ -778,3 +806,159 @@ func _draw_migration_overlay() -> void:
 			if is_active:
 				label_text += " r:%.0f s:%.1f" % [radius, zones[zi].get("strength", 2.0)]
 			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-20, -radius - 8), label_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, base_col * Color(1, 1, 1, alpha_mult))
+
+
+# -- Splay editing -------------------------------------------------------------
+
+var _splay_available_poses: Array[String] = []
+
+func _get_splays() -> Array:
+	if not _config.has("splays"):
+		_config["splays"] = []
+	return _config["splays"]
+
+
+func _try_select_splay(world_pos: Vector2) -> void:
+	var splays: Array = _get_splays()
+	for i in range(splays.size()):
+		var p: Array = splays[i].get("pos", [960, 500])
+		var pos := Vector2(p[0], p[1])
+		if world_pos.distance_to(pos) < 40.0:
+			_selected_idx = i
+			_dragging = true
+			return
+	_selected_idx = -1
+
+
+func _drag_splay(world_pos: Vector2) -> void:
+	if _selected_idx < 0:
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx < splays.size():
+		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
+
+
+func _splay_add_instance() -> void:
+	## Add a new splay instance at screen center.
+	if _splay_available_poses.is_empty():
+		# Load pose names
+		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+		if mgr_script:
+			var temp := Node.new()
+			temp.set_script(mgr_script)
+			add_child(temp)
+			_splay_available_poses = temp.get_all_pose_names()
+			temp.queue_free()
+	var pose_name: String = _splay_available_poses[0] if not _splay_available_poses.is_empty() else "t-pose"
+	var splays: Array = _get_splays()
+	splays.append({
+		"pose": pose_name,
+		"creature": "quadruped",
+		"pos": [960, 500],
+		"rotation": 0,
+		"behavior": "asleep",
+	})
+	_selected_idx = splays.size() - 1
+	config_changed.emit(_config)
+	_update_display()
+
+
+func _splay_delete_selected() -> void:
+	if _selected_idx < 0:
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx < splays.size():
+		splays.remove_at(_selected_idx)
+		_selected_idx = -1
+		config_changed.emit(_config)
+		_update_display()
+
+
+func _splay_adjust_rotation(delta_deg: float) -> void:
+	if _selected_idx < 0:
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx < splays.size():
+		var current: float = splays[_selected_idx].get("rotation", 0)
+		splays[_selected_idx]["rotation"] = fmod(current + delta_deg, 360.0)
+		config_changed.emit(_config)
+		_update_display()
+
+
+func _splay_cycle_pose(direction: int) -> void:
+	if _selected_idx < 0:
+		return
+	if _splay_available_poses.is_empty():
+		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+		if mgr_script:
+			var temp := Node.new()
+			temp.set_script(mgr_script)
+			add_child(temp)
+			_splay_available_poses = temp.get_all_pose_names()
+			temp.queue_free()
+	if _splay_available_poses.is_empty():
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx >= splays.size():
+		return
+	var current_pose: String = splays[_selected_idx].get("pose", "")
+	var idx: int = _splay_available_poses.find(current_pose)
+	idx = (idx + direction) % _splay_available_poses.size()
+	if idx < 0:
+		idx += _splay_available_poses.size()
+	splays[_selected_idx]["pose"] = _splay_available_poses[idx]
+	config_changed.emit(_config)
+	_update_display()
+
+
+func _splay_cycle_behavior() -> void:
+	if _selected_idx < 0:
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx >= splays.size():
+		return
+	var behaviors := ["asleep", "stand_down", "active"]
+	var current: String = splays[_selected_idx].get("behavior", "asleep")
+	var idx: int = behaviors.find(current)
+	idx = (idx + 1) % behaviors.size()
+	splays[_selected_idx]["behavior"] = behaviors[idx]
+	config_changed.emit(_config)
+	_update_display()
+
+
+func _draw_splay_overlay() -> void:
+	var splays: Array = _get_splays()
+	var splay_col := Color(0.9, 0.4, 0.2, 0.7)
+	var selected_col := Color(1.0, 0.8, 0.2, 0.9)
+
+	for i in range(splays.size()):
+		var s: Dictionary = splays[i]
+		var p: Array = s.get("pos", [960, 500])
+		var pos := Vector2(p[0], p[1])
+		var is_selected: bool = (i == _selected_idx)
+		var col: Color = selected_col if is_selected else splay_col
+		var rot: float = s.get("rotation", 0)
+
+		# Body marker
+		_overlay.draw_circle(pos, 16.0 if is_selected else 12.0, col * Color(1, 1, 1, 0.4))
+		_overlay.draw_arc(pos, 16.0, 0, TAU, 16, col, 1.5)
+
+		# Rotation arrow
+		var rot_rad: float = deg_to_rad(rot)
+		var arrow_end: Vector2 = pos + Vector2(cos(rot_rad), sin(rot_rad)) * 30.0
+		_overlay.draw_line(pos, arrow_end, col, 2.0)
+		var perp: Vector2 = Vector2(-sin(rot_rad), cos(rot_rad))
+		_overlay.draw_line(arrow_end, arrow_end - Vector2(cos(rot_rad), sin(rot_rad)) * 8 + perp * 5, col, 1.5)
+		_overlay.draw_line(arrow_end, arrow_end - Vector2(cos(rot_rad), sin(rot_rad)) * 8 - perp * 5, col, 1.5)
+
+		# Labels
+		var pose_name: String = s.get("pose", "?")
+		var behavior: String = s.get("behavior", "?")
+		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -22), pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -10), behavior, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.7))
+		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, 26), "rot:%.0f" % rot, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.5))
+
+	# Help text
+	if _active:
+		var help := "SPLAY: N=add  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  Drag=move"
+		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))

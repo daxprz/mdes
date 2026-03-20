@@ -308,6 +308,32 @@ func _setup_cave_walls_from_config(cave_config: Dictionary) -> void:
 		_dynamic_nodes.append(wall)
 
 
+func _setup_splays_from_config(splays_config: Array) -> void:
+	if splays_config.is_empty():
+		return
+	# Load or create splay manager
+	var mgr: Node = null
+	for child in get_children():
+		if child.name == "SplayManager":
+			mgr = child
+			break
+	if not mgr:
+		var script: GDScript = load("res://scripts/systems/splay_manager.gd")
+		mgr = Node.new()
+		mgr.name = "SplayManager"
+		mgr.set_script(script)
+		add_child(mgr)
+		_dynamic_nodes.append(mgr)
+
+	for splay_data in splays_config:
+		var pose_name: String = splay_data.get("pose", "")
+		var pos_arr: Array = splay_data.get("pos", [960, 500])
+		var pos := Vector2(pos_arr[0], pos_arr[1])
+		var rot: float = splay_data.get("rotation", 0.0)
+		var behavior: String = splay_data.get("behavior", "asleep")
+		mgr.spawn_splay(pose_name, pos, rot, behavior)
+
+
 # -- Process -------------------------------------------------------------------
 
 func _process(delta: float) -> void:
@@ -426,6 +452,7 @@ func _deferred_rebuild() -> void:
 	_setup_portal_from_config(config.get("portal", {}))
 	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
 	_setup_cave_walls_from_config(config.get("cave_walls", {}))
+	_setup_splays_from_config(config.get("splays", []))
 
 
 func _debug_regenerate_nearest_scenery() -> void:
