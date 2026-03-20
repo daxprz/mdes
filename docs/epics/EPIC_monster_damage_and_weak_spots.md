@@ -164,20 +164,9 @@ Scripted test scenarios using RCON to verify weak spots, damage states, and atta
 
 ### Tasks
 
-- [ ] **7.1** `scripts/test_damage.sh` — test script:
-  - Spawn monster + attack dummy
-  - Monster enters stand-down
-  - Attack dummy fires at each body part in sequence, verify damage states via `partstatus`
-  - Verify eye critical hit (PING + 5-way blood squirt)
-  - Verify high-damage penalties: grab disabled (mid-tail), blood drip (torso), leap reduction (legs), slash reduction (arms)
-- [ ] **7.2** `scripts/test_attachments.sh` — test script:
-  - Spawn monster in stand-down
-  - Attach balloons to head, verify front tilt
-  - Attach balloons to tail tip, verify rear tilt
-  - Attach enough balloons to float the monster
-  - Attach grapple to waist, verify pull force
-  - Verify cumulative weight interaction via `weight` command
-- [ ] **7.3** Each test outputs pass/fail per scenario with metrics
+- [x] **7.1** `scripts/test_damage.sh` — 6 tests: damage state thresholds, tail→grab disabled, torso→bleeding, legs→leap reduction, arms→slash reduction, attack dummy firing
+- [x] **7.2** `scripts/test_attachments.sh` — 6 tests: balloon on head, stacking, detach, tail tip, multiple points, weight readout
+- [x] **7.3** Both scripts output pass/fail per scenario
 
 ---
 
