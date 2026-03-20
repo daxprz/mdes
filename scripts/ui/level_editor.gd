@@ -202,6 +202,12 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_B:
 				_splay_cycle_behavior()
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_QUOTELEFT:  # Backtick ` — toggle physics preview
+				_splay_toggle_physics_preview()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_ESCAPE and _splay_physics_preview:
+				_splay_cancel_physics_preview()
+				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_P:
 				_splay_open_library()
 				get_viewport().set_input_as_handled()
@@ -860,6 +866,7 @@ var _splay_edit_pose_idx: int = -1  # Which splay instance we're editing the pos
 var _splay_edit_dragging_cast: bool = false  # True when right-dragging to set cast direction
 var _splay_edit_pose_data: Dictionary = {}  # Loaded pose data being edited
 var _pose_library: Node = null  # Pose library overlay
+var _splay_physics_preview: bool = false  # True when physics is active in editor
 
 func _get_splays() -> Array:
 	if not _config.has("splays"):
@@ -882,9 +889,33 @@ func _try_select_splay(world_pos: Vector2) -> void:
 func _drag_splay(world_pos: Vector2) -> void:
 	if _selected_idx < 0:
 		return
+	# Dragging = repositioning = cancel physics preview
+	if _splay_physics_preview:
+		_splay_cancel_physics_preview()
 	var splays: Array = _get_splays()
 	if _selected_idx < splays.size():
 		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
+
+
+func _splay_toggle_physics_preview() -> void:
+	## Toggle physics simulation for all splay creatures in the level.
+	## When off (default), creatures are frozen rigid — position/rotate freely.
+	## When on, creatures respond to gravity and tether physics.
+	_splay_physics_preview = not _splay_physics_preview
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if "_physics_frozen" in enemy:
+			enemy._physics_frozen = not _splay_physics_preview
+	_update_display()
+
+
+func _splay_cancel_physics_preview() -> void:
+	## Stop physics preview and re-freeze all splay creatures.
+	_splay_physics_preview = false
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if "_physics_frozen" in enemy:
+			enemy._physics_frozen = true
+			enemy.velocity = Vector2.ZERO
+	_update_display()
 
 
 func _splay_open_library() -> void:
@@ -1034,7 +1065,8 @@ func _draw_splay_overlay() -> void:
 
 	# Help text
 	if _active:
-		var help := "SPLAY: N=add  P=library  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  E=edit  Drag=move"
+		var physics_str: String = " [PHYSICS ON]" if _splay_physics_preview else ""
+		var help := "SPLAY: N=add  P=library  `=physics%s  Del=delete  L/R=rotate  U/D=pose  B=behavior  E=edit  Drag=move" % physics_str
 		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))
 
 

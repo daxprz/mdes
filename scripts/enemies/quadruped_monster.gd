@@ -157,6 +157,7 @@ var _dead := false
 var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
 var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
+var _physics_frozen := false  # When true, skip all physics/gravity (used during splay setup)
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
 var _pose_overrides: Dictionary = {}
@@ -577,6 +578,9 @@ func _apply_attach_forces(delta: float) -> void:
 func _physics_process(delta: float) -> void:
 	if _dead:
 		return
+	if _physics_frozen:
+		velocity = Vector2.ZERO
+		return
 
 	# Stand-down mode: force STANDDOWN state, override any transition
 	if _standdown and _state != State.STANDDOWN:
@@ -819,6 +823,9 @@ func _solve_pose(delta: float) -> void:
 		if _pose_overrides.has("waist"):
 			_spine[2] = _spine[2].lerp(_pose_overrides["waist"], blend * minf(s, 1.0))
 
+	# -- Rigid distance constraints (segments can rotate but never stretch) --
+	_enforce_spine_rigid()
+
 	# -- Floor constraints (raycast-based) --
 	if not _tail_severed:
 		for i in range(_tail.size()):
@@ -929,6 +936,37 @@ func _get_facing_offset(offset: Vector2) -> Vector2:
 	if _facing < 0:
 		return Vector2(-offset.x, offset.y)
 	return offset
+
+
+func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float) -> void:
+	## Enforce that point is exactly target_dist away from anchor.
+	## Preserves the angle, only corrects the distance. Modifies point in-place
+	## by finding which variable holds the reference.
+	## NOTE: GDScript passes Vector2 by value, so we use the actual arrays.
+	pass
+
+
+func _enforce_spine_rigid() -> void:
+	## Enforce rigid distances between all connected spine/neck segments.
+	## Called after pose solving to prevent stretching.
+	# Spine chain: spine[0] is the anchor
+	for i in range(1, 3):
+		var dir: Vector2 = (_spine[i] - _spine[i - 1])
+		var dist: float = dir.length()
+		if dist > 0.01:
+			_spine[i] = _spine[i - 1] + dir.normalized() * SPINE_SEG_LEN
+
+	# Neck: neck[0] = spine[0], neck[1] at NECK_LEN from spine[0]
+	_neck[0] = _spine[0]
+	var neck_dir: Vector2 = (_neck[1] - _spine[0])
+	if neck_dir.length() > 0.01:
+		_neck[1] = _spine[0] + neck_dir.normalized() * NECK_LEN
+
+	# Skull at skull_rest length from neck[1]
+	var skull_dist: float = _skull_rest.length()
+	var skull_dir: Vector2 = (_skull - _neck[1])
+	if skull_dir.length() > 0.01:
+		_skull = _neck[1] + skull_dir.normalized() * skull_dist
 
 
 # -- Spine & Posture ----------------------------------------------------------

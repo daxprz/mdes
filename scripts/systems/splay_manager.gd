@@ -109,6 +109,9 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		var c_behavior: String = cdef.get("behavior", behavior)
 		var creature: Node2D = _spawn_creature(c_type, pos + c_offset)
 		if creature:
+			# Freeze physics until tethers are connected
+			if "_physics_frozen" in creature:
+				creature._physics_frozen = true
 			creatures.append({"node": creature, "def": cdef, "behavior": c_behavior})
 
 	if creatures.is_empty():
@@ -187,6 +190,10 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 		# Set pose overrides for IK
 		_apply_pose_overrides(creature, c["def"], rotation_rad)
+
+		# Unfreeze physics now that tethers and pose are set
+		if "_physics_frozen" in creature:
+			creature._physics_frozen = false
 
 	# Track instance
 	var instance: Dictionary = {
