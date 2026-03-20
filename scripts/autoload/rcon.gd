@@ -290,6 +290,26 @@ func _execute(command: String) -> String:
 		"tether":
 			return _cmd_tether(parts)
 
+		"territorial":
+			var enemies: Array = get_tree().get_nodes_in_group("enemies")
+			var count: int = 0
+			var new_state: Variant = null
+			if parts.size() > 1:
+				match parts[1].to_lower():
+					"on": new_state = true
+					"off": new_state = false
+			for e in enemies:
+				if "territorial" in e:
+					if new_state != null:
+						e.territorial = new_state as bool
+					else:
+						e.territorial = not e.territorial
+					count += 1
+			if count == 0:
+				return "ERR: no monsters with territorial support"
+			var state_str: String = str(enemies[0].territorial) if "territorial" in enemies[0] else "?"
+			return "OK: territorial=%s on %d monsters" % [state_str, count]
+
 		"standdown":
 			return _cmd_standdown(parts)
 

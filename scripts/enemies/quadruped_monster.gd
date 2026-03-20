@@ -22,6 +22,10 @@ const JAW_LEN := 14.0
 const CLAVICLE_LEN := 12.0   # Short rigid bone connecting shoulders to arm hips
 const HIP_BONE_LEN := 12.0   # Short rigid bone connecting waist to leg hips
 const LIMB_FLEX := 0.10      # ±10% flex allowed on lower limb segments
+const TAIL_FLEX := 0.05      # ±5% flex allowed on tail segments
+const TAIL_MAX_BEND := deg_to_rad(20.0)  # Max rotation per tail joint (radians)
+const SPINE_MAX_BEND := deg_to_rad(30.0)  # Max rotation per spine joint
+const NECK_MAX_BEND := deg_to_rad(45.0)   # Max rotation per neck joint
 
 # Pose stiffness (how fast segments spring back to rest pose, per second)
 const STIFFNESS := 12.0       # General stiffness
@@ -171,6 +175,7 @@ var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
 var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
 var _physics_frozen := false  # When true, skip all physics/gravity (used during splay setup)
+var territorial := false      # When true, attacks other monsters instead of/in addition to players
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
 var _pose_overrides: Dictionary = {}
@@ -750,7 +755,28 @@ func _physics_process(delta: float) -> void:
 
 	# ALWAYS enforce rigid distances — even during leap/grab/precog
 	_enforce_spine_rigid()
+	# ALWAYS enforce tail segment rigidity (±5% flex) + max 20° bend per joint
+	if not _tail_severed:
+		# Reference direction: spine[1] → spine[2] (the "straight back" direction)
+		var prev_dir: Vector2 = (_spine[2] - _spine[1]).normalized()
+		var tail_parent: Vector2 = _spine[2] + Vector2(-4 * _facing, -2)
+		for ti in range(_tail.size()):
+			var tail_dir: Vector2 = _tail[ti] - tail_parent
+			var tail_dist: float = tail_dir.length()
+			if tail_dist > 0.01:
+				var current_dir: Vector2 = tail_dir.normalized()
+				# Clamp angle relative to previous segment direction
+				var angle_diff: float = prev_dir.angle_to(current_dir)
+				if absf(angle_diff) > TAIL_MAX_BEND:
+					var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
+					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+				# Clamp distance (±5% flex)
+				var clamped_len: float = clampf(tail_dist, TAIL_SEG_LEN * (1.0 - TAIL_FLEX), TAIL_SEG_LEN * (1.0 + TAIL_FLEX))
+				_tail[ti] = tail_parent + current_dir * clamped_len
+				prev_dir = current_dir
+			tail_parent = _tail[ti]
 	# ALWAYS enforce limb rigidity (upper = exact, lower = ±10%)
+	# For planted feet: foot stays at world position, rigidity pushes knee instead
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
@@ -759,16 +785,35 @@ func _physics_process(delta: float) -> void:
 			_legs[li][0] = _clavicles[li]
 		else:
 			_legs[li][0] = _hip_bones[li - 2]
-		# Rigid upper limb
-		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
-		if upper_dir.length() > 0.01:
-			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
-		# Flex lower limb ±10%
-		var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
-		var lower_dist: float = lower_dir.length()
-		if lower_dist > 0.01:
-			var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
-			_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
+
+		if _foot_planted[li] and not _leap_ik_off:
+			# Planted: foot should be at world position
+			var foot_local: Vector2 = _foot_world[li] - global_position
+			var hip: Vector2 = _legs[li][0]
+			var reach: float = hip.distance_to(foot_local)
+			var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN * (1.0 + LIMB_FLEX)
+			if reach <= max_reach:
+				# Foot is reachable — use world position
+				_legs[li][2] = foot_local
+			else:
+				# Foot is unreachable — force replant below hip
+				var floor_y: float = _raycast_floor(hip)
+				_legs[li][2] = Vector2(hip.x, floor_y)
+				_foot_world[li] = global_position + _legs[li][2]
+			# Enforce rigid upper limb from hip toward knee
+			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+			if upper_dir.length() > 0.01:
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+		else:
+			# Not planted or IK off: enforce from hip downward
+			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+			if upper_dir.length() > 0.01:
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
+			var lower_dist: float = lower_dir.length()
+			if lower_dist > 0.01:
+				var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 
 	# Affix body collider to torso (skip during grab — grab controls collision)
 	if not in_grab:
@@ -1071,25 +1116,45 @@ func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float
 
 
 func _enforce_spine_rigid() -> void:
-	## Enforce rigid distances between all connected spine/neck/clavicle/hip segments.
-	## Called after pose solving to prevent stretching.
-	# Spine chain: spine[0] is the anchor
+	## Enforce rigid distances + max bend angles between all connected segments.
+	# Spine chain: spine[0] is the anchor, each joint max 30°
+	# Reference direction for spine[0]→[1]: facing direction (horizontal)
+	var spine_ref_dir: Vector2 = Vector2(-_facing, 0)  # spine goes backward
 	for i in range(1, 3):
 		var dir: Vector2 = (_spine[i] - _spine[i - 1])
 		if dir.length() > 0.01:
-			_spine[i] = _spine[i - 1] + dir.normalized() * SPINE_SEG_LEN
+			var current_dir: Vector2 = dir.normalized()
+			var angle_diff: float = spine_ref_dir.angle_to(current_dir)
+			if absf(angle_diff) > SPINE_MAX_BEND:
+				var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
+				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+			_spine[i] = _spine[i - 1] + current_dir * SPINE_SEG_LEN
+			spine_ref_dir = current_dir
 
-	# Neck: neck[0] = spine[0], neck[1] at NECK_LEN from spine[0]
+	# Neck: 45° max bend at each joint
 	_neck[0] = _spine[0]
+	# Neck reference: spine[1]→spine[0] direction (forward from body)
+	var neck_ref_dir: Vector2 = (_spine[0] - _spine[1]).normalized()
 	var neck_dir: Vector2 = (_neck[1] - _spine[0])
 	if neck_dir.length() > 0.01:
-		_neck[1] = _spine[0] + neck_dir.normalized() * NECK_LEN
+		var current_dir: Vector2 = neck_dir.normalized()
+		var angle_diff: float = neck_ref_dir.angle_to(current_dir)
+		if absf(angle_diff) > NECK_MAX_BEND:
+			var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+			current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+		_neck[1] = _spine[0] + current_dir * NECK_LEN
 
-	# Skull at skull_rest length from neck[1]
+	# Skull: 45° max bend from neck direction
 	var skull_dist: float = _skull_rest.length()
+	var skull_ref_dir: Vector2 = (_neck[1] - _spine[0]).normalized()
 	var skull_dir: Vector2 = (_skull - _neck[1])
 	if skull_dir.length() > 0.01:
-		_skull = _neck[1] + skull_dir.normalized() * skull_dist
+		var current_dir: Vector2 = skull_dir.normalized()
+		var angle_diff: float = skull_ref_dir.angle_to(current_dir)
+		if absf(angle_diff) > NECK_MAX_BEND:
+			var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+			current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+		_skull = _neck[1] + current_dir * skull_dist
 
 	# Clavicles: rigid from spine[0]
 	for ci in range(2):
@@ -1434,11 +1499,23 @@ func _do_chase(_delta: float) -> void:
 					"arc_ratio": 0.5,
 					"launch_vel": edge["launch_vel"],
 				})
-				_state = State.ATTACK_LEAP_WINDUP
-				_attack_timer = 0.0
-				_leap_ik_off = true
-				_leap_cooldown = LEAP_COOLDOWN
-				velocity.x = 0
+				# Check facing before launching — abort if facing wrong way
+				var launch_vel: Vector2 = edge.get("launch_vel", Vector2.ZERO)
+				var launch_facing_ok: bool = true
+				if launch_vel.x > 20.0 and _facing < 0:
+					launch_facing_ok = false
+				elif launch_vel.x < -20.0 and _facing > 0:
+					launch_facing_ok = false
+				if launch_facing_ok:
+					_state = State.ATTACK_LEAP_WINDUP
+					_attack_timer = 0.0
+					_leap_ik_off = true
+					_leap_cooldown = LEAP_COOLDOWN
+					velocity.x = 0
+				else:
+					# Face the right direction first, try again next frame
+					_facing = signf(launch_vel.x) if absf(launch_vel.x) > 5.0 else _facing
+					_leap_cooldown = 0.2
 			else:
 				_leap_cooldown = 0.0
 		return
@@ -1503,10 +1580,12 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		_start_sprint_slash()
 		return
 
-	# VERTICAL LEAP: significant distance
+	# VERTICAL LEAP: significant distance — must face target horizontally
 	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
-		_start_leap()
-		return
+		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < 20.0
+		if facing_target:
+			_start_leap()
+			return
 
 	# Lunge at medium distance
 	if dist > 80.0 and dist < 200.0 and randf() < 0.3:
@@ -3187,8 +3266,18 @@ func _do_leap_windup(delta: float) -> void:
 			var compressed_foot: Vector2 = hip + Vector2(0, (LEG_UPPER_LEN + LEG_LOWER_LEN) * (1.0 - compress * 0.4))
 			_legs[li][2] = _legs[li][2].lerp(compressed_foot, 4.0 * delta)
 
-	# LAUNCH at end of windup
+	# LAUNCH at end of windup — only if body faces the target (not backwards)
 	if _attack_timer >= LEAP_WINDUP_TIME:
+		if is_instance_valid(_target):
+			var to_target_x: float = _target.global_position.x - global_position.x
+			# Body must face the same horizontal direction as the target
+			if (to_target_x > 20.0 and _facing < 0) or (to_target_x < -20.0 and _facing > 0):
+				# Facing wrong way — abort leap, flip and return to chase
+				_facing = signf(to_target_x)
+				_end_leap()
+				_state = State.CHASE
+				return
+
 		_state = State.ATTACK_LEAP_AIRBORNE
 		_attack_timer = 0.0
 		_leap_ik_off = true
@@ -3207,6 +3296,9 @@ func _do_leap_windup(delta: float) -> void:
 			var to_target: Vector2 = _leap_target_pos - global_position
 			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7 * leap_mult
 			velocity.y = -LEAP_LAUNCH_SPEED * 0.5 * leap_mult
+		# Force facing to match launch direction
+		if absf(velocity.x) > 10.0:
+			_facing = signf(velocity.x)
 		# Unplant all feet
 		for li in range(4):
 			_foot_planted[li] = false
@@ -3220,6 +3312,10 @@ func _do_leap_airborne(delta: float) -> void:
 
 	# Apply gravity for parabolic arc
 	velocity.y += GRAVITY * delta
+
+	# Force facing to match horizontal velocity — no backwards flight
+	if absf(velocity.x) > 10.0:
+		_facing = signf(velocity.x)
 
 	# Align spine toward target (body aims like a missile)
 	var fly_dir: Vector2 = velocity.normalized() if velocity.length() > 10 else Vector2(_facing, 0)
@@ -3531,15 +3627,49 @@ func _pick_target() -> void:
 				_hit_tracker.clear()
 				return
 
-	# Keep current target if valid
+	# Keep current target if valid and alive
 	if is_instance_valid(_target):
-		return
+		# If territorial target is another monster, check it's still alive
+		if _target.is_in_group("enemies") and "_dead" in _target and _target._dead:
+			_target = null
+		else:
+			return
+
+	# Territorial: find nearest other monster first
+	if territorial:
+		var rival: Node2D = _find_nearest_rival()
+		if rival:
+			_target = rival
+			_target_player_index = -1
+			return
 
 	# Find nearest player
 	_target = _find_nearest_player()
 	if _target:
 		var pi_val: Variant = _target.get("player_index")
 		_target_player_index = pi_val if pi_val is int else 0
+
+
+func _find_nearest_rival() -> Node2D:
+	## Find the nearest other monster (for territorial mode).
+	var best: Node2D = null
+	var best_dist: float = INF
+	for node in get_tree().get_nodes_in_group("enemies"):
+		if node == self:
+			continue
+		if not node is CharacterBody2D:
+			continue
+		if "_dead" in node and node._dead:
+			continue
+		if "_standdown" in node and node._standdown:
+			continue
+		if "_asleep" in node and node._asleep:
+			continue
+		var d: float = global_position.distance_to(node.global_position)
+		if d < best_dist:
+			best_dist = d
+			best = node
+	return best
 
 
 func _find_nearest_player() -> Node2D:

@@ -134,6 +134,13 @@ func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 
+	# ESC closes editor (unless in SPLAY_EDIT which handles its own ESC)
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		if _mode != Mode.SPLAY_EDIT:
+			toggle()
+			get_viewport().set_input_as_handled()
+			return
+
 	# Tab to switch modes
 	if event is InputEventKey and event.pressed:
 		if event.keycode == KEY_TAB:
@@ -212,26 +219,35 @@ func _input(event: InputEvent) -> void:
 				_splay_open_library()
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_E:
-				# Enter pose edit mode for selected splay
-				if _selected_idx >= 0:
-					_splay_edit_pose_idx = _selected_idx
-					_mode = Mode.SPLAY_EDIT
-					_selected_idx = -1
-					_update_display()
+				# Enter pose edit mode — uses existing monster or spawns one
+				_splay_edit_pose_idx = _selected_idx
+				_mode = Mode.SPLAY_EDIT
+				_selected_idx = -1
+				_enter_splay_edit()
+				_update_display()
 				get_viewport().set_input_as_handled()
 		elif _mode == Mode.SPLAY_EDIT:
 			if event.keycode == KEY_ESCAPE:
-				# Exit pose edit, back to SPLAY mode
+				_exit_splay_edit()
 				_mode = Mode.SPLAY
 				_selected_idx = _splay_edit_pose_idx
 				_splay_edit_pose_idx = -1
 				_update_display()
 				get_viewport().set_input_as_handled()
-			elif event.keycode == KEY_N:
-				_splay_edit_add_connection()
+			elif event.keycode == KEY_SPACE:
+				_splay_edit_toggle_point()
 				get_viewport().set_input_as_handled()
-			elif event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE:
-				_splay_edit_delete_connection()
+			elif event.keycode == KEY_UP:
+				_splay_edit_move_endpoint(Vector2(0, -1))
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_DOWN:
+				_splay_edit_move_endpoint(Vector2(0, 1))
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_LEFT:
+				_splay_edit_move_endpoint(Vector2(-1, 0))
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_RIGHT:
+				_splay_edit_move_endpoint(Vector2(1, 0))
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_S and event.ctrl_pressed:
 				_splay_edit_save_pose()
@@ -247,18 +263,18 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif event.button_index == MOUSE_BUTTON_RIGHT and _mode == Mode.SPLAY_EDIT:
 			if event.pressed:
-				_splay_edit_dragging_cast = true
+				_splay_edit_dragging_endpoint = true
 				_try_select_splay_connection(_get_world_pos(event.position))
 			else:
-				_splay_edit_dragging_cast = false
+				_splay_edit_dragging_endpoint = false
 			get_viewport().set_input_as_handled()
 
 	if event is InputEventMouseMotion:
 		if _dragging:
 			_do_drag(event.position)
 			get_viewport().set_input_as_handled()
-		elif _splay_edit_dragging_cast and _mode == Mode.SPLAY_EDIT and _selected_idx >= 0:
-			_splay_edit_update_cast_dir(_get_world_pos(event.position))
+		elif _splay_edit_dragging_endpoint and _mode == Mode.SPLAY_EDIT and _splay_edit_selected_point != "":
+			_drag_splay_connection(_get_world_pos(event.position))
 			get_viewport().set_input_as_handled()
 
 
@@ -313,10 +329,12 @@ func _start_drag(screen_pos: Vector2) -> void:
 
 func _stop_drag() -> void:
 	if _dragging:
-		# Live refresh on drag release
-		config_changed.emit(_config)
+		# Live refresh on drag release — skip for SPLAY_EDIT (creature is live, not config-driven)
+		if _mode != Mode.SPLAY_EDIT:
+			config_changed.emit(_config)
 	_dragging = false
 	_drag_handle = -1
+	_splay_edit_dragging_endpoint = false
 
 
 func _do_drag(screen_pos: Vector2) -> void:
@@ -1071,192 +1089,307 @@ func _draw_splay_overlay() -> void:
 
 
 # -- Splay Pose Editing (SPLAY_EDIT mode) -------------------------------------
+# Spawns a frozen creature, shows all candidate connection points.
+# SPACE toggles points on/off, drag to position, right-drag for cast endpoint.
 
-func _get_editing_pose() -> Dictionary:
-	## Get the pose data for the splay instance being edited.
-	if _splay_edit_pose_idx < 0:
-		return {}
-	var splays: Array = _get_splays()
-	if _splay_edit_pose_idx >= splays.size():
-		return {}
-	var splay_inst: Dictionary = splays[_splay_edit_pose_idx]
-	var pose_name: String = splay_inst.get("pose", "")
-	if _splay_edit_pose_data.is_empty() or _splay_edit_pose_data.get("name", "") != pose_name:
-		# Load the pose
-		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
-		var temp := Node.new()
-		temp.set_script(mgr_script)
-		add_child(temp)
-		_splay_edit_pose_data = temp.load_pose(pose_name).duplicate(true)
-		temp.queue_free()
-	return _splay_edit_pose_data
+var _splay_edit_creature: Node2D = null  # The frozen creature being edited
+var _splay_edit_origin: Vector2 = Vector2(960, 500)
+var _splay_edit_all_points: Array[String] = []  # All available attachment point names
+var _splay_edit_active: Dictionary = {}  # point_name -> { enabled: bool, cast_end: Vector2, pos_override: Vector2 }
+var _splay_edit_selected_point: String = ""  # Currently selected point name
+var _splay_edit_dragging_endpoint: bool = false  # True when dragging a cast endpoint
+
+func _enter_splay_edit() -> void:
+	## Called when entering SPLAY_EDIT mode. Spawn a frozen creature.
+	_splay_edit_origin = Vector2(960, 500)
+
+	# Find existing monster or spawn one
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	_splay_edit_creature = null
+	for e in enemies:
+		if "_attach_points" in e:
+			_splay_edit_creature = e
+			break
+
+	if not _splay_edit_creature:
+		var script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
+		var creature := CharacterBody2D.new()
+		creature.set_script(script)
+		creature.global_position = _splay_edit_origin
+		var container: Node = get_tree().current_scene
+		container.add_child(creature)
+		_splay_edit_creature = creature
+
+	# Freeze it
+	if "_physics_frozen" in _splay_edit_creature:
+		_splay_edit_creature._physics_frozen = true
+	if "_standdown" in _splay_edit_creature:
+		_splay_edit_creature._standdown = true
+
+	_splay_edit_origin = _splay_edit_creature.global_position
+
+	# Enumerate all attachment points from the creature
+	_splay_edit_all_points.clear()
+	if "_attach_points" in _splay_edit_creature:
+		for point_name in _splay_edit_creature._attach_points:
+			_splay_edit_all_points.append(point_name)
+	_splay_edit_all_points.sort()
+
+	# Initialize active state — always rebuild from creature's current skeleton positions
+	_splay_edit_active.clear()
+	for point_name in _splay_edit_all_points:
+		var point_world: Vector2 = _get_splay_point_world(point_name)
+		_splay_edit_active[point_name] = {
+			"enabled": false,
+			"cast_end": Vector2.ZERO,
+			"pos_override": point_world,  # Start at creature's current skeleton position
+		}
+	# Load enabled state + cast directions from existing pose data
+	if not _splay_edit_pose_data.is_empty():
+		for conn in _splay_edit_pose_data.get("connections", []):
+			var pn: String = conn.get("point", "")
+			if _splay_edit_active.has(pn):
+				_splay_edit_active[pn]["enabled"] = true
+				var rp: Array = conn.get("relative_pos", [0, 0])
+				var conn_world: Vector2 = _splay_edit_origin + Vector2(rp[0], rp[1])
+				_splay_edit_active[pn]["pos_override"] = conn_world
+				var cd: Array = conn.get("cast_dir", [0, -1])
+				_splay_edit_active[pn]["cast_end"] = conn_world + Vector2(cd[0], cd[1]) * 200.0
+
+	_selected_idx = -1
+	_splay_edit_selected_point = ""
 
 
-func _get_editing_origin() -> Vector2:
-	var splays: Array = _get_splays()
-	if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays.size():
-		var p: Array = splays[_splay_edit_pose_idx].get("pos", [960, 500])
-		return Vector2(p[0], p[1])
-	return Vector2(960, 500)
+func _exit_splay_edit() -> void:
+	# Unfreeze creature
+	if is_instance_valid(_splay_edit_creature) and "_physics_frozen" in _splay_edit_creature:
+		_splay_edit_creature._physics_frozen = false
+	_splay_edit_creature = null
+	_splay_edit_active.clear()
 
 
 func _try_select_splay_connection(world_pos: Vector2) -> void:
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
+	if not is_instance_valid(_splay_edit_creature):
 		return
-	var origin: Vector2 = _get_editing_origin()
-	var connections: Array = pose.get("connections", [])
-	for i in range(connections.size()):
-		var rel: Array = connections[i].get("relative_pos", [0, 0])
-		var conn_world: Vector2 = origin + Vector2(rel[0], rel[1])
-		if world_pos.distance_to(conn_world) < 20.0:
-			_selected_idx = i
+
+	# Check if clicking the origin (center) to drag the whole creature
+	if world_pos.distance_to(_splay_edit_origin) < 20.0:
+		_splay_edit_selected_point = "_origin"
+		_dragging = true
+		return
+
+	# Check cast endpoints first (small circles at end of ray)
+	for point_name in _splay_edit_all_points:
+		var data: Dictionary = _splay_edit_active.get(point_name, {})
+		if not data.get("enabled", false):
+			continue
+		var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
+		if cast_end != Vector2.ZERO and world_pos.distance_to(cast_end) < 15.0:
+			_splay_edit_selected_point = point_name
+			_splay_edit_dragging_endpoint = true
 			_dragging = true
 			return
-	_selected_idx = -1
+
+	# Check connection point circles
+	for point_name in _splay_edit_all_points:
+		var point_world: Vector2 = _get_splay_point_world(point_name)
+		if world_pos.distance_to(point_world) < 15.0:
+			_splay_edit_selected_point = point_name
+			_splay_edit_dragging_endpoint = false
+			_dragging = true
+			return
+
+	_splay_edit_selected_point = ""
+	_dragging = false
 
 
 func _drag_splay_connection(world_pos: Vector2) -> void:
-	if _selected_idx < 0:
+	if _splay_edit_selected_point == "_origin":
+		# Move the whole creature + all overrides
+		if is_instance_valid(_splay_edit_creature):
+			var delta_pos: Vector2 = world_pos - _splay_edit_origin
+			_splay_edit_creature.global_position = world_pos
+			_splay_edit_origin = world_pos
+			# Move all overrides and cast endpoints with it
+			for pn in _splay_edit_active:
+				var data: Dictionary = _splay_edit_active[pn]
+				if data["pos_override"] != Vector2.ZERO:
+					data["pos_override"] += delta_pos
+				if data["cast_end"] != Vector2.ZERO:
+					data["cast_end"] += delta_pos
 		return
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
+
+	if _splay_edit_selected_point == "" or not _splay_edit_active.has(_splay_edit_selected_point):
 		return
-	var origin: Vector2 = _get_editing_origin()
-	var connections: Array = pose.get("connections", [])
-	if _selected_idx < connections.size():
-		var rel: Vector2 = world_pos - origin
-		# Clamp to max chain distance from origin
-		var point_name: String = connections[_selected_idx].get("point", "")
+
+	if _splay_edit_dragging_endpoint:
+		# Dragging the cast ray endpoint
+		_splay_edit_active[_splay_edit_selected_point]["cast_end"] = world_pos
+	else:
+		# Dragging the connection point itself — constrained by chain length
 		var SplayMgr: GDScript = load("res://scripts/systems/splay_manager.gd")
-		var max_dist: float = SplayMgr.get_max_distance_from_origin(point_name)
+		var max_dist: float = SplayMgr.get_max_distance_from_origin(_splay_edit_selected_point)
+		var rel: Vector2 = world_pos - _splay_edit_origin
 		if rel.length() > max_dist:
 			rel = rel.normalized() * max_dist
-		connections[_selected_idx]["relative_pos"] = [rel.x, rel.y]
+		_splay_edit_active[_splay_edit_selected_point]["pos_override"] = _splay_edit_origin + rel
 
 
-func _splay_edit_add_connection() -> void:
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
+func _get_splay_point_world(point_name: String) -> Vector2:
+	# Use override position if available (from dragging or loaded pose)
+	if _splay_edit_active.has(point_name):
+		var pos_ov: Vector2 = _splay_edit_active[point_name].get("pos_override", Vector2.ZERO)
+		if pos_ov != Vector2.ZERO:
+			return pos_ov
+	# Fallback: creature's live skeleton position
+	if is_instance_valid(_splay_edit_creature) and "_attach_points" in _splay_edit_creature:
+		if _splay_edit_creature._attach_points.has(point_name):
+			return _splay_edit_creature.global_position + _splay_edit_creature._attach_points[point_name].position
+	return _splay_edit_origin
+
+
+func _splay_edit_toggle_point() -> void:
+	if _splay_edit_selected_point == "" or _splay_edit_selected_point == "_origin":
 		return
-	var connections: Array = pose.get("connections", [])
-	# Find an attachment point not yet used
-	var all_points := ["head", "tail_tip", "shoulders", "waist"]
-	var used: Array[String] = []
-	for c in connections:
-		used.append(c.get("point", ""))
-	var new_point: String = ""
-	for p in all_points:
-		if p not in used:
-			new_point = p
-			break
-	if new_point.is_empty():
-		return  # All points already used
-	connections.append({
-		"point": new_point,
-		"relative_pos": [0, 0],
-		"cast_dir": [0, -1],
-	})
-	_selected_idx = connections.size() - 1
-	_update_display()
+	if not _splay_edit_active.has(_splay_edit_selected_point):
+		return
+	var data: Dictionary = _splay_edit_active[_splay_edit_selected_point]
+	data["enabled"] = not data["enabled"]
+	if data["enabled"] and data["cast_end"] == Vector2.ZERO:
+		# Default cast endpoint: 200px directly away from origin
+		var point_world: Vector2 = data.get("pos_override", _get_splay_point_world(_splay_edit_selected_point))
+		var away: Vector2 = (point_world - _splay_edit_origin).normalized()
+		if away.length() < 0.1:
+			away = Vector2(0, -1)
+		data["cast_end"] = point_world + away * 200.0
 
 
-func _splay_edit_delete_connection() -> void:
-	if _selected_idx < 0:
+func _splay_edit_move_endpoint(dir: Vector2) -> void:
+	if _splay_edit_selected_point == "" or not _splay_edit_active.has(_splay_edit_selected_point):
 		return
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
-		return
-	var connections: Array = pose.get("connections", [])
-	if _selected_idx < connections.size():
-		connections.remove_at(_selected_idx)
-		_selected_idx = -1
-		_update_display()
-
-
-func _splay_edit_update_cast_dir(world_pos: Vector2) -> void:
-	## Right-drag: set cast direction on selected connection point.
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty() or _selected_idx < 0:
-		return
-	var origin: Vector2 = _get_editing_origin()
-	var connections: Array = pose.get("connections", [])
-	if _selected_idx >= connections.size():
-		return
-	var rel: Array = connections[_selected_idx].get("relative_pos", [0, 0])
-	var conn_pos: Vector2 = origin + Vector2(rel[0], rel[1])
-	var dir: Vector2 = (world_pos - conn_pos).normalized()
-	if dir.length() < 0.1:
-		dir = Vector2(0, -1)
-	connections[_selected_idx]["cast_dir"] = [dir.x, dir.y]
-	_update_display()
+	var data: Dictionary = _splay_edit_active[_splay_edit_selected_point]
+	if data.get("enabled", false):
+		data["cast_end"] += dir * 5.0
 
 
 func _splay_edit_save_pose() -> void:
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
-		return
+	## Build pose from active points and save.
+	var connections: Array = []
+	for point_name in _splay_edit_all_points:
+		var data: Dictionary = _splay_edit_active.get(point_name, {})
+		if not data.get("enabled", false):
+			continue
+		var point_world: Vector2 = data.get("pos_override", _get_splay_point_world(point_name))
+		var rel_pos: Vector2 = point_world - _splay_edit_origin
+		var cast_end: Vector2 = data.get("cast_end", point_world + Vector2(0, -200))
+		var cast_dir: Vector2 = (cast_end - point_world).normalized()
+		if cast_dir.length() < 0.1:
+			cast_dir = Vector2(0, -1)
+		connections.append({
+			"point": point_name,
+			"relative_pos": [snappedf(rel_pos.x, 0.1), snappedf(rel_pos.y, 0.1)],
+			"cast_dir": [snappedf(cast_dir.x, 0.01), snappedf(cast_dir.y, 0.01)],
+		})
+
+	var pose_name: String = _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
+	var pose: Dictionary = {
+		"name": pose_name,
+		"creature": "quadruped",
+		"breakaway_sound": "",
+		"connections": connections,
+	}
 	var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
 	var temp := Node.new()
 	temp.set_script(mgr_script)
 	add_child(temp)
 	temp.save_pose(pose)
 	temp.queue_free()
-	print("EDITOR: saved splay pose '%s'" % pose.get("name", "?"))
+	_splay_edit_pose_data = pose
+	print("EDITOR: saved splay pose '%s' with %d connections" % [pose_name, connections.size()])
 
 
 func _draw_splay_edit_overlay() -> void:
-	var pose: Dictionary = _get_editing_pose()
-	if pose.is_empty():
+	if not is_instance_valid(_splay_edit_creature):
+		_overlay.draw_string(ThemeDB.fallback_font, Vector2(400, 300), "No creature found. Press ESC and spawn one first.", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1, 0.3, 0.3))
 		return
-	var origin: Vector2 = _get_editing_origin()
-	var connections: Array = pose.get("connections", [])
 
-	# Draw origin marker
-	_overlay.draw_circle(origin, 8.0, Color(0.9, 0.5, 0.2, 0.5))
-	_overlay.draw_arc(origin, 8.0, 0, TAU, 16, Color(0.9, 0.5, 0.2, 0.8), 1.5)
-	_overlay.draw_string(ThemeDB.fallback_font, origin + Vector2(-20, -14), pose.get("name", "?"), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.8, 0.3))
+	var origin: Vector2 = _splay_edit_origin
+	var font: Font = ThemeDB.fallback_font
 
-	var conn_col := Color(0.3, 0.8, 1.0, 0.8)
+	# Draw origin (draggable center)
+	var origin_selected: bool = (_splay_edit_selected_point == "_origin")
+	var origin_col: Color = Color(1.0, 0.9, 0.3, 0.9) if origin_selected else Color(0.9, 0.5, 0.2, 0.7)
+	_overlay.draw_circle(origin, 10.0, origin_col * Color(1, 1, 1, 0.3))
+	_overlay.draw_arc(origin, 10.0, 0, TAU, 16, origin_col, 2.0)
+	_overlay.draw_string(font, origin + Vector2(-8, 4), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, origin_col)
+
+	# Draw each candidate connection point
+	var off_col := Color(0.4, 0.4, 0.4, 0.5)
+	var on_col := Color(0.2, 0.9, 0.5, 0.8)
 	var sel_col := Color(1.0, 1.0, 0.3, 1.0)
-	var cast_col := Color(1.0, 0.4, 0.3, 0.5)
+	var cast_col := Color(1.0, 0.4, 0.3, 0.6)
+	var endpoint_col := Color(1.0, 0.6, 0.2, 0.8)
 
-	for i in range(connections.size()):
-		var c: Dictionary = connections[i]
-		var rel: Array = c.get("relative_pos", [0, 0])
-		var cast: Array = c.get("cast_dir", [0, -1])
-		var point_name: String = c.get("point", "?")
-		var conn_pos: Vector2 = origin + Vector2(rel[0], rel[1])
-		var cast_dir: Vector2 = Vector2(cast[0], cast[1]).normalized()
-		var is_selected: bool = (i == _selected_idx)
-		var col: Color = sel_col if is_selected else conn_col
+	for point_name in _splay_edit_all_points:
+		var point_world: Vector2 = _get_splay_point_world(point_name)
+		var data: Dictionary = _splay_edit_active.get(point_name, {})
+		var enabled: bool = data.get("enabled", false)
+		var is_selected: bool = (_splay_edit_selected_point == point_name)
 
-		# Connection point handle
-		_overlay.draw_circle(conn_pos, 8.0 if is_selected else 6.0, col * Color(1, 1, 1, 0.5))
-		_overlay.draw_arc(conn_pos, 8.0, 0, TAU, 12, col, 1.5)
+		var col: Color
+		if is_selected:
+			col = sel_col
+		elif enabled:
+			col = on_col
+		else:
+			col = off_col
 
-		# Line from origin to connection
-		_overlay.draw_line(origin, conn_pos, col * Color(1, 1, 1, 0.3), 1.0)
-
-		# Cast direction arrow
-		var cast_end: Vector2 = conn_pos + cast_dir * 60.0
-		_overlay.draw_line(conn_pos, cast_end, cast_col, 2.0)
-		var perp: Vector2 = Vector2(-cast_dir.y, cast_dir.x)
-		_overlay.draw_line(cast_end, cast_end - cast_dir * 8 + perp * 4, cast_col, 1.5)
-		_overlay.draw_line(cast_end, cast_end - cast_dir * 8 - perp * 4, cast_col, 1.5)
-
-		# Cast direction dotted preview (where raycast would hit)
-		var dash_pos: float = 60.0
-		while dash_pos < 400.0:
-			var d_start: Vector2 = conn_pos + cast_dir * dash_pos
-			var d_end: Vector2 = conn_pos + cast_dir * minf(dash_pos + 6.0, 400.0)
-			_overlay.draw_line(d_start, d_end, cast_col * Color(1, 1, 1, 0.3), 1.0)
-			dash_pos += 12.0
+		# Connection point circle
+		var r: float = 10.0 if is_selected else 7.0
+		_overlay.draw_circle(point_world, r, col * Color(1, 1, 1, 0.3))
+		_overlay.draw_arc(point_world, r, 0, TAU, 12, col, 1.5)
 
 		# Label
-		_overlay.draw_string(ThemeDB.fallback_font, conn_pos + Vector2(-20, -14), point_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col)
+		var label_col: Color = col
+		var status: String = " [ON]" if enabled else ""
+		_overlay.draw_string(font, point_world + Vector2(-25, -r - 6), point_name + status, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, label_col)
+
+		# Cast ray + endpoint (only if enabled)
+		if enabled:
+			var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
+			if cast_end != Vector2.ZERO:
+				# Dotted line from connection point to cast endpoint
+				var ray_dir: Vector2 = (cast_end - point_world).normalized()
+				var ray_len: float = point_world.distance_to(cast_end)
+				var dash: float = 0.0
+				while dash < ray_len:
+					var d_start: Vector2 = point_world + ray_dir * dash
+					var d_end: Vector2 = point_world + ray_dir * minf(dash + 8.0, ray_len)
+					_overlay.draw_line(d_start, d_end, cast_col, 1.5)
+					dash += 14.0
+
+				# Arrow at endpoint
+				var perp: Vector2 = Vector2(-ray_dir.y, ray_dir.x)
+				_overlay.draw_line(cast_end, cast_end - ray_dir * 10 + perp * 5, cast_col, 1.5)
+				_overlay.draw_line(cast_end, cast_end - ray_dir * 10 - perp * 5, cast_col, 1.5)
+
+				# Draggable endpoint circle
+				var ep_selected: bool = is_selected and _splay_edit_dragging_endpoint
+				var ep_col: Color = sel_col if ep_selected else endpoint_col
+				_overlay.draw_circle(cast_end, 6.0, ep_col * Color(1, 1, 1, 0.5))
+				_overlay.draw_arc(cast_end, 6.0, 0, TAU, 8, ep_col, 1.5)
+
+	# Pose name
+	var pose_name: String = _splay_edit_pose_data.get("name", "(unsaved)")
+	_overlay.draw_string(font, Vector2(10, 50), "Pose: %s" % pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.8, 0.3))
+
+	# Active count
+	var active_count: int = 0
+	for pn in _splay_edit_active:
+		if _splay_edit_active[pn].get("enabled", false):
+			active_count += 1
+	_overlay.draw_string(font, Vector2(10, 66), "Active points: %d / %d" % [active_count, _splay_edit_all_points.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.7, 0.7))
 
 	# Help text
-	if _active:
-		var help := "SPLAY EDIT: Drag=move point  N=add  Del=delete  Ctrl+S=save pose  Esc=back"
-		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))
+	var help := "SPLAY EDIT: Click=select  SPACE=toggle on/off  Drag endpoint=aim  Arrows=nudge  Ctrl+S=save  Esc=back"
+	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))

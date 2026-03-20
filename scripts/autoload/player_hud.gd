@@ -754,7 +754,7 @@ func _input(event: InputEvent) -> void:
 		if allow_classes:
 			if event.keycode == KEY_Q:
 				_cycle_class(pi, -1, is_title or profile_select_mode)
-			elif event.keycode == KEY_E:
+			elif event.keycode == KEY_E and not event.ctrl_pressed:
 				_cycle_class(pi, 1, is_title or profile_select_mode)
 		if allow_profiles and event.keycode == KEY_R:
 			_cycle_profile(pi, -1, -1)

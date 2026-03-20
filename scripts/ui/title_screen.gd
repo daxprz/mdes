@@ -25,6 +25,8 @@ var _scenery_items: Array = []  # Procedurally generated background items
 var _current_config: Dictionary = {}
 var _config_spawn_positions: Array[Vector2] = []
 var _editor: Node = null
+var _test_menu: Node = null
+var _help_overlay: CanvasLayer = null
 var _dynamic_nodes: Array = []  # All nodes created from config (for teardown)
 var _portal_node: Node2D = null
 var _firefly_manager: Node2D = null
@@ -396,6 +398,22 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# ? toggles help overlay, ESC closes it
+	if event is InputEventKey and event.pressed and event.keycode == KEY_SLASH and event.shift_pressed:
+		_toggle_help()
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and _help_overlay:
+		_toggle_help()
+		get_viewport().set_input_as_handled()
+		return
+
+	# Ctrl+T toggles test menu
+	if event is InputEventKey and event.pressed and event.keycode == KEY_T and event.ctrl_pressed:
+		_toggle_test_menu()
+		get_viewport().set_input_as_handled()
+		return
+
 	# Debug: G key regenerates nearest scenery item to P1
 	if event is InputEventKey and event.pressed and event.keycode == KEY_G:
 		if PlayerHUD._debug_mode:
@@ -405,6 +423,163 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventKey and event.pressed and event.keycode == KEY_M:
 		if PlayerHUD._debug_mode:
 			_debug_spawn_monster()
+
+
+func _toggle_help() -> void:
+	if _help_overlay:
+		_help_overlay.queue_free()
+		_help_overlay = null
+		return
+
+	_help_overlay = CanvasLayer.new()
+	_help_overlay.layer = 99
+	var panel := Control.new()
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.draw.connect(func():
+		var vp: Vector2 = get_viewport().get_visible_rect().size
+		var px: float = 40.0
+		var py: float = 30.0
+		var pw: float = vp.x - 80.0
+		var ph: float = vp.y - 60.0
+		panel.draw_rect(Rect2(px, py, pw, ph), Color(0.06, 0.06, 0.08, 0.96))
+		panel.draw_rect(Rect2(px, py, pw, ph), Color(0.5, 0.5, 0.3, 0.5), false, 2.0)
+
+		var font: Font = ThemeDB.fallback_font
+		var y: float = py + 28
+		var col_h := Color(1.0, 0.9, 0.3)
+		var col_k := Color(0.5, 0.9, 1.0)
+		var col_v := Color(0.8, 0.8, 0.8)
+		var col_dim := Color(0.5, 0.5, 0.5)
+		var lh: float = 14.0
+
+		panel.draw_string(font, Vector2(px + 20, y), "COMMAND REFERENCE  (? to close)", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, col_h)
+		y += 24
+
+		# Columns
+		var col1: float = px + 20
+		var col2: float = px + pw * 0.35
+		var col3: float = px + pw * 0.65
+
+		# --- Column 1: Keyboard ---
+		panel.draw_string(font, Vector2(col1, y), "KEYBOARD", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col_h)
+		y += lh + 4
+		var keys := [
+			["?", "This help screen"],
+			["Ctrl+D", "Toggle debug mode"],
+			["Ctrl+E", "Level editor"],
+			["Ctrl+T", "Test menu"],
+			["TAB", "Cycle enemy selection (debug)"],
+			["SPACE", "Dump skeleton JSON (debug)"],
+			["I", "Toggle debug draw on all enemies"],
+			["M", "Spawn monster (debug)"],
+			["G", "Regen nearest tree (debug)"],
+			["", ""],
+			["LEVEL EDITOR", ""],
+			["Tab", "Cycle mode"],
+			["Ctrl+S", "Save level"],
+			["Ctrl+R", "Reset level"],
+			["N", "Add item"],
+			["Del", "Delete selected"],
+			["", ""],
+			["SPLAY MODE", ""],
+			["P", "Pose library"],
+			["E", "Edit pose"],
+			["B", "Cycle behavior"],
+			["L/R arrows", "Rotate"],
+			["U/D arrows", "Cycle pose"],
+			["`", "Toggle physics preview"],
+		]
+		for entry in keys:
+			if entry[0] == "":
+				y += 4
+				continue
+			if entry[1] == "":
+				panel.draw_string(font, Vector2(col1, y), entry[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_h)
+				y += lh
+				continue
+			panel.draw_string(font, Vector2(col1, y), entry[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_k)
+			panel.draw_string(font, Vector2(col1 + 100, y), entry[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_v)
+			y += lh
+
+		# --- Column 2: Controller ---
+		y = py + 52
+		panel.draw_string(font, Vector2(col2, y), "CONTROLLER", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col_h)
+		y += lh + 4
+		var ctrl := [
+			["L-Stick/D-pad", "Move"],
+			["Cross (A)", "Jump / Self-revive"],
+			["Square (X)", "Attack / Fire"],
+			["Triangle (Y)", "Special ability"],
+			["Circle (O)", "Interact / Reload"],
+			["L1", "Grapple / Tether 2nd hook"],
+			["R1", "Pull to anchor"],
+			["L2", "Archer aim (analog)"],
+			["R2", "Fire aimed arrow"],
+			["L3", "Block"],
+			["Start", "Join / Pause"],
+			["Select", "Debug toggle"],
+			["R-Stick", "Aim direction"],
+			["", ""],
+			["WHILE SWINGING", ""],
+			["L1 (hold/rel)", "2nd hook → tether"],
+			["R1", "Pull to anchor"],
+			["D-pad U/D", "Adjust rope length"],
+			["Jump", "Release + impulse"],
+		]
+		for entry in ctrl:
+			if entry[0] == "":
+				y += 4
+				continue
+			if entry[1] == "":
+				panel.draw_string(font, Vector2(col2, y), entry[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_h)
+				y += lh
+				continue
+			panel.draw_string(font, Vector2(col2, y), entry[0], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_k)
+			panel.draw_string(font, Vector2(col2 + 110, y), entry[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col_v)
+			y += lh
+
+		# --- Column 3: RCON ---
+		y = py + 52
+		panel.draw_string(font, Vector2(col3, y), "RCON (port 9999)", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col_h)
+		y += lh + 4
+		var rcon := [
+			"spawn monster|dummy|attacker [x y]",
+			"clear / clearplayers / enablejoins",
+			"standdown [on|off]",
+			"territorial [on|off]",
+			"revive / resethp",
+			"tp <x> <y>",
+			"partstatus / partdmg <part> <amt>",
+			"weight / attach balloon <pt>",
+			"detach <point>",
+			"tether <idx> <pt> floor [len]",
+			"tether status / cut / length <px>",
+			"splay list / spawn / clear / status",
+			"dump [enemy_idx]",
+			"attacker target|part|weapon|rate",
+			"attacker stop|start|stats",
+			"tab [n] / key <k>",
+			"enemies / players / status",
+			"fps / hp / ik / thrash / ball",
+			"debug / debugdraw / ikreset",
+			"title <text> / score / grid",
+			"quit",
+		]
+		for line in rcon:
+			panel.draw_string(font, Vector2(col3, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col_v)
+			y += lh
+	)
+	_help_overlay.add_child(panel)
+	add_child(_help_overlay)
+
+
+func _toggle_test_menu() -> void:
+	if _test_menu == null:
+		var script := load("res://scripts/ui/test_menu.gd")
+		_test_menu = CanvasLayer.new()
+		_test_menu.set_script(script)
+		add_child(_test_menu)
+	_test_menu.toggle()
 
 
 func _toggle_editor() -> void:
