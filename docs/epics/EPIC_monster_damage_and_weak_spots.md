@@ -22,16 +22,16 @@ Invisible hitbox zones where items (balloons, grapple hooks) can attach to the m
 
 ### Tasks
 
-- [ ] **1.1** Add attachment point `Area2D` nodes (separate from damage hitboxes) on collision layer for item attachment:
-  - `attach_head` — centered on `_skull`, radius matches skull polygon bounding circle
-  - `attach_tail_tip` — centered on `_tail[4]` (last segment), large invisible circle (r=30+, generous target)
-  - `attach_shoulders` — centered on `_spine[0]` (front leg hip), radius matches shoulder width
-  - `attach_waist` — centered on `_spine[2]` (rear leg hip), radius matches waist width
-- [ ] **1.2** Update positions every frame in `_update_hitbox_positions()` — attachment points track their skeleton anchor
-- [ ] **1.3** Each attachment point stores an array of attached items (`_attachments: Dictionary` keyed by point name)
-- [ ] **1.4** Public API: `attach_item(point_name: String, item: Node2D)` and `detach_item(point_name: String, item: Node2D)`
-- [ ] **1.5** Attached items have their `global_position` updated to the attachment point's world position each frame
-- [ ] **1.6** Debug draw: when TAB-selected, show attachment points as dashed circles with labels
+- [x] **1.1** Add attachment point `Area2D` nodes (separate from damage hitboxes):
+  - `head` — centered on `_skull`, r=16 (matches skull polygon bounding circle)
+  - `tail_tip` — centered on `_tail[4]`, r=30 (large generous target)
+  - `shoulders` — centered on `_spine[0]`, r=14 (matches shoulder width)
+  - `waist` — centered on `_spine[2]`, r=12 (matches waist width)
+- [x] **1.2** Positions updated every frame in `_update_hitbox_positions()` — track skeleton anchors
+- [x] **1.3** `_attachments: Dictionary` keyed by point name, each an `Array[Node2D]`
+- [x] **1.4** Public API: `attach_item()`, `detach_item()`, `get_attach_world_position()`
+- [x] **1.5** Attached items `global_position` updated to attachment point world position each frame (with cleanup of freed items)
+- [x] **1.6** Debug draw: dashed cyan circles with labels + attached item count when TAB-selected
 
 ---
 
@@ -103,22 +103,14 @@ Each body segment has a weight proportional to its visual size. Attached item fo
 
 ### Tasks
 
-- [ ] **4.1** Define weight constants per segment, proportional to visual size:
-  - Head (skull + jaw): ~15 (small, bony)
-  - Neck (2 segments): ~10
-  - Shoulders / spine[0]: ~30 (front of torso, arms attached)
-  - Torso / spine[1]: ~40 (largest body section)
-  - Waist / spine[2]: ~30 (rear of torso, legs attached)
-  - Tail (5 segments): ~20 total (~4 each)
-  - Each leg (3 segments): ~12 each (~48 total)
-  - **Total: ~205** (close to existing MASS=200)
-- [ ] **4.2** Attachment forces are divided by the local segment weight before being applied to the skeleton. Light parts (head, tail tip) are more affected than heavy parts (torso).
-- [ ] **4.3** Forces propagate through the skeleton chain: a force on the tail tip pulls tail[4], which pulls tail[3], etc., each attenuated by the next segment's weight. Cumulative force reaches the body.
-- [ ] **4.4** Total upward force across all attachments is summed and compared against total body weight. If upward force exceeds weight, the monster begins to float (reduced gravity or negative gravity on the CharacterBody2D).
-- [ ] **4.5** Enough balloons on the head should visibly tilt the front of the monster upward (spine[0] rises relative to spine[2]).
-- [ ] **4.6** RCON command: `weight` — print all segment weights and total upward/pull forces from attached items
-- [ ] **4.7** RCON command: `attach balloon <point>` — attach a test balloon to an attachment point
-- [ ] **4.8** RCON command: `detach <point>` — remove all items from an attachment point
+- [x] **4.1** `SEGMENT_WEIGHTS` dict: head=15, neck=10, shoulders=30, torso=40, waist=30, tail=20, legs=12 each. **Total: 193** (close to MASS=200)
+- [x] **4.2** Forces divided by local segment weight in `_apply_attach_forces()` — light parts (head, tail) move more
+- [x] **4.3** Force propagation through skeleton chains: tail_tip → tail[4-1] → spine[2], head → neck → spine[0], etc. with attenuation
+- [x] **4.4** Total upward force vs body weight: when upward force > 50% body weight, gravity reduced proportionally. Caps at -120 velocity.
+- [x] **4.5** Head balloons tilt spine[0] upward via local_effect on skeleton points
+- [x] **4.6** RCON: `weight` — shows all segment weights, active forces, attached item count
+- [x] **4.7** RCON: `attach balloon <point>` — spawns balloon dart pre-attached and inflating at attachment point
+- [x] **4.8** RCON: `detach <point>` — removes and frees all items from an attachment point
 
 ---
 
@@ -159,7 +151,7 @@ A test mode where the monster becomes passive — stops attacking, stops moving,
 - [x] **6.1** New state: `State.STANDDOWN` — monster enters idle pose, all attack/chase/precog logic skipped
 - [x] **6.2** In stand-down: monster still runs skeleton physics (breathing, IK, foot planting) so it looks alive and hitboxes are positioned correctly
 - [x] **6.3** In stand-down: `take_damage` and `take_part_damage` still function — damage states update, blood effects trigger, gameplay penalties apply
-- [ ] **6.4** In stand-down: attachment points active — items can attach and physics forces apply *(blocked on Story 1)*
+- [x] **6.4** In stand-down: attachment points active — items can attach and physics forces apply
 - [x] **6.5** RCON command: `standdown` — toggle stand-down mode on all quadruped monsters
 - [x] **6.6** RCON command: `standdown on` / `standdown off` — explicit set
 - [x] **6.7** Visual indicator: when in stand-down, draw white flag + "STANDDOWN" text above the monster
@@ -226,8 +218,7 @@ Record the current baseline metrics before any work in this EPIC begins. All fut
 | After Story 2 (Weak Spots) | 17/18 | 3617 | 53 | 1680 | 24 | 46 | No regressions. Crash in title_screen.gd unrelated (controller disconnect) |
 | After Story 6 (Stand-Down) | — | — | — | — | — | — | |
 | After Story 5 (Attack Dummy) | — | — | — | — | — | — | |
-| After Story 1 (Attach Points) | — | — | — | — | — | — | |
-| After Story 4 (Weight) | — | — | — | — | — | — | |
+| After Story 1+4 (Attach+Weight) | 17/18 | 3488 | 54 | 1538 | 24 | 46 | No regressions |
 | After Story 3 (Items) | — | — | — | — | — | — | |
 
 ---

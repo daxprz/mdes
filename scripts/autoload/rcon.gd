@@ -237,6 +237,15 @@ func _execute(command: String) -> String:
 		"partdmg":
 			return _cmd_partdmg(parts)
 
+		"weight":
+			return _cmd_weight()
+
+		"attach":
+			return _cmd_attach(parts)
+
+		"detach":
+			return _cmd_detach(parts)
+
 		"standdown":
 			return _cmd_standdown(parts)
 
@@ -644,6 +653,83 @@ func _cmd_partdmg(parts: PackedStringArray) -> String:
 			e.take_part_damage(part_name, amount)
 			return "OK: dealt %d damage to %s" % [amount, part_name]
 	return "ERR: no enemy with take_part_damage"
+
+
+func _cmd_weight() -> String:
+	## Print segment weights and attached forces.
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if "SEGMENT_WEIGHTS" in e:
+			var lines: Array[String] = ["weights (total=%.0f):" % e.get_total_weight()]
+			for seg_name in e.SEGMENT_WEIGHTS:
+				lines.append("  %s: %.0f" % [seg_name, e.SEGMENT_WEIGHTS[seg_name]])
+			if "_attach_forces" in e and not e._attach_forces.is_empty():
+				lines.append("forces:")
+				for point_name in e._attach_forces:
+					var f: Vector2 = e._attach_forces[point_name]
+					lines.append("  %s: (%.1f, %.1f)" % [point_name, f.x, f.y])
+			else:
+				lines.append("forces: none")
+			if "_attachments" in e:
+				var total_items: int = 0
+				for point_name in e._attachments:
+					total_items += e._attachments[point_name].size()
+				lines.append("attached_items: %d" % total_items)
+			return "\n".join(lines)
+	return "ERR: no enemy with weight data"
+
+
+func _cmd_attach(parts: PackedStringArray) -> String:
+	## Attach a test item: attach balloon <point>
+	if parts.size() < 3:
+		return "ERR: usage: attach balloon <point_name>"
+	var item_type: String = parts[1].to_lower()
+	var point_name: String = parts[2]
+
+	if item_type != "balloon":
+		return "ERR: only 'balloon' supported. Usage: attach balloon <point>"
+
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if e.has_method("attach_item") and "_attachments" in e:
+			if not e._attachments.has(point_name):
+				return "ERR: unknown attachment point '%s'. Try: head, tail_tip, shoulders, waist" % point_name
+			# Spawn a balloon dart and attach it
+			var dart_script := load("res://scripts/characters/balloon_dart.gd")
+			var dart := Node2D.new()
+			dart.set_script(dart_script)
+			var attach_pos: Vector2 = e.get_attach_world_position(point_name)
+			dart.global_position = attach_pos
+			dart.dart_direction = Vector2.UP
+			dart.owner_index = -1
+			var container: Node = get_tree().current_scene
+			container.add_child(dart)
+			# Force-attach: skip dart flight, go straight to inflating
+			dart._dart_active = false
+			dart._attached_to = e
+			dart._balloon_inflating = true
+			dart._balloon_timer = 0.0
+			dart._dart_pos = attach_pos
+			# Register with attachment system
+			e.attach_item(point_name, dart)
+			return "OK: attached balloon to %s" % point_name
+	return "ERR: no enemy with attachment points"
+
+
+func _cmd_detach(parts: PackedStringArray) -> String:
+	## Detach all items from a point: detach <point>
+	if parts.size() < 2:
+		return "ERR: usage: detach <point_name>"
+	var point_name: String = parts[1]
+
+	for e in get_tree().get_nodes_in_group("enemies"):
+		if "_attachments" in e and e._attachments.has(point_name):
+			var items: Array = e._attachments[point_name]
+			var count: int = items.size()
+			for item in items:
+				if is_instance_valid(item):
+					item.queue_free()
+			items.clear()
+			return "OK: detached %d items from %s" % [count, point_name]
+	return "ERR: no enemy with attachment point '%s'" % point_name
 
 
 func _cmd_standdown(parts: PackedStringArray) -> String:

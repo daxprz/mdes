@@ -222,6 +222,25 @@ var _blood_particles: Array = []       # Active blood particles [{pos, vel, life
 # Hitbox nodes (assigned in _ready from scene tree or created dynamically)
 var _hitboxes: Dictionary = {}  # part_name -> Area2D
 var _body_collision: CollisionShape2D = null  # Main body collision shape
+
+# Attachment points — larger zones for item attachment (balloons, grapple)
+var _attach_points: Dictionary = {}  # point_name -> Area2D
+var _attachments: Dictionary = {}    # point_name -> Array[Node2D] (attached items)
+
+# Per-segment weights (proportional to visual size, total ~205)
+const SEGMENT_WEIGHTS: Dictionary = {
+	"head": 15.0,       # Skull + jaw (small, bony)
+	"neck": 10.0,       # 2 neck segments
+	"shoulders": 30.0,  # spine[0] — front of torso, arms attached
+	"torso": 40.0,      # spine[1] — largest body section
+	"waist": 30.0,      # spine[2] — rear of torso, legs attached
+	"tail": 20.0,       # 5 tail segments (~4 each)
+	"leg0": 12.0,       # Front-left arm
+	"leg1": 12.0,       # Front-right arm
+	"leg2": 12.0,       # Rear-left leg
+	"leg3": 12.0,       # Rear-right leg
+}
+var _attach_forces: Dictionary = {}  # point_name -> Vector2 (accumulated force from attached items)
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
 var debug_draw_lite: bool = true     # Lightweight debug (state, platforms, waypoint, target)
 
@@ -251,6 +270,7 @@ func _ready() -> void:
 	_init_part_health()
 	_init_collision()
 	_init_hitboxes()
+	_init_attach_points()
 
 
 func _init_skeleton() -> void:
@@ -431,6 +451,137 @@ func _init_hitboxes() -> void:
 	_hitboxes["eye"] = eye_area
 
 
+func _init_attach_points() -> void:
+	## Create larger Area2D zones for item attachment (balloons, grapple).
+	## These are separate from damage hitboxes — sized to match the visual body part.
+	var points := {
+		"head": 16.0,       # Matches skull polygon bounding circle (~32px wide)
+		"tail_tip": 30.0,   # Large generous target at tail end
+		"shoulders": 14.0,  # Matches spine[0] visual size (r=12 + margin)
+		"waist": 12.0,      # Matches spine[2] visual size (r=10 + margin)
+	}
+	for point_name in points:
+		var area := Area2D.new()
+		area.name = "Attach_" + point_name
+		area.collision_layer = 0
+		area.collision_mask = 2  # Player projectiles can target these
+		area.set_meta("attach_point", point_name)
+		var shape := CollisionShape2D.new()
+		var circle := CircleShape2D.new()
+		circle.radius = points[point_name]
+		shape.shape = circle
+		area.add_child(shape)
+		add_child(area)
+		_attach_points[point_name] = area
+		_attachments[point_name] = []
+
+
+func attach_item(point_name: String, item: Node2D) -> void:
+	## Attach an item to a named attachment point.
+	if not _attachments.has(point_name):
+		return
+	if item not in _attachments[point_name]:
+		_attachments[point_name].append(item)
+
+
+func detach_item(point_name: String, item: Node2D) -> void:
+	## Detach an item from a named attachment point.
+	if not _attachments.has(point_name):
+		return
+	_attachments[point_name].erase(item)
+
+
+func get_attach_world_position(point_name: String) -> Vector2:
+	## Get the current world position of an attachment point.
+	if _attach_points.has(point_name):
+		return global_position + _attach_points[point_name].position
+	return global_position
+
+
+func get_segment_weight(point_name: String) -> float:
+	## Get the weight of a segment by attachment point name.
+	if SEGMENT_WEIGHTS.has(point_name):
+		return SEGMENT_WEIGHTS[point_name]
+	# Map attachment point names to segment names
+	match point_name:
+		"tail_tip": return SEGMENT_WEIGHTS["tail"]
+	return 30.0  # Default
+
+
+func get_total_weight() -> float:
+	var total: float = 0.0
+	for w in SEGMENT_WEIGHTS.values():
+		total += w
+	return total
+
+
+func _accumulate_attach_forces() -> void:
+	## Collect forces from all attached items. Items with a `get_attach_force()` method
+	## provide their force vector; balloon darts use their float force.
+	_attach_forces.clear()
+	for point_name in _attachments:
+		var force := Vector2.ZERO
+		for item in _attachments[point_name]:
+			if not is_instance_valid(item):
+				continue
+			if item.has_method("get_attach_force"):
+				force += item.get_attach_force()
+			elif "_balloon_inflating" in item and item._balloon_inflating:
+				# Balloon dart: use its float force based on inflation
+				var inflate_ratio: float = clampf(item._balloon_timer / item.BALLOON_INFLATE_TIME, 0.0, 1.0)
+				force += Vector2(0, item.BALLOON_FLOAT_FORCE * inflate_ratio * inflate_ratio)
+		if force.length_squared() > 0.01:
+			_attach_forces[point_name] = force
+
+
+func _apply_attach_forces(delta: float) -> void:
+	## Apply accumulated attachment forces to the skeleton and body.
+	## Forces are divided by local segment weight — light parts move more.
+	if _attach_forces.is_empty():
+		return
+
+	var total_upward: float = 0.0
+
+	for point_name in _attach_forces:
+		var force: Vector2 = _attach_forces[point_name]
+		var weight: float = get_segment_weight(point_name)
+
+		# Force effect on the local skeleton segment (divided by weight)
+		var local_effect: Vector2 = force * delta / weight
+
+		# Apply to the corresponding skeleton points
+		match point_name:
+			"head":
+				_skull += local_effect * 2.0
+				_neck[1] += local_effect * 1.0
+				_spine[0] += local_effect * 0.3  # Propagate to shoulders
+			"tail_tip":
+				if not _tail_severed:
+					_tail[4] += local_effect * 2.0
+					_tail[3] += local_effect * 1.5
+					_tail[2] += local_effect * 1.0
+					_tail[1] += local_effect * 0.5
+					_spine[2] += local_effect * 0.2  # Propagate to waist
+			"shoulders":
+				_spine[0] += local_effect * 1.5
+				_spine[1] += local_effect * 0.5
+			"waist":
+				_spine[2] += local_effect * 1.5
+				_spine[1] += local_effect * 0.5
+
+		# Accumulate total upward force for float check
+		total_upward += force.y  # Negative = upward
+
+	# If total upward force exceeds body weight, reduce gravity
+	var body_weight: float = get_total_weight()
+	if total_upward < -body_weight * 0.5:
+		# Significant upward pull — reduce gravity effect
+		var lift_ratio: float = clampf(absf(total_upward) / body_weight, 0.0, 2.0)
+		velocity.y -= GRAVITY * delta * lift_ratio * 0.8
+		if velocity.y < -120.0:
+			velocity.y = -120.0
+
+
 # -- Physics -------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
@@ -558,6 +709,8 @@ func _physics_process(delta: float) -> void:
 		_constrain_skeleton_to_world()
 
 	_update_hitbox_positions()
+	_accumulate_attach_forces()
+	_apply_attach_forces(delta)
 	_update_blood_particles(delta)
 	_score_ik_quality()
 	_score_strategy_thrash()
@@ -3430,6 +3583,28 @@ func _update_hitbox_positions() -> void:
 		if _hitboxes.has(key) and not _leg_severed[li]:
 			_hitboxes[key].position = _legs[li][1]  # Knee area
 
+	# Attachment points
+	if _attach_points.has("head"):
+		_attach_points["head"].position = _skull
+	if _attach_points.has("tail_tip") and not _tail_severed:
+		_attach_points["tail_tip"].position = _tail[4]  # Last tail segment
+	if _attach_points.has("shoulders"):
+		_attach_points["shoulders"].position = _spine[0]
+	if _attach_points.has("waist"):
+		_attach_points["waist"].position = _spine[2]
+
+	# Update attached items to follow their attachment points
+	for point_name in _attachments:
+		var world_pos: Vector2 = get_attach_world_position(point_name)
+		var items: Array = _attachments[point_name]
+		var i: int = items.size() - 1
+		while i >= 0:
+			if is_instance_valid(items[i]):
+				items[i].global_position = world_pos
+			else:
+				items.remove_at(i)  # Clean up freed items
+			i -= 1
+
 
 # -- Blood Particles -----------------------------------------------------------
 
@@ -3896,3 +4071,26 @@ func _draw_debug() -> void:
 					draw_line(pe_l[ei] - global_position, pe_l[ei + 1] - global_position, pe_col, 2.0)
 				for ei in range(pe_r.size() - 1):
 					draw_line(pe_r[ei] - global_position, pe_r[ei + 1] - global_position, pe_col, 2.0)
+
+	# -- Attachment points (dashed circles + labels) --
+	var attach_col := Color(0.4, 0.8, 1.0, 0.5)
+	for point_name in _attach_points:
+		var area: Area2D = _attach_points[point_name]
+		var pos: Vector2 = area.position
+		var r: float = 12.0
+		if area.get_child_count() > 0:
+			var shape_node: CollisionShape2D = area.get_child(0) as CollisionShape2D
+			if shape_node and shape_node.shape is CircleShape2D:
+				r = (shape_node.shape as CircleShape2D).radius
+		# Dashed circle approximation
+		var segments: int = 16
+		for si in range(segments):
+			if si % 2 == 1:
+				continue
+			var a1: float = TAU * float(si) / float(segments)
+			var a2: float = TAU * float(si + 1) / float(segments)
+			draw_line(pos + Vector2(cos(a1), sin(a1)) * r, pos + Vector2(cos(a2), sin(a2)) * r, attach_col, 1.0)
+		draw_string(font, pos + Vector2(-20, -r - 4), point_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, attach_col)
+		var acount: int = _attachments[point_name].size() if _attachments.has(point_name) else 0
+		if acount > 0:
+			draw_string(font, pos + Vector2(-8, r + 10), "x%d" % acount, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0.2))
