@@ -987,5 +987,33 @@ func _cmd_attacker(parts: PackedStringArray) -> String:
 					a._shots_fired, a._hits_landed])
 			return "\n".join(lines)
 
+		"tether_length":
+			if parts.size() < 3:
+				return "ERR: usage: attacker tether_length <px>"
+			var tlen: float = float(parts[2])
+			for a in attackers:
+				a.set_tether_length(tlen)
+			return "OK: tether_length=%.0f" % tlen
+
+		"tether_b":
+			# attacker tether_b floor  OR  attacker tether_b enemy <idx> <part>
+			if parts.size() < 3:
+				return "ERR: usage: attacker tether_b floor | attacker tether_b enemy <idx> <part>"
+			var btype: String = parts[2].to_lower()
+			if btype == "floor":
+				for a in attackers:
+					a.set_tether_target_b("floor")
+				return "OK: tether_b=floor"
+			elif btype == "enemy" and parts.size() >= 5:
+				var eidx: int = int(parts[3])
+				var epart: String = parts[4]
+				var enemies: Array = get_tree().get_nodes_in_group("enemies")
+				if eidx >= enemies.size():
+					return "ERR: enemy %d not found" % eidx
+				for a in attackers:
+					a.set_tether_target_b("enemy", enemies[eidx], epart)
+				return "OK: tether_b=enemy %d %s" % [eidx, epart]
+			return "ERR: usage: attacker tether_b floor | attacker tether_b enemy <idx> <part>"
+
 		_:
-			return "ERR: unknown attacker subcommand '%s'. Try: target, part, weapon, rate, stop, start, stats" % subcmd
+			return "ERR: unknown attacker subcommand '%s'. Try: target, part, weapon, rate, stop, start, stats, tether_length, tether_b" % subcmd

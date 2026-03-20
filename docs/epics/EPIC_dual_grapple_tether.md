@@ -45,16 +45,16 @@ Extend the grapple state machine to support tether mode with L2 as the second-po
 
 ### Tasks
 
-- [ ] **1.1** Add new grapple states: `TETHER_WINDUP` (second hook spinning at anchor A), `TETHER_THROWN` (second hook in flight from anchor A), `TETHER_ACTIVE` (both points connected, rope live, player detached)
-- [ ] **1.2** When in CONNECTED/SWINGING state, L2 (hold) transitions to `TETHER_WINDUP` — second hook begins spinning at the current anchor point (anchor A)
-- [ ] **1.3** L2 (release) in `TETHER_WINDUP` → `TETHER_THROWN` — second hook launches from anchor A position toward player's aim direction
-- [ ] **1.4** Second hook uses same physics as primary hook: gravity, drag, raycast collision detection
-- [ ] **1.5** On second hook connect → `TETHER_ACTIVE`: player detaches from rope, rope stays between anchor A and anchor B
-- [ ] **1.6** Store tether data: anchor A (position, body, offset, part), anchor B (same), target length (from D-pad adjustment in step 3)
-- [ ] **1.7** Move existing L2 boost/shrink functionality to a different binding (or disable during grapple connected state)
-- [ ] **1.8** Tether inventory: max 5 active tethers per player. Track in `_active_tethers: Array` (max size 5). New tether refused if 5 already active.
-- [ ] **1.9** Broken/severed tethers are automatically reclaimed — removed from `_active_tethers`, freeing a slot
-- [ ] **1.10** On second hook connect: player DROPS from the rope (velocity preserved, normal gravity resumes). Rope becomes standalone tether entity between A and B.
+- [x] **1.1** Add new grapple states: `TETHER_WINDUP` (second hook spinning at anchor A), `TETHER_THROWN` (second hook in flight from anchor A), `TETHER_ACTIVE` (both points connected, rope live, player detached)
+- [x] **1.2** When in CONNECTED/SWINGING state, L2 (hold) transitions to `TETHER_WINDUP` — second hook begins spinning at the current anchor point (anchor A)
+- [x] **1.3** L2 (release) in `TETHER_WINDUP` → `TETHER_THROWN` — second hook launches from anchor A position toward player's aim direction
+- [x] **1.4** Second hook uses same physics as primary hook: gravity, drag, raycast collision detection
+- [x] **1.5** On second hook connect → `TETHER_ACTIVE`: player detaches from rope, rope stays between anchor A and anchor B
+- [x] **1.6** Store tether data: anchor A (position, body, offset, part), anchor B (same), target length (from D-pad adjustment in step 3)
+- [x] **1.7** Move existing L2 boost/shrink functionality to a different binding (or disable during grapple connected state)
+- [x] **1.8** Tether inventory: max 5 active tethers per player. Track in `_active_tethers: Array` (max size 5). New tether refused if 5 already active.
+- [x] **1.9** Broken/severed tethers are automatically reclaimed — removed from `_active_tethers`, freeing a slot
+- [x] **1.10** On second hook connect: player DROPS from the rope (velocity preserved, normal gravity resumes). Rope becomes standalone tether entity between A and B.
 - [ ] **1.11** Self-tether: if player aims second hook at nothing / presses a cancel, anchor B = player. Player is now tethered to anchor A (bound by tether length, can still walk/jump within radius).
 
 ---
@@ -65,15 +65,15 @@ The tether is a standalone entity that persists after the player detaches. It ap
 
 ### Tasks
 
-- [ ] **2.1** New script: `scripts/systems/tether.gd` — `Node2D` entity with: anchor A data, anchor B data, target length, current HP, rope segments for rendering
-- [ ] **2.2** Each frame: compute distance between anchors. If distance > target length, apply pull force toward each other
-- [ ] **2.3** Pull force: strong spring — `TETHER_PULL_FORCE` constant, scaled by (distance - target_length). Should pull hard enough to yank enemies.
-- [ ] **2.4** Force divided by each anchor's mass — wall = infinite mass (only other end moves), light enemies move more
-- [ ] **2.5** Enemy mass lookup: use `mass` property if present, otherwise default (50.0)
-- [ ] **2.6** If anchor is an enemy attachment point: apply force via `_apply_attach_forces` / directly offset skeleton segments, using `get_segment_weight()`
-- [ ] **2.7** Tether interacts with balloon float: a tethered-to-floor enemy can't float away even with balloons
-- [ ] **2.8** Tether entity added to `"tethers"` group for RCON/test access
-- [ ] **2.9** Tether cleans up if either anchor is freed (enemy dies, etc.)
+- [x] **2.1** New script: `scripts/systems/tether.gd` — `Node2D` entity with: anchor A data, anchor B data, target length, current HP, rope segments for rendering
+- [x] **2.2** Each frame: compute distance between anchors. If distance > target length, apply pull force toward each other
+- [x] **2.3** Pull force: strong spring — `TETHER_PULL_FORCE` constant, scaled by (distance - target_length). Should pull hard enough to yank enemies.
+- [x] **2.4** Force divided by each anchor's mass — wall = infinite mass (only other end moves), light enemies move more
+- [x] **2.5** Enemy mass lookup: use `mass` property if present, otherwise default (50.0)
+- [x] **2.6** If anchor is an enemy attachment point: apply force via `_apply_attach_forces` / directly offset skeleton segments, using `get_segment_weight()`
+- [x] **2.7** Tether interacts with balloon float: a tethered-to-floor enemy can't float away even with balloons
+- [x] **2.8** Tether entity added to `"tethers"` group for RCON/test access
+- [x] **2.9** Tether cleans up if either anchor is freed (enemy dies, etc.)
 
 ---
 
@@ -83,12 +83,12 @@ Player sets the tether length before launching the second hook. The tether then 
 
 ### Tasks
 
-- [ ] **3.1** When in CONNECTED/SWINGING state, D-pad UP/DOWN adjusts `_tether_target_length` (same as existing rope adjust, but also stored for tether)
-- [ ] **3.2** Default tether length = current rope length at the moment L2 is pressed
-- [ ] **3.3** On `TETHER_ACTIVE`: rope immediately begins pulling anchors to target length
-- [ ] **3.4** Visual indicator during step 3: show target length numerically or as a marker on the rope while player adjusts
-- [ ] **3.5** Length adjustment speed: `GRAPPLE_ROPE_ADJUST_SPEED` (80 px/s)
-- [ ] **3.6** Min tether length: 30px. Max tether length: 900px (matching existing grapple constraints)
+- [x] **3.1** When in CONNECTED/SWINGING state, D-pad UP/DOWN adjusts `_tether_target_length` (same as existing rope adjust, but also stored for tether)
+- [x] **3.2** Default tether length = current rope length at the moment L2 is pressed
+- [x] **3.3** On `TETHER_ACTIVE`: rope immediately begins pulling anchors to target length
+- [x] **3.4** Visual indicator during step 3: show target length numerically or as a marker on the rope while player adjusts
+- [x] **3.5** Length adjustment speed: `GRAPPLE_ROPE_ADJUST_SPEED` (80 px/s)
+- [x] **3.6** Min tether length: 30px. Max tether length: 900px (matching existing grapple constraints)
 
 ---
 
@@ -98,12 +98,12 @@ Tether hooks snap to attachment points on enemies for precise, weight-aware anch
 
 ### Tasks
 
-- [ ] **4.1** When grapple hook (either first or second) hits an enemy with `_attach_points`, snap to the nearest attachment point within range
-- [ ] **4.2** Store attachment point name in tether anchor data — forces applied at that skeleton position
-- [ ] **4.3** Tether force at attachment point uses `get_segment_weight()` — pulling the tail tip moves the tail more than pulling the torso
-- [ ] **4.4** Support tethering two parts on the SAME enemy (e.g., head↔waist folds the monster over)
-- [ ] **4.5** Support tethering parts across different enemies (e.g., monster A head ↔ monster B tail)
-- [ ] **4.6** Visual: rope end-points track the attachment point world position each frame
+- [x] **4.1** When grapple hook (either first or second) hits an enemy with `_attach_points`, snap to the nearest attachment point within range
+- [x] **4.2** Store attachment point name in tether anchor data — forces applied at that skeleton position
+- [x] **4.3** Tether force at attachment point uses `get_segment_weight()` — pulling the tail tip moves the tail more than pulling the torso
+- [x] **4.4** Support tethering two parts on the SAME enemy (e.g., head↔waist folds the monster over)
+- [x] **4.5** Support tethering parts across different enemies (e.g., monster A head ↔ monster B tail)
+- [x] **4.6** Visual: rope end-points track the attachment point world position each frame
 
 ---
 
@@ -113,11 +113,11 @@ Tethers have HP and can be cut by projectile damage.
 
 ### Tasks
 
-- [ ] **5.1** Tether HP: configurable constant (default 20 HP)
-- [ ] **5.2** Hit detection: each frame, check all projectiles in `"loose_items"` group for proximity to tether rope segments (distance < 8px from rope line)
-- [ ] **5.3** On hit: deal projectile damage to tether, projectile continues (passes through)
-- [ ] **5.4** At 0 HP: rope snaps — both anchors released, snap visual + sound
-- [ ] **5.5** Visual: damaged rope changes color (brown → orange → red) as HP decreases
+- [x] **5.1** Tether HP: configurable constant (default 20 HP)
+- [x] **5.2** Hit detection: each frame, check all projectiles in `"loose_items"` group for proximity to tether rope segments (distance < 8px from rope line)
+- [x] **5.3** On hit: deal projectile damage to tether, projectile continues (passes through)
+- [x] **5.4** At 0 HP: rope snaps — both anchors released, snap visual + sound
+- [x] **5.5** Visual: damaged rope changes color (brown → orange → red) as HP decreases
 - [ ] **5.6** Enemies attacking through the rope also damage it (proximity check against enemy attack hitboxes)
 
 ---
@@ -128,12 +128,12 @@ Visual rendering of the spinning second hook, thrown rope, and active tether.
 
 ### Tasks
 
-- [ ] **6.1** `TETHER_WINDUP`: draw second hook spinning in circles at anchor A position (same visual as normal windup but at a remote point)
-- [ ] **6.2** `TETHER_THROWN`: draw rope from anchor A to flying second hook
-- [ ] **6.3** `TETHER_ACTIVE`: draw multi-segment rope between anchor A and anchor B with catenary sag when slack
-- [ ] **6.4** Tension visual: slack = droopy grey rope, taut = straight brown rope, pulling = bright/vibrating
-- [ ] **6.5** Anchor indicators: small hook/circle drawn at each end
-- [ ] **6.6** Snap animation on sever: rope recoils to both ends, particle burst at break point
+- [x] **6.1** `TETHER_WINDUP`: draw second hook spinning in circles at anchor A position (same visual as normal windup but at a remote point)
+- [x] **6.2** `TETHER_THROWN`: draw rope from anchor A to flying second hook
+- [x] **6.3** `TETHER_ACTIVE`: draw multi-segment rope between anchor A and anchor B with catenary sag when slack
+- [x] **6.4** Tension visual: slack = droopy grey rope, taut = straight brown rope, pulling = bright/vibrating
+- [x] **6.5** Anchor indicators: small hook/circle drawn at each end
+- [x] **6.6** Snap animation on sever: rope recoils to both ends, particle burst at break point
 
 ---
 
@@ -143,10 +143,10 @@ Visual rendering of the spinning second hook, thrown rope, and active tether.
 
 ### Tasks
 
-- [ ] **7.1** Draw 5 small dots near the Ranger's grapple UI area
-- [ ] **7.2** Solid brown dot = tether available. Empty/outline dot = tether in use.
-- [ ] **7.3** When a tether is severed/broken, its dot transitions from empty → solid (reclaimed)
-- [ ] **7.4** When a tether is created, a dot transitions from solid → empty
+- [x] **7.1** Draw 5 small dots near the Ranger's grapple UI area
+- [x] **7.2** Solid brown dot = tether available. Empty/outline dot = tether in use.
+- [x] **7.3** When a tether is severed/broken, its dot transitions from empty → solid (reclaimed)
+- [x] **7.4** When a tether is created, a dot transitions from solid → empty
 - [ ] **7.5** Subtle animation on transitions (pulse on reclaim, fade on use)
 
 ---
@@ -157,13 +157,13 @@ The attack dummy can simulate tether actions for automated testing — aim at at
 
 ### Tasks
 
-- [ ] **8.1** New weapon for attack dummy: `"tether"` — fires a grapple-like hook at the target
-- [ ] **8.2** Tether weapon flow: dummy aims at target enemy attachment point → fires hook → on connect, fires second hook straight down (to floor) or to a specified second target
-- [ ] **8.3** Configurable tether length on dummy: `set_tether_length(px: float)`
-- [ ] **8.4** Configurable second target: `set_tether_target_b(target: Node2D, part: String)` or `"floor"` for ground anchor
-- [ ] **8.5** RCON: `attacker weapon tether` — switch to tether weapon
-- [ ] **8.6** RCON: `attacker tether_length <px>` — set tether length
-- [ ] **8.7** RCON: `attacker tether_b floor` or `attacker tether_b enemy <idx> <part>` — set second anchor target
+- [x] **8.1** New weapon for attack dummy: `"tether"` — creates tether directly at target
+- [x] **8.2** Tether weapon flow: dummy aims at target attachment point → creates tether to floor or specified second target
+- [x] **8.3** `set_tether_length(px)` configurable
+- [x] **8.4** `set_tether_target_b("floor")` or `set_tether_target_b("enemy", node, part)`
+- [x] **8.5** RCON: `attacker weapon tether`
+- [x] **8.6** RCON: `attacker tether_length <px>`
+- [x] **8.7** RCON: `attacker tether_b floor` or `attacker tether_b enemy <idx> <part>`
 
 ---
 
@@ -173,13 +173,13 @@ RCON commands and test scripts for tether verification.
 
 ### Tasks
 
-- [ ] **9.1** RCON: `tether <enemy_idx> <point> floor` — create tether from enemy body part to floor directly below
-- [ ] **9.2** RCON: `tether <enemy_idx1> <point1> <enemy_idx2> <point2>` — tether two enemy body parts
-- [ ] **9.3** RCON: `tether wall <x1> <y1> <x2> <y2>` — tether between two wall positions
-- [ ] **9.4** RCON: `tether length <px>` — set length on most recent tether
-- [ ] **9.5** RCON: `tether cut` — sever all active tethers
-- [ ] **9.6** RCON: `tether status` — show all active tethers: anchors, length, tension, HP
-- [ ] **9.7** `scripts/test_tether.sh` — automated tests:
+- [x] **9.1** RCON: `tether <enemy_idx> <point> floor` — create tether from enemy body part to floor directly below
+- [x] **9.2** RCON: `tether <enemy_idx1> <point1> <enemy_idx2> <point2>` — tether two enemy body parts
+- [x] **9.3** RCON: `tether wall <x1> <y1> <x2> <y2>` — tether between two wall positions
+- [x] **9.4** RCON: `tether length <px>` — set length on most recent tether
+- [x] **9.5** RCON: `tether cut` — sever all active tethers
+- [x] **9.6** RCON: `tether status` — show all active tethers: anchors, length, tension, HP
+- [x] **9.7** `scripts/test_tether.sh` — 7 automated tests:
   - Create tether enemy↔floor, verify enemy can't move past length
   - Create tether enemy↔enemy, verify pull forces
   - Attach balloons to tethered enemy, verify tether holds it down

@@ -12,15 +12,22 @@ const BOW_PROJECTILE_SPEED := 400.0
 const BOW_DAMAGE := 15
 const BOW_COOLDOWN := 1.5
 const BALLOON_COOLDOWN := 2.0
+const TETHER_COOLDOWN := 3.0
 
 var _target: Node2D = null
 var _target_part: String = ""  # "" = body center, "head", "eye", "tail", etc.
-var _weapon: String = "bow"    # "bow" or "balloon"
+var _weapon: String = "bow"    # "bow" or "balloon" or "tether"
 var _attack_rate: float = BOW_COOLDOWN
 var _attack_timer: float = 0.0
 var _attacking: bool = true
 var _shots_fired: int = 0
 var _hits_landed: int = 0
+
+# Tether weapon config
+var _tether_length: float = 100.0         # Target tether length
+var _tether_target_b: String = "floor"    # "floor" or body part name for second anchor
+var _tether_target_b_enemy: Node2D = null # Second anchor enemy (if not floor)
+var _tether_target_b_part: String = ""    # Second anchor body part
 
 
 func _ready() -> void:
@@ -67,6 +74,18 @@ func set_weapon(weapon_name: String) -> void:
 		_attack_rate = BOW_COOLDOWN
 	elif weapon_name == "balloon":
 		_attack_rate = BALLOON_COOLDOWN
+	elif weapon_name == "tether":
+		_attack_rate = TETHER_COOLDOWN
+
+
+func set_tether_length(length: float) -> void:
+	_tether_length = length
+
+
+func set_tether_target_b(target_type: String, enemy: Node2D = null, part: String = "") -> void:
+	_tether_target_b = target_type  # "floor" or "enemy"
+	_tether_target_b_enemy = enemy
+	_tether_target_b_part = part
 
 
 func set_rate(seconds: float) -> void:
@@ -122,6 +141,8 @@ func _fire() -> void:
 			_fire_bow(direction, aim_pos)
 		"balloon":
 			_fire_balloon(direction)
+		"tether":
+			_fire_tether(aim_pos)
 
 	_shots_fired += 1
 
@@ -249,6 +270,51 @@ func _fire_balloon(direction: Vector2) -> void:
 	get_parent().add_child(dart)
 
 
+func _fire_tether(aim_pos: Vector2) -> void:
+	## Create a tether directly between the target attachment point and a second anchor.
+	if not is_instance_valid(_target):
+		return
+
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	if not TetherScript:
+		return
+
+	# Anchor A: target enemy, specific body part
+	var ap_a: String = ""
+	if _target_part != "" and "_attach_points" in _target and _target._attach_points.has(_target_part):
+		ap_a = _target_part
+	var anchor_a: Dictionary = TetherScript.make_anchor_body(_target, ap_a)
+
+	# Anchor B: floor below target, or another enemy/part
+	var anchor_b: Dictionary
+	if _tether_target_b == "floor":
+		var anchor_a_pos: Vector2 = TetherScript.get_anchor_world_pos(anchor_a)
+		# Raycast to find floor below
+		var floor_pos: Vector2 = Vector2(anchor_a_pos.x, anchor_a_pos.y + _tether_length + 200)
+		var space := _target.get_world_2d().direct_space_state
+		var query := PhysicsRayQueryParameters2D.create(anchor_a_pos, floor_pos, 1)
+		var result: Dictionary = space.intersect_ray(query)
+		if result:
+			floor_pos = result["position"]
+		anchor_b = TetherScript.make_anchor_wall(floor_pos)
+	elif _tether_target_b == "enemy" and is_instance_valid(_tether_target_b_enemy):
+		var ap_b: String = ""
+		if _tether_target_b_part != "" and "_attach_points" in _tether_target_b_enemy:
+			if _tether_target_b_enemy._attach_points.has(_tether_target_b_part):
+				ap_b = _tether_target_b_part
+		anchor_b = TetherScript.make_anchor_body(_tether_target_b_enemy, ap_b)
+	else:
+		# Default: floor
+		var pos_a: Vector2 = TetherScript.get_anchor_world_pos(anchor_a)
+		anchor_b = TetherScript.make_anchor_wall(Vector2(pos_a.x, pos_a.y + _tether_length))
+
+	var tether := Node2D.new()
+	tether.set_script(TetherScript)
+	tether.setup(anchor_a, anchor_b, _tether_length)
+	get_parent().add_child(tether)
+	_hits_landed += 1
+
+
 func _draw() -> void:
 	# Body: orange circle
 	draw_circle(Vector2.ZERO, 10.0, Color(1.0, 0.6, 0.2, 0.8))
@@ -265,6 +331,9 @@ func _draw() -> void:
 		"balloon":
 			weapon_color = Color(0.4, 0.8, 1.0)
 			weapon_label = "BLN"
+		"tether":
+			weapon_color = Color(0.5, 0.4, 0.3)
+			weapon_label = "TTH"
 		_:
 			weapon_color = Color.WHITE
 			weapon_label = "?"

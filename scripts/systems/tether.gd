@@ -7,8 +7,8 @@ extends Node2D
 
 # -- Constants -----------------------------------------------------------------
 
-const TETHER_PULL_FORCE := 12000.0   # Strong pull when over-length
-const TETHER_PULL_DAMPING := 0.85    # Damping on pull velocity
+const TETHER_PULL_FORCE := 25000.0   # Very strong pull when over-length
+const TETHER_PULL_DAMPING := 0.9     # Damping on pull velocity
 const TETHER_MIN_LEN := 30.0
 const TETHER_MAX_LEN := 900.0
 const TETHER_MAX_HP := 20
@@ -140,9 +140,12 @@ func _apply_force_to_anchor(anchor: Dictionary, force: Vector2) -> void:
 			body._attach_forces[ap] = Vector2.ZERO
 		body._attach_forces[ap] += force * 60.0  # Scale for per-frame accumulation
 
-	# Also apply to body velocity directly
+	# Apply to body velocity directly — strong enough to counteract balloons/gravity
 	if "velocity" in body:
 		body.velocity += force * TETHER_PULL_DAMPING
+		# Hard clamp: if force is pulling down (tether to floor) and body is moving up, kill upward velocity
+		if force.y > 0 and body.velocity.y < 0:
+			body.velocity.y *= 0.5  # Dampen upward movement when tether pulls down
 
 
 func _check_projectile_hits(pos_a: Vector2, pos_b: Vector2) -> void:
