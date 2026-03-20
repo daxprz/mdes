@@ -748,6 +748,28 @@ func _physics_process(delta: float) -> void:
 		_solve_pose(delta)
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
 
+	# ALWAYS enforce rigid distances — even during leap/grab/precog
+	_enforce_spine_rigid()
+	# ALWAYS enforce limb rigidity (upper = exact, lower = ±10%)
+	for li in range(4):
+		if _leg_severed[li]:
+			continue
+		# Pin hip to clavicle/hip bone endpoint
+		if li < 2:
+			_legs[li][0] = _clavicles[li]
+		else:
+			_legs[li][0] = _hip_bones[li - 2]
+		# Rigid upper limb
+		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+		if upper_dir.length() > 0.01:
+			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+		# Flex lower limb ±10%
+		var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
+		var lower_dist: float = lower_dir.length()
+		if lower_dist > 0.01:
+			var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+			_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
+
 	# Affix body collider to torso (skip during grab — grab controls collision)
 	if not in_grab:
 		if _body_collision:
@@ -877,14 +899,15 @@ func _solve_pose(delta: float) -> void:
 		if _leap_ik_off:
 			continue
 
-		# Sanity check: only clamp if foot is wildly far (> 2x leg reach)
+		# Sanity check: if foot is too far from hip, force replant below hip
 		var hip: Vector2 = _legs[li][0]
 		var foot: Vector2 = _legs[li][2]
 		var hip_to_foot: float = hip.distance_to(foot)
-		if hip_to_foot > max_leg_reach * 2.0:
-			var clamped_foot: Vector2 = hip + (foot - hip).normalized() * max_leg_reach
-			_legs[li][2] = clamped_foot
-			_foot_world[li] = global_position + clamped_foot
+		if hip_to_foot > max_leg_reach * 1.2:
+			# Replant foot directly below hip at floor level
+			var floor_y: float = _raycast_floor(hip)
+			_legs[li][2] = Vector2(hip.x, floor_y)
+			_foot_world[li] = global_position + _legs[li][2]
 			_foot_planted[li] = true
 
 		# Knee: solved via 2-bone IK — snap quickly (no slow lerp)
