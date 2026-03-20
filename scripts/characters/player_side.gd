@@ -2895,9 +2895,10 @@ func _handle_ranger_grapple() -> void:
 	if character_class != PlayerManager.CharacterClass.RANGED:
 		return
 
-	# Initiate grapple on left bumper press
+	# L1 (left bumper): grapple windup/throw AND tether second hook
 	if _is_device_action_just_pressed("grapple"):
 		if _grapple_state == GrappleState.IDLE:
+			# First L1: start grapple windup
 			_grapple_state = GrappleState.WINDUP
 			_grapple_hold_time = 0.0
 			_grapple_angle = 0.0
@@ -2906,24 +2907,28 @@ func _handle_ranger_grapple() -> void:
 			_grapple_pulling = false
 		elif _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
 			if _grapple_anchor_entity and is_instance_valid(_grapple_anchor_entity):
-				# Enemy: tug on first press
+				# Connected to enemy: tug
 				_grapple_tug()
-			elif _grapple_pulling:
-				# Second L1 press: disconnect
-				_grapple_release()
-			else:
-				# First L1 press: pull toward anchor, stay connected
-				_grapple_pull_to_anchor()
-
-	# L2 initiates tether second hook (while connected/swinging)
-	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
-		if _is_trigger_just_pressed(JOY_AXIS_TRIGGER_LEFT):
-			if _active_tethers.size() < TETHER_MAX_COUNT:
+			elif _active_tethers.size() < TETHER_MAX_COUNT:
+				# Second L1 while connected to wall: start tether second hook
 				_tether_begin_second_hook()
+			else:
+				# All 5 tether slots full: disconnect instead
+				_grapple_release()
 
-	# L2 release throws second hook
+	# R1 (right bumper): pull to anchor / disconnect
+	var r1_pressed: bool = false
+	if device_id >= 0:
+		r1_pressed = Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_SHOULDER)
+	else:
+		r1_pressed = Input.is_key_pressed(KEY_SHIFT)
+	if r1_pressed and _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		if not _grapple_pulling:
+			_grapple_pull_to_anchor()
+
+	# L1 release during tether windup: throw second hook
 	if _grapple_state == GrappleState.TETHER_WINDUP:
-		if not _is_trigger_pressed(JOY_AXIS_TRIGGER_LEFT):
+		if not _is_device_action_pressed("grapple"):
 			if _tether_hold_time >= GRAPPLE_MIN_HOLD:
 				_tether_throw_second_hook()
 			else:
