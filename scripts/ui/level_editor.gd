@@ -1140,6 +1140,14 @@ func _enter_splay_edit() -> void:
 		container.add_child(creature)
 		_splay_edit_creature = creature
 
+	# Remove any existing tethers attached to this creature
+	for tether in get_tree().get_nodes_in_group("tethers"):
+		if is_instance_valid(tether):
+			var ta: Dictionary = tether.anchor_a
+			var tb: Dictionary = tether.anchor_b
+			if ta.get("body") == _splay_edit_creature or tb.get("body") == _splay_edit_creature:
+				tether.queue_free()
+
 	# Freeze it and lock the pose so editor controls the skeleton
 	if "_physics_frozen" in _splay_edit_creature:
 		_splay_edit_creature._physics_frozen = true
@@ -1191,29 +1199,38 @@ func _enter_splay_edit() -> void:
 			"pos_override": point_world,
 		}
 
-	# Load saved pose data: override positions and enabled state
-	if not _splay_edit_pose_data.is_empty():
+	# Load saved pose data: apply to skeleton FIRST, then set active state
+	if not _splay_edit_pose_data.is_empty() and is_instance_valid(_splay_edit_creature):
+		var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
+		# First pass: apply all IK solves to reposition skeleton
+		for conn in _splay_edit_pose_data.get("connections", []):
+			var pn: String = conn.get("point", "")
+			var rp: Array = conn.get("relative_pos", [0, 0])
+			var target_local: Vector2 = Vector2(rp[0], rp[1])
+			var chain_data: Dictionary = ChainIK.get_chain_for_point(pn, _splay_edit_creature)
+			if not chain_data.is_empty():
+				var solved: Array[Vector2] = ChainIK.solve(
+					chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
+					target_local, true
+				)
+				var apply_fn: Callable = chain_data["apply"]
+				apply_fn.call(solved)
+		# Update attachment point positions from solved skeleton
+		if _splay_edit_creature.has_method("_update_hitbox_positions"):
+			_splay_edit_creature._update_hitbox_positions()
+		_splay_edit_creature.queue_redraw()
+		# Second pass: set active state with correct world positions
 		for conn in _splay_edit_pose_data.get("connections", []):
 			var pn: String = conn.get("point", "")
 			if _splay_edit_active.has(pn):
 				_splay_edit_active[pn]["enabled"] = true
-				var rp: Array = conn.get("relative_pos", [0, 0])
-				var conn_world: Vector2 = _splay_edit_origin + Vector2(rp[0], rp[1])
-				_splay_edit_active[pn]["pos_override"] = conn_world
+				# Read the actual solved position from the skeleton
+				var point_world: Vector2 = _splay_edit_origin
+				if "_attach_points" in _splay_edit_creature and _splay_edit_creature._attach_points.has(pn):
+					point_world = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+				_splay_edit_active[pn]["pos_override"] = point_world
 				var cd: Array = conn.get("cast_dir", [0, -1])
-				_splay_edit_active[pn]["cast_end"] = conn_world + Vector2(cd[0], cd[1]) * 200.0
-				# Also apply to creature skeleton via IK so body shows the saved pose
-				if is_instance_valid(_splay_edit_creature):
-					var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
-					var target_local: Vector2 = conn_world - _splay_edit_creature.global_position
-					var chain_data: Dictionary = ChainIK.get_chain_for_point(pn, _splay_edit_creature)
-					if not chain_data.is_empty():
-						var solved: Array[Vector2] = ChainIK.solve(
-							chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
-							target_local, true
-						)
-						var apply_fn: Callable = chain_data["apply"]
-						apply_fn.call(solved)
+				_splay_edit_active[pn]["cast_end"] = point_world + Vector2(cd[0], cd[1]) * 200.0
 
 	_selected_idx = -1
 	_splay_edit_selected_point = ""
@@ -1227,13 +1244,71 @@ func _enter_splay_edit() -> void:
 
 
 func _exit_splay_edit() -> void:
-	# Unfreeze creature and unlock pose — but keep reference for re-entry
+	# If we have a saved pose with active connections, spawn as a splay with tethers
+	if is_instance_valid(_splay_edit_creature) and not _splay_edit_pose_data.is_empty():
+		var has_active: bool = false
+		for pn in _splay_edit_active:
+			if _splay_edit_active[pn].get("enabled", false):
+				has_active = true
+				break
+		if has_active:
+			# Unfreeze and spawn tethers via splay manager
+			if "_physics_frozen" in _splay_edit_creature:
+				_splay_edit_creature._physics_frozen = false
+			if "_pose_locked" in _splay_edit_creature:
+				_splay_edit_creature._pose_locked = false
+			# Set pose overrides so the creature holds the edited shape
+			if _splay_edit_creature.has_method("set_pose_overrides"):
+				var overrides: Dictionary = {}
+				for conn in _splay_edit_pose_data.get("connections", []):
+					var pn: String = conn.get("point", "")
+					var rp: Array = conn.get("relative_pos", [0, 0])
+					overrides[pn] = Vector2(rp[0], rp[1])
+				_splay_edit_creature.set_pose_overrides(overrides)
+			# Spawn tethers from the saved pose
+			_spawn_tethers_from_pose()
+			return
+
+	# No active connections — just unfreeze
 	if is_instance_valid(_splay_edit_creature):
 		if "_physics_frozen" in _splay_edit_creature:
 			_splay_edit_creature._physics_frozen = false
 		if "_pose_locked" in _splay_edit_creature:
 			_splay_edit_creature._pose_locked = false
-	# Don't null creature or clear active — preserve for re-entry
+
+
+func _spawn_tethers_from_pose() -> void:
+	## Create tethers from the saved pose connections to world surfaces.
+	if not is_instance_valid(_splay_edit_creature) or _splay_edit_pose_data.is_empty():
+		return
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var creature: Node2D = _splay_edit_creature
+	var origin: Vector2 = creature.global_position
+
+	for conn in _splay_edit_pose_data.get("connections", []):
+		var point_name: String = conn.get("point", "")
+		var rp: Array = conn.get("relative_pos", [0, 0])
+		var cd: Array = conn.get("cast_dir", [0, -1])
+		var cast_dir := Vector2(cd[0], cd[1]).normalized()
+		var conn_world: Vector2 = origin + Vector2(rp[0], rp[1])
+
+		# Raycast to find surface
+		var cast_end: Vector2 = conn_world + cast_dir * 800.0
+		var space := creature.get_world_2d().direct_space_state
+		var query := PhysicsRayQueryParameters2D.create(conn_world, cast_end, 1)
+		var result: Dictionary = space.intersect_ray(query)
+		if not result:
+			continue
+
+		var surface_pos: Vector2 = result["position"]
+		var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
+		var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
+		var length: float = conn_world.distance_to(surface_pos)
+
+		var tether := Node2D.new()
+		tether.set_script(TetherScript)
+		tether.setup(anchor_a, anchor_b, length)
+		get_tree().current_scene.add_child(tether)
 
 
 func _try_select_splay_connection(world_pos: Vector2) -> void:
