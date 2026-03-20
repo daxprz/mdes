@@ -815,36 +815,44 @@ func _solve_pose(delta: float) -> void:
 			_tail[i] = _tail[i].lerp(rest_target, tail_s)
 			parent = _tail[i]
 
-	# -- Clavicles: short rigid bones from spine[0], perpendicular to spine --
-	# Derive orientation from spine direction so they rotate with the body
-	var spine_fwd: Vector2 = (_spine[0] - _spine[1]).normalized()
-	var spine_down: Vector2 = Vector2(-spine_fwd.y, spine_fwd.x)  # Perpendicular (body "down")
-	if spine_down.y < 0:
-		spine_down = -spine_down  # Ensure it points screen-downward
-	for ci in range(2):
-		var side: float = -1.0 if ci == 0 else 1.0
-		var rest_dir: Vector2 = (spine_down + spine_fwd * side * 0.3).normalized()
-		var rest_target: Vector2 = _spine[0] + rest_dir * CLAVICLE_LEN
-		_clavicles[ci] = _clavicles[ci].lerp(rest_target, s_clamp)
-		# Enforce rigid length
-		var dir: Vector2 = _clavicles[ci] - _spine[0]
-		if dir.length() > 0.01:
-			_clavicles[ci] = _spine[0] + dir.normalized() * CLAVICLE_LEN
+	# -- Clavicles + Hip bones --
+	# During leap or grab, pin tight to spine (no perpendicular spread)
+	var in_special_pose: bool = _leap_ik_off or _state == State.ATTACK_GRAB or _state == State.PRECOGNITION
+	if in_special_pose:
+		# Pin clavicles directly below spine[0], hip bones below spine[2]
+		for ci in range(2):
+			var side: float = -3.0 if ci == 0 else 3.0
+			_clavicles[ci] = _spine[0] + Vector2(side, 6)
+		for hi in range(2):
+			var side: float = -3.0 if hi == 0 else 3.0
+			_hip_bones[hi] = _spine[2] + Vector2(side, 6)
+	else:
+		# Normal: perpendicular to spine, rotate with body
+		var spine_fwd: Vector2 = (_spine[0] - _spine[1]).normalized()
+		var spine_down: Vector2 = Vector2(-spine_fwd.y, spine_fwd.x)
+		if spine_down.y < 0:
+			spine_down = -spine_down
+		for ci in range(2):
+			var side: float = -1.0 if ci == 0 else 1.0
+			var rest_dir: Vector2 = (spine_down + spine_fwd * side * 0.3).normalized()
+			var rest_target: Vector2 = _spine[0] + rest_dir * CLAVICLE_LEN
+			_clavicles[ci] = _clavicles[ci].lerp(rest_target, s_clamp)
+			var dir: Vector2 = _clavicles[ci] - _spine[0]
+			if dir.length() > 0.01:
+				_clavicles[ci] = _spine[0] + dir.normalized() * CLAVICLE_LEN
 
-	# -- Hip bones: short rigid bones from spine[2], perpendicular to spine --
-	var spine_back: Vector2 = (_spine[2] - _spine[1]).normalized()
-	var spine_down2: Vector2 = Vector2(-spine_back.y, spine_back.x)
-	if spine_down2.y < 0:
-		spine_down2 = -spine_down2
-	for hi in range(2):
-		var side: float = -1.0 if hi == 0 else 1.0
-		var rest_dir: Vector2 = (spine_down2 + spine_back * side * 0.3).normalized()
-		var rest_target: Vector2 = _spine[2] + rest_dir * HIP_BONE_LEN
-		_hip_bones[hi] = _hip_bones[hi].lerp(rest_target, s_clamp)
-		# Enforce rigid length
-		var dir: Vector2 = _hip_bones[hi] - _spine[2]
-		if dir.length() > 0.01:
-			_hip_bones[hi] = _spine[2] + dir.normalized() * HIP_BONE_LEN
+		var spine_back: Vector2 = (_spine[2] - _spine[1]).normalized()
+		var spine_down2: Vector2 = Vector2(-spine_back.y, spine_back.x)
+		if spine_down2.y < 0:
+			spine_down2 = -spine_down2
+		for hi in range(2):
+			var side: float = -1.0 if hi == 0 else 1.0
+			var rest_dir: Vector2 = (spine_down2 + spine_back * side * 0.3).normalized()
+			var rest_target: Vector2 = _spine[2] + rest_dir * HIP_BONE_LEN
+			_hip_bones[hi] = _hip_bones[hi].lerp(rest_target, s_clamp)
+			var dir: Vector2 = _hip_bones[hi] - _spine[2]
+			if dir.length() > 0.01:
+				_hip_bones[hi] = _spine[2] + dir.normalized() * HIP_BONE_LEN
 
 	# -- Legs: 2-bone IK from hip to foot, knee solved --
 	var max_leg_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
