@@ -202,6 +202,9 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_B:
 				_splay_cycle_behavior()
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_P:
+				_splay_open_library()
+				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_E:
 				# Enter pose edit mode for selected splay
 				if _selected_idx >= 0:
@@ -856,6 +859,7 @@ var _splay_available_poses: Array[String] = []
 var _splay_edit_pose_idx: int = -1  # Which splay instance we're editing the pose of
 var _splay_edit_dragging_cast: bool = false  # True when right-dragging to set cast direction
 var _splay_edit_pose_data: Dictionary = {}  # Loaded pose data being edited
+var _pose_library: Node = null  # Pose library overlay
 
 func _get_splays() -> Array:
 	if not _config.has("splays"):
@@ -881,6 +885,31 @@ func _drag_splay(world_pos: Vector2) -> void:
 	var splays: Array = _get_splays()
 	if _selected_idx < splays.size():
 		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
+
+
+func _splay_open_library() -> void:
+	if not _pose_library:
+		var lib_script: GDScript = load("res://scripts/ui/pose_library.gd")
+		_pose_library = CanvasLayer.new()
+		_pose_library.set_script(lib_script)
+		add_child(_pose_library)
+		_pose_library.pose_selected.connect(_on_library_pose_selected)
+	_pose_library.open()
+
+
+func _on_library_pose_selected(pose_name: String) -> void:
+	# Place a new splay instance with the selected pose
+	var splays: Array = _get_splays()
+	splays.append({
+		"pose": pose_name,
+		"creature": "quadruped",
+		"pos": [960, 500],
+		"rotation": 0,
+		"behavior": "asleep",
+	})
+	_selected_idx = splays.size() - 1
+	config_changed.emit(_config)
+	_update_display()
 
 
 func _splay_add_instance() -> void:
@@ -1005,7 +1034,7 @@ func _draw_splay_overlay() -> void:
 
 	# Help text
 	if _active:
-		var help := "SPLAY: N=add  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  E=edit pose  Drag=move"
+		var help := "SPLAY: N=add  P=library  Del=delete  Left/Right=rotate  Up/Down=pose  B=behavior  E=edit  Drag=move"
 		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))
 
 
