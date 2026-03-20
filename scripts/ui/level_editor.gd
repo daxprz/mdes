@@ -1725,16 +1725,16 @@ func _splay_edit_save_pose() -> void:
 	temp.queue_free()
 	_splay_edit_pose_data = pose
 	print("EDITOR: saved splay pose '%s' with %d connections" % [pose_name, connections.size()])
-	if _status_label:
-		_status_label.text = "POSE SAVED!"
-		_status_label.modulate = Color(0.3, 1.0, 0.3)
-		var tween := create_tween()
-		tween.tween_interval(1.5)
-		tween.tween_callback(func() -> void:
-			if is_instance_valid(_status_label):
-				_status_label.text = "EDITOR"
-				_status_label.modulate = Color(0.3, 0.8, 0.3)
-		)
+	_status_label.text = "POSE SAVED!"
+	_status_label.modulate = Color(0.3, 1.0, 0.3)
+	_show_center_flash("POSE SAVED", Color(0.3, 1.0, 0.3))
+	var tween := create_tween()
+	tween.tween_interval(1.5)
+	tween.tween_callback(func() -> void:
+		if is_instance_valid(_status_label):
+			_status_label.text = "EDITOR"
+			_status_label.modulate = Color(0.3, 0.8, 0.3)
+	)
 
 
 func _draw_splay_edit_overlay() -> void:
