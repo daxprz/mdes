@@ -4,6 +4,88 @@ A 4-player local co-op PVE action game built in Godot 4.6.
 
 Players battle through tower dungeons, fight bosses, and collect muffins across three game modes: top-down overworld exploration, side-scrolling tower platforming, and boss arena fights.
 
+## Controls
+
+### Controller (PS5 / Xbox)
+
+| Button | Gameplay | Ranger Grapple | Menus |
+|--------|----------|----------------|-------|
+| **Left Stick / D-pad** | Move | Swing boost/brake (horizontal), adjust rope length (vertical) | Navigate |
+| **Cross (A)** | Jump | Disconnect + jump impulse | Select |
+| **Square (X)** | Attack / Fire crossbow | — | Select |
+| **Triangle (Y)** | Special ability | — | Delete character |
+| **Circle (O)** | Interact / Reload | — | — |
+| **L1 (bumper)** | Grapple: hold to spin, release to throw | While connected: second hook for tether | — |
+| **R1 (bumper)** | — | Pull to anchor | — |
+| **L2 (trigger)** | Archer aim mode (analog power) | — | — |
+| **R2 (trigger)** | Fire aimed arrow | — | — |
+| **L3 (left stick click)** | Block | — | — |
+| **Start / Options** | Join game / Pause | — | Confirm |
+| **Select / Share** | Debug toggle | — | — |
+| **Right Stick** | Archer reticle position | Aim direction for throw | — |
+
+### Keyboard
+
+| Key | Action |
+|-----|--------|
+| **W/A/S/D** | Move |
+| **Space** | Jump |
+| **J** | Attack |
+| **K** | Special ability |
+| **F** | Interact |
+| **G** | Grapple (hold/release) |
+| **Shift** | Pull to anchor (R1) |
+| **Tab** | Archer aim (L2) |
+| **Enter** | Fire aimed arrow (R2) |
+| **Left Arrow** | Block |
+| **Escape** | Pause |
+| **Backtick (`)** | Debug toggle |
+
+### Title Screen
+
+| Input | Action |
+|-------|--------|
+| **Press any button** | Join / materialize ghost player |
+| **Move** | Ghost player movement before materializing |
+| **Jump (when dead, solo)** | Self-revive |
+| **Ctrl+D** | Toggle debug mode |
+| **Ctrl+E** | Toggle level editor |
+| **M** (debug) | Spawn quadruped monster |
+| **G** (debug) | Regenerate nearest tree |
+
+### Level Editor (Ctrl+E)
+
+| Input | Action |
+|-------|--------|
+| **Tab** | Cycle mode: Spawn Areas → Positions → Seeds → Platforms → Portal → Migration |
+| **Ctrl+S** | Save level |
+| **Ctrl+R** | Reset to defaults |
+| **Mouse drag** | Edit positions and sizes |
+| **1-9** (Migration) | Select phase |
+| **N** (Migration) | Add phase |
+| **Del / Backspace** (Migration) | Delete last phase |
+| **+** (Migration) | Add zone |
+| **S** (Migration) | Cycle species |
+| **G** (Migration) | Toggle stagger |
+| **Left/Right** (Migration) | Adjust cadence (1s steps) |
+
+### RCON Commands (TCP port 9999)
+
+```
+help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n],
+key <k>, enemies, players, precog, status, quit, clear, clearplayers,
+enablejoins, revive, resethp, fps, hp, ik, ikreset, thrash, ball,
+debugdraw, title, score, grid,
+standdown [on|off], partstatus, partdmg <part> <amount>,
+weight, attach balloon <point>, detach <point>,
+tether <idx> <point> floor [len], tether <idx1> <pt1> <idx2> <pt2> [len],
+tether wall <x1> <y1> <x2> <y2> [len], tether length <px>,
+tether cut, tether status,
+attacker <target|part|weapon|rate|stop|start|stats|tether_length|tether_b>
+```
+
+---
+
 ## Features
 
 - **12 playable classes** with unique mechanics: Melee, Ranged, Mage, Summoner, Rogue, Demolitionist, Healer, Tank, Ninja, Balloonist, Guitarist, Werewolf
