@@ -77,9 +77,10 @@ func _ready() -> void:
 
 func _process(delta: float) -> void:
 	_age += delta
-	if _age > BALLOON_LIFETIME + BALLOON_INFLATE_TIME + 2.0:
-		_detach_and_free()
-		return
+	# Balloons last forever — only removed by popping (fire/projectile)
+	#if _age > BALLOON_LIFETIME + BALLOON_INFLATE_TIME + 2.0:
+	#	_detach_and_free()
+	#	return
 
 	_detect_wind()
 
