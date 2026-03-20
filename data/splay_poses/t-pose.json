@@ -1,0 +1,27 @@
+{
+  "name": "t-pose",
+  "creature": "quadruped",
+  "breakaway_sound": "",
+  "connections": [
+    {
+      "point": "head",
+      "relative_pos": [0, -50],
+      "cast_dir": [0, -1]
+    },
+    {
+      "point": "tail_tip",
+      "relative_pos": [0, 70],
+      "cast_dir": [0, 1]
+    },
+    {
+      "point": "shoulders",
+      "relative_pos": [-60, 0],
+      "cast_dir": [-1, 0]
+    },
+    {
+      "point": "waist",
+      "relative_pos": [60, 0],
+      "cast_dir": [1, 0]
+    }
+  ]
+}

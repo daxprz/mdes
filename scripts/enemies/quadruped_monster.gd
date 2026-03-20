@@ -155,6 +155,12 @@ var health: int = MAX_HEALTH
 var mass: float = MASS
 var _dead := false
 var _standdown := false  # Stand-down mode: passive, receives damage, no AI
+var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
+var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
+
+# Pose overrides for splay system (attachment point name -> target local Vector2)
+var _pose_overrides: Dictionary = {}
+const POSE_OVERRIDE_BLEND := 0.8  # 0.0 = natural, 1.0 = fully overridden
 var _state: State = State.PATROL
 var _posture: Posture = Posture.QUADRUPED
 var _facing: float = 1.0  # 1=right, -1=left
@@ -498,6 +504,15 @@ func get_attach_world_position(point_name: String) -> Vector2:
 	return global_position
 
 
+func set_pose_overrides(overrides: Dictionary) -> void:
+	## Set IK pose override targets. Keys = attachment point names, values = local Vector2 positions.
+	_pose_overrides = overrides
+
+
+func clear_pose_overrides() -> void:
+	_pose_overrides.clear()
+
+
 func get_segment_weight(point_name: String) -> float:
 	## Get the weight of a segment by attachment point name.
 	if SEGMENT_WEIGHTS.has(point_name):
@@ -568,6 +583,16 @@ func _physics_process(delta: float) -> void:
 		_state = State.STANDDOWN
 		_want_direction = 0.0
 		velocity.x = 0.0
+
+	# Asleep mode: same as standdown but wakes on damage
+	if _asleep and _state != State.STANDDOWN:
+		_state = State.STANDDOWN
+		_want_direction = 0.0
+		velocity.x = 0.0
+
+	# Breakaway invincibility timer
+	if _breakaway_immune > 0:
+		_breakaway_immune -= delta
 
 	# Out-of-bounds recovery: teleport back to spawn area
 	if global_position.y > 1200 or global_position.y < -200 or global_position.x < -100 or global_position.x > 2020:
@@ -781,6 +806,18 @@ func _solve_pose(delta: float) -> void:
 		)
 		# Snap knee to IK solution (fast lerp to prevent sticking)
 		_legs[li][1] = _legs[li][1].lerp(knee_pos, minf(s * 2.0, 1.0))
+
+	# -- Pose overrides (splay system) --
+	if not _pose_overrides.is_empty():
+		var blend: float = POSE_OVERRIDE_BLEND
+		if _pose_overrides.has("head"):
+			_skull = _skull.lerp(_pose_overrides["head"], blend * minf(s, 1.0))
+		if _pose_overrides.has("tail_tip") and not _tail_severed:
+			_tail[4] = _tail[4].lerp(_pose_overrides["tail_tip"], blend * minf(s, 1.0))
+		if _pose_overrides.has("shoulders"):
+			_spine[0] = _spine[0].lerp(_pose_overrides["shoulders"], blend * minf(s, 1.0))
+		if _pose_overrides.has("waist"):
+			_spine[2] = _spine[2].lerp(_pose_overrides["waist"], blend * minf(s, 1.0))
 
 	# -- Floor constraints (raycast-based) --
 	if not _tail_severed:
@@ -3357,6 +3394,14 @@ func _find_player_by_index(pi: int) -> Node2D:
 func take_damage(amount: int, source_index: int = -1) -> void:
 	if _dead:
 		return
+	if _breakaway_immune > 0:
+		return
+
+	# Wake from sleep on any damage
+	if _asleep:
+		_asleep = false
+		_standdown = false
+		AudioManager.play("grapple_hit", 2.0, 0.6)  # Growl on wake
 
 	# Rift tentacle absorption
 	if has_meta("rift_tentacle"):
@@ -3648,6 +3693,11 @@ func _draw() -> void:
 	_draw_legs()
 	_draw_neck_head()
 	_draw_blood_particles()
+	if _asleep:
+		# ZZZ indicator above head
+		var zzz_pos: Vector2 = _skull + Vector2(10, -20)
+		var zzz_alpha: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 800.0)
+		draw_string(ThemeDB.fallback_font, zzz_pos, "ZZZ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 1.0, zzz_alpha))
 	if _standdown:
 		# White flag / STANDDOWN indicator above the monster
 		var flag_pos: Vector2 = _spine[1] + Vector2(0, -40)
@@ -3773,8 +3823,12 @@ func _draw_neck_head() -> void:
 	# Eye
 	var eye_local := Vector2(16, 5)
 	var eye_pos: Vector2 = _skull + eye_local.x * head_fwd + eye_local.y * head_up
-	draw_circle(eye_pos, 4.0, Color(1.0, 0.2, 0.1))
-	draw_circle(eye_pos, 2.0, Color(1.0, 0.5, 0.2))
+	if _asleep:
+		# Closed eye: horizontal line
+		draw_line(eye_pos - head_fwd * 3.0, eye_pos + head_fwd * 3.0, Color(0.4, 0.15, 0.1), 1.5)
+	else:
+		draw_circle(eye_pos, 4.0, Color(1.0, 0.2, 0.1))
+		draw_circle(eye_pos, 2.0, Color(1.0, 0.5, 0.2))
 
 	# Jaw (opens downward = negative head_up direction)
 	var jaw_col := Color(0.3, 0.24, 0.19)

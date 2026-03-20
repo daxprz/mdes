@@ -272,6 +272,9 @@ func _execute(command: String) -> String:
 		"detach":
 			return _cmd_detach(parts)
 
+		"splay":
+			return _cmd_splay(parts)
+
 		"tether":
 			return _cmd_tether(parts)
 
@@ -759,6 +762,59 @@ func _cmd_detach(parts: PackedStringArray) -> String:
 			items.clear()
 			return "OK: detached %d items from %s" % [count, point_name]
 	return "ERR: no enemy with attachment point '%s'" % point_name
+
+
+func _cmd_splay(parts: PackedStringArray) -> String:
+	if parts.size() < 2:
+		return "ERR: usage: splay <list|spawn|clear|status>"
+
+	var subcmd: String = parts[1].to_lower()
+	# Find the SplayManager autoload or instance
+	var mgr: Node = get_node_or_null("/root/SplayManager")
+	if not mgr:
+		# Try to find it as a child of current scene
+		for child in get_tree().current_scene.get_children():
+			if child.name == "SplayManager":
+				mgr = child
+				break
+		if not mgr:
+			# Create one on the fly
+			var script: GDScript = load("res://scripts/systems/splay_manager.gd")
+			mgr = Node.new()
+			mgr.name = "SplayManager"
+			mgr.set_script(script)
+			get_tree().current_scene.add_child(mgr)
+
+	match subcmd:
+		"list":
+			var names: Array[String] = mgr.get_all_pose_names()
+			if names.is_empty():
+				return "splay poses: (none)"
+			return "splay poses: %s" % ", ".join(names)
+
+		"spawn":
+			# splay spawn <pose> [x y] [rotation] [behavior]
+			if parts.size() < 3:
+				return "ERR: usage: splay spawn <pose> [x y] [rotation] [behavior]"
+			var pose_name: String = parts[2]
+			var x: float = float(parts[3]) if parts.size() > 3 else 960.0
+			var y: float = float(parts[4]) if parts.size() > 4 else 500.0
+			var rot: float = float(parts[5]) if parts.size() > 5 else 0.0
+			var behavior: String = parts[6] if parts.size() > 6 else "asleep"
+			# spawn_splay is async (uses await) — call deferred
+			mgr.spawn_splay(pose_name, Vector2(x, y), rot, behavior)
+			return "OK: spawning splay '%s' at (%.0f,%.0f) rot=%.0f behavior=%s" % [pose_name, x, y, rot, behavior]
+
+		"clear":
+			var count: int = mgr.clear_all_splays()
+			return "OK: cleared %d splay instances" % count
+
+		"status":
+			var lines: Array[String] = mgr.get_splay_status()
+			return "\n".join(lines)
+
+		_:
+			return "ERR: unknown splay subcommand '%s'. Try: list, spawn, clear, status" % subcmd
 
 
 func _cmd_tether(parts: PackedStringArray) -> String:

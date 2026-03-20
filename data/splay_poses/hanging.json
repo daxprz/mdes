@@ -1,0 +1,22 @@
+{
+  "name": "hanging",
+  "creature": "quadruped",
+  "breakaway_sound": "",
+  "connections": [
+    {
+      "point": "shoulders",
+      "relative_pos": [-20, -40],
+      "cast_dir": [0, -1]
+    },
+    {
+      "point": "waist",
+      "relative_pos": [20, -40],
+      "cast_dir": [0, -1]
+    },
+    {
+      "point": "tail_tip",
+      "relative_pos": [0, 80],
+      "cast_dir": [0, 1]
+    }
+  ]
+}
