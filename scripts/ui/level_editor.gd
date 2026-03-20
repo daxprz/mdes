@@ -148,7 +148,7 @@ func _input(event: InputEvent) -> void:
 			_selected_idx = -1
 			_update_display()
 			get_viewport().set_input_as_handled()
-		elif event.keycode == KEY_S and event.ctrl_pressed:
+		elif event.keycode == KEY_S and event.ctrl_pressed and _mode != Mode.SPLAY_EDIT:
 			_save()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_R and event.ctrl_pressed:
@@ -1650,6 +1650,16 @@ func _splay_edit_save_pose() -> void:
 	temp.queue_free()
 	_splay_edit_pose_data = pose
 	print("EDITOR: saved splay pose '%s' with %d connections" % [pose_name, connections.size()])
+	if _status_label:
+		_status_label.text = "POSE SAVED!"
+		_status_label.modulate = Color(0.3, 1.0, 0.3)
+		var tween := create_tween()
+		tween.tween_interval(1.5)
+		tween.tween_callback(func() -> void:
+			if is_instance_valid(_status_label):
+				_status_label.text = "EDITOR"
+				_status_label.modulate = Color(0.3, 0.8, 0.3)
+		)
 
 
 func _draw_splay_edit_overlay() -> void:
