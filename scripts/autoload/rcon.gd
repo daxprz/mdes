@@ -246,6 +246,9 @@ func _execute(command: String) -> String:
 		"detach":
 			return _cmd_detach(parts)
 
+		"tether":
+			return _cmd_tether(parts)
+
 		"standdown":
 			return _cmd_standdown(parts)
 
@@ -730,6 +733,165 @@ func _cmd_detach(parts: PackedStringArray) -> String:
 			items.clear()
 			return "OK: detached %d items from %s" % [count, point_name]
 	return "ERR: no enemy with attachment point '%s'" % point_name
+
+
+func _cmd_tether(parts: PackedStringArray) -> String:
+	## Tether commands: tether <subcommand> [args]
+	if parts.size() < 2:
+		return "ERR: usage: tether <enemy idx point floor|enemy idx1 point1 idx2 point2|wall x1 y1 x2 y2|length px|cut|status>"
+
+	var subcmd: String = parts[1].to_lower()
+
+	match subcmd:
+		"status":
+			var tethers: Array = get_tree().get_nodes_in_group("tethers")
+			if tethers.is_empty():
+				return "tethers: 0"
+			var lines: Array[String] = ["tethers: %d" % tethers.size()]
+			var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+			for i in range(tethers.size()):
+				var t: Node2D = tethers[i]
+				var pa: Vector2 = TetherScript.get_anchor_world_pos(t.anchor_a)
+				var pb: Vector2 = TetherScript.get_anchor_world_pos(t.anchor_b)
+				var a_name: String = t.anchor_a.get("attach_point", "")
+				if a_name == "":
+					a_name = "wall" if t.anchor_a.get("is_wall", false) else "body"
+				var b_name: String = t.anchor_b.get("attach_point", "")
+				if b_name == "":
+					b_name = "wall" if t.anchor_b.get("is_wall", false) else "body"
+				lines.append("  [%d] A=%s(%.0f,%.0f) B=%s(%.0f,%.0f) len=%.0f/%.0f tension=%.2f hp=%d/%d" % [
+					i, a_name, pa.x, pa.y, b_name, pb.x, pb.y,
+					pa.distance_to(pb), t.target_length, t.get_tension(), t.current_hp, t.TETHER_MAX_HP])
+			return "\n".join(lines)
+
+		"cut":
+			var tethers: Array = get_tree().get_nodes_in_group("tethers")
+			var count: int = tethers.size()
+			for t in tethers:
+				t.sever()
+			return "OK: severed %d tethers" % count
+
+		"length":
+			if parts.size() < 3:
+				return "ERR: usage: tether length <px>"
+			var length: float = float(parts[2])
+			var tethers: Array = get_tree().get_nodes_in_group("tethers")
+			if tethers.is_empty():
+				return "ERR: no active tethers"
+			tethers[tethers.size() - 1].target_length = clampf(length, 30.0, 900.0)
+			return "OK: set last tether length to %.0f" % length
+
+		"wall":
+			# tether wall <x1> <y1> <x2> <y2> [length]
+			if parts.size() < 6:
+				return "ERR: usage: tether wall <x1> <y1> <x2> <y2> [length]"
+			var x1: float = float(parts[2])
+			var y1: float = float(parts[3])
+			var x2: float = float(parts[4])
+			var y2: float = float(parts[5])
+			var length: float = Vector2(x1, y1).distance_to(Vector2(x2, y2))
+			if parts.size() > 6:
+				length = float(parts[6])
+			return _create_tether_wall_wall(Vector2(x1, y1), Vector2(x2, y2), length)
+
+		_:
+			# Try: tether <enemy_idx> <point> floor [length]
+			# Or:  tether <enemy_idx1> <point1> <enemy_idx2> <point2> [length]
+			if parts.size() >= 4 and parts[3].to_lower() == "floor":
+				var idx: int = int(parts[1])
+				var point: String = parts[2]
+				var length: float = 100.0
+				if parts.size() > 4:
+					length = float(parts[4])
+				return _create_tether_enemy_floor(idx, point, length)
+			elif parts.size() >= 5:
+				var idx1: int = int(parts[1])
+				var point1: String = parts[2]
+				var idx2: int = int(parts[3])
+				var point2: String = parts[4]
+				var length: float = -1.0  # Auto
+				if parts.size() > 5:
+					length = float(parts[5])
+				return _create_tether_enemy_enemy(idx1, point1, idx2, point2, length)
+			return "ERR: unrecognized tether command. Try: tether status, tether cut, tether <idx> <point> floor, tether <idx1> <point1> <idx2> <point2>"
+
+
+func _create_tether_enemy_floor(enemy_idx: int, point: String, length: float) -> String:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if enemy_idx >= enemies.size():
+		return "ERR: enemy index %d not found" % enemy_idx
+	var enemy: Node2D = enemies[enemy_idx]
+
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var tether := Node2D.new()
+	tether.set_script(TetherScript)
+
+	var ap: String = ""
+	if "_attach_points" in enemy and enemy._attach_points.has(point):
+		ap = point
+	var a: Dictionary = TetherScript.make_anchor_body(enemy, ap)
+
+	# Floor position: directly below the attachment point
+	var attach_pos: Vector2 = TetherScript.get_anchor_world_pos(a)
+	var floor_pos: Vector2 = Vector2(attach_pos.x, attach_pos.y + length)
+	# Raycast to find actual floor
+	var space := enemy.get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(attach_pos, attach_pos + Vector2(0, length + 200), 1)
+	var result: Dictionary = space.intersect_ray(query)
+	if result:
+		floor_pos = result["position"]
+
+	var b: Dictionary = TetherScript.make_anchor_wall(floor_pos)
+
+	var actual_length: float = length
+	if actual_length <= 0:
+		actual_length = attach_pos.distance_to(floor_pos)
+
+	tether.setup(a, b, actual_length)
+	get_tree().current_scene.add_child(tether)
+	return "OK: tethered enemy %d (%s) to floor at (%.0f,%.0f) len=%.0f" % [enemy_idx, point, floor_pos.x, floor_pos.y, actual_length]
+
+
+func _create_tether_enemy_enemy(idx1: int, point1: String, idx2: int, point2: String, length: float) -> String:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if idx1 >= enemies.size():
+		return "ERR: enemy index %d not found" % idx1
+	if idx2 >= enemies.size():
+		return "ERR: enemy index %d not found" % idx2
+
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var tether := Node2D.new()
+	tether.set_script(TetherScript)
+
+	var ap1: String = ""
+	if "_attach_points" in enemies[idx1] and enemies[idx1]._attach_points.has(point1):
+		ap1 = point1
+	var a: Dictionary = TetherScript.make_anchor_body(enemies[idx1], ap1)
+
+	var ap2: String = ""
+	if "_attach_points" in enemies[idx2] and enemies[idx2]._attach_points.has(point2):
+		ap2 = point2
+	var b: Dictionary = TetherScript.make_anchor_body(enemies[idx2], ap2)
+
+	if length <= 0:
+		length = TetherScript.get_anchor_world_pos(a).distance_to(TetherScript.get_anchor_world_pos(b))
+
+	tether.setup(a, b, length)
+	get_tree().current_scene.add_child(tether)
+	return "OK: tethered enemy %d (%s) to enemy %d (%s) len=%.0f" % [idx1, point1, idx2, point2, length]
+
+
+func _create_tether_wall_wall(pos_a: Vector2, pos_b: Vector2, length: float) -> String:
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var tether := Node2D.new()
+	tether.set_script(TetherScript)
+
+	var a: Dictionary = TetherScript.make_anchor_wall(pos_a)
+	var b: Dictionary = TetherScript.make_anchor_wall(pos_b)
+
+	tether.setup(a, b, length)
+	get_tree().current_scene.add_child(tether)
+	return "OK: tethered wall (%.0f,%.0f) to (%.0f,%.0f) len=%.0f" % [pos_a.x, pos_a.y, pos_b.x, pos_b.y, length]
 
 
 func _cmd_standdown(parts: PackedStringArray) -> String:
