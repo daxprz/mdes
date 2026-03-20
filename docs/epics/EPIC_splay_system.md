@@ -237,8 +237,77 @@ The correct Godot-idiomatic approach for this custom skeleton is:
 
 ---
 
-## Open Questions
+## Answered Questions
 
-- **Pose library UI**: Should there be an in-game browser for selecting poses, or is the editor sufficient?
-- **Breakaway**: When a splayed creature breaks free (all tethers severed), should there be a dramatic animation/sound?
-- **Multiple creatures per splay**: Could a splay instance reference multiple creatures (e.g., two monsters tethered to each other in a pose)?
+- **Pose library UI**: YES — in-game browser for selecting/previewing poses. See Story 9.
+- **Breakaway**: YES — dramatic animation + sound when all tethers severed. See Story 10.
+- **Multiple creatures per splay**: YES — a splay can reference multiple creatures tethered to each other. See Story 11.
+
+---
+
+## STORY 9: Pose Library UI
+
+In-game browser for browsing, previewing, and selecting splay poses.
+
+### Tasks
+
+- [ ] **9.1** Pose library panel: overlay UI showing all available poses as a scrollable list/grid
+- [ ] **9.2** Each entry shows: pose name, creature type, connection count, thumbnail preview (small skeleton outline in the pose shape)
+- [ ] **9.3** Select a pose to see a full-size preview: creature skeleton drawn in the pose with connection points and cast direction arrows
+- [ ] **9.4** "Place" button: transitions to SPLAY editor mode with the selected pose ready to place
+- [ ] **9.5** "Edit" button: transitions to SPLAY_EDIT editor mode for the selected pose
+- [ ] **9.6** "New" button: create a blank pose from a template, auto-opens SPLAY_EDIT
+- [ ] **9.7** "Delete" button: remove a user-created pose (bundled poses can't be deleted)
+- [ ] **9.8** Accessible from level editor via a key (e.g., P for Pose library) while in SPLAY mode
+- [ ] **9.9** Filter/search: type to filter poses by name
+
+---
+
+## STORY 10: Breakaway — Dramatic Freedom
+
+When a splayed creature breaks free (all tethers severed), play a dramatic animation and sound.
+
+### Tasks
+
+- [ ] **10.1** Track tether count per splayed creature. When count reaches 0, trigger breakaway sequence.
+- [ ] **10.2** Breakaway sound: loud roar/chain-snap sound effect
+- [ ] **10.3** Screen shake on breakaway (scaled by creature mass)
+- [ ] **10.4** Visual: tether snap particles burst outward from each former anchor point
+- [ ] **10.5** Visual: creature flashes bright for 0.3s, brief slow-motion (Engine.time_scale = 0.3 for 0.5s, then restore)
+- [ ] **10.6** Creature pose overrides cleared — skeleton springs back to natural rest pose (visible uncoiling/stretching)
+- [ ] **10.7** Creature automatically becomes active (regardless of previous behavior) — it's angry now
+- [ ] **10.8** Brief invincibility (0.5s) after breakaway so creature isn't immediately killed while uncoiling
+- [ ] **10.9** RCON: `splay breakaway <idx>` — force-trigger breakaway on a splayed creature for testing
+
+---
+
+## STORY 11: Multi-Creature Splay
+
+A splay pose can reference multiple creatures, with connections between them and to the world.
+
+### Tasks
+
+- [ ] **11.1** Pose format: `"creatures"` array instead of single `"creature"` field. Each entry has: `creature_type`, `offset` (relative to splay origin), `connections` array.
+- [ ] **11.2** Connections can target: `"world"` (raycast to surface, current behavior) or `"creature:<index>:<point>"` (tether to another creature's attachment point)
+- [ ] **11.3** Spawn all creatures in the splay, then create tethers: world tethers raycast to surfaces, inter-creature tethers connect attachment points directly
+- [ ] **11.4** Inter-creature tether length = distance between the two attachment points at pose time (tight)
+- [ ] **11.5** Breakaway: if ALL tethers on ALL creatures in the splay are severed, trigger breakaway for all. Partial break (one creature free, others still tethered) = only the freed creature wakes.
+- [ ] **11.6** SPLAY editor: show multiple creature outlines, drag each independently. Connection lines drawn between creatures.
+- [ ] **11.7** Pose library: thumbnail shows all creatures in the multi-creature arrangement
+- [ ] **11.8** Behavior is per-creature within the splay (one could be asleep, another active)
+
+---
+
+## Updated Implementation Priority
+
+1. **Story 1 (Data Format)** — Foundation
+2. **Story 3 (Asleep Mode)** — Simple flag
+3. **Story 2 (Spawning)** — Core mechanic
+4. **Story 4 (IK Override)** — Visual pose
+5. **Story 8 (RCON)** — Test without editor
+6. **Story 10 (Breakaway)** — Dramatic payoff
+7. **Story 5 (Level Integration)** — Persistence
+8. **Story 6 (Instance Editor)** — Place splays
+9. **Story 7 (Pose Editor)** — Edit poses
+10. **Story 9 (Pose Library)** — Browse/preview
+11. **Story 11 (Multi-Creature)** — Advanced feature
