@@ -4976,7 +4976,7 @@ func _die() -> void:
 	# Add revive prompt above head
 	var revive_label := Label.new()
 	revive_label.name = "ReviveLabel"
-	revive_label.text = "STAND NEAR TO REVIVE"
+	revive_label.text = "PRESS JUMP TO REVIVE"
 	revive_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	revive_label.add_theme_font_size_override("font_size", 8)
 	revive_label.position = Vector2(-50, -36)
@@ -4998,6 +4998,19 @@ func _die() -> void:
 func _check_revive(delta: float) -> void:
 	if not _is_dead:
 		return
+
+	# Solo self-revive: if no other alive players exist, press jump to revive
+	var alive_teammates: int = 0
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == self or not (p is CharacterBody2D):
+			continue
+		if not p.get("_is_dead"):
+			alive_teammates += 1
+
+	if alive_teammates == 0:
+		if _is_device_action_just_pressed("jump"):
+			_revive()
+			return
 
 	# Auto-revive when any alive player stands nearby
 	var teammate_nearby := false

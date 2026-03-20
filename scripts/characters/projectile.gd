@@ -57,7 +57,21 @@ func _on_body_entered(body: Node2D) -> void:
 		queue_free()
 
 
-func _on_area_entered(_area: Area2D) -> void:
+func _on_area_entered(area: Area2D) -> void:
+	# Check if this is an enemy hitbox (e.g., monster body parts)
+	if area.has_meta("part_name"):
+		var part_name: String = area.get_meta("part_name")
+		var enemy: Node2D = area.get_parent()
+		if enemy and enemy.has_method("take_part_damage"):
+			enemy.take_part_damage(part_name, damage, owner_index)
+		elif enemy and enemy.has_method("take_damage"):
+			enemy.take_damage(damage, owner_index)
+		if projectile_type == "muffin_grenade":
+			_explode()
+		else:
+			queue_free()
+		return
+
 	# Hitting a wall or obstacle
 	if projectile_type == "muffin_grenade":
 		_explode()

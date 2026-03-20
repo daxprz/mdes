@@ -425,8 +425,8 @@ func _init_hitboxes() -> void:
 	for part_name in parts:
 		var area := Area2D.new()
 		area.name = "Hitbox_" + part_name
-		area.collision_layer = 0
-		area.collision_mask = 2  # Player attacks
+		area.collision_layer = 8  # Enemy layer — detectable by projectiles
+		area.collision_mask = 0
 		area.set_meta("part_name", part_name)
 		var shape := CollisionShape2D.new()
 		var circle := CircleShape2D.new()
@@ -439,8 +439,8 @@ func _init_hitboxes() -> void:
 	# Eye hitbox — tiny, rewards precision aim
 	var eye_area := Area2D.new()
 	eye_area.name = "Hitbox_eye"
-	eye_area.collision_layer = 0
-	eye_area.collision_mask = 2
+	eye_area.collision_layer = 8  # Enemy layer — detectable by projectiles
+	eye_area.collision_mask = 0
 	eye_area.set_meta("part_name", "eye")
 	var eye_shape := CollisionShape2D.new()
 	var eye_circle := CircleShape2D.new()
@@ -535,49 +535,24 @@ func _accumulate_attach_forces() -> void:
 
 
 func _apply_attach_forces(delta: float) -> void:
-	## Apply accumulated attachment forces to the skeleton and body.
-	## Forces are divided by local segment weight — light parts move more.
+	## Apply accumulated attachment forces to the CharacterBody2D velocity.
+	## Forces move the whole monster in world space — NOT the skeleton points.
 	if _attach_forces.is_empty():
 		return
 
-	var total_upward: float = 0.0
-
+	var total_force := Vector2.ZERO
 	for point_name in _attach_forces:
-		var force: Vector2 = _attach_forces[point_name]
-		var weight: float = get_segment_weight(point_name)
+		total_force += _attach_forces[point_name]
 
-		# Force effect on the local skeleton segment (divided by weight)
-		var local_effect: Vector2 = force * delta / weight
-
-		# Apply to the corresponding skeleton points
-		match point_name:
-			"head":
-				_skull += local_effect * 2.0
-				_neck[1] += local_effect * 1.0
-				_spine[0] += local_effect * 0.3  # Propagate to shoulders
-			"tail_tip":
-				if not _tail_severed:
-					_tail[4] += local_effect * 2.0
-					_tail[3] += local_effect * 1.5
-					_tail[2] += local_effect * 1.0
-					_tail[1] += local_effect * 0.5
-					_spine[2] += local_effect * 0.2  # Propagate to waist
-			"shoulders":
-				_spine[0] += local_effect * 1.5
-				_spine[1] += local_effect * 0.5
-			"waist":
-				_spine[2] += local_effect * 1.5
-				_spine[1] += local_effect * 0.5
-
-		# Accumulate total upward force for float check
-		total_upward += force.y  # Negative = upward
-
-	# If total upward force exceeds body weight, reduce gravity
+	# Apply force to body velocity (divided by total mass)
 	var body_weight: float = get_total_weight()
-	if total_upward < -body_weight * 0.5:
-		# Significant upward pull — reduce gravity effect
-		var lift_ratio: float = clampf(absf(total_upward) / body_weight, 0.0, 2.0)
+	velocity += total_force * delta * (200.0 / body_weight)
+
+	# If net force is upward and strong enough, counteract gravity
+	if total_force.y < 0:
+		var lift_ratio: float = clampf(absf(total_force.y) / body_weight, 0.0, 2.0)
 		velocity.y -= GRAVITY * delta * lift_ratio * 0.8
+		# Cap upward speed
 		if velocity.y < -120.0:
 			velocity.y = -120.0
 
