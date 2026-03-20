@@ -1226,13 +1226,24 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 		# Dragging the cast ray endpoint
 		_splay_edit_active[_splay_edit_selected_point]["cast_end"] = world_pos
 	else:
-		# Dragging the connection point itself — constrained by chain length
-		var SplayMgr: GDScript = load("res://scripts/systems/splay_manager.gd")
-		var max_dist: float = SplayMgr.get_max_distance_from_origin(_splay_edit_selected_point)
-		var rel: Vector2 = world_pos - _splay_edit_origin
-		if rel.length() > max_dist:
-			rel = rel.normalized() * max_dist
-		_splay_edit_active[_splay_edit_selected_point]["pos_override"] = _splay_edit_origin + rel
+		# Dragging the connection point — IK solve the chain from origin to drag point
+		if not is_instance_valid(_splay_edit_creature):
+			return
+		var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
+		# Convert target to local space
+		var target_local: Vector2 = world_pos - _splay_edit_creature.global_position
+		var chain_data: Dictionary = ChainIK.get_chain_for_point(_splay_edit_selected_point, _splay_edit_creature)
+		if chain_data.is_empty():
+			return
+		var solved: Array[Vector2] = ChainIK.solve(
+			chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
+			target_local, true
+		)
+		# Apply solved positions back to creature skeleton
+		var apply_fn: Callable = chain_data["apply"]
+		apply_fn.call(solved)
+		# Update the pos_override to match the solved endpoint
+		_splay_edit_active[_splay_edit_selected_point]["pos_override"] = _splay_edit_creature.global_position + solved[solved.size() - 1]
 
 
 func _get_splay_point_world(point_name: String) -> Vector2:

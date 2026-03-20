@@ -35,7 +35,7 @@ if [ "$EC" = "0" ]; then
 fi
 
 R "resethp" > /dev/null
-sleep 8
+sleep 12
 
 HPLINE=$(R "hp")
 DMG=$(printf "%s" "$HPLINE" | grep -o 'damage_taken=[0-9]*' | cut -d= -f2)
