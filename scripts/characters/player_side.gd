@@ -3386,17 +3386,17 @@ func _tether_begin_second_hook() -> void:
 	else:
 		_tether_anchor_a = TetherScript.make_anchor_wall(_grapple_anchor)
 
-	# Start second hook spinning at anchor A position
+	# Start second hook spinning at the PLAYER position (player spins the rope)
 	_grapple_state = GrappleState.TETHER_WINDUP
 	_tether_hold_time = 0.0
 	_tether_angle = 0.0
 	_tether_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
-	_tether_hook_pos = _grapple_anchor
+	_tether_hook_pos = global_position
 	AudioManager.play("grapple_launch", -6.0, 1.5)
 
 
 func _tether_tick_windup(delta: float) -> void:
-	## Second hook spins at anchor A position.
+	## Second hook spins at the PLAYER position (player spins the rope end).
 	_tether_hold_time += delta
 	_tether_angular_vel = minf(
 		GRAPPLE_BASE_ANGULAR_VEL + _tether_hold_time * GRAPPLE_ANGULAR_ACCEL,
@@ -3404,12 +3404,27 @@ func _tether_tick_windup(delta: float) -> void:
 	)
 	_tether_angle += _tether_angular_vel * delta
 
-	# Hook orbits anchor A
-	var anchor_pos: Vector2 = _grapple_anchor
-	_tether_hook_pos = anchor_pos + Vector2(
+	# Hook orbits the player
+	_tether_hook_pos = global_position + Vector2(
 		cos(_tether_angle) * GRAPPLE_SWING_RADIUS,
 		sin(_tether_angle) * GRAPPLE_SWING_RADIUS
 	)
+
+	# Update aim direction (same as normal windup — sticks control aim arrow)
+	if device_id >= 0:
+		var right_stick := Vector2(
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_X),
+			Input.get_joy_axis(device_id, JOY_AXIS_RIGHT_Y)
+		)
+		if right_stick.length() > 0.2:
+			_grapple_locked_aim = right_stick.normalized()
+		else:
+			var left_stick := Vector2(
+				Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X),
+				Input.get_joy_axis(device_id, JOY_AXIS_LEFT_Y)
+			)
+			if left_stick.length() > 0.2:
+				_grapple_locked_aim = left_stick.normalized()
 
 	var spin_ratio: float = _tether_angular_vel / GRAPPLE_MAX_ANGULAR_VEL
 	_rumble(spin_ratio * 0.2, 0.0, 0.05)
@@ -3424,7 +3439,7 @@ func _tether_throw_second_hook() -> void:
 		GRAPPLE_MAX_THROW_SPEED
 	)
 	_tether_hook_vel = aim * throw_speed
-	_tether_hook_pos = _grapple_anchor  # Launch from anchor A
+	_tether_hook_pos = global_position  # Launch from the player
 	_grapple_state = GrappleState.TETHER_THROWN
 	AudioManager.play("grapple_launch")
 	_rumble(0.4, 0.6, 0.15)
@@ -3714,13 +3729,35 @@ func _draw_grapple() -> void:
 				draw_line(prev_pt, pt, rope_color, 2.0)
 				prev_pt = pt
 			draw_circle(anchor_local, 5.0, hook_color)
-			# Draw second hook spinning at anchor A
+			# Draw second hook spinning at PLAYER (orbiting player)
 			var tether_hook_local: Vector2 = _tether_hook_pos - global_position
-			draw_line(anchor_local, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 1.5)
+			draw_line(Vector2.ZERO, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 1.5)
 			draw_circle(tether_hook_local, 4.0, Color(0.7, 0.5, 0.9))
+			# Draw aim arrow (same as normal windup)
+			var aim: Vector2 = _grapple_locked_aim
+			var throw_speed: float = clampf(
+				GRAPPLE_BASE_THROW_SPEED + _tether_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
+				GRAPPLE_BASE_THROW_SPEED, GRAPPLE_MAX_THROW_SPEED
+			)
+			var vp_size: Vector2 = get_viewport_rect().size
+			var max_indicator: float = minf(vp_size.x, vp_size.y) * 0.3
+			var indicator_len: float = minf(throw_speed * 0.06, max_indicator)
+			var aim_color := Color(1.0, 0.6, 0.2, 0.4)
+			var dash_len: float = 8.0
+			var gap_len: float = 6.0
+			var total: float = 0.0
+			while total < indicator_len:
+				var seg_start: Vector2 = aim * total
+				var seg_end: Vector2 = aim * minf(total + dash_len, indicator_len)
+				draw_line(seg_start, seg_end, aim_color, 1.5)
+				total += dash_len + gap_len
+			var arrow_tip: Vector2 = aim * indicator_len
+			var perp: Vector2 = Vector2(-aim.y, aim.x)
+			draw_line(arrow_tip, arrow_tip - aim * 8.0 + perp * 5.0, aim_color, 1.5)
+			draw_line(arrow_tip, arrow_tip - aim * 8.0 - perp * 5.0, aim_color, 1.5)
 
 		GrappleState.TETHER_THROWN:
-			# Draw primary rope
+			# Draw primary rope (player to anchor A)
 			var anchor_local: Vector2 = _grapple_anchor - global_position
 			var straight_dist: float = anchor_local.length()
 			var slack: float = maxf(_grapple_rope_len - straight_dist, 0.0)
@@ -3733,9 +3770,9 @@ func _draw_grapple() -> void:
 				draw_line(prev_pt, pt, rope_color, 2.0)
 				prev_pt = pt
 			draw_circle(anchor_local, 5.0, hook_color)
-			# Draw second hook flying from anchor A
+			# Draw second hook flying from PLAYER
 			var tether_hook_local: Vector2 = _tether_hook_pos - global_position
-			draw_line(anchor_local, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 2.0)
+			draw_line(Vector2.ZERO, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 2.0)
 			draw_circle(tether_hook_local, 4.0, Color(0.7, 0.5, 0.9))
 
 	# Draw tether inventory dots (5 brown dots)
