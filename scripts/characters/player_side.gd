@@ -183,7 +183,8 @@ const GRAPPLE_HOOK_DAMAGE := 0  # No damage on connection
 const GRAPPLE_TUG_DAMAGE := 10
 const PLAYER_MASS := 70.0
 
-enum GrappleState { IDLE, WINDUP, THROWN, CONNECTED, SWINGING, TUG, RETRACTING }
+enum GrappleState { IDLE, WINDUP, THROWN, CONNECTED, SWINGING, TUG, RETRACTING,
+					 TETHER_WINDUP, TETHER_THROWN }
 var _grapple_state: GrappleState = GrappleState.IDLE
 var _grapple_hold_time: float = 0.0
 var _grapple_angle: float = 0.0  # Current windup angle
@@ -203,6 +204,18 @@ var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
 var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
 var _grapple_launch_immunity: float = 0.0  # Seconds where _handle_movement won't override velocity
+
+# Tether system (dual-grapple)
+const TETHER_MAX_COUNT := 5
+var _active_tethers: Array = []        # Array of tether Node2D refs (max 5)
+var _tether_target_length: float = 0.0 # Length set by D-pad before L2 throw
+var _tether_anchor_a: Dictionary = {}  # First anchor (saved when L2 pressed)
+var _tether_hook_pos: Vector2 = Vector2.ZERO  # Second hook position during TETHER_THROWN
+var _tether_hook_vel: Vector2 = Vector2.ZERO  # Second hook velocity
+var _tether_hold_time: float = 0.0     # L2 hold duration for windup
+var _tether_angle: float = 0.0         # Second hook spin angle
+var _tether_angular_vel: float = 0.0   # Second hook spin speed
+
 var _debug_mode: bool = false  # Toggle with SELECT button
 var _debug_tracers: Array = []  # [{pos, vel, predicted, time}]
 
@@ -499,6 +512,8 @@ func _needs_redraw() -> bool:
 	return false
 
 
+var _trigger_left_was_pressed: bool = false  # Previous frame L2 state
+
 func _is_trigger_pressed(axis: JoyAxis) -> bool:
 	## Check if an analog trigger is pressed with hysteresis.
 	## Higher threshold to START pressing, lower threshold to STOP.
@@ -512,6 +527,16 @@ func _is_trigger_pressed(axis: JoyAxis) -> bool:
 	# Hysteresis: if already aiming, use lower threshold to keep it active
 	var threshold: float = 0.05 if _archer_aiming else 0.1
 	return value > threshold
+
+
+func _is_trigger_just_pressed(axis: JoyAxis) -> bool:
+	## Returns true on the frame the trigger transitions from released to pressed.
+	var pressed: bool = _is_trigger_pressed(axis)
+	if axis == JOY_AXIS_TRIGGER_LEFT:
+		var just: bool = pressed and not _trigger_left_was_pressed
+		_trigger_left_was_pressed = pressed
+		return just
+	return false
 
 
 func _input(event: InputEvent) -> void:
@@ -2890,6 +2915,28 @@ func _handle_ranger_grapple() -> void:
 				# First L1 press: pull toward anchor, stay connected
 				_grapple_pull_to_anchor()
 
+	# L2 initiates tether second hook (while connected/swinging)
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+		if _is_trigger_just_pressed(JOY_AXIS_TRIGGER_LEFT):
+			if _active_tethers.size() < TETHER_MAX_COUNT:
+				_tether_begin_second_hook()
+
+	# L2 release throws second hook
+	if _grapple_state == GrappleState.TETHER_WINDUP:
+		if not _is_trigger_pressed(JOY_AXIS_TRIGGER_LEFT):
+			if _tether_hold_time >= GRAPPLE_MIN_HOLD:
+				_tether_throw_second_hook()
+			else:
+				# Cancelled — go back to swinging
+				_grapple_state = GrappleState.SWINGING
+
+	# Clean up freed tethers
+	var ti: int = _active_tethers.size() - 1
+	while ti >= 0:
+		if not is_instance_valid(_active_tethers[ti]):
+			_active_tethers.remove_at(ti)
+		ti -= 1
+
 	if _grapple_state == GrappleState.IDLE:
 		return
 
@@ -2906,9 +2953,16 @@ func _handle_ranger_grapple() -> void:
 			_grapple_tick_swinging(delta)
 		GrappleState.RETRACTING:
 			_grapple_tick_retracting(delta)
+		GrappleState.TETHER_WINDUP:
+			_grapple_tick_swinging(delta)  # Player keeps swinging
+			_tether_tick_windup(delta)
+		GrappleState.TETHER_THROWN:
+			_grapple_tick_swinging(delta)  # Player keeps swinging
+			_tether_tick_thrown(delta)
 
 	# Jump while connected = disconnect with jump boost (AFTER tick so velocity is current)
-	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED,
+						   GrappleState.TETHER_WINDUP, GrappleState.TETHER_THROWN]:
 		if _is_device_action_just_pressed("jump"):
 			_grapple_jump_release()
 
@@ -3302,6 +3356,140 @@ func _grapple_tick_retracting(delta: float) -> void:
 		_grapple_rope_points.clear()
 
 
+# -- Tether (Dual-Grapple) ----------------------------------------------------
+
+func _tether_begin_second_hook() -> void:
+	## L2 pressed while connected/swinging: save anchor A, start second hook windup at anchor position.
+	_tether_target_length = _grapple_rope_len  # Current rope length is the tether target
+	# Save first anchor data
+	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	if is_instance_valid(_grapple_anchor_entity):
+		# Anchored to enemy — check for nearest attachment point
+		var ap: String = ""
+		if "_attach_points" in _grapple_anchor_entity:
+			var best_dist: float = 999.0
+			for point_name in _grapple_anchor_entity._attach_points:
+				var area: Area2D = _grapple_anchor_entity._attach_points[point_name]
+				var point_world: Vector2 = _grapple_anchor_entity.global_position + area.position
+				var d: float = _grapple_anchor.distance_to(point_world)
+				if d < best_dist:
+					best_dist = d
+					ap = point_name
+		_tether_anchor_a = TetherScript.make_anchor_body(_grapple_anchor_entity, ap)
+	elif is_instance_valid(_grapple_anchor_body):
+		_tether_anchor_a = TetherScript.make_anchor_wall(_grapple_anchor)
+	else:
+		_tether_anchor_a = TetherScript.make_anchor_wall(_grapple_anchor)
+
+	# Start second hook spinning at anchor A position
+	_grapple_state = GrappleState.TETHER_WINDUP
+	_tether_hold_time = 0.0
+	_tether_angle = 0.0
+	_tether_angular_vel = GRAPPLE_BASE_ANGULAR_VEL
+	_tether_hook_pos = _grapple_anchor
+	AudioManager.play("grapple_launch", -6.0, 1.5)
+
+
+func _tether_tick_windup(delta: float) -> void:
+	## Second hook spins at anchor A position.
+	_tether_hold_time += delta
+	_tether_angular_vel = minf(
+		GRAPPLE_BASE_ANGULAR_VEL + _tether_hold_time * GRAPPLE_ANGULAR_ACCEL,
+		GRAPPLE_MAX_ANGULAR_VEL
+	)
+	_tether_angle += _tether_angular_vel * delta
+
+	# Hook orbits anchor A
+	var anchor_pos: Vector2 = _grapple_anchor
+	_tether_hook_pos = anchor_pos + Vector2(
+		cos(_tether_angle) * GRAPPLE_SWING_RADIUS,
+		sin(_tether_angle) * GRAPPLE_SWING_RADIUS
+	)
+
+	var spin_ratio: float = _tether_angular_vel / GRAPPLE_MAX_ANGULAR_VEL
+	_rumble(spin_ratio * 0.2, 0.0, 0.05)
+
+
+func _tether_throw_second_hook() -> void:
+	## Release L2: launch second hook from anchor A toward player's aim.
+	var aim: Vector2 = _grapple_locked_aim
+	var throw_speed: float = clampf(
+		GRAPPLE_BASE_THROW_SPEED + _tether_hold_time * GRAPPLE_THROW_SPEED_PER_SEC,
+		GRAPPLE_BASE_THROW_SPEED,
+		GRAPPLE_MAX_THROW_SPEED
+	)
+	_tether_hook_vel = aim * throw_speed
+	_tether_hook_pos = _grapple_anchor  # Launch from anchor A
+	_grapple_state = GrappleState.TETHER_THROWN
+	AudioManager.play("grapple_launch")
+	_rumble(0.4, 0.6, 0.15)
+
+
+func _tether_tick_thrown(delta: float) -> void:
+	## Second hook in flight from anchor A.
+	_tether_hook_vel.y += GRAPPLE_HOOK_GRAVITY * delta
+	_tether_hook_vel *= GRAPPLE_HOOK_DRAG
+	var prev_pos: Vector2 = _tether_hook_pos
+	_tether_hook_pos += _tether_hook_vel * delta
+
+	# Raycast for collision
+	var space := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(
+		prev_pos, _tether_hook_pos,
+		1 | 8  # world + enemies
+	)
+	query.exclude = [get_rid()]
+	var result: Dictionary = space.intersect_ray(query)
+
+	if result:
+		_tether_hook_pos = result["position"]
+		var collider: Node = result["collider"]
+
+		# Build anchor B
+		var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+		var anchor_b: Dictionary
+		if collider.is_in_group("enemies"):
+			var ap: String = ""
+			if "_attach_points" in collider:
+				var best_dist: float = 999.0
+				for point_name in collider._attach_points:
+					var area: Area2D = collider._attach_points[point_name]
+					var point_world: Vector2 = collider.global_position + area.position
+					var d: float = _tether_hook_pos.distance_to(point_world)
+					if d < best_dist:
+						best_dist = d
+						ap = point_name
+			anchor_b = TetherScript.make_anchor_body(collider as Node2D, ap)
+			if collider.has_method("take_damage"):
+				collider.take_damage(GRAPPLE_HOOK_DAMAGE, player_index)
+		else:
+			anchor_b = TetherScript.make_anchor_wall(result["position"])
+
+		# Create the tether entity
+		var tether := Node2D.new()
+		tether.set_script(TetherScript)
+		tether.setup(_tether_anchor_a, anchor_b, _tether_target_length, player_index)
+		get_tree().current_scene.add_child(tether)
+		_active_tethers.append(tether)
+
+		AudioManager.play("grapple_hit")
+		_rumble(0.6, 0.9, 0.2)
+
+		# Player drops from the rope — tether is now standalone
+		_grapple_launch_immunity = 0.5
+		_grapple_state = GrappleState.RETRACTING
+		_grapple_retract_timer = 0.2
+		_grapple_anchor_entity = null
+		_grapple_anchor_body = null
+		return
+
+	# Max range: retract if second hook goes too far from anchor A
+	var anchor_a_pos: Vector2 = _grapple_anchor
+	if _tether_hook_pos.distance_to(anchor_a_pos) > GRAPPLE_MAX_ROPE_LEN:
+		# Failed — cancel tether, go back to swinging
+		_grapple_state = GrappleState.SWINGING
+
+
 # -- Grapple Drawing -----------------------------------------------------------
 
 var _hud_aura_fade: float = 0.0  # 1.0 = fully visible, fades to 0 over 1s
@@ -3506,6 +3694,55 @@ func _draw_grapple() -> void:
 			var hook_local: Vector2 = _grapple_hook_pos - global_position
 			draw_line(Vector2.ZERO, hook_local, rope_color * Color(1, 1, 1, 0.5), 1.5)
 			draw_circle(hook_local, 3.0, hook_color * Color(1, 1, 1, 0.5))
+
+		GrappleState.TETHER_WINDUP:
+			# Draw primary rope (player to anchor A) — same as SWINGING
+			var anchor_local: Vector2 = _grapple_anchor - global_position
+			var straight_dist: float = anchor_local.length()
+			var slack: float = maxf(_grapple_rope_len - straight_dist, 0.0)
+			var seg_count: int = maxi(int(_grapple_rope_len / GRAPPLE_ROPE_SEGMENT_LEN), 3)
+			var prev_pt: Vector2 = Vector2.ZERO
+			for i in range(1, seg_count + 1):
+				var t: float = float(i) / float(seg_count)
+				var pt: Vector2 = Vector2.ZERO.lerp(anchor_local, t)
+				pt.y += sin(t * PI) * (slack * 0.5 + 5.0)
+				draw_line(prev_pt, pt, rope_color, 2.0)
+				prev_pt = pt
+			draw_circle(anchor_local, 5.0, hook_color)
+			# Draw second hook spinning at anchor A
+			var tether_hook_local: Vector2 = _tether_hook_pos - global_position
+			draw_line(anchor_local, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 1.5)
+			draw_circle(tether_hook_local, 4.0, Color(0.7, 0.5, 0.9))
+
+		GrappleState.TETHER_THROWN:
+			# Draw primary rope
+			var anchor_local: Vector2 = _grapple_anchor - global_position
+			var straight_dist: float = anchor_local.length()
+			var slack: float = maxf(_grapple_rope_len - straight_dist, 0.0)
+			var seg_count: int = maxi(int(_grapple_rope_len / GRAPPLE_ROPE_SEGMENT_LEN), 3)
+			var prev_pt: Vector2 = Vector2.ZERO
+			for i in range(1, seg_count + 1):
+				var t: float = float(i) / float(seg_count)
+				var pt: Vector2 = Vector2.ZERO.lerp(anchor_local, t)
+				pt.y += sin(t * PI) * (slack * 0.5 + 5.0)
+				draw_line(prev_pt, pt, rope_color, 2.0)
+				prev_pt = pt
+			draw_circle(anchor_local, 5.0, hook_color)
+			# Draw second hook flying from anchor A
+			var tether_hook_local: Vector2 = _tether_hook_pos - global_position
+			draw_line(anchor_local, tether_hook_local, Color(0.6, 0.4, 0.8, 0.8), 2.0)
+			draw_circle(tether_hook_local, 4.0, Color(0.7, 0.5, 0.9))
+
+	# Draw tether inventory dots (5 brown dots)
+	if character_class == PlayerManager.CharacterClass.RANGED:
+		var dot_start: Vector2 = Vector2(-12, -30)
+		for di in range(TETHER_MAX_COUNT):
+			var dot_pos: Vector2 = dot_start + Vector2(di * 6, 0)
+			if di < TETHER_MAX_COUNT - _active_tethers.size():
+				draw_circle(dot_pos, 2.0, Color(0.5, 0.4, 0.3, 0.9))  # Solid = available
+			else:
+				draw_circle(dot_pos, 2.0, Color(0.5, 0.4, 0.3, 0.3))  # Dim = in use
+				draw_arc(dot_pos, 2.0, 0, TAU, 8, Color(0.5, 0.4, 0.3, 0.6), 0.5)
 
 
 # -- Ranger Reload -------------------------------------------------------------
