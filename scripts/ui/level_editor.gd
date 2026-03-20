@@ -264,6 +264,12 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_D and not event.ctrl_pressed:
 				_splay_edit_preset_pose("down")
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_P:
+				_splay_edit_toggle_pin()
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_M:
+				_splay_edit_mirror = not _splay_edit_mirror
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -1110,6 +1116,8 @@ var _splay_edit_all_points: Array[String] = []  # All available attachment point
 var _splay_edit_active: Dictionary = {}  # point_name -> { enabled: bool, cast_end: Vector2, pos_override: Vector2 }
 var _splay_edit_selected_point: String = ""  # Currently selected point name
 var _splay_edit_dragging_endpoint: bool = false  # True when dragging a cast endpoint
+var _splay_edit_pinned: Dictionary = {}  # point_name -> bool (pinned = doesn't respond to IK pulling)
+var _splay_edit_mirror: bool = false  # When true, L/R changes are mirrored along body axis
 
 func _enter_splay_edit() -> void:
 	## Called when entering SPLAY_EDIT mode. Spawn a frozen creature.
@@ -1209,17 +1217,23 @@ func _enter_splay_edit() -> void:
 
 	_selected_idx = -1
 	_splay_edit_selected_point = ""
+	_splay_edit_mirror = false
+
+	# Spine attachment points are PINNED by default (don't respond to IK)
+	_splay_edit_pinned.clear()
+	for point_name in _splay_edit_all_points:
+		# Spine-adjacent points: shoulders, waist are pinned by default
+		_splay_edit_pinned[point_name] = point_name in ["shoulders", "waist"]
 
 
 func _exit_splay_edit() -> void:
-	# Unfreeze creature and unlock pose
+	# Unfreeze creature and unlock pose — but keep reference for re-entry
 	if is_instance_valid(_splay_edit_creature):
 		if "_physics_frozen" in _splay_edit_creature:
 			_splay_edit_creature._physics_frozen = false
 		if "_pose_locked" in _splay_edit_creature:
 			_splay_edit_creature._pose_locked = false
-	_splay_edit_creature = null
-	_splay_edit_active.clear()
+	# Don't null creature or clear active — preserve for re-entry
 
 
 func _try_select_splay_connection(world_pos: Vector2) -> void:
@@ -1280,26 +1294,29 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 		# Dragging the cast ray endpoint
 		_splay_edit_active[_splay_edit_selected_point]["cast_end"] = world_pos
 	else:
-		# Dragging the connection point — IK solve the chain from origin to drag point
+		# Dragging the connection point — check if pinned
+		if _splay_edit_pinned.get(_splay_edit_selected_point, false):
+			return  # Pinned — doesn't move
 		if not is_instance_valid(_splay_edit_creature):
 			return
-		var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
-		# Convert target to local space
-		var target_local: Vector2 = world_pos - _splay_edit_creature.global_position
-		var chain_data: Dictionary = ChainIK.get_chain_for_point(_splay_edit_selected_point, _splay_edit_creature)
-		if chain_data.is_empty():
-			return
-		var solved: Array[Vector2] = ChainIK.solve(
-			chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
-			target_local, true
-		)
-		# Apply solved positions back to creature skeleton
-		var apply_fn: Callable = chain_data["apply"]
-		apply_fn.call(solved)
-		# Force creature to redraw with new skeleton positions
-		_splay_edit_creature.queue_redraw()
-		# Update the pos_override to match the solved endpoint
-		_splay_edit_active[_splay_edit_selected_point]["pos_override"] = _splay_edit_creature.global_position + solved[solved.size() - 1]
+
+		# IK solve the chain from origin to drag point
+		_splay_edit_ik_drag(_splay_edit_selected_point, world_pos)
+
+		# Mirror: apply same movement to the opposite side
+		if _splay_edit_mirror:
+			var mirror_pt: String = _get_mirror_point(_splay_edit_selected_point)
+			if mirror_pt != "":
+				# Mirror the target position across the spine axis
+				var rel: Vector2 = world_pos - _splay_edit_origin
+				# Determine spine axis from creature
+				var spine_dir: Vector2 = (_splay_edit_creature._spine[0] - _splay_edit_creature._spine[2]).normalized()
+				# Reflect rel across spine axis
+				var proj: float = rel.dot(spine_dir)
+				var perp: Vector2 = rel - spine_dir * proj
+				var mirrored_rel: Vector2 = spine_dir * proj - perp
+				var mirror_world: Vector2 = _splay_edit_origin + mirrored_rel
+				_splay_edit_ik_drag(mirror_pt, mirror_world)
 
 
 func _get_splay_point_world(point_name: String) -> Vector2:
@@ -1330,6 +1347,52 @@ func _splay_edit_toggle_point() -> void:
 		if away.length() < 0.1:
 			away = Vector2(0, -1)
 		data["cast_end"] = _splay_edit_origin + away * body_len
+
+
+func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
+	## IK-drag a single connection point to world_pos. Updates skeleton + pos_override.
+	if not is_instance_valid(_splay_edit_creature):
+		return
+	var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
+	var target_local: Vector2 = world_pos - _splay_edit_creature.global_position
+	var chain_data: Dictionary = ChainIK.get_chain_for_point(point_name, _splay_edit_creature)
+	if chain_data.is_empty():
+		return
+	var solved: Array[Vector2] = ChainIK.solve(
+		chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
+		target_local, true
+	)
+	var apply_fn: Callable = chain_data["apply"]
+	apply_fn.call(solved)
+	_splay_edit_creature.queue_redraw()
+	# Update pos_override + attachment positions
+	if _splay_edit_active.has(point_name):
+		_splay_edit_active[point_name]["pos_override"] = _splay_edit_creature.global_position + solved[solved.size() - 1]
+	# Also update attachment positions so other points track skeleton
+	if _splay_edit_creature.has_method("_update_hitbox_positions"):
+		_splay_edit_creature._update_hitbox_positions()
+	# Refresh all pos_overrides from skeleton
+	for pn in _splay_edit_all_points:
+		if pn != point_name and "_attach_points" in _splay_edit_creature:
+			if _splay_edit_creature._attach_points.has(pn):
+				_splay_edit_active[pn]["pos_override"] = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+
+
+func _splay_edit_toggle_pin() -> void:
+	if _splay_edit_selected_point == "" or _splay_edit_selected_point == "_origin":
+		return
+	if _splay_edit_pinned.has(_splay_edit_selected_point):
+		_splay_edit_pinned[_splay_edit_selected_point] = not _splay_edit_pinned[_splay_edit_selected_point]
+
+
+func _get_mirror_point(point_name: String) -> String:
+	## Get the mirrored counterpart of a point (L↔R).
+	match point_name:
+		"elbow_l": return "elbow_r"
+		"elbow_r": return "elbow_l"
+		"knee_l": return "knee_r"
+		"knee_r": return "knee_l"
+	return ""
 
 
 func _splay_edit_move_endpoint(dir: Vector2) -> void:
@@ -1461,12 +1524,44 @@ func _splay_edit_preset_pose(direction: String) -> void:
 		for li in range(creature._foot_planted.size()):
 			creature._foot_planted[li] = false
 
-	# Reset all connection points: disable, clear cast endpoints
+	# Force creature to update hitbox/attachment point positions from new skeleton
+	if creature.has_method("_update_hitbox_positions"):
+		creature._update_hitbox_positions()
+
+	# Let dangling segments (lower legs) settle briefly with gravity
+	# Simulate a few frames of gravity on unplanted feet
+	for _sim in range(5):
+		for li in range(creature._legs.size()):
+			if "_leg_severed" in creature and creature._leg_severed[li]:
+				continue
+			# Lower leg dangles from knee
+			var knee: Vector2 = creature._legs[li][1]
+			var foot: Vector2 = creature._legs[li][2]
+			var lower_dir: Vector2 = (foot - knee).normalized()
+			# Apply slight gravity pull
+			lower_dir = (lower_dir + Vector2(0, 0.3)).normalized()
+			creature._legs[li][2] = knee + lower_dir * 22.0  # LEG_LOWER_LEN
+
+	# Update attachment positions again after leg settling
+	if creature.has_method("_update_hitbox_positions"):
+		creature._update_hitbox_positions()
+
+	# Now read actual joint positions from the creature and set connection points
+	var body_len: float = _splay_edit_get_body_length()
 	for pn in _splay_edit_active:
 		_splay_edit_active[pn]["enabled"] = false
-		_splay_edit_active[pn]["cast_end"] = Vector2.ZERO
-		# Update pos_override from new skeleton position
-		_splay_edit_active[pn]["pos_override"] = _get_splay_point_world(pn)
+		# Read the actual skeleton position for this attachment point
+		var point_world: Vector2 = Vector2.ZERO
+		if "_attach_points" in creature and creature._attach_points.has(pn):
+			point_world = creature.global_position + creature._attach_points[pn].position
+		else:
+			point_world = origin
+		_splay_edit_active[pn]["pos_override"] = point_world
+		# Cast endpoint: body-length radius straight out from origin through this joint
+		var away: Vector2 = (point_world - origin).normalized()
+		if away.length() < 0.1:
+			away = Vector2(0, -1)
+		_splay_edit_active[pn]["cast_end"] = origin + away * body_len
 
 	# Force redraw
 	creature.queue_redraw()
@@ -1560,35 +1655,49 @@ func _draw_splay_edit_overlay() -> void:
 		_overlay.draw_circle(point_world, r, col * Color(1, 1, 1, 0.3))
 		_overlay.draw_arc(point_world, r, 0, TAU, 12, col, 1.5)
 
+		# Pin indicator
+		var is_pinned: bool = _splay_edit_pinned.get(point_name, false)
+		if is_pinned:
+			# Draw pin icon (small X through the circle)
+			_overlay.draw_line(point_world + Vector2(-4, -4), point_world + Vector2(4, 4), Color(1, 0.3, 0.3, 0.7), 1.5)
+			_overlay.draw_line(point_world + Vector2(4, -4), point_world + Vector2(-4, 4), Color(1, 0.3, 0.3, 0.7), 1.5)
+
 		# Label
 		var label_col: Color = col
-		var status: String = " [ON]" if enabled else ""
+		var status: String = ""
+		if enabled:
+			status += " [ON]"
+		if is_pinned:
+			status += " PIN"
 		_overlay.draw_string(font, point_world + Vector2(-25, -r - 6), point_name + status, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, label_col)
 
-		# Cast ray + endpoint (only if enabled)
-		if enabled:
-			var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
-			if cast_end != Vector2.ZERO:
-				# Dotted line from connection point to cast endpoint
-				var ray_dir: Vector2 = (cast_end - point_world).normalized()
-				var ray_len: float = point_world.distance_to(cast_end)
-				var dash: float = 0.0
-				while dash < ray_len:
-					var d_start: Vector2 = point_world + ray_dir * dash
-					var d_end: Vector2 = point_world + ray_dir * minf(dash + 8.0, ray_len)
-					_overlay.draw_line(d_start, d_end, cast_col, 1.5)
-					dash += 14.0
+		# Cast ray + endpoint — always shown if cast_end exists (dim if disabled, bright if enabled)
+		var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
+		if cast_end != Vector2.ZERO:
+			var alpha: float = 1.0 if enabled else 0.3
+			var ray_col: Color = cast_col * Color(1, 1, 1, alpha)
 
-				# Arrow at endpoint
-				var perp: Vector2 = Vector2(-ray_dir.y, ray_dir.x)
-				_overlay.draw_line(cast_end, cast_end - ray_dir * 10 + perp * 5, cast_col, 1.5)
-				_overlay.draw_line(cast_end, cast_end - ray_dir * 10 - perp * 5, cast_col, 1.5)
+			# Dotted line from connection point to cast endpoint
+			var ray_dir: Vector2 = (cast_end - point_world).normalized()
+			var ray_len: float = point_world.distance_to(cast_end)
+			var dash: float = 0.0
+			while dash < ray_len:
+				var d_start: Vector2 = point_world + ray_dir * dash
+				var d_end: Vector2 = point_world + ray_dir * minf(dash + 8.0, ray_len)
+				_overlay.draw_line(d_start, d_end, ray_col, 1.5)
+				dash += 14.0
 
-				# Draggable endpoint circle
-				var ep_selected: bool = is_selected and _splay_edit_dragging_endpoint
-				var ep_col: Color = sel_col if ep_selected else endpoint_col
-				_overlay.draw_circle(cast_end, 6.0, ep_col * Color(1, 1, 1, 0.5))
-				_overlay.draw_arc(cast_end, 6.0, 0, TAU, 8, ep_col, 1.5)
+			# Arrow at endpoint
+			var perp: Vector2 = Vector2(-ray_dir.y, ray_dir.x)
+			_overlay.draw_line(cast_end, cast_end - ray_dir * 10 + perp * 5, ray_col, 1.5)
+			_overlay.draw_line(cast_end, cast_end - ray_dir * 10 - perp * 5, ray_col, 1.5)
+
+			# Draggable endpoint circle
+			var ep_selected: bool = is_selected and _splay_edit_dragging_endpoint
+			var ep_alpha: float = 0.8 if enabled else 0.3
+			var ep_col: Color = (sel_col if ep_selected else endpoint_col) * Color(1, 1, 1, ep_alpha)
+			_overlay.draw_circle(cast_end, 6.0, ep_col * Color(1, 1, 1, 0.5))
+			_overlay.draw_arc(cast_end, 6.0, 0, TAU, 8, ep_col, 1.5)
 
 	# Pose name
 	var pose_name: String = _splay_edit_pose_data.get("name", "(unsaved)")
@@ -1602,5 +1711,6 @@ func _draw_splay_edit_overlay() -> void:
 	_overlay.draw_string(font, Vector2(10, 66), "Active points: %d / %d" % [active_count, _splay_edit_all_points.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.7, 0.7))
 
 	# Help text
-	var help := "SPLAY EDIT: Click=select  SPACE=toggle  Drag=IK  Arrows=nudge  L/R/U/D=preset pose  Ctrl+S=save  Esc=back"
+	var mirror_str: String = " [MIRROR]" if _splay_edit_mirror else ""
+	var help := "SPLAY EDIT: Click=select  SPACE=toggle  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back" % mirror_str
 	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))
