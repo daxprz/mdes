@@ -287,6 +287,9 @@ func _execute(command: String) -> String:
 		"splay":
 			return _cmd_splay(parts)
 
+		"chaindump":
+			return _cmd_chaindump()
+
 		"chain":
 			return _cmd_chain(parts)
 
@@ -850,6 +853,36 @@ func _cmd_splay(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown splay subcommand '%s'. Try: list, spawn, clear, status" % subcmd
+
+
+func _cmd_chaindump() -> String:
+	## Dump detailed state of all chains: every point position and distances.
+	var chains: Array = get_tree().get_nodes_in_group("chains")
+	if chains.is_empty():
+		return "chains: 0"
+	var lines: Array[String] = ["chains: %d" % chains.size()]
+	for ci in range(chains.size()):
+		var c: Node2D = chains[ci]
+		lines.append("=== Chain %d: %d pts, target_len=%.1f, link_len=%.1f, hp=%d/%d ===" % [
+			ci, c._point_count, c.target_length, c._link_len, c.current_hp, c.CHAIN_MAX_HP])
+		# Dump points with distances
+		for i in range(c._points.size()):
+			var pt: Vector2 = c._points[i]
+			var dist_str: String = ""
+			if i > 0:
+				var dist: float = c._points[i - 1].distance_to(pt)
+				var pct: float = (dist / c._link_len - 1.0) * 100
+				if absf(pct) > 5:
+					dist_str = " dist=%.1f (%.0f%%)" % [dist, pct]
+				else:
+					dist_str = " dist=%.1f" % dist
+			var label: String = ""
+			if i == 0:
+				label = " [ANCHOR_A]"
+			elif i == c._point_count - 1:
+				label = " [ANCHOR_B]"
+			lines.append("  pt[%d]: (%.1f,%.1f)%s%s" % [i, pt.x, pt.y, dist_str, label])
+	return "\n".join(lines)
 
 
 func _cmd_chain(parts: PackedStringArray) -> String:

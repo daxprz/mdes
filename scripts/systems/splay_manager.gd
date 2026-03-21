@@ -285,9 +285,12 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		# Set behavior per creature
 		_apply_behavior(creature, c["behavior"])
 
-		# Keep physics frozen — chains hold the body in place,
-		# pose_locked keeps skeleton in saved shape.
-		# Only _draw runs (via the _physics_frozen check in quadruped)
+		# Unfreeze physics, set chained mode — chains hold the body.
+		# Chained mode: no gravity, no AI, chains control position.
+		if "_physics_frozen" in creature:
+			creature._physics_frozen = false
+		if "_chained" in creature:
+			creature._chained = true
 
 	# Track instance
 	var instance: Dictionary = {
@@ -416,23 +419,35 @@ func _monitor_breakaway(instance: Dictionary) -> void:
 func _check_breakaway_loop(instance: Dictionary) -> void:
 	if not is_inside_tree():
 		return
-	# Check if instance is still valid
+	# Track ALL tethers (including severed/freed) for aggregate damage
+	var total_original_hp: float = instance.get("_total_original_hp", 0.0)
+	if total_original_hp == 0.0:
+		# First call: calculate total original HP from all tethers
+		for t in instance["tethers"]:
+			if is_instance_valid(t):
+				total_original_hp += t.CHAIN_MAX_HP if t.is_in_group("chains") else t.TETHER_MAX_HP
+			else:
+				total_original_hp += 200.0  # Default for already-freed tethers
+		instance["_total_original_hp"] = total_original_hp
+
+	# Count surviving tethers and their remaining HP
 	var valid_tethers: Array = []
-	var total_max_hp: float = 0.0
-	var total_damage: float = 0.0
+	var surviving_hp: float = 0.0
 	for t in instance["tethers"]:
 		if is_instance_valid(t) and not t._severed:
-			var max_hp: float = t.CHAIN_MAX_HP if t.is_in_group("chains") else t.TETHER_MAX_HP
-			total_max_hp += max_hp
-			total_damage += (max_hp - t.current_hp)
+			surviving_hp += t.current_hp
 			valid_tethers.append(t)
 
+	# Total damage = original HP - surviving HP
+	var total_damage: float = total_original_hp - surviving_hp
+
 	if valid_tethers.is_empty():
-		# All tethers gone — trigger breakaway if not already
+		# All tethers gone — trigger breakaway
 		_trigger_breakaway(instance)
 		return
 
-	if total_max_hp > 0 and total_damage > total_max_hp * 0.5:
+	if total_original_hp > 0 and total_damage > total_original_hp * 0.5:
+		# Over 50% of ALL original HP destroyed — breakaway
 		_trigger_breakaway(instance)
 		return
 
@@ -456,11 +471,19 @@ func _trigger_breakaway(instance: Dictionary) -> void:
 		if creature.has_method("clear_pose_overrides"):
 			creature.clear_pose_overrides()
 
-		# Wake up
+		# Wake up, unchain, and start chasing
 		if "_standdown" in creature:
 			creature._standdown = false
 		if "_asleep" in creature:
 			creature._asleep = false
+		if "_chained" in creature:
+			creature._chained = false
+		if "_pose_locked" in creature:
+			creature._pose_locked = false
+		if "_state" in creature:
+			creature._state = 1  # State.CHASE — immediately hunt nearest player
+		if creature.has_method("_pick_target"):
+			creature._pick_target()
 
 		# Brief invincibility
 		if "_breakaway_immune" in creature:

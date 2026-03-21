@@ -979,6 +979,12 @@ func dump_entity_skeleton(entity: Node2D, trigger: String = "manual") -> Diction
 		data["standdown"] = entity._standdown
 	if "_asleep" in entity:
 		data["asleep"] = entity._asleep
+	if "_chained" in entity:
+		data["chained"] = entity._chained
+	if "_pose_locked" in entity:
+		data["pose_locked"] = entity._pose_locked
+	if "_physics_frozen" in entity:
+		data["physics_frozen"] = entity._physics_frozen
 	if "_facing" in entity:
 		data["facing"] = entity._facing
 

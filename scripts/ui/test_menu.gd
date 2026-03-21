@@ -26,7 +26,8 @@ const MENU_ITEMS := [
 	{ "label": "Monster Fight! (2 territorial)", "cmd": "monster_fight" },
 	{ "label": "Toggle Territorial Mode", "cmd": "territorial" },
 	{ "label": "Clear All Enemies", "cmd": "clear" },
-	{ "label": "Reset Level", "cmd": "reset" },
+	{ "label": "Clear Level", "cmd": "clear_level" },
+	{ "label": "Restart Level", "cmd": "restart_level" },
 	{ "label": "Enable Player Joins", "cmd": "enable_joins" },
 	{ "label": "Revive All Players", "cmd": "revive" },
 ]
@@ -132,9 +133,13 @@ func _execute_selected() -> void:
 			_run_rcon_sequence(["territorial"])
 		"clear":
 			_run_rcon_sequence(["clear"])
-		"reset":
+		"clear_level":
 			_run_rcon_sequence(["clear", "clearplayers", "enablejoins"])
-			_output_lines.append("Level reset. Press controller button to rejoin.")
+			_output_lines.append("Level cleared. Press controller button to rejoin.")
+		"restart_level":
+			_output_lines.append("Restarting level...")
+			close()
+			get_tree().reload_current_scene()
 		"enable_joins":
 			_run_rcon_sequence(["enablejoins"])
 		"revive":

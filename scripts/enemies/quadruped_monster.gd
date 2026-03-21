@@ -176,6 +176,7 @@ var _asleep := false     # Asleep mode: dormant until damaged, then becomes acti
 var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
 var _physics_frozen := false  # When true, skip all physics/gravity (used during splay setup)
 var _pose_locked := false     # When true, skip _solve_pose — external system controls skeleton (splay editor)
+var _chained := false         # When true, chains control position — skip gravity and move_and_slide
 var territorial := false      # When true, attacks other monsters instead of/in addition to players
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
@@ -553,6 +554,56 @@ func get_attach_world_position(point_name: String) -> Vector2:
 	return global_position
 
 
+func _apply_chain_constraints() -> void:
+	## Clamp global_position so no attached chain/tether exceeds its target length.
+	## Finds all tethers/chains attached to this creature and constrains position.
+	for tether in get_tree().get_nodes_in_group("tethers"):
+		if not is_instance_valid(tether) or tether._severed:
+			continue
+		# Check if this creature is an anchor
+		var is_anchor_a: bool = tether.anchor_a.get("body") == self
+		var is_anchor_b: bool = tether.anchor_b.get("body") == self
+		if not is_anchor_a and not is_anchor_b:
+			continue
+		# Get the other anchor's world position
+		var other_pos: Vector2
+		var other_anchor: Dictionary = tether.anchor_b if is_anchor_a else tether.anchor_a
+		# Read anchor position — works for both tether.gd and chain.gd
+		if other_anchor.get("is_wall", false):
+			other_pos = other_anchor.get("pos", Vector2.ZERO)
+		elif is_instance_valid(other_anchor.get("body")):
+			var body: Node2D = other_anchor["body"]
+			var ap: String = other_anchor.get("attach_point", "")
+			if ap != "" and body.has_method("get_attach_world_position"):
+				other_pos = body.get_attach_world_position(ap)
+			else:
+				other_pos = body.global_position + other_anchor.get("body_offset", Vector2.ZERO)
+		else:
+			other_pos = other_anchor.get("pos", global_position)
+		# For physics chains: constrain to last link position, not wall anchor
+		var constrain_pos: Vector2 = other_pos
+		var max_dist: float = tether.target_length
+		if tether.is_in_group("chains") and "_links" in tether and not tether._links.is_empty():
+			# Clamp to the nearest chain link endpoint (one link length away)
+			var nearest_link: Node2D = null
+			if is_anchor_a and tether._links.size() > 0:
+				nearest_link = tether._links[0]  # First link (closest to anchor A = creature)
+			elif tether._links.size() > 0:
+				nearest_link = tether._links[tether._links.size() - 1]  # Last link
+			if is_instance_valid(nearest_link):
+				constrain_pos = nearest_link.global_position
+				max_dist = tether.target_length / float(tether._link_count)  # One link length
+
+		var dist: float = global_position.distance_to(constrain_pos)
+		if dist > max_dist:
+			var dir: Vector2 = (global_position - constrain_pos).normalized()
+			global_position = constrain_pos + dir * max_dist
+			# Kill velocity component moving away from anchor
+			var vel_away: float = velocity.dot(dir)
+			if vel_away > 0:
+				velocity -= dir * vel_away
+
+
 func set_pose_overrides(overrides: Dictionary) -> void:
 	## Set IK pose override targets. Keys = attachment point names, values = local Vector2 positions.
 	_pose_overrides = overrides
@@ -679,6 +730,77 @@ func _physics_process(delta: float) -> void:
 		_precog_cooldown -= delta
 	if _state_lock_timer > 0.0:
 		_state_lock_timer -= delta
+
+	# Chained mode: gravity applies, but chains constrain position.
+	# Creature hangs naturally, can walk within chain reach, can't escape.
+	if _chained:
+		# Apply gravity
+		velocity.y += GRAVITY * delta
+		# Apply chain constraints: clamp position so no chain exceeds its length
+		_apply_chain_constraints()
+		# Move with constraints
+		move_and_slide()
+		# Re-apply chain constraints after move_and_slide (it may have pushed past)
+		_apply_chain_constraints()
+		# Check if touching ground
+		var on_floor: bool = is_on_floor()
+		# Skeleton behavior based on state
+		if _asleep or not on_floor:
+			# GO LIMP: skeleton dangles, no pose solving
+			# Let gravity pull limbs down naturally
+			if not _pose_locked:
+				_update_spine()
+				# Limbs dangle — don't solve pose, just let gravity pull feet down
+				for li in range(4):
+					if _leg_severed[li]:
+						continue
+					# Dangle: feet pulled down by gravity
+					_legs[li][2].y += GRAVITY * delta * 0.1
+		elif not _pose_locked:
+			# AWAKE + ON FLOOR: try to stand/walk within chain reach
+			_update_spine()
+			_update_gait(delta)
+			_solve_pose(delta)
+		# Always enforce rigidity
+		_enforce_spine_rigid()
+		# Always enforce limb constraints
+		if not _tail_severed:
+			var prev_dir: Vector2 = (_spine[2] - _spine[1]).normalized()
+			var tail_parent: Vector2 = _spine[2] + Vector2(-4 * _facing, -2)
+			for ti in range(_tail.size()):
+				var tail_dir: Vector2 = _tail[ti] - tail_parent
+				var tail_dist: float = tail_dir.length()
+				if tail_dist > 0.01:
+					var current_dir: Vector2 = tail_dir.normalized()
+					var angle_diff: float = prev_dir.angle_to(current_dir)
+					if absf(angle_diff) > TAIL_MAX_BEND:
+						var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
+						current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+					var clamped_len: float = clampf(tail_dist, TAIL_SEG_LEN * (1.0 - TAIL_FLEX), TAIL_SEG_LEN * (1.0 + TAIL_FLEX))
+					_tail[ti] = tail_parent + current_dir * clamped_len
+					prev_dir = current_dir
+				tail_parent = _tail[ti]
+		for li in range(4):
+			if _leg_severed[li]:
+				continue
+			if li < 2:
+				_legs[li][0] = _clavicles[li]
+			else:
+				_legs[li][0] = _hip_bones[li - 2]
+			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+			if upper_dir.length() > 0.01:
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
+			var lower_dist: float = lower_dir.length()
+			if lower_dist > 0.01:
+				var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
+		_update_hitbox_positions()
+		_accumulate_attach_forces()
+		_apply_attach_forces(delta)
+		_update_blood_particles(delta)
+		queue_redraw()
+		return
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
@@ -1122,43 +1244,54 @@ func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float
 
 func _enforce_spine_rigid() -> void:
 	## Enforce rigid distances + max bend angles between all connected segments.
-	# Spine chain: spine[0] is the anchor, each joint max 30°
-	# Reference direction for spine[0]→[1]: facing direction (horizontal)
-	var spine_ref_dir: Vector2 = Vector2(-_facing, 0)  # spine goes backward
-	for i in range(1, 3):
-		var dir: Vector2 = (_spine[i] - _spine[i - 1])
-		if dir.length() > 0.01:
-			var current_dir: Vector2 = dir.normalized()
-			var angle_diff: float = spine_ref_dir.angle_to(current_dir)
-			if absf(angle_diff) > SPINE_MAX_BEND:
-				var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
-				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-			_spine[i] = _spine[i - 1] + current_dir * SPINE_SEG_LEN
-			spine_ref_dir = current_dir
+	## When _pose_locked: only enforce distances (skip angle constraints — pose may be non-standard orientation).
+	# Spine chain: spine[0] is the anchor
+	if _pose_locked:
+		# Distance-only enforcement — preserve the current angles
+		for i in range(1, 3):
+			var dir: Vector2 = (_spine[i] - _spine[i - 1])
+			if dir.length() > 0.01:
+				_spine[i] = _spine[i - 1] + dir.normalized() * SPINE_SEG_LEN
+	else:
+		# Full enforcement: distances + max 30° bend angles
+		# Reference direction for spine[0]→[1]: facing direction (horizontal)
+		var spine_ref_dir: Vector2 = Vector2(-_facing, 0)  # spine goes backward
+		for i in range(1, 3):
+			var dir: Vector2 = (_spine[i] - _spine[i - 1])
+			if dir.length() > 0.01:
+				var current_dir: Vector2 = dir.normalized()
+				var angle_diff: float = spine_ref_dir.angle_to(current_dir)
+				if absf(angle_diff) > SPINE_MAX_BEND:
+					var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
+					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+				_spine[i] = _spine[i - 1] + current_dir * SPINE_SEG_LEN
+				spine_ref_dir = current_dir
 
-	# Neck: 45° max bend at each joint
+	# Neck: distance enforcement (+ angle constraints when not pose_locked)
 	_neck[0] = _spine[0]
-	# Neck reference: spine[1]→spine[0] direction (forward from body)
-	var neck_ref_dir: Vector2 = (_spine[0] - _spine[1]).normalized()
 	var neck_dir: Vector2 = (_neck[1] - _spine[0])
 	if neck_dir.length() > 0.01:
 		var current_dir: Vector2 = neck_dir.normalized()
-		var angle_diff: float = neck_ref_dir.angle_to(current_dir)
-		if absf(angle_diff) > NECK_MAX_BEND:
-			var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
-			current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+		if not _pose_locked:
+			# Angle constraint: 45° max bend from spine forward direction
+			var neck_ref_dir: Vector2 = (_spine[0] - _spine[1]).normalized()
+			var angle_diff: float = neck_ref_dir.angle_to(current_dir)
+			if absf(angle_diff) > NECK_MAX_BEND:
+				var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
 		_neck[1] = _spine[0] + current_dir * NECK_LEN
 
-	# Skull: 45° max bend from neck direction
+	# Skull: distance enforcement (+ angle constraints when not pose_locked)
 	var skull_dist: float = _skull_rest.length()
-	var skull_ref_dir: Vector2 = (_neck[1] - _spine[0]).normalized()
 	var skull_dir: Vector2 = (_skull - _neck[1])
 	if skull_dir.length() > 0.01:
 		var current_dir: Vector2 = skull_dir.normalized()
-		var angle_diff: float = skull_ref_dir.angle_to(current_dir)
-		if absf(angle_diff) > NECK_MAX_BEND:
-			var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
-			current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
+		if not _pose_locked:
+			var skull_ref_dir: Vector2 = (_neck[1] - _spine[0]).normalized()
+			var angle_diff: float = skull_ref_dir.angle_to(current_dir)
+			if absf(angle_diff) > NECK_MAX_BEND:
+				var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
 		_skull = _neck[1] + current_dir * skull_dist
 
 	# Clavicles: rigid from spine[0]

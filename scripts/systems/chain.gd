@@ -1,24 +1,21 @@
 extends Node2D
 
-## Chain — rigid connection between two anchor points.
-## Unlike tethers, chains have ZERO stretch (hard constraint) and much higher durability.
-## Visually rendered as chain links instead of a rope.
+## Chain — rigid fixed-length connection between two anchor points.
+## Position-based constraint solving (Jakobsen method) — no RigidBody2D.
+## Zero stretch: hard position correction every frame.
+## Visually rendered as alternating thin/thick dark grey segments.
+## Shackles at creature end, peg+ring at wall end.
 
-# -- Constants -----------------------------------------------------------------
+# -- Configurable Constants ----------------------------------------------------
 
-const CHAIN_PULL_FORCE := 80000.0   # Extremely strong — near-instant correction
-const CHAIN_PULL_DAMPING := 0.95    # High damping to prevent oscillation
+const CHAIN_LINK_LENGTH := 8.0     # Visual/physics segment length (configurable)
+const CHAIN_MAX_HP := 200
+const CHAIN_HIT_RADIUS := 10.0    # Proximity for projectile damage
 const CHAIN_MIN_LEN := 10.0
 const CHAIN_MAX_LEN := 900.0
-const CHAIN_MAX_HP := 2000
-const CHAIN_HIT_RADIUS := 6.0      # Slightly harder to hit than rope
-const LINK_COUNT := 20              # Visual chain links
 const WALL_MASS := 99999.0
 
-# Reuse tether's anchor helpers
-var _TetherScript: GDScript = null
-
-# -- State ---------------------------------------------------------------------
+# -- Anchor data (same format as tether) ---------------------------------------
 
 var anchor_a: Dictionary = {}
 var anchor_b: Dictionary = {}
@@ -26,16 +23,18 @@ var target_length: float = 200.0
 var current_hp: int = CHAIN_MAX_HP
 var _severed: bool = false
 var _owner_index: int = -1
-var _shake_timer: float = 0.0   # Shakes when damaged
+
+# -- Chain segment positions (Jakobsen constraint) -----------------------------
+
+var _points: PackedVector2Array = PackedVector2Array()  # Current world positions
+var _prev_points: PackedVector2Array = PackedVector2Array()  # Previous frame positions (for Verlet)
+var _point_count: int = 0
+var _link_len: float = 8.0        # Actual length per segment
+
+# -- Shake feedback ------------------------------------------------------------
+
+var _shake_timer: float = 0.0
 var _shake_intensity: float = 0.0
-
-
-
-func _ready() -> void:
-	add_to_group("tethers")  # Same group as tethers for RCON/status/cut
-	add_to_group("chains")
-	z_index = 5
-	_TetherScript = load("res://scripts/systems/tether.gd")
 
 
 static func make_anchor_wall(world_pos: Vector2) -> Dictionary:
@@ -71,11 +70,37 @@ func _get_anchor_mass(anchor: Dictionary) -> float:
 	return 50.0
 
 
+func _ready() -> void:
+	add_to_group("tethers")  # Compatible with tether status/cut commands
+	add_to_group("chains")
+	z_index = 5
+
+
 func setup(a: Dictionary, b: Dictionary, length: float, owner_idx: int = -1) -> void:
 	anchor_a = a
 	anchor_b = b
 	target_length = clampf(length, CHAIN_MIN_LEN, CHAIN_MAX_LEN)
 	_owner_index = owner_idx
+	_build_chain()
+
+
+func _build_chain() -> void:
+	## Initialize chain points along the line between anchors.
+	var pos_a: Vector2 = _get_anchor_world_pos(anchor_a)
+	var pos_b: Vector2 = _get_anchor_world_pos(anchor_b)
+
+	# Calculate number of segments
+	_point_count = clampi(int(ceil(target_length / CHAIN_LINK_LENGTH)) + 1, 3, 100)
+	_link_len = target_length / float(_point_count - 1)
+
+	# Initialize points along the straight line from A to B
+	_points.clear()
+	_prev_points.clear()
+	for i in range(_point_count):
+		var t: float = float(i) / float(_point_count - 1)
+		var pt: Vector2 = pos_a.lerp(pos_b, t)
+		_points.append(pt)
+		_prev_points.append(pt)  # No initial velocity
 
 
 func _physics_process(delta: float) -> void:
@@ -92,39 +117,49 @@ func _physics_process(delta: float) -> void:
 
 	var pos_a: Vector2 = _get_anchor_world_pos(anchor_a)
 	var pos_b: Vector2 = _get_anchor_world_pos(anchor_b)
-	var dist: float = pos_a.distance_to(pos_b)
 
-	# ZERO stretch: hard constraint — snap position every frame, no exceptions
-	if dist > target_length + 0.5:
-		var direction: Vector2 = (pos_b - pos_a).normalized()
-		var over: float = dist - target_length
+	# Pin endpoints to anchors
+	_points[0] = pos_a
+	_points[_point_count - 1] = pos_b
+	_prev_points[0] = pos_a
+	_prev_points[_point_count - 1] = pos_b
 
-		var mass_a: float = _get_anchor_mass(anchor_a)
-		var mass_b: float = _get_anchor_mass(anchor_b)
-		var total_mass: float = mass_a + mass_b
-		var ratio_a: float = mass_b / total_mass
-		var ratio_b: float = mass_a / total_mass
+	# Verlet integration: position-based physics with implicit velocity
+	var gravity := Vector2(0, 600.0)  # Match game gravity
+	var damping: float = 0.99  # Slight damping to reduce oscillation
+	for i in range(1, _point_count - 1):
+		var current: Vector2 = _points[i]
+		var prev: Vector2 = _prev_points[i]
+		var velocity: Vector2 = (current - prev) * damping
+		_prev_points[i] = current
+		_points[i] = current + velocity + gravity * delta * delta
 
-		# Hard position snap — full correction, every frame
-		var correction: Vector2 = direction * over
-		if not anchor_a.get("is_wall", false) and is_instance_valid(anchor_a.get("body")):
-			var body_a: Node2D = anchor_a["body"]
-			body_a.global_position += correction * ratio_a
-			# Kill velocity component along chain direction
-			if "velocity" in body_a:
-				var vel_along: float = body_a.velocity.dot(direction)
-				if vel_along < 0:  # Moving away from B
-					body_a.velocity -= direction * vel_along
-		if not anchor_b.get("is_wall", false) and is_instance_valid(anchor_b.get("body")):
-			var body_b: Node2D = anchor_b["body"]
-			body_b.global_position -= correction * ratio_b
-			if "velocity" in body_b:
-				var vel_along: float = body_b.velocity.dot(-direction)
-				if vel_along < 0:  # Moving away from A
-					body_b.velocity += direction * vel_along
+	# Jakobsen constraint solving: enforce fixed distances
+	# Iterations scale with chain length for convergence
+	var iterations: int = clampi(_point_count * 2, 20, 100)
+	for _pass in range(iterations):
+		# Pin endpoints every pass
+		_points[0] = pos_a
+		_points[_point_count - 1] = pos_b
+		# Correct all consecutive pairs
+		for i in range(_point_count - 1):
+			var p1: Vector2 = _points[i]
+			var p2: Vector2 = _points[i + 1]
+			var dir: Vector2 = p2 - p1
+			var dist: float = dir.length()
+			if dist < 0.001:
+				dir = Vector2(0, 1)
+				dist = 0.001
+			var diff: float = (dist - _link_len) / dist
+			var offset: Vector2 = dir * diff * 0.5
+			# Don't move pinned endpoints
+			if i > 0:
+				_points[i] += offset
+			if i + 1 < _point_count - 1:
+				_points[i + 1] -= offset
 
-	# Check projectile hits
-	_check_projectile_hits(pos_a, pos_b)
+	# Check for projectile hits
+	_check_projectile_hits()
 
 	# Shake decay
 	if _shake_timer > 0:
@@ -133,38 +168,26 @@ func _physics_process(delta: float) -> void:
 	queue_redraw()
 
 
-func _apply_force(anchor: Dictionary, force: Vector2) -> void:
-	var body: Node2D = anchor.get("body")
-	if not is_instance_valid(body):
-		return
-	var ap: String = anchor.get("attach_point", "")
-	if ap != "" and "_attach_forces" in body:
-		if not body._attach_forces.has(ap):
-			body._attach_forces[ap] = Vector2.ZERO
-		body._attach_forces[ap] += force * 60.0
-	if "velocity" in body:
-		body.velocity += force * CHAIN_PULL_DAMPING
-		if force.y > 0 and body.velocity.y < 0:
-			body.velocity.y *= 0.3
-
-
-func _check_projectile_hits(pos_a: Vector2, pos_b: Vector2) -> void:
+func _check_projectile_hits() -> void:
+	## Check projectile proximity to chain segments and deal damage.
 	for proj in get_tree().get_nodes_in_group("loose_items"):
 		if not proj is Node2D:
 			continue
-		var dist: float = _point_to_segment_distance(proj.global_position, pos_a, pos_b)
-		if dist < CHAIN_HIT_RADIUS:
-			var dmg: int = 3  # Chains are harder to damage
-			if "damage" in proj:
-				dmg = mini(proj.damage, 5)  # Cap damage per hit
-			current_hp -= dmg
-			# Trigger shake on damage
-			_shake_timer = 0.4
-			_shake_intensity = clampf(float(dmg) / 3.0, 1.0, 3.0)
-			AudioManager.play("grapple_hit", -8.0, 1.5)  # Metallic clink
-			if current_hp <= 0:
-				sever()
-				return
+		var proj_pos: Vector2 = proj.global_position
+		for i in range(_point_count - 1):
+			var dist: float = _point_to_segment_distance(proj_pos, _points[i], _points[i + 1])
+			if dist < CHAIN_HIT_RADIUS:
+				var dmg: int = 3
+				if "damage" in proj:
+					dmg = mini(proj.damage, 5)
+				current_hp -= dmg
+				_shake_timer = 0.4
+				_shake_intensity = clampf(float(dmg) / 3.0, 1.0, 3.0)
+				AudioManager.play("grapple_hit", -8.0, 1.5)
+				if current_hp <= 0:
+					sever()
+					return
+				break
 
 
 func _point_to_segment_distance(point: Vector2, seg_a: Vector2, seg_b: Vector2) -> float:
@@ -181,16 +204,14 @@ func sever() -> void:
 	if _severed:
 		return
 	_severed = true
-	AudioManager.play("grapple_hit", 0.0, 0.5)  # Heavy metallic snap
-
+	AudioManager.play("grapple_hit", 0.0, 0.5)
 	for anchor in [anchor_a, anchor_b]:
 		var ap: String = anchor.get("attach_point", "")
 		if not anchor.get("is_wall", false) and is_instance_valid(anchor.get("body")) and ap != "":
 			if anchor["body"].has_method("detach_item"):
 				anchor["body"].detach_item(ap, self)
-
 	var tween: Tween = create_tween()
-	tween.tween_property(self, "modulate:a", 0.0, 0.2)
+	tween.tween_property(self, "modulate:a", 0.0, 0.3)
 	tween.tween_callback(queue_free)
 
 
@@ -204,10 +225,7 @@ func get_tension() -> float:
 
 
 func _draw() -> void:
-	var pos_a: Vector2 = _get_anchor_world_pos(anchor_a)
-	var pos_b: Vector2 = _get_anchor_world_pos(anchor_b)
-	var dist: float = pos_a.distance_to(pos_b)
-	if dist < 0.1:
+	if _points.size() < 2:
 		return
 
 	var hp_ratio: float = float(current_hp) / float(CHAIN_MAX_HP)
@@ -215,86 +233,50 @@ func _draw() -> void:
 	if hp_ratio < 0.5:
 		dark_grey = dark_grey.lerp(Color(0.6, 0.2, 0.15, 0.95), 1.0 - hp_ratio * 2.0)
 
-	var chain_dir: Vector2 = (pos_b - pos_a).normalized()
-	var a_local: Vector2 = pos_a - global_position
-	var b_local: Vector2 = pos_b - global_position
-
-	# Draw chain as fixed-length segments with catenary sag.
-	# Total path length = target_length ALWAYS. Sag increases when endpoints are closer.
-	var slack: float = maxf(0.0, target_length - dist)
-	var sag_amount: float = slack * 0.4  # Sag proportional to slack
-
-	# Build points along the chain path with sag
-	var seg_len: float = target_length / float(LINK_COUNT)
-	var chain_points: PackedVector2Array = PackedVector2Array()
-	for i in range(LINK_COUNT + 1):
-		var t: float = float(i) / float(LINK_COUNT)
-		var pt: Vector2 = a_local.lerp(b_local, t)
-		# Catenary sag (downward arc)
-		pt.y += sin(t * PI) * sag_amount
-		chain_points.append(pt)
-
-	# Now enforce that each segment has exactly seg_len length
-	# Walk from A, placing each point at seg_len from the previous
-	for i in range(1, chain_points.size()):
-		var dir: Vector2 = (chain_points[i] - chain_points[i - 1])
-		if dir.length() > 0.01:
-			chain_points[i] = chain_points[i - 1] + dir.normalized() * seg_len
-
-	# Draw alternating thin/thick segments with shake offset when damaged
 	var shaking: bool = _shake_timer > 0
-	for i in range(chain_points.size() - 1):
-		var width: float = 4.0 if i % 2 == 0 else 2.0
-		var p1: Vector2 = chain_points[i]
-		var p2: Vector2 = chain_points[i + 1]
+
+	# Draw alternating thin/thick segments
+	for i in range(_points.size() - 1):
+		var p1: Vector2 = _points[i] - global_position
+		var p2: Vector2 = _points[i + 1] - global_position
 		if shaking:
-			# Perpendicular shake — middle links shake more than ends
-			var t: float = float(i) / float(chain_points.size() - 1)
+			var t: float = float(i) / float(_points.size() - 1)
 			var shake_amt: float = sin(t * PI) * _shake_intensity * _shake_timer * 15.0
 			var seg_dir: Vector2 = (p2 - p1).normalized()
 			var perp: Vector2 = Vector2(-seg_dir.y, seg_dir.x)
 			var offset: Vector2 = perp * sin(Time.get_ticks_msec() * 0.05 + i * 2.0) * shake_amt
 			p1 += offset
 			p2 += offset
-		# Flash white briefly on hit
 		var draw_col: Color = dark_grey
 		if shaking and _shake_timer > 0.3:
 			draw_col = dark_grey.lerp(Color(0.9, 0.9, 0.8, 1.0), (_shake_timer - 0.3) * 10.0)
+		var width: float = 4.0 if i % 2 == 0 else 2.0
 		draw_line(p1, p2, draw_col, width)
 
-	# Shackle at creature end — solid filled rectangle in body-local coordinates
-	_draw_anchor_hardware(anchor_a, pos_a, dark_grey)
-	_draw_anchor_hardware(anchor_b, pos_b, dark_grey)
+	# Anchor hardware
+	_draw_anchor_hardware(anchor_a, _points[0])
+	_draw_anchor_hardware(anchor_b, _points[_points.size() - 1])
 
 
-func _draw_anchor_hardware(anchor: Dictionary, world_pos: Vector2, chain_col: Color) -> void:
+func _draw_anchor_hardware(anchor: Dictionary, world_pos: Vector2) -> void:
+	var chain_col := Color(0.3, 0.28, 0.26, 0.95)
+	var local_pos: Vector2 = world_pos - global_position
 	if anchor.get("is_wall", false):
-		_draw_wall_mount(world_pos - global_position, chain_col)
+		# Peg + ring
+		draw_line(local_pos, local_pos + Vector2(0, -10), chain_col, 4.0)
+		draw_arc(local_pos, 5.0, 0, TAU, 12, chain_col, 2.0)
 	else:
-		_draw_shackle(anchor, world_pos, chain_col)
-
-
-func _draw_shackle(anchor: Dictionary, world_pos: Vector2, chain_col: Color) -> void:
-	## Draw a solid rectangle shackle at the body part position, rendered relative to the body.
-	var body: Node2D = anchor.get("body")
-	if not is_instance_valid(body):
-		draw_rect(Rect2((world_pos - global_position) + Vector2(-5, -4), Vector2(10, 8)), chain_col)
-		return
-
-	# Get the attachment point position in body-local space
-	var ap: String = anchor.get("attach_point", "")
-	var local_pos: Vector2 = Vector2.ZERO
-	if ap != "" and "_attach_points" in body and body._attach_points.has(ap):
-		local_pos = body._attach_points[ap].position
-
-	# Limb width determines shackle size
-	var limb_w: float = _get_limb_width(anchor)
-	var hw: float = limb_w * 0.5 + 2.0  # Slightly larger than limb
-	var hh: float = hw * 0.6
-
-	# Convert to our draw space (body global + local offset - our global)
-	var draw_pos: Vector2 = body.global_position + local_pos - global_position
-	draw_rect(Rect2(draw_pos.x - hw, draw_pos.y - hh, hw * 2, hh * 2), chain_col)
+		# Shackle — solid rectangle at attachment point
+		var body: Node2D = anchor.get("body")
+		var draw_pos: Vector2 = local_pos
+		if is_instance_valid(body):
+			var ap: String = anchor.get("attach_point", "")
+			if ap != "" and "_attach_points" in body and body._attach_points.has(ap):
+				draw_pos = body.global_position + body._attach_points[ap].position - global_position
+		var limb_w: float = _get_limb_width(anchor)
+		var hw: float = limb_w * 0.5 + 2.0
+		var hh: float = hw * 0.6
+		draw_rect(Rect2(draw_pos.x - hw, draw_pos.y - hh, hw * 2, hh * 2), chain_col)
 
 
 func _get_limb_width(anchor: Dictionary) -> float:
@@ -307,11 +289,3 @@ func _get_limb_width(anchor: Dictionary) -> float:
 		"elbow_l", "elbow_r": return 6.0
 		"knee_l", "knee_r": return 6.0
 	return 8.0
-
-
-func _draw_wall_mount(pos: Vector2, chain_col: Color) -> void:
-	## Peg + ring at wall anchor.
-	# Peg
-	draw_line(pos, pos + Vector2(0, -10), chain_col, 4.0)
-	# Ring
-	draw_arc(pos, 5.0, 0, TAU, 12, chain_col, 2.0)

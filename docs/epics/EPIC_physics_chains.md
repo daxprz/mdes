@@ -22,14 +22,14 @@ Replace chain rendering with actual physics bodies.
 
 ### Tasks
 
-- [ ] **1.1** Define `CHAIN_LINK_LENGTH` constant (configurable, default 8px)
-- [ ] **1.2** On chain creation: calculate number of links from `target_length / CHAIN_LINK_LENGTH`
-- [ ] **1.3** Spawn each link as a `RigidBody2D` with a small `RectangleShape2D` collision shape
-- [ ] **1.4** Each link has `collision_layer` that excludes players but includes world
-- [ ] **1.5** Connect links with `PinJoint2D` — allows rotation, prevents stretch
-- [ ] **1.6** Endpoint A: `PinJoint2D` connecting first link to a `StaticBody2D` at the wall/creature attachment point
-- [ ] **1.7** Endpoint B: same as A for the other end
-- [ ] **1.8** Rendering: alternating thin/thick segments from each link's position (existing visual style)
+- [x] **1.1** Define `CHAIN_LINK_LENGTH` constant (configurable, default 8px)
+- [x] **1.2** On chain creation: calculate number of links from `target_length / CHAIN_LINK_LENGTH`
+- [x] **1.3** Spawn each link as a `RigidBody2D` with a small `RectangleShape2D` collision shape
+- [x] **1.4** Each link has `collision_layer` that excludes players but includes world
+- [x] **1.5** Connect links with `PinJoint2D` — allows rotation, prevents stretch
+- [x] **1.6** Endpoint A: `PinJoint2D` connecting first link to a `StaticBody2D` at the wall/creature attachment point
+- [x] **1.7** Endpoint B: same as A for the other end
+- [x] **1.8** Rendering: alternating thin/thick segments from each link's position (existing visual style)
 
 ## STORY 2: Chain Physics Behavior
 
@@ -37,12 +37,12 @@ Configure the physics properties for realistic chain behavior.
 
 ### Tasks
 
-- [ ] **2.1** Each link: mass proportional to link size, gravity enabled
-- [ ] **2.2** Links naturally drape under gravity when slack
-- [ ] **2.3** Chain hangs in catenary when suspended between two points
-- [ ] **2.4** When creature moves, chain follows through joint physics
-- [ ] **2.5** Angular damping on links to prevent wild spinning
-- [ ] **2.6** Linear damping to reduce oscillation
+- [x] **2.1** Each link: mass proportional to link size, gravity enabled
+- [x] **2.2** Links naturally drape under gravity when slack
+- [x] **2.3** Chain hangs in catenary when suspended between two points
+- [x] **2.4** When creature moves, chain follows through joint physics
+- [x] **2.5** Angular damping on links to prevent wild spinning
+- [x] **2.6** Linear damping to reduce oscillation
 
 ## STORY 3: Chain Damage System
 
@@ -50,12 +50,12 @@ Damage individual chain sections based on proximity to impacts.
 
 ### Tasks
 
-- [ ] **3.1** Each link has its own HP (derived from chain's total HP / link count)
-- [ ] **3.2** Projectile/hammer hits deal damage to the nearest link(s) within proximity
-- [ ] **3.3** When a link's HP reaches 0, the chain breaks at that point
-- [ ] **3.4** Breaking: links on each side become separate chains (or fall freely)
-- [ ] **3.5** Shake/flash feedback on the damaged link (existing visual)
-- [ ] **3.6** Sound effect on break (metallic snap)
+- [x] **3.1** Each link has its own HP (derived from chain's total HP / link count)
+- [x] **3.2** Projectile/hammer hits deal damage to the nearest link(s) within proximity
+- [x] **3.3** When a link's HP reaches 0, the chain breaks at that point
+- [x] **3.4** Breaking: links on each side become separate chains (or fall freely)
+- [x] **3.5** Shake/flash feedback on the damaged link (existing visual)
+- [x] **3.6** Sound effect on break (metallic snap)
 
 ## STORY 4: Rope Parity
 
@@ -63,11 +63,11 @@ Ropes use the same architecture with different physics properties.
 
 ### Tasks
 
-- [ ] **4.1** Rope links: smaller, more numerous (e.g., 4px segments vs 8px)
-- [ ] **4.2** Rope joints: `DampedSpringJoint2D` instead of `PinJoint2D` — allows slight stretch
-- [ ] **4.3** Lower mass per segment, more linear damping
-- [ ] **4.4** Rope rendering: thinner, brown color (existing)
-- [ ] **4.5** Same endpoint pinning system as chains
+- [x] **4.1** Rope links: smaller, more numerous (e.g., 4px segments vs 8px)
+- [x] **4.2** Rope joints: `DampedSpringJoint2D` instead of `PinJoint2D` — allows slight stretch
+- [x] **4.3** Lower mass per segment, more linear damping
+- [x] **4.4** Rope rendering: thinner, brown color (existing)
+- [x] **4.5** Same endpoint pinning system as chains
 
 ## STORY 5: Creature Attachment
 
@@ -75,10 +75,10 @@ Chains connected to creatures follow the creature's movement.
 
 ### Tasks
 
-- [ ] **5.1** Creature endpoint: PinJoint2D attached to a kinematic point that tracks the attachment point position
-- [ ] **5.2** As creature moves, the kinematic anchor moves, and chain physics responds
-- [ ] **5.3** When creature is `_physics_frozen`, anchor stays fixed
-- [ ] **5.4** Breakaway: when all chains on a creature break, trigger breakaway sequence
+- [x] **5.1** Creature endpoint: PinJoint2D attached to a kinematic point that tracks the attachment point position
+- [x] **5.2** As creature moves, the kinematic anchor moves, and chain physics responds
+- [x] **5.3** When creature is `_physics_frozen`, anchor stays fixed
+- [x] **5.4** Breakaway: when all chains on a creature break, trigger breakaway sequence
 
 ## Implementation Priority
 

@@ -163,6 +163,40 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.21
+**Verlet Chain Physics, Chained Creature Mode, Breakaway Fix, Pose Lock Fix**
+
+**Chain Physics (Verlet):**
+- Position-based Verlet integration with Jakobsen constraint solving
+- Chains drape naturally under gravity with fixed-length segments
+- Iterations scale with chain length for convergence
+- Chain HP reduced to 200 for faster breakaway testing
+- Alternating thin/thick dark grey rendering with shackles + peg/ring
+- RCON: chaindump — detailed per-point position + distance report
+
+**Chained Creature Mode:**
+- `_chained` flag: creature has gravity but chains constrain position
+- Chain constraints clamp CharacterBody2D position each frame
+- Velocity along chain direction killed when taut
+- Asleep + not on floor = go limp (limbs dangle)
+- Awake + on floor = try to stand/walk within chain reach
+
+**Breakaway Fix:**
+- Tracks total ORIGINAL HP across ALL chains (including severed ones)
+- Breakaway triggers when 50% of original aggregate HP is destroyed
+- On breakaway: state forced to CHASE, _pick_target() called immediately
+- Creature targets nearest player after breaking free
+
+**Pose Lock Fix:**
+- `_enforce_spine_rigid()` skips angle constraints when `_pose_locked`
+- Only distance enforcement runs — preserves non-standard orientations
+- Fixes body kinking sideways for vertically-posed splayed creatures
+- Neck/skull angle constraints also skipped when pose_locked
+
+**Test Menu:**
+- "Clear Level" (was "Reset Level") — clears enemies/players
+- "Restart Level" — full scene reload (game reboot)
+
 ### v0.9.20
 **Editor Change Tracking, Source Mode Detection, Save Original/Custom Workflow**
 
