@@ -1380,6 +1380,19 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 	if _splay_edit_dragging_endpoint:
 		# Dragging the cast ray endpoint
 		_splay_edit_active[_splay_edit_selected_point]["cast_end"] = world_pos
+		# Mirror the cast endpoint too
+		if _splay_edit_mirror:
+			var mirror_pt: String = _get_mirror_point(_splay_edit_selected_point)
+			if mirror_pt != "" and _splay_edit_active.has(mirror_pt):
+				# Mirror across spine axis
+				var rel: Vector2 = world_pos - _splay_edit_origin
+				var spine_dir: Vector2 = Vector2(1, 0)
+				if is_instance_valid(_splay_edit_creature) and "_spine" in _splay_edit_creature:
+					spine_dir = (_splay_edit_creature._spine[0] - _splay_edit_creature._spine[2]).normalized()
+				var proj: float = rel.dot(spine_dir)
+				var perp: Vector2 = rel - spine_dir * proj
+				var mirrored_rel: Vector2 = spine_dir * proj - perp
+				_splay_edit_active[mirror_pt]["cast_end"] = _splay_edit_origin + mirrored_rel
 	else:
 		# Dragging the connection point — check if pinned
 		if _splay_edit_pinned.get(_splay_edit_selected_point, false):
@@ -1393,7 +1406,7 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 		# Mirror: apply same movement to the opposite side
 		if _splay_edit_mirror:
 			var mirror_pt: String = _get_mirror_point(_splay_edit_selected_point)
-			if mirror_pt != "":
+			if mirror_pt != "" and not _splay_edit_pinned.get(mirror_pt, false):
 				# Mirror the target position across the spine axis
 				var rel: Vector2 = world_pos - _splay_edit_origin
 				# Determine spine axis from creature
@@ -1404,6 +1417,11 @@ func _drag_splay_connection(world_pos: Vector2) -> void:
 				var mirrored_rel: Vector2 = spine_dir * proj - perp
 				var mirror_world: Vector2 = _splay_edit_origin + mirrored_rel
 				_splay_edit_ik_drag(mirror_pt, mirror_world)
+				# Mirror the enabled/cast_end state too
+				if _splay_edit_active.has(mirror_pt) and _splay_edit_active.has(_splay_edit_selected_point):
+					var src: Dictionary = _splay_edit_active[_splay_edit_selected_point]
+					var dst: Dictionary = _splay_edit_active[mirror_pt]
+					dst["enabled"] = src["enabled"]
 
 
 func _get_splay_point_world(point_name: String) -> Vector2:
@@ -1427,13 +1445,24 @@ func _splay_edit_toggle_point() -> void:
 	var data: Dictionary = _splay_edit_active[_splay_edit_selected_point]
 	data["enabled"] = not data["enabled"]
 	if data["enabled"] and data["cast_end"] == Vector2.ZERO:
-		# Default cast endpoint: body-length radius straight out from origin through this point
-		var body_len: float = _splay_edit_get_body_length()
-		var point_world: Vector2 = data.get("pos_override", _get_splay_point_world(_splay_edit_selected_point))
-		var away: Vector2 = (point_world - _splay_edit_origin).normalized()
-		if away.length() < 0.1:
-			away = Vector2(0, -1)
-		data["cast_end"] = _splay_edit_origin + away * body_len
+		_splay_edit_set_default_cast(data, _splay_edit_selected_point)
+	# Mirror toggle
+	if _splay_edit_mirror:
+		var mirror_pt: String = _get_mirror_point(_splay_edit_selected_point)
+		if mirror_pt != "" and _splay_edit_active.has(mirror_pt):
+			var mdata: Dictionary = _splay_edit_active[mirror_pt]
+			mdata["enabled"] = data["enabled"]
+			if mdata["enabled"] and mdata["cast_end"] == Vector2.ZERO:
+				_splay_edit_set_default_cast(mdata, mirror_pt)
+
+
+func _splay_edit_set_default_cast(data: Dictionary, point_name: String) -> void:
+	var body_len: float = _splay_edit_get_body_length()
+	var point_world: Vector2 = data.get("pos_override", _get_splay_point_world(point_name))
+	var away: Vector2 = (point_world - _splay_edit_origin).normalized()
+	if away.length() < 0.1:
+		away = Vector2(0, -1)
+	data["cast_end"] = _splay_edit_origin + away * body_len
 
 
 func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
@@ -1446,12 +1475,10 @@ func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
 	if chain_data.is_empty():
 		return
 
-	# Build pinned array: map chain points to attachment point names and check pin state
+	# Build pinned array
 	var chain: Array[Vector2] = chain_data["chain"]
 	var pinned_arr: Array[bool] = []
-	# Root is always pinned
-	pinned_arr.append(true)
-	# Map intermediate chain points to attachment point names for pin lookup
+	pinned_arr.append(true)  # Root always pinned
 	var chain_point_names: Array[String] = _get_chain_point_names(point_name)
 	for i in range(1, chain.size()):
 		if i - 1 < chain_point_names.size():
@@ -1466,18 +1493,53 @@ func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
 	)
 	var apply_fn: Callable = chain_data["apply"]
 	apply_fn.call(solved)
-	_splay_edit_creature.queue_redraw()
-	# Update pos_override + attachment positions
-	if _splay_edit_active.has(point_name):
-		_splay_edit_active[point_name]["pos_override"] = _splay_edit_creature.global_position + solved[solved.size() - 1]
-	# Also update attachment positions so other points track skeleton
+
+	# Settle dangling lower legs after IK changes
+	_splay_edit_settle_legs()
+
+	# Update attachment positions from skeleton
 	if _splay_edit_creature.has_method("_update_hitbox_positions"):
 		_splay_edit_creature._update_hitbox_positions()
-	# Refresh all pos_overrides from skeleton
+	_splay_edit_creature.queue_redraw()
+
+	# Refresh ALL pos_overrides and cast endpoints from actual skeleton
+	_splay_edit_refresh_all_points()
+
+
+func _splay_edit_settle_legs() -> void:
+	## Simulate gravity on lower leg segments (knee→foot) so they dangle naturally.
+	if not is_instance_valid(_splay_edit_creature) or "_legs" not in _splay_edit_creature:
+		return
+	for _sim in range(8):
+		for li in range(_splay_edit_creature._legs.size()):
+			if "_leg_severed" in _splay_edit_creature and _splay_edit_creature._leg_severed[li]:
+				continue
+			var knee: Vector2 = _splay_edit_creature._legs[li][1]
+			var foot: Vector2 = _splay_edit_creature._legs[li][2]
+			var lower_dir: Vector2 = (foot - knee).normalized()
+			# Pull toward gravity
+			lower_dir = (lower_dir + Vector2(0, 0.4)).normalized()
+			_splay_edit_creature._legs[li][2] = knee + lower_dir * 22.0  # LEG_LOWER_LEN
+
+
+func _splay_edit_refresh_all_points() -> void:
+	## Refresh all pos_overrides and recalculate cast endpoints for OFF points.
+	if not is_instance_valid(_splay_edit_creature):
+		return
+	var body_len: float = _splay_edit_get_body_length()
+	var origin: Vector2 = _splay_edit_origin
 	for pn in _splay_edit_all_points:
-		if pn != point_name and "_attach_points" in _splay_edit_creature:
-			if _splay_edit_creature._attach_points.has(pn):
-				_splay_edit_active[pn]["pos_override"] = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+		# Read actual skeleton position
+		var point_world: Vector2 = origin
+		if "_attach_points" in _splay_edit_creature and _splay_edit_creature._attach_points.has(pn):
+			point_world = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+		_splay_edit_active[pn]["pos_override"] = point_world
+		# For OFF points (not enabled): recalculate cast endpoint on body-length circle
+		if not _splay_edit_active[pn].get("enabled", false):
+			var away: Vector2 = (point_world - origin).normalized()
+			if away.length() < 0.1:
+				away = Vector2(0, -1)
+			_splay_edit_active[pn]["cast_end"] = origin + away * body_len
 
 
 func _get_chain_point_names(endpoint: String) -> Array[String]:
