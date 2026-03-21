@@ -26,6 +26,8 @@ var target_length: float = 200.0
 var current_hp: int = CHAIN_MAX_HP
 var _severed: bool = false
 var _owner_index: int = -1
+var _shake_timer: float = 0.0   # Shakes when damaged
+var _shake_intensity: float = 0.0
 
 
 
@@ -124,6 +126,10 @@ func _physics_process(delta: float) -> void:
 	# Check projectile hits
 	_check_projectile_hits(pos_a, pos_b)
 
+	# Shake decay
+	if _shake_timer > 0:
+		_shake_timer -= delta
+
 	queue_redraw()
 
 
@@ -152,6 +158,10 @@ func _check_projectile_hits(pos_a: Vector2, pos_b: Vector2) -> void:
 			if "damage" in proj:
 				dmg = mini(proj.damage, 5)  # Cap damage per hit
 			current_hp -= dmg
+			# Trigger shake on damage
+			_shake_timer = 0.4
+			_shake_intensity = clampf(float(dmg) / 3.0, 1.0, 3.0)
+			AudioManager.play("grapple_hit", -8.0, 1.5)  # Metallic clink
 			if current_hp <= 0:
 				sever()
 				return
@@ -231,10 +241,26 @@ func _draw() -> void:
 		if dir.length() > 0.01:
 			chain_points[i] = chain_points[i - 1] + dir.normalized() * seg_len
 
-	# Draw alternating thin/thick segments
+	# Draw alternating thin/thick segments with shake offset when damaged
+	var shaking: bool = _shake_timer > 0
 	for i in range(chain_points.size() - 1):
 		var width: float = 4.0 if i % 2 == 0 else 2.0
-		draw_line(chain_points[i], chain_points[i + 1], dark_grey, width)
+		var p1: Vector2 = chain_points[i]
+		var p2: Vector2 = chain_points[i + 1]
+		if shaking:
+			# Perpendicular shake — middle links shake more than ends
+			var t: float = float(i) / float(chain_points.size() - 1)
+			var shake_amt: float = sin(t * PI) * _shake_intensity * _shake_timer * 15.0
+			var seg_dir: Vector2 = (p2 - p1).normalized()
+			var perp: Vector2 = Vector2(-seg_dir.y, seg_dir.x)
+			var offset: Vector2 = perp * sin(Time.get_ticks_msec() * 0.05 + i * 2.0) * shake_amt
+			p1 += offset
+			p2 += offset
+		# Flash white briefly on hit
+		var draw_col: Color = dark_grey
+		if shaking and _shake_timer > 0.3:
+			draw_col = dark_grey.lerp(Color(0.9, 0.9, 0.8, 1.0), (_shake_timer - 0.3) * 10.0)
+		draw_line(p1, p2, draw_col, width)
 
 	# Shackle at creature end — solid filled rectangle in body-local coordinates
 	_draw_anchor_hardware(anchor_a, pos_a, dark_grey)
