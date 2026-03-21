@@ -1,0 +1,16 @@
+{
+	"name": "same_floor_near",
+	"description": "Monster attacks dummy on same floor close",
+	"setup": [
+		"clear",
+		"clearplayers",
+		"spawn dummy 800 885",
+		"spawn monster 960 885"
+	],
+	"wait": 15.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" },
+		{ "command": "ik", "extract": "ik_peak", "expect_lt": 2000, "label": "ik_peak" }
+	]
+}

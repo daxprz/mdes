@@ -1,0 +1,22 @@
+{
+	"name": "combat",
+	"description": "Full combat test suite — 12 scenarios",
+	"tests": [
+		"same_floor_near",
+		"same_floor_far",
+		"hunt_P1",
+		"hunt_P2",
+		"hunt_P3",
+		"hunt_P4",
+		"floor_to_upper",
+		"cross_lower",
+		"P1_to_P3",
+		"P2_to_P4",
+		"corner_left",
+		"corner_right"
+	],
+	"aggregation": {
+		"show_grid": true,
+		"pass_threshold": 0.9
+	}
+}

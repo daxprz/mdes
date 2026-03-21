@@ -27,6 +27,7 @@ var _config_spawn_positions: Array[Vector2] = []
 var _editor: Node = null
 var _test_menu: Node = null
 var _help_overlay: CanvasLayer = null
+var _game_console: Node = null
 var _dynamic_nodes: Array = []  # All nodes created from config (for teardown)
 var _portal_node: Node2D = null
 var _firefly_manager: Node2D = null
@@ -41,6 +42,12 @@ func _ready() -> void:
 	PlayerManager.player_left.connect(_on_player_left)
 	PlayerHUD.class_changed.connect(_on_class_changed)
 	PlayerHUD.create_profile_requested.connect(_on_create_profile_requested)
+
+	# Create the pop-down console
+	var console_script: GDScript = load("res://scripts/ui/game_console.gd")
+	_game_console = CanvasLayer.new()
+	_game_console.set_script(console_script)
+	add_child(_game_console)
 
 	# Check if returning from quit-to-menu with saved choices
 	var saved_choices: Dictionary = {}

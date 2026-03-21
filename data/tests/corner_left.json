@@ -1,0 +1,16 @@
+{
+	"name": "corner_left",
+	"description": "Monster attacks in left corner",
+	"setup": [
+		"clear",
+		"clearplayers",
+		"spawn dummy 100 885",
+		"spawn monster 960 885"
+	],
+	"wait": 15.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" },
+		{ "command": "ik", "extract": "ik_peak", "expect_lt": 2000, "label": "ik_peak" }
+	]
+}

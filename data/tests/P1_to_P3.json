@@ -1,0 +1,16 @@
+{
+	"name": "P1_to_P3",
+	"description": "Monster from P1 to P3",
+	"setup": [
+		"clear",
+		"clearplayers",
+		"spawn dummy 670 525",
+		"spawn monster 550 745"
+	],
+	"wait": 15.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" },
+		{ "command": "ik", "extract": "ik_peak", "expect_lt": 2000, "label": "ik_peak" }
+	]
+}
