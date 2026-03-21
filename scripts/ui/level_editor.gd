@@ -28,6 +28,11 @@ var _nav_cooldown: float = 0.0
 var _migration_pattern_idx: int = 0  # Which pattern is selected
 var _migration_phase_idx: int = 0    # Which phase within that pattern
 
+# -- Change tracking --
+var _changed: Dictionary = {}        # component_name -> bool (has unsaved changes)
+var _changed_items: Dictionary = {}  # component_name -> Array[int] (changed item indices)
+var _level_save_dialog_active: bool = false  # True when showing O/C save dialog for level
+
 # UI nodes
 var _panel: PanelContainer
 var _mode_label: Label
@@ -149,7 +154,10 @@ func _input(event: InputEvent) -> void:
 			_update_display()
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_S and event.ctrl_pressed and _mode != Mode.SPLAY_EDIT:
-			_save()
+			if Version.is_source_mode():
+				_level_save_dialog_active = true
+			else:
+				_save()  # Non-source: always save custom
 			get_viewport().set_input_as_handled()
 		elif event.keycode == KEY_R and event.ctrl_pressed:
 			_reset()
@@ -232,6 +240,8 @@ func _input(event: InputEvent) -> void:
 				_mode = Mode.SPLAY
 				_selected_idx = _splay_edit_pose_idx
 				_splay_edit_pose_idx = -1
+				# Rebuild level to re-spawn all splay creatures
+				config_changed.emit(_config)
 				_update_display()
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_SPACE and event.shift_pressed:
@@ -255,7 +265,19 @@ func _input(event: InputEvent) -> void:
 				_splay_edit_move_endpoint(Vector2(1, 0))
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_S and event.ctrl_pressed:
-				_splay_edit_save_pose()
+				_splay_save_dialog_active = true
+				get_viewport().set_input_as_handled()
+			elif _splay_save_dialog_active and event.keycode == KEY_O:
+				_splay_save_dialog_active = false
+				if Version.is_source_mode():
+					_splay_edit_save_pose_original()
+				get_viewport().set_input_as_handled()
+			elif _splay_save_dialog_active and event.keycode == KEY_C:
+				_splay_save_dialog_active = false
+				_splay_edit_save_pose_custom()
+				get_viewport().set_input_as_handled()
+			elif _splay_save_dialog_active and event.keycode == KEY_ESCAPE:
+				_splay_save_dialog_active = false
 				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_L:
 				_splay_edit_preset_pose("left")
@@ -278,6 +300,62 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_C:
 				_splay_edit_cycle_link_type()
 				get_viewport().set_input_as_handled()
+
+	# Level save dialog keyboard handling
+	if _level_save_dialog_active and event is InputEventKey and event.pressed:
+		if event.keycode == KEY_O and Version.is_source_mode():
+			_level_save_dialog_active = false
+			_save_original()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_C:
+			_level_save_dialog_active = false
+			_save()
+			get_viewport().set_input_as_handled()
+			return
+		elif event.keycode == KEY_ESCAPE:
+			_level_save_dialog_active = false
+			get_viewport().set_input_as_handled()
+			return
+
+	# Level save dialog click handling
+	if _level_save_dialog_active and event is InputEventMouseButton and event.pressed:
+		var vp2: Vector2 = get_viewport().get_visible_rect().size
+		var ldx: float = vp2.x / 2.0 - 160
+		var ldy: float = vp2.y / 2.0 - 40
+		var lmpos: Vector2 = event.position
+		if Rect2(ldx + 20, ldy + 40, 120, 28).has_point(lmpos) and Version.is_source_mode():
+			_level_save_dialog_active = false
+			_save_original()
+		elif Rect2(ldx + 180, ldy + 40, 120, 28).has_point(lmpos):
+			_level_save_dialog_active = false
+			_save()
+		else:
+			_level_save_dialog_active = false
+		get_viewport().set_input_as_handled()
+		return
+
+	# Splay pose save dialog click handling — intercept ALL mouse clicks when dialog is active
+	if _splay_save_dialog_active and event is InputEventMouseButton and event.pressed:
+		var vp: Vector2 = get_viewport().get_visible_rect().size
+		var dx: float = vp.x / 2.0 - 160
+		var dy: float = vp.y / 2.0 - 40
+		var mpos: Vector2 = event.position
+		# Original button (left side)
+		var orig_rect := Rect2(dx + 20, dy + 40, 120, 28)
+		# Custom button (right side)
+		var custom_rect := Rect2(dx + 180, dy + 40, 120, 28)
+		if orig_rect.has_point(mpos) and Version.is_source_mode():
+			_splay_save_dialog_active = false
+			_splay_edit_save_pose_original()
+		elif custom_rect.has_point(mpos):
+			_splay_save_dialog_active = false
+			_splay_edit_save_pose_custom()
+		else:
+			# Click outside dialog — cancel
+			_splay_save_dialog_active = false
+		get_viewport().set_input_as_handled()
+		return
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -353,17 +431,21 @@ func _start_drag(screen_pos: Vector2) -> void:
 			_try_select_splay_connection(world_pos)
 
 
+var _drag_moved: bool = false  # True if mouse actually moved during a drag
+
 func _stop_drag() -> void:
-	if _dragging:
-		# Live refresh on drag release — skip for SPLAY_EDIT (creature is live, not config-driven)
-		if _mode != Mode.SPLAY_EDIT:
+	if _dragging and _drag_moved:
+		# Live refresh on drag release — skip for SPLAY modes (handled separately)
+		if _mode != Mode.SPLAY_EDIT and _mode != Mode.SPLAY:
 			config_changed.emit(_config)
 	_dragging = false
+	_drag_moved = false
 	_drag_handle = -1
 	_splay_edit_dragging_endpoint = false
 
 
 func _do_drag(screen_pos: Vector2) -> void:
+	_drag_moved = true
 	var world_pos: Vector2 = _get_world_pos(screen_pos)
 
 	match _mode:
@@ -672,11 +754,39 @@ func _migration_add_zone() -> void:
 # -- Save / Reset --------------------------------------------------------------
 
 func _save() -> void:
+	## Save level to user:// (custom save)
 	LevelConfig.save_level(_level_name, _config)
 	config_changed.emit(_config)
-	_status_label.text = "SAVED!"
+	_clear_all_changes()
+	_status_label.text = "CUSTOM SAVED!"
 	_status_label.modulate = Color(0.3, 1.0, 0.3)
-	_show_center_flash("SAVED", Color(0.3, 1.0, 0.3))
+	_show_center_flash("CUSTOM SAVED", Color(0.3, 1.0, 0.3))
+	var tween := create_tween()
+	tween.tween_interval(1.5)
+	tween.tween_callback(func() -> void:
+		_status_label.text = "EDITOR"
+		_status_label.modulate = Color(0.3, 0.8, 0.3)
+	)
+
+
+func _save_original() -> void:
+	## Save level to res:// (source authority) and delete custom if it exists.
+	if not Version.is_source_mode():
+		return
+	var path: String = "res://levels/" + _level_name + ".json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(_config, "\t"))
+		file.close()
+	# Delete custom override since original is now up-to-date
+	var custom_path: String = "user://levels/" + _level_name + ".json"
+	if FileAccess.file_exists(custom_path):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(custom_path))
+	config_changed.emit(_config)
+	_clear_all_changes()
+	_status_label.text = "ORIGINAL SAVED!"
+	_status_label.modulate = Color(0.3, 0.8, 1.0)
+	_show_center_flash("ORIGINAL SAVED", Color(0.3, 0.8, 1.0))
 	var tween := create_tween()
 	tween.tween_interval(1.5)
 	tween.tween_callback(func() -> void:
@@ -747,6 +857,71 @@ func _draw_overlay() -> void:
 			_draw_splay_overlay()
 		Mode.SPLAY_EDIT:
 			_draw_splay_edit_overlay()
+
+	# -- Common overlay: change summary + save dialogs --
+	_draw_change_summary()
+	if _level_save_dialog_active:
+		_draw_level_save_dialog()
+
+
+func _draw_change_summary() -> void:
+	## Draw change count summary and custom/original status at top-right.
+	var font: Font = ThemeDB.fallback_font
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var rx: float = vp.x - 10  # Right-aligned
+	var y: float = 55.0
+
+	# Change summary: list non-zero changes
+	var change_parts: Array[String] = []
+	for key in _changed:
+		if _changed[key]:
+			var count: int = _changed_items[key].size() if _changed_items.has(key) else 1
+			change_parts.append("%d %s" % [count, key])
+
+	if not change_parts.is_empty():
+		var summary: String = ", ".join(change_parts) + " changed"
+		_overlay.draw_string(font, Vector2(rx - 300, y), summary, HORIZONTAL_ALIGNMENT_RIGHT, 300, 10, Color(1.0, 0.9, 0.3, 0.8))
+		y += 14
+
+	# Custom/Original status (source mode only)
+	if Version.is_source_mode():
+		if _has_custom_level():
+			var total: int = _get_total_change_count()
+			var status_text: String
+			if total > 0:
+				status_text = "(CUSTOM - %d unsaved changes)" % total
+			else:
+				status_text = "(CUSTOM - saved)"
+			_overlay.draw_string(font, Vector2(rx - 300, y), status_text, HORIZONTAL_ALIGNMENT_RIGHT, 300, 10, Color(1.0, 0.6, 0.3, 0.8))
+		else:
+			_overlay.draw_string(font, Vector2(rx - 300, y), "(ORIGINAL)", HORIZONTAL_ALIGNMENT_RIGHT, 300, 10, Color(0.3, 0.8, 1.0, 0.6))
+
+
+func _draw_level_save_dialog() -> void:
+	## Draw the O/C save dialog for level saving (same style as pose save).
+	var font: Font = ThemeDB.fallback_font
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var dx: float = vp.x / 2.0 - 160
+	var dy: float = vp.y / 2.0 - 40
+	_overlay.draw_rect(Rect2(dx, dy, 320, 80), Color(0.1, 0.1, 0.12, 0.95))
+	_overlay.draw_rect(Rect2(dx, dy, 320, 80), Color(0.5, 0.5, 0.3, 0.7), false, 2.0)
+	_overlay.draw_string(font, Vector2(dx + 20, dy + 24), "Save Level: %s" % _level_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.9, 0.3))
+
+	# Original button
+	var o_col := Color(0.3, 0.8, 1.0)
+	_overlay.draw_rect(Rect2(dx + 20, dy + 40, 120, 28), o_col * Color(1, 1, 1, 0.2))
+	_overlay.draw_rect(Rect2(dx + 20, dy + 40, 120, 28), o_col, false, 1.5)
+	_overlay.draw_string(font, Vector2(dx + 35, dy + 60), "O", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, o_col)
+	_overlay.draw_line(Vector2(dx + 35, dy + 62), Vector2(dx + 45, dy + 62), o_col, 1.5)
+	_overlay.draw_string(font, Vector2(dx + 46, dy + 60), "riginal", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, o_col)
+
+	# Custom button
+	var c_col := Color(0.3, 1.0, 0.3)
+	_overlay.draw_rect(Rect2(dx + 180, dy + 40, 120, 28), c_col * Color(1, 1, 1, 0.2))
+	_overlay.draw_rect(Rect2(dx + 180, dy + 40, 120, 28), c_col, false, 1.5)
+	_overlay.draw_string(font, Vector2(dx + 200, dy + 60), "C", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c_col)
+	_overlay.draw_line(Vector2(dx + 200, dy + 62), Vector2(dx + 210, dy + 62), c_col, 1.5)
+	_overlay.draw_string(font, Vector2(dx + 211, dy + 60), "ustom", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c_col)
 
 
 func _draw_spawn_zones() -> void:
@@ -912,6 +1087,33 @@ var _splay_edit_pose_data: Dictionary = {}  # Loaded pose data being edited
 var _pose_library: Node = null  # Pose library overlay
 var _splay_physics_preview: bool = false  # True when physics is active in editor
 
+func _mark_changed(component: String, item_idx: int = -1) -> void:
+	## Mark a component as having unsaved changes.
+	_changed[component] = true
+	if item_idx >= 0:
+		if not _changed_items.has(component):
+			_changed_items[component] = []
+		if item_idx not in _changed_items[component]:
+			_changed_items[component].append(item_idx)
+
+
+func _clear_all_changes() -> void:
+	_changed.clear()
+	_changed_items.clear()
+
+
+func _get_total_change_count() -> int:
+	var total: int = 0
+	for key in _changed:
+		if _changed[key]:
+			total += 1
+	return total
+
+
+func _has_custom_level() -> bool:
+	return FileAccess.file_exists("user://levels/" + _level_name + ".json")
+
+
 func _get_splays() -> Array:
 	if not _config.has("splays"):
 		_config["splays"] = []
@@ -938,7 +1140,26 @@ func _drag_splay(world_pos: Vector2) -> void:
 		_splay_cancel_physics_preview()
 	var splays: Array = _get_splays()
 	if _selected_idx < splays.size():
+		var old_pos_arr: Array = splays[_selected_idx].get("pos", [960, 500])
+		var old_pos := Vector2(old_pos_arr[0], old_pos_arr[1])
+		var delta_pos: Vector2 = world_pos - old_pos
 		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
+		_mark_changed("splays", _selected_idx)
+		# Move the actual creature(s) associated with this splay instance
+		# Find matching creatures by proximity to old position
+		for enemy in get_tree().get_nodes_in_group("enemies"):
+			if "_physics_frozen" in enemy and enemy._physics_frozen:
+				if enemy.global_position.distance_to(old_pos) < 100.0:
+					enemy.global_position = world_pos
+					# Also move any tethers/chains anchored to walls for this creature
+					for tether in get_tree().get_nodes_in_group("tethers"):
+						if is_instance_valid(tether):
+							var ta: Dictionary = tether.anchor_a
+							var tb: Dictionary = tether.anchor_b
+							if ta.get("body") == enemy and tb.get("is_wall", false):
+								tb["pos"] = tb["pos"] + delta_pos
+							elif tb.get("body") == enemy and ta.get("is_wall", false):
+								ta["pos"] = ta["pos"] + delta_pos
 
 
 func _splay_toggle_physics_preview() -> void:
@@ -973,6 +1194,15 @@ func _splay_open_library() -> void:
 
 
 func _on_library_pose_selected(pose_name: String) -> void:
+	if _pose_library and _pose_library._replacement_mode and _selected_idx >= 0:
+		# Replacing a missing pose reference
+		var splays: Array = _get_splays()
+		if _selected_idx < splays.size():
+			splays[_selected_idx]["pose"] = pose_name
+			config_changed.emit(_config)
+			_update_display()
+		return
+
 	# Place a new splay instance with the selected pose
 	var splays: Array = _get_splays()
 	splays.append({
@@ -1030,7 +1260,7 @@ func _splay_adjust_rotation(delta_deg: float) -> void:
 	if _selected_idx < splays.size():
 		var current: float = splays[_selected_idx].get("rotation", 0)
 		splays[_selected_idx]["rotation"] = fmod(current + delta_deg, 360.0)
-		config_changed.emit(_config)
+		_mark_changed("splays", _selected_idx)
 		_update_display()
 
 
@@ -1056,7 +1286,7 @@ func _splay_cycle_pose(direction: int) -> void:
 	if idx < 0:
 		idx += _splay_available_poses.size()
 	splays[_selected_idx]["pose"] = _splay_available_poses[idx]
-	config_changed.emit(_config)
+	_mark_changed("splays", _selected_idx)
 	_update_display()
 
 
@@ -1071,7 +1301,7 @@ func _splay_cycle_behavior() -> void:
 	var idx: int = behaviors.find(current)
 	idx = (idx + 1) % behaviors.size()
 	splays[_selected_idx]["behavior"] = behaviors[idx]
-	config_changed.emit(_config)
+	_mark_changed("splays", _selected_idx)
 	_update_display()
 
 
@@ -1080,17 +1310,37 @@ func _draw_splay_overlay() -> void:
 	var splay_col := Color(0.9, 0.4, 0.2, 0.7)
 	var selected_col := Color(1.0, 0.8, 0.2, 0.9)
 
+	# Check which poses exist
+	var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
+	var temp_mgr := Node.new()
+	temp_mgr.set_script(mgr_script)
+	add_child(temp_mgr)
+	var available_poses: Array[String] = temp_mgr.get_all_pose_names()
+	temp_mgr.queue_free()
+
 	for i in range(splays.size()):
 		var s: Dictionary = splays[i]
 		var p: Array = s.get("pos", [960, 500])
 		var pos := Vector2(p[0], p[1])
 		var is_selected: bool = (i == _selected_idx)
-		var col: Color = selected_col if is_selected else splay_col
+		var pose_name: String = s.get("pose", "")
+		var pose_missing: bool = pose_name not in available_poses
 		var rot: float = s.get("rotation", 0)
+
+		var col: Color
+		if pose_missing:
+			col = Color(1.0, 0.2, 0.2, 0.9)  # RED for missing
+		elif is_selected:
+			col = selected_col
+		else:
+			col = splay_col
 
 		# Body marker
 		_overlay.draw_circle(pos, 16.0 if is_selected else 12.0, col * Color(1, 1, 1, 0.4))
 		_overlay.draw_arc(pos, 16.0, 0, TAU, 16, col, 1.5)
+		# Change indicator: yellow asterisk if this item has unsaved changes
+		if _changed_items.has("splays") and i in _changed_items["splays"]:
+			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(14, -14), "*", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.2))
 
 		# Rotation arrow
 		var rot_rad: float = deg_to_rad(rot)
@@ -1101,9 +1351,12 @@ func _draw_splay_overlay() -> void:
 		_overlay.draw_line(arrow_end, arrow_end - Vector2(cos(rot_rad), sin(rot_rad)) * 8 - perp * 5, col, 1.5)
 
 		# Labels
-		var pose_name: String = s.get("pose", "?")
+		var display_pose_name: String = s.get("pose", "?")
 		var behavior: String = s.get("behavior", "?")
-		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -22), pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+		if pose_missing:
+			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-40, -22), "MISSING: " + display_pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.2, 0.2))
+		else:
+			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -22), display_pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
 		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -10), behavior, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.7))
 		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, 26), "rot:%.0f" % rot, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.5))
 
@@ -1119,6 +1372,8 @@ func _draw_splay_overlay() -> void:
 # SPACE toggles points on/off, drag to position, right-drag for cast endpoint.
 
 var _splay_edit_creature: Node2D = null  # The frozen creature being edited
+var _splay_edit_origin_pose_name: String = ""  # The pose this edit started from
+var _splay_save_dialog_active: bool = false  # True when O/C save dialog is showing
 var _splay_edit_origin: Vector2 = Vector2(960, 500)
 var _splay_edit_all_points: Array[String] = []  # All available attachment point names
 var _splay_edit_active: Dictionary = {}  # point_name -> { enabled: bool, cast_end: Vector2, pos_override: Vector2 }
@@ -1208,6 +1463,7 @@ func _enter_splay_edit() -> void:
 			var loaded: Dictionary = temp.load_pose(pose_name)
 			if not loaded.is_empty():
 				_splay_edit_pose_data = loaded.duplicate(true)
+				_splay_edit_origin_pose_name = pose_name
 		temp.queue_free()
 
 	# Initialize active state — start from creature's live skeleton positions
@@ -1846,8 +2102,8 @@ func _splay_edit_get_body_length() -> float:
 	return skull.distance_to(tail_tip)
 
 
-func _splay_edit_save_pose() -> void:
-	## Build pose from active points and save.
+func _splay_edit_build_pose(pose_name: String) -> Dictionary:
+	## Build pose dictionary from current editor state.
 	var connections: Array = []
 	for point_name in _splay_edit_all_points:
 		var data: Dictionary = _splay_edit_active.get(point_name, {})
@@ -1867,7 +2123,6 @@ func _splay_edit_save_pose() -> void:
 			"link_type": lt,
 		})
 
-	# Save full skeleton snapshot for exact reload
 	var skel: Dictionary = {}
 	if is_instance_valid(_splay_edit_creature):
 		var cr: Node2D = _splay_edit_creature
@@ -1888,14 +2143,45 @@ func _splay_edit_save_pose() -> void:
 			for li in range(cr._legs.size()):
 				skel["legs"].append([[cr._legs[li][0].x, cr._legs[li][0].y], [cr._legs[li][1].x, cr._legs[li][1].y], [cr._legs[li][2].x, cr._legs[li][2].y]])
 
-	var pose_name: String = _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
-	var pose: Dictionary = {
+	return {
 		"name": pose_name,
 		"creature": "quadruped",
 		"breakaway_sound": "",
 		"connections": connections,
 		"skeleton": skel,
 	}
+
+
+func _splay_edit_save_pose_original() -> void:
+	## Save to bundled source: res://data/splay_poses/ (source mode only)
+	if not Version.is_source_mode():
+		return
+	var pose_name: String = _splay_edit_origin_pose_name if _splay_edit_origin_pose_name != "" else _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
+	var pose: Dictionary = _splay_edit_build_pose(pose_name)
+	# Write directly to res:// (project source)
+	var path: String = "res://data/splay_poses/" + pose_name + ".json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(pose, "\t"))
+		file.close()
+	_splay_edit_pose_data = pose
+	print("EDITOR: saved ORIGINAL pose '%s'" % pose_name)
+	_show_center_flash("ORIGINAL SAVED", Color(0.3, 0.8, 1.0))
+	_status_label.text = "ORIGINAL SAVED"
+	_status_label.modulate = Color(0.3, 0.8, 1.0)
+	var tween := create_tween()
+	tween.tween_interval(1.5)
+	tween.tween_callback(func() -> void:
+		if is_instance_valid(_status_label):
+			_status_label.text = "EDITOR"
+			_status_label.modulate = Color(0.3, 0.8, 0.3)
+	)
+
+
+func _splay_edit_save_pose_custom() -> void:
+	## Save to user directory: user://data/splay_poses/
+	var pose_name: String = _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
+	var pose: Dictionary = _splay_edit_build_pose(pose_name)
 	var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
 	var temp := Node.new()
 	temp.set_script(mgr_script)
@@ -1903,10 +2189,10 @@ func _splay_edit_save_pose() -> void:
 	temp.save_pose(pose)
 	temp.queue_free()
 	_splay_edit_pose_data = pose
-	print("EDITOR: saved splay pose '%s' with %d connections" % [pose_name, connections.size()])
-	_status_label.text = "POSE SAVED!"
+	print("EDITOR: saved CUSTOM pose '%s'" % pose_name)
+	_show_center_flash("CUSTOM SAVED", Color(0.3, 1.0, 0.3))
+	_status_label.text = "CUSTOM SAVED"
 	_status_label.modulate = Color(0.3, 1.0, 0.3)
-	_show_center_flash("POSE SAVED", Color(0.3, 1.0, 0.3))
 	var tween := create_tween()
 	tween.tween_interval(1.5)
 	tween.tween_callback(func() -> void:
@@ -2018,6 +2304,34 @@ func _draw_splay_edit_overlay() -> void:
 	_overlay.draw_string(font, Vector2(10, 66), "Active points: %d / %d" % [active_count, _splay_edit_all_points.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.7, 0.7))
 
 	# Help text
+	# Save dialog overlay
+	if _splay_save_dialog_active:
+		var vp: Vector2 = get_viewport().get_visible_rect().size
+		var dx: float = vp.x / 2.0 - 160
+		var dy: float = vp.y / 2.0 - 40
+		_overlay.draw_rect(Rect2(dx, dy, 320, 80), Color(0.1, 0.1, 0.12, 0.95))
+		_overlay.draw_rect(Rect2(dx, dy, 320, 80), Color(0.5, 0.5, 0.3, 0.7), false, 2.0)
+		_overlay.draw_string(font, Vector2(dx + 20, dy + 24), "Save Pose: %s" % _splay_edit_pose_data.get("name", "?"), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color(1.0, 0.9, 0.3))
+
+		# Original button
+		var o_available: bool = Version.is_source_mode()
+		var o_col: Color = Color(0.3, 0.8, 1.0) if o_available else Color(0.3, 0.3, 0.3)
+		_overlay.draw_rect(Rect2(dx + 20, dy + 40, 120, 28), o_col * Color(1, 1, 1, 0.2))
+		_overlay.draw_rect(Rect2(dx + 20, dy + 40, 120, 28), o_col, false, 1.5)
+		# Underline the O
+		_overlay.draw_string(font, Vector2(dx + 35, dy + 60), "O", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, o_col)
+		_overlay.draw_line(Vector2(dx + 35, dy + 62), Vector2(dx + 45, dy + 62), o_col, 1.5)
+		_overlay.draw_string(font, Vector2(dx + 46, dy + 60), "riginal", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, o_col)
+
+		# Custom button
+		var c_col := Color(0.3, 1.0, 0.3)
+		_overlay.draw_rect(Rect2(dx + 180, dy + 40, 120, 28), c_col * Color(1, 1, 1, 0.2))
+		_overlay.draw_rect(Rect2(dx + 180, dy + 40, 120, 28), c_col, false, 1.5)
+		_overlay.draw_string(font, Vector2(dx + 200, dy + 60), "C", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c_col)
+		_overlay.draw_line(Vector2(dx + 200, dy + 62), Vector2(dx + 210, dy + 62), c_col, 1.5)
+		_overlay.draw_string(font, Vector2(dx + 211, dy + 60), "ustom", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c_col)
+
 	var mirror_str: String = " [MIRROR]" if _splay_edit_mirror else ""
-	var help := "SPLAY EDIT: Click=select  SPACE=toggle  C=rope/chain  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back" % mirror_str
+	var src_str: String = " [DEV]" if Version.is_source_mode() else ""
+	var help := "SPLAY EDIT: Click=select  SPACE=toggle  C=rope/chain  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back%s" % [mirror_str, src_str]
 	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))

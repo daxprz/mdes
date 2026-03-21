@@ -7,7 +7,13 @@ extends Node
 
 const MAJOR := 0
 const MINOR := 9
-const PATCH := 19
+const PATCH := 20
 
 static func get_string() -> String:
 	return "%d.%d.%d" % [MAJOR, MINOR, PATCH]
+
+
+static func is_source_mode() -> bool:
+	## Returns true when running from source code (dev environment).
+	## Checks if project.godot exists as a real file on the filesystem.
+	return FileAccess.file_exists("res://project.godot")

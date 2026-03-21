@@ -163,6 +163,40 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.20
+**Editor Change Tracking, Source Mode Detection, Save Original/Custom Workflow**
+
+**Source Mode Detection:**
+- `Version.is_source_mode()` — detects running from source code (checks `res://project.godot`)
+- "[DEV]" badge shown in editor when in source mode
+- Source-only operations: save original, delete bundled poses
+
+**Editor Save Workflow (Original / Custom):**
+- Ctrl+S shows O/C dialog with clickable buttons and keyboard shortcuts
+- _O_riginal: saves to `res://` (source authority), deletes custom override
+- _C_ustom: saves to `user://` (user override)
+- Works for both level configs AND splay poses (same UX)
+- Non-source builds: only Custom save available
+
+**Change Tracking:**
+- Per-component tracking: which items have unsaved changes
+- Yellow asterisk (*) on changed splay instances in editor overlay
+- Summary bar: "2 splays changed, 1 migration changed" (only non-zero)
+- Custom/Original status: "(CUSTOM - N unsaved changes)" or "(ORIGINAL)"
+
+**Pose Library Enhancements:**
+- Usage tracking: scans all level configs, shows "Used in: level(count)" per pose
+- CRUD: N=new, Del=delete, E=edit
+- Unused poses shown dimmed
+- Missing pose references: RED outline, click to replace or delete
+
+**Splay Editor Fixes:**
+- Drag/rotate/cycle no longer trigger full level rebuilds
+- Creature moves directly when dragging splay instance marker
+- I-pose: renamed from t-pose (body=I stem, arms/legs=I serifs)
+- Save dialog: O/C choice with underlined hotkeys, clickable buttons
+- ESC from edit rebuilds level to restore all splay creatures
+
 ### v0.9.19
 **Splay Pose System, Chain System, Skeleton Rigidity, Editor Overhaul**
 

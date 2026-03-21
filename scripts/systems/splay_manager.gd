@@ -152,7 +152,7 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 	## multi-creature ("creatures" array) pose formats.
 	var pose: Dictionary = load_pose(pose_name)
 	if pose.is_empty():
-		push_warning("SplayManager: pose '%s' not found" % pose_name)
+		push_warning("SplayManager: pose '%s' not found — skipping (missing pose reference)" % pose_name)
 		return {}
 
 	var scene_root: Node = get_tree().current_scene
@@ -198,9 +198,7 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 	if creatures.is_empty():
 		return {}
 
-	# Wait a frame for physics to initialize
-	await get_tree().physics_frame
-
+	# Restore skeleton immediately (no await — synchronous setup)
 	# FIRST: restore skeleton on all creatures BEFORE creating tethers
 	for ci in range(creatures.size()):
 		var creature: Node2D = creatures[ci]["node"]

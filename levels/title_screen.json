@@ -14,6 +14,14 @@
 			495.0
 		]
 	},
+	"cave_walls": {
+		"ceiling_y": 0.0,
+		"curve_width": 180.0,
+		"floor_y": 900.0,
+		"ledge_depth": 55.0,
+		"ledge_height_ratio": 0.33,
+		"ledge_thickness": 30.0
+	},
 	"floor": {
 		"color": [
 			0.35,
@@ -495,18 +503,32 @@
 			}
 		]
 	},
-	"version": 1,
+	"splays": [
+		{
+			"behavior": "asleep",
+			"creature": "quadruped",
+			"pos": [
+				959.75,
+				369.25
+			],
+			"pose": "i-pose",
+			"rotation": 0.0
+		},
+		{
+			"behavior": "asleep",
+			"creature": "quadruped",
+			"pos": [
+				1687.75,
+				121.5
+			],
+			"pose": "hanging",
+			"rotation": 0
+		}
+	],
+	"version": 1.0,
 	"walls": {
 		"ceiling": -10.0,
 		"left": -10.0,
 		"right": 1930.0
-	},
-	"cave_walls": {
-		"floor_y": 900.0,
-		"ceiling_y": 0.0,
-		"curve_width": 180.0,
-		"ledge_height_ratio": 0.33,
-		"ledge_depth": 55.0,
-		"ledge_thickness": 30.0
 	}
 }
