@@ -1120,25 +1120,37 @@ var _splay_edit_pinned: Dictionary = {}  # point_name -> bool (pinned = doesn't 
 var _splay_edit_mirror: bool = false  # When true, L/R changes are mirrored along body axis
 
 func _enter_splay_edit() -> void:
-	## Called when entering SPLAY_EDIT mode. Spawn a frozen creature.
+	## Called when entering SPLAY_EDIT mode.
+	## Deletes any existing monster and spawns a fresh one at the configured origin.
+
+	# Determine origin from selected splay instance, or default center
 	_splay_edit_origin = Vector2(960, 500)
+	var splays: Array = _get_splays()
+	if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays.size():
+		var p: Array = splays[_splay_edit_pose_idx].get("pos", [960, 500])
+		_splay_edit_origin = Vector2(p[0], p[1])
 
-	# Find existing monster or spawn one
-	var enemies: Array = get_tree().get_nodes_in_group("enemies")
-	_splay_edit_creature = null
-	for e in enemies:
+	# Delete ALL existing quadruped monsters (the running ones)
+	for e in get_tree().get_nodes_in_group("enemies"):
 		if "_attach_points" in e:
-			_splay_edit_creature = e
-			break
+			# Also remove any tethers attached to it
+			for tether in get_tree().get_nodes_in_group("tethers"):
+				if is_instance_valid(tether):
+					var ta: Dictionary = tether.anchor_a
+					var tb: Dictionary = tether.anchor_b
+					if ta.get("body") == e or tb.get("body") == e:
+						tether.queue_free()
+			e.queue_free()
+	_splay_edit_creature = null
 
-	if not _splay_edit_creature:
-		var script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
-		var creature := CharacterBody2D.new()
-		creature.set_script(script)
-		creature.global_position = _splay_edit_origin
-		var container: Node = get_tree().current_scene
-		container.add_child(creature)
-		_splay_edit_creature = creature
+	# Spawn a fresh monster at the configured origin
+	var script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
+	var creature := CharacterBody2D.new()
+	creature.set_script(script)
+	creature.global_position = _splay_edit_origin
+	var container: Node = get_tree().current_scene
+	container.add_child(creature)
+	_splay_edit_creature = creature
 
 	# Remove any existing tethers attached to this creature
 	for tether in get_tree().get_nodes_in_group("tethers"):
