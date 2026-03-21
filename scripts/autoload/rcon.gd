@@ -974,9 +974,10 @@ func _cmd_tether(parts: PackedStringArray) -> String:
 				var b_name: String = t.anchor_b.get("attach_point", "")
 				if b_name == "":
 					b_name = "wall" if t.anchor_b.get("is_wall", false) else "body"
+				var max_hp: int = t.CHAIN_MAX_HP if t.is_in_group("chains") else t.TETHER_MAX_HP
 				lines.append("  [%d] A=%s(%.0f,%.0f) B=%s(%.0f,%.0f) len=%.0f/%.0f tension=%.2f hp=%d/%d" % [
 					i, a_name, pa.x, pa.y, b_name, pb.x, pb.y,
-					pa.distance_to(pb), t.target_length, t.get_tension(), t.current_hp, t.TETHER_MAX_HP])
+					pa.distance_to(pb), t.target_length, t.get_tension(), t.current_hp, max_hp])
 			return "\n".join(lines)
 
 		"cut":

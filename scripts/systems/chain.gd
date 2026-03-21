@@ -124,8 +124,6 @@ func _physics_process(delta: float) -> void:
 	# Check projectile hits
 	_check_projectile_hits(pos_a, pos_b)
 
-	# Update visual
-	_compute_link_points(pos_a, pos_b, dist)
 	queue_redraw()
 
 

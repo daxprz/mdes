@@ -1186,6 +1186,13 @@ func _enter_splay_edit() -> void:
 			_splay_edit_all_points.append(point_name)
 	_splay_edit_all_points.sort()
 
+	# Init defaults BEFORE loading saved data (load will override)
+	_splay_edit_pinned.clear()
+	_splay_edit_link_type.clear()
+	for point_name in _splay_edit_all_points:
+		_splay_edit_pinned[point_name] = point_name in ["shoulders", "waist"]
+		_splay_edit_link_type[point_name] = "rope"
+
 	# Try to reload pose data from disk (in case it was saved previously)
 	if _splay_edit_pose_data.is_empty() or true:  # Always reload fresh
 		var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
@@ -1273,13 +1280,7 @@ func _enter_splay_edit() -> void:
 	_selected_idx = -1
 	_splay_edit_selected_point = ""
 	_splay_edit_mirror = false
-
-	# Spine attachment points are PINNED by default (don't respond to IK)
-	_splay_edit_pinned.clear()
-	_splay_edit_link_type.clear()
-	for point_name in _splay_edit_all_points:
-		_splay_edit_pinned[point_name] = point_name in ["shoulders", "waist"]
-		_splay_edit_link_type[point_name] = "rope"  # Default to rope
+	# NOTE: pinned/link_type are initialized BEFORE pose load (above), not here
 
 
 func _exit_splay_edit() -> void:
@@ -1291,11 +1292,9 @@ func _exit_splay_edit() -> void:
 				has_active = true
 				break
 		if has_active:
-			# Unfreeze and spawn tethers via splay manager
+			# Unfreeze but KEEP pose locked so skeleton holds the edited shape
 			if "_physics_frozen" in _splay_edit_creature:
 				_splay_edit_creature._physics_frozen = false
-			if "_pose_locked" in _splay_edit_creature:
-				_splay_edit_creature._pose_locked = false
 			# Set pose overrides so the creature holds the edited shape
 			if _splay_edit_creature.has_method("set_pose_overrides"):
 				var overrides: Dictionary = {}
