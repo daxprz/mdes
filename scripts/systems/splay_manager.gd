@@ -328,17 +328,68 @@ func _apply_behavior(creature: Node2D, behavior: String) -> void:
 
 
 func _apply_pose_overrides(creature: Node2D, pose: Dictionary, rotation_rad: float) -> void:
-	if not creature.has_method("set_pose_overrides"):
-		return
-	var overrides: Dictionary = {}
-	for conn in pose.get("connections", []):
-		var point_name: String = conn.get("point", "")
-		var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
-		var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
-		if rotation_rad != 0.0:
-			rel_pos = rel_pos.rotated(rotation_rad)
-		overrides[point_name] = rel_pos
-	creature.set_pose_overrides(overrides)
+	# Restore full skeleton snapshot if available
+	var skel: Dictionary = pose.get("skeleton", {})
+	if not skel.is_empty():
+		if skel.has("spine") and "_spine" in creature and skel["spine"].size() >= 3:
+			for i in range(3):
+				var pt := Vector2(skel["spine"][i][0], skel["spine"][i][1])
+				if rotation_rad != 0.0:
+					pt = pt.rotated(rotation_rad)
+				creature._spine[i] = pt
+		if skel.has("neck") and "_neck" in creature:
+			for i in range(mini(skel["neck"].size(), creature._neck.size())):
+				var pt := Vector2(skel["neck"][i][0], skel["neck"][i][1])
+				if rotation_rad != 0.0:
+					pt = pt.rotated(rotation_rad)
+				creature._neck[i] = pt
+		if skel.has("skull") and "_skull" in creature:
+			var pt := Vector2(skel["skull"][0], skel["skull"][1])
+			if rotation_rad != 0.0:
+				pt = pt.rotated(rotation_rad)
+			creature._skull = pt
+		if skel.has("jaw") and "_jaw" in creature:
+			var pt := Vector2(skel["jaw"][0], skel["jaw"][1])
+			if rotation_rad != 0.0:
+				pt = pt.rotated(rotation_rad)
+			creature._jaw = pt
+		if skel.has("clavicles") and "_clavicles" in creature:
+			for i in range(2):
+				var pt := Vector2(skel["clavicles"][i][0], skel["clavicles"][i][1])
+				if rotation_rad != 0.0:
+					pt = pt.rotated(rotation_rad)
+				creature._clavicles[i] = pt
+		if skel.has("hip_bones") and "_hip_bones" in creature:
+			for i in range(2):
+				var pt := Vector2(skel["hip_bones"][i][0], skel["hip_bones"][i][1])
+				if rotation_rad != 0.0:
+					pt = pt.rotated(rotation_rad)
+				creature._hip_bones[i] = pt
+		if skel.has("tail") and "_tail" in creature:
+			for ti in range(mini(skel["tail"].size(), creature._tail.size())):
+				var pt := Vector2(skel["tail"][ti][0], skel["tail"][ti][1])
+				if rotation_rad != 0.0:
+					pt = pt.rotated(rotation_rad)
+				creature._tail[ti] = pt
+		if skel.has("legs") and "_legs" in creature:
+			for li in range(mini(skel["legs"].size(), creature._legs.size())):
+				for ji in range(3):
+					var pt := Vector2(skel["legs"][li][ji][0], skel["legs"][li][ji][1])
+					if rotation_rad != 0.0:
+						pt = pt.rotated(rotation_rad)
+					creature._legs[li][ji] = pt
+
+	# Also set pose overrides for ongoing enforcement
+	if creature.has_method("set_pose_overrides"):
+		var overrides: Dictionary = {}
+		for conn in pose.get("connections", []):
+			var point_name: String = conn.get("point", "")
+			var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
+			var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
+			if rotation_rad != 0.0:
+				rel_pos = rel_pos.rotated(rotation_rad)
+			overrides[point_name] = rel_pos
+		creature.set_pose_overrides(overrides)
 
 
 func _monitor_breakaway(instance: Dictionary) -> void:

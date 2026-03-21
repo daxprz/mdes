@@ -1224,50 +1224,35 @@ func _enter_splay_edit() -> void:
 	# then enforce rigidity, then set active state.
 	if not _splay_edit_pose_data.is_empty() and is_instance_valid(_splay_edit_creature):
 		var c: Node2D = _splay_edit_creature
-		# Directly position endpoints from saved data (no IK — just set the target positions)
-		for conn in _splay_edit_pose_data.get("connections", []):
-			var pn: String = conn.get("point", "")
-			var rp: Array = conn.get("relative_pos", [0, 0])
-			var target_local: Vector2 = Vector2(rp[0], rp[1])
-			# Set the endpoint directly based on what it maps to in the skeleton
-			match pn:
-				"head":
-					c._skull = target_local
-					# Position neck between spine[0] and skull
-					c._neck[1] = c._spine[0].lerp(c._skull, 0.6)
-				"tail_tip":
-					if "_tail" in c and c._tail.size() >= 5:
-						c._tail[4] = target_local
-						# Distribute intermediate tail points evenly
-						var tail_start: Vector2 = c._spine[2]
-						for ti in range(5):
-							c._tail[ti] = tail_start.lerp(target_local, float(ti + 1) / 5.0)
-				"shoulders":
-					c._spine[0] = target_local
-					c._neck[0] = target_local
-				"waist":
-					c._spine[2] = target_local
-				"elbow_l":
-					if "_legs" in c:
-						c._legs[0][1] = target_local
-				"elbow_r":
-					if "_legs" in c:
-						c._legs[1][1] = target_local
-				"knee_l":
-					if "_legs" in c:
-						c._legs[2][1] = target_local
-				"knee_r":
-					if "_legs" in c:
-						c._legs[3][1] = target_local
 
-		# Enforce rigid constraints to fix any violations
-		if c.has_method("_enforce_spine_rigid"):
-			c._enforce_spine_rigid()
+		# Restore full skeleton snapshot if available (exact positions)
+		var skel: Dictionary = _splay_edit_pose_data.get("skeleton", {})
+		if not skel.is_empty():
+			if skel.has("spine") and skel["spine"].size() >= 3:
+				for i in range(3):
+					c._spine[i] = Vector2(skel["spine"][i][0], skel["spine"][i][1])
+			if skel.has("neck") and skel["neck"].size() >= 2:
+				c._neck[0] = Vector2(skel["neck"][0][0], skel["neck"][0][1])
+				c._neck[1] = Vector2(skel["neck"][1][0], skel["neck"][1][1])
+			if skel.has("skull"):
+				c._skull = Vector2(skel["skull"][0], skel["skull"][1])
+			if skel.has("jaw"):
+				c._jaw = Vector2(skel["jaw"][0], skel["jaw"][1])
+			if skel.has("clavicles") and "_clavicles" in c:
+				c._clavicles[0] = Vector2(skel["clavicles"][0][0], skel["clavicles"][0][1])
+				c._clavicles[1] = Vector2(skel["clavicles"][1][0], skel["clavicles"][1][1])
+			if skel.has("hip_bones") and "_hip_bones" in c:
+				c._hip_bones[0] = Vector2(skel["hip_bones"][0][0], skel["hip_bones"][0][1])
+				c._hip_bones[1] = Vector2(skel["hip_bones"][1][0], skel["hip_bones"][1][1])
+			if skel.has("tail") and "_tail" in c:
+				for ti in range(mini(skel["tail"].size(), c._tail.size())):
+					c._tail[ti] = Vector2(skel["tail"][ti][0], skel["tail"][ti][1])
+			if skel.has("legs") and "_legs" in c:
+				for li in range(mini(skel["legs"].size(), c._legs.size())):
+					for ji in range(3):
+						c._legs[li][ji] = Vector2(skel["legs"][li][ji][0], skel["legs"][li][ji][1])
 
-		# Settle dangling lower legs
-		_splay_edit_settle_legs()
-
-		# Update attachment point positions from corrected skeleton
+		# Update attachment point positions from restored skeleton
 		if c.has_method("_update_hitbox_positions"):
 			c._update_hitbox_positions()
 		c.queue_redraw()
@@ -1853,12 +1838,34 @@ func _splay_edit_save_pose() -> void:
 			"link_type": lt,
 		})
 
+	# Save full skeleton snapshot for exact reload
+	var skel: Dictionary = {}
+	if is_instance_valid(_splay_edit_creature):
+		var cr: Node2D = _splay_edit_creature
+		skel["spine"] = [[cr._spine[0].x, cr._spine[0].y], [cr._spine[1].x, cr._spine[1].y], [cr._spine[2].x, cr._spine[2].y]]
+		skel["neck"] = [[cr._neck[0].x, cr._neck[0].y], [cr._neck[1].x, cr._neck[1].y]]
+		skel["skull"] = [cr._skull.x, cr._skull.y]
+		skel["jaw"] = [cr._jaw.x, cr._jaw.y]
+		if "_clavicles" in cr:
+			skel["clavicles"] = [[cr._clavicles[0].x, cr._clavicles[0].y], [cr._clavicles[1].x, cr._clavicles[1].y]]
+		if "_hip_bones" in cr:
+			skel["hip_bones"] = [[cr._hip_bones[0].x, cr._hip_bones[0].y], [cr._hip_bones[1].x, cr._hip_bones[1].y]]
+		if "_tail" in cr:
+			skel["tail"] = []
+			for t in cr._tail:
+				skel["tail"].append([t.x, t.y])
+		if "_legs" in cr:
+			skel["legs"] = []
+			for li in range(cr._legs.size()):
+				skel["legs"].append([[cr._legs[li][0].x, cr._legs[li][0].y], [cr._legs[li][1].x, cr._legs[li][1].y], [cr._legs[li][2].x, cr._legs[li][2].y]])
+
 	var pose_name: String = _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
 	var pose: Dictionary = {
 		"name": pose_name,
 		"creature": "quadruped",
 		"breakaway_sound": "",
 		"connections": connections,
+		"skeleton": skel,
 	}
 	var mgr_script: GDScript = load("res://scripts/systems/splay_manager.gd")
 	var temp := Node.new()
