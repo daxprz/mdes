@@ -234,6 +234,11 @@ func _input(event: InputEvent) -> void:
 				_splay_edit_pose_idx = -1
 				_update_display()
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_SPACE and event.shift_pressed:
+				# Shift+SPACE: dump skeleton to logs
+				if is_instance_valid(_splay_edit_creature):
+					PlayerHUD.dump_entity_skeleton(_splay_edit_creature, "splay_edit")
+				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_SPACE:
 				_splay_edit_toggle_point()
 				get_viewport().set_input_as_handled()
@@ -1215,36 +1220,67 @@ func _enter_splay_edit() -> void:
 			"pos_override": point_world,
 		}
 
-	# Load saved pose data: apply to skeleton FIRST, then set active state
+	# Load saved pose data: directly set skeleton positions from saved relative_pos,
+	# then enforce rigidity, then set active state.
 	if not _splay_edit_pose_data.is_empty() and is_instance_valid(_splay_edit_creature):
-		var ChainIK: GDScript = load("res://scripts/systems/chain_ik.gd")
-		# First pass: apply all IK solves to reposition skeleton
+		var c: Node2D = _splay_edit_creature
+		# Directly position endpoints from saved data (no IK — just set the target positions)
 		for conn in _splay_edit_pose_data.get("connections", []):
 			var pn: String = conn.get("point", "")
 			var rp: Array = conn.get("relative_pos", [0, 0])
 			var target_local: Vector2 = Vector2(rp[0], rp[1])
-			var chain_data: Dictionary = ChainIK.get_chain_for_point(pn, _splay_edit_creature)
-			if not chain_data.is_empty():
-				var solved: Array[Vector2] = ChainIK.solve(
-					chain_data["chain"], chain_data["lengths"], chain_data["max_angles"],
-					target_local, true
-				)
-				var apply_fn: Callable = chain_data["apply"]
-				apply_fn.call(solved)
-		# Update attachment point positions from solved skeleton
-		if _splay_edit_creature.has_method("_update_hitbox_positions"):
-			_splay_edit_creature._update_hitbox_positions()
-		_splay_edit_creature.queue_redraw()
-		# Second pass: set active state with correct world positions
+			# Set the endpoint directly based on what it maps to in the skeleton
+			match pn:
+				"head":
+					c._skull = target_local
+					# Position neck between spine[0] and skull
+					c._neck[1] = c._spine[0].lerp(c._skull, 0.6)
+				"tail_tip":
+					if "_tail" in c and c._tail.size() >= 5:
+						c._tail[4] = target_local
+						# Distribute intermediate tail points evenly
+						var tail_start: Vector2 = c._spine[2]
+						for ti in range(5):
+							c._tail[ti] = tail_start.lerp(target_local, float(ti + 1) / 5.0)
+				"shoulders":
+					c._spine[0] = target_local
+					c._neck[0] = target_local
+				"waist":
+					c._spine[2] = target_local
+				"elbow_l":
+					if "_legs" in c:
+						c._legs[0][1] = target_local
+				"elbow_r":
+					if "_legs" in c:
+						c._legs[1][1] = target_local
+				"knee_l":
+					if "_legs" in c:
+						c._legs[2][1] = target_local
+				"knee_r":
+					if "_legs" in c:
+						c._legs[3][1] = target_local
+
+		# Enforce rigid constraints to fix any violations
+		if c.has_method("_enforce_spine_rigid"):
+			c._enforce_spine_rigid()
+
+		# Settle dangling lower legs
+		_splay_edit_settle_legs()
+
+		# Update attachment point positions from corrected skeleton
+		if c.has_method("_update_hitbox_positions"):
+			c._update_hitbox_positions()
+		c.queue_redraw()
+
+		# Set active state with correct world positions
 		for conn in _splay_edit_pose_data.get("connections", []):
 			var pn: String = conn.get("point", "")
 			if _splay_edit_active.has(pn):
 				_splay_edit_active[pn]["enabled"] = true
 				_splay_edit_link_type[pn] = conn.get("link_type", "rope")
-				# Read the actual solved position from the skeleton
 				var point_world: Vector2 = _splay_edit_origin
-				if "_attach_points" in _splay_edit_creature and _splay_edit_creature._attach_points.has(pn):
-					point_world = _splay_edit_creature.global_position + _splay_edit_creature._attach_points[pn].position
+				if "_attach_points" in c and c._attach_points.has(pn):
+					point_world = c.global_position + c._attach_points[pn].position
 				_splay_edit_active[pn]["pos_override"] = point_world
 				var cd: Array = conn.get("cast_dir", [0, -1])
 				_splay_edit_active[pn]["cast_end"] = point_world + Vector2(cd[0], cd[1]) * 200.0
