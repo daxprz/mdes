@@ -200,6 +200,7 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 	await get_tree().physics_frame
 
 	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
 	var tethers: Array = []
 	var all_creatures_nodes: Array = []
 	for c in creatures:
@@ -254,25 +255,37 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 					continue
 
 				var surface_pos: Vector2 = result["position"]
-				var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
-				var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
 				var length: float = cast_origin.distance_to(surface_pos)
+				var link_type: String = conn.get("link_type", "rope")
 
-				var tether := Node2D.new()
-				tether.set_script(TetherScript)
-				tether.setup(anchor_a, anchor_b, length)
-				scene_root.add_child(tether)
-				tethers.append(tether)
+				if link_type == "chain":
+					var anchor_a: Dictionary = ChainScript.make_anchor_body(creature, point_name)
+					var anchor_b: Dictionary = ChainScript.make_anchor_wall(surface_pos)
+					var chain_node := Node2D.new()
+					chain_node.set_script(ChainScript)
+					chain_node.setup(anchor_a, anchor_b, length)
+					scene_root.add_child(chain_node)
+					tethers.append(chain_node)
+				else:
+					var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
+					var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
+					var tether := Node2D.new()
+					tether.set_script(TetherScript)
+					tether.setup(anchor_a, anchor_b, length)
+					scene_root.add_child(tether)
+					tethers.append(tether)
+
+		# Apply full skeleton snapshot + pose overrides
+		_apply_pose_overrides(creature, pose, rotation_rad)
 
 		# Set behavior per creature
 		_apply_behavior(creature, c["behavior"])
 
-		# Set pose overrides for IK
-		_apply_pose_overrides(creature, c["def"], rotation_rad)
-
-		# Unfreeze physics now that tethers and pose are set
+		# Unfreeze physics but keep pose locked so _solve_pose doesn't override skeleton
 		if "_physics_frozen" in creature:
 			creature._physics_frozen = false
+		if "_pose_locked" in creature and pose.has("skeleton"):
+			creature._pose_locked = true  # Keep skeleton exactly as restored
 
 	# Track instance
 	var instance: Dictionary = {
