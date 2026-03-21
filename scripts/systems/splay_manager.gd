@@ -188,9 +188,11 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		var c_behavior: String = cdef.get("behavior", behavior)
 		var creature: Node2D = _spawn_creature(c_type, pos + c_offset)
 		if creature:
-			# Freeze physics until tethers are connected
+			# Freeze physics AND lock pose until skeleton is restored
 			if "_physics_frozen" in creature:
 				creature._physics_frozen = true
+			if "_pose_locked" in creature:
+				creature._pose_locked = true
 			creatures.append({"node": creature, "def": cdef, "behavior": c_behavior})
 
 	if creatures.is_empty():
@@ -198,6 +200,13 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 	# Wait a frame for physics to initialize
 	await get_tree().physics_frame
+
+	# FIRST: restore skeleton on all creatures BEFORE creating tethers
+	for ci in range(creatures.size()):
+		var creature: Node2D = creatures[ci]["node"]
+		_apply_pose_overrides(creature, pose, rotation_rad)
+		if creature.has_method("_update_hitbox_positions"):
+			creature._update_hitbox_positions()
 
 	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
 	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
@@ -275,17 +284,12 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 					scene_root.add_child(tether)
 					tethers.append(tether)
 
-		# Apply full skeleton snapshot + pose overrides
-		_apply_pose_overrides(creature, pose, rotation_rad)
-
 		# Set behavior per creature
 		_apply_behavior(creature, c["behavior"])
 
-		# Unfreeze physics but keep pose locked so _solve_pose doesn't override skeleton
-		if "_physics_frozen" in creature:
-			creature._physics_frozen = false
-		if "_pose_locked" in creature and pose.has("skeleton"):
-			creature._pose_locked = true  # Keep skeleton exactly as restored
+		# Keep physics frozen — chains hold the body in place,
+		# pose_locked keeps skeleton in saved shape.
+		# Only _draw runs (via the _physics_frozen check in quadruped)
 
 	# Track instance
 	var instance: Dictionary = {
