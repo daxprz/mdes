@@ -270,6 +270,9 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_M:
 				_splay_edit_mirror = not _splay_edit_mirror
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_C:
+				_splay_edit_cycle_link_type()
+				get_viewport().set_input_as_handled()
 
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
@@ -1118,6 +1121,7 @@ var _splay_edit_selected_point: String = ""  # Currently selected point name
 var _splay_edit_dragging_endpoint: bool = false  # True when dragging a cast endpoint
 var _splay_edit_pinned: Dictionary = {}  # point_name -> bool (pinned = doesn't respond to IK pulling)
 var _splay_edit_mirror: bool = false  # When true, L/R changes are mirrored along body axis
+var _splay_edit_link_type: Dictionary = {}  # point_name -> "rope" or "chain"
 
 func _enter_splay_edit() -> void:
 	## Called when entering SPLAY_EDIT mode.
@@ -1236,6 +1240,7 @@ func _enter_splay_edit() -> void:
 			var pn: String = conn.get("point", "")
 			if _splay_edit_active.has(pn):
 				_splay_edit_active[pn]["enabled"] = true
+				_splay_edit_link_type[pn] = conn.get("link_type", "rope")
 				# Read the actual solved position from the skeleton
 				var point_world: Vector2 = _splay_edit_origin
 				if "_attach_points" in _splay_edit_creature and _splay_edit_creature._attach_points.has(pn):
@@ -1250,9 +1255,10 @@ func _enter_splay_edit() -> void:
 
 	# Spine attachment points are PINNED by default (don't respond to IK)
 	_splay_edit_pinned.clear()
+	_splay_edit_link_type.clear()
 	for point_name in _splay_edit_all_points:
-		# Spine-adjacent points: shoulders, waist are pinned by default
 		_splay_edit_pinned[point_name] = point_name in ["shoulders", "waist"]
+		_splay_edit_link_type[point_name] = "rope"  # Default to rope
 
 
 func _exit_splay_edit() -> void:
@@ -1290,10 +1296,11 @@ func _exit_splay_edit() -> void:
 
 
 func _spawn_tethers_from_pose() -> void:
-	## Create tethers from the saved pose connections to world surfaces.
+	## Create tethers/chains from the saved pose connections to world surfaces.
 	if not is_instance_valid(_splay_edit_creature) or _splay_edit_pose_data.is_empty():
 		return
 	var TetherScript: GDScript = load("res://scripts/systems/tether.gd")
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
 	var creature: Node2D = _splay_edit_creature
 	var origin: Vector2 = creature.global_position
 
@@ -1301,6 +1308,7 @@ func _spawn_tethers_from_pose() -> void:
 		var point_name: String = conn.get("point", "")
 		var rp: Array = conn.get("relative_pos", [0, 0])
 		var cd: Array = conn.get("cast_dir", [0, -1])
+		var lt: String = conn.get("link_type", "rope")
 		var cast_dir := Vector2(cd[0], cd[1]).normalized()
 		var conn_world: Vector2 = origin + Vector2(rp[0], rp[1])
 
@@ -1313,14 +1321,22 @@ func _spawn_tethers_from_pose() -> void:
 			continue
 
 		var surface_pos: Vector2 = result["position"]
-		var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
-		var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
 		var length: float = conn_world.distance_to(surface_pos)
 
-		var tether := Node2D.new()
-		tether.set_script(TetherScript)
-		tether.setup(anchor_a, anchor_b, length)
-		get_tree().current_scene.add_child(tether)
+		if lt == "chain":
+			var anchor_a: Dictionary = ChainScript.make_anchor_body(creature, point_name)
+			var anchor_b: Dictionary = ChainScript.make_anchor_wall(surface_pos)
+			var link := Node2D.new()
+			link.set_script(ChainScript)
+			link.setup(anchor_a, anchor_b, length)
+			get_tree().current_scene.add_child(link)
+		else:
+			var anchor_a: Dictionary = TetherScript.make_anchor_body(creature, point_name)
+			var anchor_b: Dictionary = TetherScript.make_anchor_wall(surface_pos)
+			var link := Node2D.new()
+			link.set_script(TetherScript)
+			link.setup(anchor_a, anchor_b, length)
+			get_tree().current_scene.add_child(link)
 
 
 func _try_select_splay_connection(world_pos: Vector2) -> void:
@@ -1454,6 +1470,21 @@ func _splay_edit_toggle_point() -> void:
 			mdata["enabled"] = data["enabled"]
 			if mdata["enabled"] and mdata["cast_end"] == Vector2.ZERO:
 				_splay_edit_set_default_cast(mdata, mirror_pt)
+
+
+func _splay_edit_cycle_link_type() -> void:
+	if _splay_edit_selected_point == "" or _splay_edit_selected_point == "_origin":
+		return
+	if _splay_edit_link_type.has(_splay_edit_selected_point):
+		if _splay_edit_link_type[_splay_edit_selected_point] == "rope":
+			_splay_edit_link_type[_splay_edit_selected_point] = "chain"
+		else:
+			_splay_edit_link_type[_splay_edit_selected_point] = "rope"
+		# Mirror
+		if _splay_edit_mirror:
+			var mirror_pt: String = _get_mirror_point(_splay_edit_selected_point)
+			if mirror_pt != "" and _splay_edit_link_type.has(mirror_pt):
+				_splay_edit_link_type[mirror_pt] = _splay_edit_link_type[_splay_edit_selected_point]
 
 
 func _splay_edit_set_default_cast(data: Dictionary, point_name: String) -> void:
@@ -1778,10 +1809,12 @@ func _splay_edit_save_pose() -> void:
 		var cast_dir: Vector2 = (cast_end - point_world).normalized()
 		if cast_dir.length() < 0.1:
 			cast_dir = Vector2(0, -1)
+		var lt: String = _splay_edit_link_type.get(point_name, "rope")
 		connections.append({
 			"point": point_name,
 			"relative_pos": [snappedf(rel_pos.x, 0.1), snappedf(rel_pos.y, 0.1)],
 			"cast_dir": [snappedf(cast_dir.x, 0.01), snappedf(cast_dir.y, 0.01)],
+			"link_type": lt,
 		})
 
 	var pose_name: String = _splay_edit_pose_data.get("name", "custom-%d" % (randi() % 1000))
@@ -1861,18 +1894,23 @@ func _draw_splay_edit_overlay() -> void:
 
 		# Label
 		var label_col: Color = col
+		var lt: String = _splay_edit_link_type.get(point_name, "rope")
 		var status: String = ""
 		if enabled:
 			status += " [ON]"
 		if is_pinned:
 			status += " PIN"
+		if lt == "chain":
+			status += " CHAIN"
 		_overlay.draw_string(font, point_world + Vector2(-25, -r - 6), point_name + status, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, label_col)
 
 		# Cast ray + endpoint — always shown if cast_end exists (dim if disabled, bright if enabled)
 		var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
 		if cast_end != Vector2.ZERO:
 			var alpha: float = 1.0 if enabled else 0.3
-			var ray_col: Color = cast_col * Color(1, 1, 1, alpha)
+			var is_chain: bool = _splay_edit_link_type.get(point_name, "rope") == "chain"
+			var base_ray_col: Color = Color(0.5, 0.48, 0.45, 0.7) if is_chain else cast_col
+			var ray_col: Color = base_ray_col * Color(1, 1, 1, alpha)
 
 			# Dotted line from connection point to cast endpoint
 			var ray_dir: Vector2 = (cast_end - point_world).normalized()
@@ -1909,5 +1947,5 @@ func _draw_splay_edit_overlay() -> void:
 
 	# Help text
 	var mirror_str: String = " [MIRROR]" if _splay_edit_mirror else ""
-	var help := "SPLAY EDIT: Click=select  SPACE=toggle  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back" % mirror_str
+	var help := "SPLAY EDIT: Click=select  SPACE=toggle  C=rope/chain  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back" % mirror_str
 	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))
