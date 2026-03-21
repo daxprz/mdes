@@ -424,8 +424,9 @@ func _check_breakaway_loop(instance: Dictionary) -> void:
 	var total_damage: float = 0.0
 	for t in instance["tethers"]:
 		if is_instance_valid(t) and not t._severed:
-			total_max_hp += t.TETHER_MAX_HP
-			total_damage += (t.TETHER_MAX_HP - t.current_hp)
+			var max_hp: float = t.CHAIN_MAX_HP if t.is_in_group("chains") else t.TETHER_MAX_HP
+			total_max_hp += max_hp
+			total_damage += (max_hp - t.current_hp)
 			valid_tethers.append(t)
 
 	if valid_tethers.is_empty():

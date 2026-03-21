@@ -66,6 +66,7 @@ func _ready() -> void:
 	_setup_portal_from_config(config.get("portal", {}))
 	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
 	_setup_cave_walls_from_config(config.get("cave_walls", {}))
+	_setup_splays_from_config(config.get("splays", []))
 
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
