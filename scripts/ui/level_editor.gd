@@ -1185,9 +1185,9 @@ func _enter_splay_edit() -> void:
 		add_child(temp)
 		# Try to load the pose associated with the selected splay instance
 		var pose_name: String = ""
-		var splays: Array = _get_splays()
-		if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays.size():
-			pose_name = splays[_splay_edit_pose_idx].get("pose", "")
+		var splays2: Array = _get_splays()
+		if _splay_edit_pose_idx >= 0 and _splay_edit_pose_idx < splays2.size():
+			pose_name = splays2[_splay_edit_pose_idx].get("pose", "")
 		if pose_name != "":
 			var loaded: Dictionary = temp.load_pose(pose_name)
 			if not loaded.is_empty():
