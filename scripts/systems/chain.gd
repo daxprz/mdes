@@ -239,7 +239,58 @@ func _draw() -> void:
 		# Connection between links
 		draw_line(a, b, chain_color * Color(1, 1, 1, 0.5), 1.5)
 
-	# Anchor hooks: metallic circles
-	var hook_color := Color(0.5, 0.48, 0.45, 0.9)
-	draw_circle(_link_points[0] - global_position, 4.0, hook_color)
-	draw_circle(_link_points[_link_points.size() - 1] - global_position, 4.0, hook_color)
+	# Anchor A rendering
+	var metal_col := Color(0.5, 0.48, 0.45, 0.9)
+	var dark_metal := Color(0.35, 0.33, 0.3, 0.9)
+	var a_local: Vector2 = _link_points[0] - global_position
+	var b_local: Vector2 = _link_points[_link_points.size() - 1] - global_position
+
+	if anchor_a.get("is_wall", false):
+		_draw_wall_mount(a_local, metal_col, dark_metal)
+	else:
+		var limb_width: float = _get_limb_width(anchor_a)
+		_draw_shackle(a_local, limb_width, metal_col, dark_metal)
+
+	if anchor_b.get("is_wall", false):
+		_draw_wall_mount(b_local, metal_col, dark_metal)
+	else:
+		var limb_width: float = _get_limb_width(anchor_b)
+		_draw_shackle(b_local, limb_width, metal_col, dark_metal)
+
+
+func _get_limb_width(anchor: Dictionary) -> float:
+	## Estimate the width of the limb at the attachment point.
+	var ap: String = anchor.get("attach_point", "")
+	match ap:
+		"head": return 14.0
+		"shoulders": return 12.0
+		"waist": return 11.0
+		"tail_tip": return 4.0
+		"elbow_l", "elbow_r": return 6.0
+		"knee_l", "knee_r": return 6.0
+	return 8.0  # Default
+
+
+func _draw_shackle(pos: Vector2, limb_width: float, metal: Color, dark: Color) -> void:
+	## Draw a rectangular metal shackle around the limb.
+	var hw: float = limb_width * 0.6 + 2.0  # Half-width (slightly larger than limb)
+	var hh: float = hw * 0.7  # Half-height
+	# Outer rectangle
+	var rect := Rect2(pos.x - hw, pos.y - hh, hw * 2, hh * 2)
+	draw_rect(rect, dark, false, 2.5)
+	# Inner highlight
+	draw_rect(Rect2(pos.x - hw + 1, pos.y - hh + 1, hw * 2 - 2, hh * 2 - 2), metal, false, 1.0)
+	# Rivets at corners
+	for corner in [Vector2(-hw, -hh), Vector2(hw, -hh), Vector2(-hw, hh), Vector2(hw, hh)]:
+		draw_circle(pos + corner, 1.5, metal)
+
+
+func _draw_wall_mount(pos: Vector2, metal: Color, dark: Color) -> void:
+	## Draw a peg driven into the wall with a ring attached.
+	# Peg: short thick line into the wall
+	draw_line(pos, pos + Vector2(0, -8), dark, 4.0)
+	draw_line(pos + Vector2(-1, -8), pos + Vector2(1, -8), metal, 3.0)
+	# Ring: circle around the peg base
+	draw_arc(pos, 5.0, 0, TAU, 12, metal, 2.0)
+	# Ring highlight
+	draw_arc(pos + Vector2(-1, -1), 5.0, PI * 0.7, PI * 1.3, 6, Color(0.6, 0.58, 0.55, 0.7), 1.0)
