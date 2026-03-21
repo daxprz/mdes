@@ -50,6 +50,8 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 | **Jump (when dead, solo)** | Self-revive |
 | **Ctrl+D** | Toggle debug mode |
 | **Ctrl+E** | Toggle level editor |
+| **Ctrl+T** | Test menu |
+| **?** | Help overlay (all commands) |
 | **M** (debug) | Spawn quadruped monster |
 | **G** (debug) | Regenerate nearest tree |
 
@@ -57,7 +59,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 
 | Input | Action |
 |-------|--------|
-| **Tab** | Cycle mode: Spawn Areas → Positions → Seeds → Platforms → Portal → Migration |
+| **Tab** | Cycle mode: Spawn Areas → Positions → Seeds → Platforms → Portal → Migration → Splay → Splay Edit |
 | **Ctrl+S** | Save level |
 | **Ctrl+R** | Reset to defaults |
 | **Mouse drag** | Edit positions and sizes |
@@ -68,6 +70,20 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 | **S** (Migration) | Cycle species |
 | **G** (Migration) | Toggle stagger |
 | **Left/Right** (Migration) | Adjust cadence (1s steps) |
+| **N** (Splay) | Add splay instance |
+| **P** (Splay) | Pose library browser |
+| **E** (Splay) | Enter pose editor |
+| **B** (Splay) | Cycle behavior (asleep/stand_down/active) |
+| **Left/Right** (Splay) | Rotate instance |
+| **Up/Down** (Splay) | Cycle pose |
+| **SPACE** (Splay Edit) | Toggle connection point on/off |
+| **Shift+SPACE** (Splay Edit) | Dump skeleton JSON to logs |
+| **C** (Splay Edit) | Toggle rope/chain |
+| **P** (Splay Edit) | Toggle pin (joint doesn't move during IK) |
+| **M** (Splay Edit) | Toggle mirror mode (L/R symmetric) |
+| **L/R/U/D** (Splay Edit) | Preset poses |
+| **Arrows** (Splay Edit) | Nudge cast endpoint |
+| **Drag** (Splay Edit) | IK-drag connection point / cast endpoint / origin |
 
 ### RCON Commands (TCP port 9999)
 
@@ -76,11 +92,14 @@ help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n],
 key <k>, enemies, players, precog, status, quit, clear, clearplayers,
 enablejoins, revive, resethp, fps, hp, ik, ikreset, thrash, ball,
 debugdraw, title, score, grid,
-standdown [on|off], partstatus, partdmg <part> <amount>,
+standdown [on|off], territorial [on|off], partstatus, partdmg <part> <amount>,
 weight, attach balloon <point>, detach <point>,
 tether <idx> <point> floor [len], tether <idx1> <pt1> <idx2> <pt2> [len],
 tether wall <x1> <y1> <x2> <y2> [len], tether length <px>,
 tether cut, tether status,
+chain <idx> <point> floor [len], chain status, chain cut,
+splay list, splay spawn <pose> [x y] [rot] [behavior], splay clear, splay status,
+dump [enemy_idx] [trigger],
 attacker <target|part|weapon|rate|stop|start|stats|tether_length|tether_b>
 ```
 
@@ -99,7 +118,9 @@ attacker <target|part|weapon|rate|stop|start|stats|tether_length|tether_b>
 - **Controller haptics** — rumble feedback for grapple events, LED color matching class
 - **Procedural background trees** with debug regeneration tools
 - **Portal doorway** — atmospheric game start with stone archway, wooden doors, vortex, and fog
-- **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal all editable
+- **Splay pose system** — position creatures in custom poses with chains/tethers to walls, full skeleton snapshot save/restore, breakaway at 50% damage
+- **Chain system** — zero-stretch rigid connections with shackles, peg+ring wall mounts, 2000 HP, shake/flash on damage
+- **Level editor** (Ctrl+E) with JSON config system — spawn zones, positions, seeds, platforms, portal, splay instances all editable
 - **Title screen ecosystem** — fireflies with spawn-gravity zones and bats with perlin noise hunting
 - **Migration patterns** — cyclic multi-phase movement sequences that drive wildlife across the level
 - **Quadruped monster** — procedurally animated beast with foot-driven locomotion, 2-bone IK, head tracking, pre-cognition pathfinding, vulnerable body parts with tiered damage, and attachment points for balloons/tethers
@@ -141,6 +162,49 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.9.19
+**Splay Pose System, Chain System, Skeleton Rigidity, Editor Overhaul**
+
+**Splay Pose System:**
+- Creatures positioned in custom poses with chains/tethers to walls
+- Pose editor (Ctrl+E → SPLAY → E): preset poses (L/R/U/D), FABRIK IK drag, pinned joints, mirror mode
+- Full skeleton snapshot saved in pose JSON — exact restoration on reload and spawn
+- Poses auto-spawn from level config on level load
+- 3 behaviors: active, stand_down, asleep (dormant until damaged)
+- Breakaway at 50% aggregate tether damage — flash, screen shake, creature wakes
+- Pose library browser (P key) with preview thumbnails
+- Multi-creature splay support with inter-creature tethers
+
+**Chain System:**
+- Zero-stretch rigid connections (hard position correction every frame)
+- 2000 HP, damage per hit capped at 5
+- Shackles at creature end (sized to limb), peg+ring at wall end
+- Alternating thin/thick dark grey segments, fixed-length rendering
+- Shake + flash damage feedback on hit
+- RCON: chain commands parallel tether commands
+
+**Skeleton Rigidity:**
+- 4 new bones: clavicle L/R (from shoulders), hip bone L/R (from waist)
+- Clavicles/hip bones rotate with body orientation
+- Upper limbs rigid (exact length), lower limbs ±10% flex
+- Tail segments: rigid ±5% flex, max 20° bend per joint
+- Spine joints: max 30° bend, neck joints: max 45° bend
+- All rigid constraints enforced in ALL states (leap, grab, precog)
+- Planted feet preserved at world position when reachable
+- Skeleton dump system: Shift+SPACE in edit, RCON dump, auto-triggers
+
+**Leap & Movement Fixes:**
+- No backwards leaps: facing check at initiation, launch, and during flight
+- Precog multi-hop: must face launch direction before each hop
+- Floating legs fixed: force-replant when feet unreachable
+
+**Editor & Testing:**
+- Splay editor: click to select, SPACE toggle, C rope/chain, P pin, M mirror, drag IK
+- Test menu (Ctrl+T): run test suites, spawn monsters, reset level
+- Help overlay (?): all keyboard, controller, and RCON commands
+- Territorial mode: monsters attack each other (RCON: territorial [on|off])
+- Skeleton dump: JSON export of all bone positions + distances for debugging
 
 ### v0.9.18
 **Monster Damage & Weak Spots, Dual-Grapple Tether System, Attack Dummy**

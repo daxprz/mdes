@@ -1,0 +1,79 @@
+{
+	"breakaway_sound": "",
+	"connections": [
+		{
+			"cast_dir": [
+				0.71,
+				-0.71
+			],
+			"link_type": "chain",
+			"point": "elbow_l",
+			"relative_pos": [
+				35.4,
+				-35.2
+			]
+		},
+		{
+			"cast_dir": [
+				-0.71,
+				-0.71
+			],
+			"link_type": "chain",
+			"point": "elbow_r",
+			"relative_pos": [
+				-35.4,
+				-35.2
+			]
+		},
+		{
+			"cast_dir": [
+				0.0,
+				-1.0
+			],
+			"link_type": "chain",
+			"point": "head",
+			"relative_pos": [
+				0.0,
+				-66.0
+			]
+		},
+		{
+			"cast_dir": [
+				0.67,
+				0.74
+			],
+			"link_type": "chain",
+			"point": "knee_l",
+			"relative_pos": [
+				34.5,
+				38.0
+			]
+		},
+		{
+			"cast_dir": [
+				-0.67,
+				0.74
+			],
+			"link_type": "chain",
+			"point": "knee_r",
+			"relative_pos": [
+				-34.5,
+				38.0
+			]
+		},
+		{
+			"cast_dir": [
+				0.0,
+				1.0
+			],
+			"link_type": "chain",
+			"point": "tail_tip",
+			"relative_pos": [
+				0.0,
+				108.0
+			]
+		}
+	],
+	"creature": "quadruped",
+	"name": "custom-215"
+}
