@@ -287,6 +287,9 @@ func _execute(command: String) -> String:
 		"splay":
 			return _cmd_splay(parts)
 
+		"chain":
+			return _cmd_chain(parts)
+
 		"tether":
 			return _cmd_tether(parts)
 
@@ -847,6 +850,104 @@ func _cmd_splay(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown splay subcommand '%s'. Try: list, spawn, clear, status" % subcmd
+
+
+func _cmd_chain(parts: PackedStringArray) -> String:
+	## Chain commands — same syntax as tether but creates chains instead.
+	if parts.size() < 2:
+		return "ERR: usage: chain <enemy idx point floor [len]|status|cut>"
+	var subcmd: String = parts[1].to_lower()
+	match subcmd:
+		"status":
+			var chains: Array = get_tree().get_nodes_in_group("chains")
+			if chains.is_empty():
+				return "chains: 0"
+			var lines: Array[String] = ["chains: %d" % chains.size()]
+			var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+			for i in range(chains.size()):
+				var c: Node2D = chains[i]
+				var pa: Vector2 = c._get_anchor_world_pos(c.anchor_a)
+				var pb: Vector2 = c._get_anchor_world_pos(c.anchor_b)
+				lines.append("  [%d] len=%.0f/%.0f tension=%.2f hp=%d/%d" % [
+					i, pa.distance_to(pb), c.target_length, c.get_tension(), c.current_hp, c.CHAIN_MAX_HP])
+			return "\n".join(lines)
+		"cut":
+			var chains: Array = get_tree().get_nodes_in_group("chains")
+			var count: int = chains.size()
+			for c in chains:
+				c.sever()
+			return "OK: severed %d chains" % count
+		_:
+			# Same parsing as tether: chain <idx> <point> floor [len] etc.
+			if parts.size() >= 4 and parts[3].to_lower() == "floor":
+				var idx: int = int(parts[1])
+				var point: String = parts[2]
+				var length: float = 100.0
+				if parts.size() > 4:
+					length = float(parts[4])
+				return _create_chain_enemy_floor(idx, point, length)
+			elif parts.size() >= 5:
+				var idx1: int = int(parts[1])
+				var point1: String = parts[2]
+				var idx2: int = int(parts[3])
+				var point2: String = parts[4]
+				var length: float = -1.0
+				if parts.size() > 5:
+					length = float(parts[5])
+				return _create_chain_enemy_enemy(idx1, point1, idx2, point2, length)
+	return "ERR: usage: chain <idx> <point> floor [len] | chain status | chain cut"
+
+
+func _create_chain_enemy_floor(enemy_idx: int, point: String, length: float) -> String:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if enemy_idx >= enemies.size():
+		return "ERR: enemy %d not found" % enemy_idx
+	var enemy: Node2D = enemies[enemy_idx]
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	var chain := Node2D.new()
+	chain.set_script(ChainScript)
+	var ap: String = ""
+	if "_attach_points" in enemy and enemy._attach_points.has(point):
+		ap = point
+	var a: Dictionary = ChainScript.make_anchor_body(enemy, ap)
+	var attach_pos: Vector2 = chain._get_anchor_world_pos(a) if chain.has_method("_get_anchor_world_pos") else enemy.global_position
+	# For static methods we need the instance
+	# Raycast to floor
+	var floor_pos: Vector2 = Vector2(attach_pos.x, attach_pos.y + length + 200)
+	var space := enemy.get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.create(attach_pos, floor_pos, 1)
+	var result: Dictionary = space.intersect_ray(query)
+	if result:
+		floor_pos = result["position"]
+	var b: Dictionary = ChainScript.make_anchor_wall(floor_pos)
+	var actual_length: float = length if length > 0 else attach_pos.distance_to(floor_pos)
+	chain.setup(a, b, actual_length)
+	get_tree().current_scene.add_child(chain)
+	return "OK: chained enemy %d (%s) to floor len=%.0f" % [enemy_idx, point, actual_length]
+
+
+func _create_chain_enemy_enemy(idx1: int, point1: String, idx2: int, point2: String, length: float) -> String:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if idx1 >= enemies.size():
+		return "ERR: enemy %d not found" % idx1
+	if idx2 >= enemies.size():
+		return "ERR: enemy %d not found" % idx2
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	var chain := Node2D.new()
+	chain.set_script(ChainScript)
+	var ap1: String = ""
+	if "_attach_points" in enemies[idx1] and enemies[idx1]._attach_points.has(point1):
+		ap1 = point1
+	var a: Dictionary = ChainScript.make_anchor_body(enemies[idx1], ap1)
+	var ap2: String = ""
+	if "_attach_points" in enemies[idx2] and enemies[idx2]._attach_points.has(point2):
+		ap2 = point2
+	var b: Dictionary = ChainScript.make_anchor_body(enemies[idx2], ap2)
+	if length <= 0:
+		length = enemies[idx1].global_position.distance_to(enemies[idx2].global_position)
+	chain.setup(a, b, length)
+	get_tree().current_scene.add_child(chain)
+	return "OK: chained enemy %d (%s) to enemy %d (%s) len=%.0f" % [idx1, point1, idx2, point2, length]
 
 
 func _cmd_tether(parts: PackedStringArray) -> String:
