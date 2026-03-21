@@ -1292,19 +1292,49 @@ func _exit_splay_edit() -> void:
 				has_active = true
 				break
 		if has_active:
-			# Unfreeze but KEEP pose locked so skeleton holds the edited shape
+			# Snap creature to the configured origin
+			_splay_edit_creature.global_position = _splay_edit_origin
+			_splay_edit_creature.velocity = Vector2.ZERO
+
+			# Restore skeleton from saved snapshot
+			var skel: Dictionary = _splay_edit_pose_data.get("skeleton", {})
+			if not skel.is_empty():
+				var c: Node2D = _splay_edit_creature
+				if skel.has("spine") and skel["spine"].size() >= 3:
+					for i in range(3):
+						c._spine[i] = Vector2(skel["spine"][i][0], skel["spine"][i][1])
+				if skel.has("neck") and skel["neck"].size() >= 2:
+					c._neck[0] = Vector2(skel["neck"][0][0], skel["neck"][0][1])
+					c._neck[1] = Vector2(skel["neck"][1][0], skel["neck"][1][1])
+				if skel.has("skull"):
+					c._skull = Vector2(skel["skull"][0], skel["skull"][1])
+				if skel.has("jaw"):
+					c._jaw = Vector2(skel["jaw"][0], skel["jaw"][1])
+				if skel.has("clavicles") and "_clavicles" in c:
+					c._clavicles[0] = Vector2(skel["clavicles"][0][0], skel["clavicles"][0][1])
+					c._clavicles[1] = Vector2(skel["clavicles"][1][0], skel["clavicles"][1][1])
+				if skel.has("hip_bones") and "_hip_bones" in c:
+					c._hip_bones[0] = Vector2(skel["hip_bones"][0][0], skel["hip_bones"][0][1])
+					c._hip_bones[1] = Vector2(skel["hip_bones"][1][0], skel["hip_bones"][1][1])
+				if skel.has("tail") and "_tail" in c:
+					for ti in range(mini(skel["tail"].size(), c._tail.size())):
+						c._tail[ti] = Vector2(skel["tail"][ti][0], skel["tail"][ti][1])
+				if skel.has("legs") and "_legs" in c:
+					for li in range(mini(skel["legs"].size(), c._legs.size())):
+						for ji in range(3):
+							c._legs[li][ji] = Vector2(skel["legs"][li][ji][0], skel["legs"][li][ji][1])
+				if c.has_method("_update_hitbox_positions"):
+					c._update_hitbox_positions()
+
+			# Keep frozen + pose locked — same as splay spawn
 			if "_physics_frozen" in _splay_edit_creature:
-				_splay_edit_creature._physics_frozen = false
-			# Set pose overrides so the creature holds the edited shape
-			if _splay_edit_creature.has_method("set_pose_overrides"):
-				var overrides: Dictionary = {}
-				for conn in _splay_edit_pose_data.get("connections", []):
-					var pn: String = conn.get("point", "")
-					var rp: Array = conn.get("relative_pos", [0, 0])
-					overrides[pn] = Vector2(rp[0], rp[1])
-				_splay_edit_creature.set_pose_overrides(overrides)
-			# Spawn tethers from the saved pose
+				_splay_edit_creature._physics_frozen = true
+			if "_pose_locked" in _splay_edit_creature:
+				_splay_edit_creature._pose_locked = true
+
+			# Spawn tethers/chains from the saved pose
 			_spawn_tethers_from_pose()
+			_splay_edit_creature.queue_redraw()
 			return
 
 	# No active connections — just unfreeze
