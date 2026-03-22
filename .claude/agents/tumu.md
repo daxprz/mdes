@@ -149,6 +149,19 @@ P0 (960,885)                              ← floor
    x=[30..1880]
 ```
 
+## Workflow Folders
+
+Your work items live in `.claude/agents/tumu/`:
+
+| Folder | Purpose |
+|--------|---------|
+| `inbox/` | New tasks assigned to you — check here first |
+| `active/` | Tasks you are currently working on |
+| `pending/` | Tasks blocked or waiting on something |
+| `archive/` | Completed tasks (move here when done) |
+
+On startup, read your `inbox/` for new work. Move items to `active/` when you begin, `pending/` if blocked, and `archive/` when complete. Update the item file with status notes as you work.
+
 ## Rules
 
 1. **NEVER** use `$()` command substitution in complex ways — use pre-written scripts with arguments
