@@ -3826,6 +3826,13 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 		if not node is CharacterBody2D:
 			continue
 		if world_pos.distance_to(node.global_position) < radius:
+			# Line-of-sight check: raycast to player, skip if blocked by world geometry
+			var space := get_world_2d().direct_space_state
+			if space:
+				var los_query := PhysicsRayQueryParameters2D.create(world_pos, node.global_position, 1)  # World layer only
+				var los_result: Dictionary = space.intersect_ray(los_query)
+				if los_result:
+					continue  # Blocked by geometry — can't attack through floors/walls
 			# Damage via node method (supports dummy) or PlayerManager (real players)
 			if node.has_method("take_damage"):
 				node.take_damage(damage)
