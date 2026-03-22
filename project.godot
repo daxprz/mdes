@@ -32,6 +32,7 @@ Version="*res://scripts/autoload/version.gd"
 Rcon="*res://scripts/autoload/rcon.gd"
 DebugOverlay="*res://scripts/autoload/debug_overlay.gd"
 DebugAspects="*res://scripts/autoload/debug_aspects.gd"
+DebugDrawer="*res://scripts/ui/debug_drawer.gd"
 
 [display]
 

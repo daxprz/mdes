@@ -657,12 +657,10 @@ func _update_panel(player_index: int) -> void:
 
 
 func _input(event: InputEvent) -> void:
-	# Ctrl+D always toggles debug
+	# Ctrl+D now handled by DebugDrawer — sync debug_mode from DebugOverlay
 	if event is InputEventKey and event.pressed and event.keycode == KEY_D and event.ctrl_pressed:
-		_debug_mode = not _debug_mode
-		if not _debug_mode:
-			debug_selected_enemy = null
-			_debug_enemy_index = -1
+		# DebugDrawer handles the toggle and syncs PlayerHUD._debug_mode
+		return
 
 	# TAB cycles through enemies in debug mode
 	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
