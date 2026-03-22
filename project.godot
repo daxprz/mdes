@@ -30,6 +30,8 @@ PlayerHUD="*res://scripts/autoload/player_hud.gd"
 LevelConfig="*res://scripts/autoload/level_config.gd"
 Version="*res://scripts/autoload/version.gd"
 Rcon="*res://scripts/autoload/rcon.gd"
+DebugOverlay="*res://scripts/autoload/debug_overlay.gd"
+DebugAspects="*res://scripts/autoload/debug_aspects.gd"
 
 [display]
 
