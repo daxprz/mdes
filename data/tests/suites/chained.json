@@ -1,0 +1,13 @@
+{
+	"name": "chained",
+	"description": "Chained monster behavior tests",
+	"tests": [
+		"chained_floor",
+		"chained_reach",
+		"chained_above"
+	],
+	"aggregation": {
+		"show_grid": true,
+		"pass_threshold": 1.0
+	}
+}

@@ -1,0 +1,17 @@
+{
+	"name": "chained_above",
+	"description": "Chained monster on floor, dummy on platform above — monster should not teleport up",
+	"setup": [
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn dummy 960 520",
+		"spawn monster 960 885",
+		"chain 0 head floor 200"
+	],
+	"wait": 15.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_eq": 0, "label": "no_teleport_damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+	]
+}

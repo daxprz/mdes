@@ -605,8 +605,17 @@ func _apply_chain_constraints() -> void:
 					if (velocity.x > 0 and sign_x > 0) or (velocity.x < 0 and sign_x < 0):
 						velocity.x = 0
 			else:
-				# Not on floor: full 2D constraint
-				global_position = other_pos + dir * tether.target_length - my_attach_offset
+				# Not on floor: full 2D constraint, but don't push below floor
+				var new_pos: Vector2 = other_pos + dir * tether.target_length - my_attach_offset
+				# Raycast to find floor below the new position
+				var space := get_world_2d().direct_space_state
+				if space:
+					var floor_query := PhysicsRayQueryParameters2D.create(
+						new_pos + Vector2(0, -20), new_pos + Vector2(0, 20), 1)
+					var floor_result: Dictionary = space.intersect_ray(floor_query)
+					if floor_result and new_pos.y > floor_result["position"].y:
+						new_pos.y = floor_result["position"].y
+				global_position = new_pos
 				var vel_along: float = velocity.dot(dir)
 				if vel_along > 0:
 					velocity -= dir * vel_along

@@ -134,6 +134,9 @@ func _physics_process(delta: float) -> void:
 		_prev_points[i] = current
 		_points[i] = current + velocity + gravity * delta * delta
 
+	# Surface collision: push points out of world geometry
+	_collide_with_surfaces()
+
 	# Jakobsen constraint solving: enforce fixed distances
 	# Iterations scale with chain length for convergence
 	var iterations: int = clampi(_point_count * 2, 20, 100)
@@ -158,6 +161,9 @@ func _physics_process(delta: float) -> void:
 			if i + 1 < _point_count - 1:
 				_points[i + 1] -= offset
 
+	# Re-apply surface collision after constraints (may have pushed points inside)
+	_collide_with_surfaces()
+
 	# Check for projectile hits
 	_check_projectile_hits()
 
@@ -166,6 +172,64 @@ func _physics_process(delta: float) -> void:
 		_shake_timer -= delta
 
 	queue_redraw()
+
+
+func _collide_with_surfaces() -> void:
+	## For each intermediate chain point, check if it's inside world geometry.
+	## If so, push it to the nearest surface. Uses short raycasts in 4 directions.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return
+
+	for i in range(1, _point_count - 1):
+		var pt: Vector2 = _points[i]
+
+		# Raycast downward — most common collision (chain resting on platform)
+		var query_down := PhysicsRayQueryParameters2D.create(
+			pt + Vector2(0, -2), pt + Vector2(0, 4), 1  # World layer only
+		)
+		var result: Dictionary = space.intersect_ray(query_down)
+		if result:
+			# Point is at or below a surface — push it up
+			_points[i].y = result["position"].y - 1.0
+			# Kill downward velocity (friction)
+			if i < _prev_points.size():
+				_prev_points[i].y = _points[i].y
+				# Add friction to horizontal movement on surfaces
+				_prev_points[i].x = lerpf(_prev_points[i].x, _points[i].x, 0.1)
+			continue
+
+		# Raycast upward — ceiling collision
+		var query_up := PhysicsRayQueryParameters2D.create(
+			pt + Vector2(0, 2), pt + Vector2(0, -4), 1
+		)
+		result = space.intersect_ray(query_up)
+		if result:
+			_points[i].y = result["position"].y + 1.0
+			if i < _prev_points.size():
+				_prev_points[i].y = _points[i].y
+			continue
+
+		# Raycast left — wall collision
+		var query_left := PhysicsRayQueryParameters2D.create(
+			pt + Vector2(2, 0), pt + Vector2(-4, 0), 1
+		)
+		result = space.intersect_ray(query_left)
+		if result:
+			_points[i].x = result["position"].x + 1.0
+			if i < _prev_points.size():
+				_prev_points[i].x = _points[i].x
+			continue
+
+		# Raycast right — wall collision
+		var query_right := PhysicsRayQueryParameters2D.create(
+			pt + Vector2(-2, 0), pt + Vector2(4, 0), 1
+		)
+		result = space.intersect_ray(query_right)
+		if result:
+			_points[i].x = result["position"].x - 1.0
+			if i < _prev_points.size():
+				_prev_points[i].x = _points[i].x
 
 
 func _check_projectile_hits() -> void:
