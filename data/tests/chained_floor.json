@@ -10,7 +10,7 @@
 		"wait 1",
 		"chain 0 head floor 200",
 		"wait 1",
-		"spawn dummy 800 885",
+		"spawn dummy 900 885",
 		"standdown off"
 	],
 	"wait": 15.0,

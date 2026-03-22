@@ -22,6 +22,10 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Re-apply portal state periodically (catches portals created after rebuild)
+	if Engine.get_frames_drawn() % 60 == 0:
+		_apply_portal_state()
+
 	# Accept new connections
 	if _server.is_connection_available():
 		var peer: StreamPeerTCP = _server.take_connection()
@@ -317,14 +321,13 @@ func _execute(command: String) -> String:
 			return "OK: territorial=%s on %d monsters" % [state_str, count]
 
 		"portal":
-			# portal on|off — enable/disable portal transition
+			# portal on|off — enable/disable portal transition (persists across rebuilds)
 			var enable: bool = true
 			if parts.size() > 1 and parts[1].to_lower() == "off":
 				enable = false
-			for node in get_tree().current_scene.get_children():
-				if "disabled" in node and node.has_method("_process"):
-					if node.name.begins_with("Portal") or node.name.begins_with("Doorway") or ("_doors_open" in node):
-						node.disabled = not enable
+			# Store as meta on the scene so it persists across rebuilds
+			get_tree().current_scene.set_meta("portal_disabled", not enable)
+			_apply_portal_state()
 			return "OK: portal %s" % ("enabled" if enable else "disabled")
 
 		"standdown":
@@ -1161,6 +1164,17 @@ func _create_tether_wall_wall(pos_a: Vector2, pos_b: Vector2, length: float) -> 
 	return "OK: tethered wall (%.0f,%.0f) to (%.0f,%.0f) len=%.0f" % [pos_a.x, pos_a.y, pos_b.x, pos_b.y, length]
 
 
+func _apply_portal_state() -> void:
+	## Apply the stored portal disabled state to all portal nodes.
+	var scene := get_tree().current_scene
+	if not scene:
+		return
+	var disabled: bool = scene.get_meta("portal_disabled", false)
+	for node in scene.get_children():
+		if "disabled" in node and ("_doors_open" in node or node.name.contains("ortal") or node.name.contains("oorway")):
+			node.disabled = disabled
+
+
 func _cmd_standdown(parts: PackedStringArray) -> String:
 	## Toggle or set stand-down mode on all quadruped monsters.
 	var enemies: Array = get_tree().get_nodes_in_group("enemies")
@@ -1178,6 +1192,11 @@ func _cmd_standdown(parts: PackedStringArray) -> String:
 				e._standdown = new_state as bool
 			else:
 				e._standdown = not e._standdown
+			# When waking up (standdown off), kick into CHASE state
+			if not e._standdown and "_state" in e and e._state == 19:  # 19 = STANDDOWN
+				e._state = 1  # CHASE
+				if e.has_method("_pick_target"):
+					e._pick_target()
 			count += 1
 
 	if count == 0:
