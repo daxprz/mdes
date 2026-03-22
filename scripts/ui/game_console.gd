@@ -19,6 +19,31 @@ var _current_input: String = ""
 var _scroll_offset: int = 0
 var _cursor_blink: float = 0.0
 
+# Autocomplete
+var _tab_completions: Array[String] = []
+var _tab_index: int = 0
+
+# All known commands for autocomplete
+const COMMANDS := [
+	"help", "debug", "spawn monster", "spawn dummy", "spawn attacker",
+	"clear", "clearplayers", "enablejoins", "portal off", "portal on",
+	"tp", "tab", "key", "enemies", "players", "status", "quit",
+	"standdown on", "standdown off", "standdown",
+	"territorial on", "territorial off", "territorial",
+	"revive", "resethp", "fps", "hp", "ik", "ikreset", "thrash", "ball",
+	"debugdraw", "title", "score", "grid",
+	"partstatus", "partdmg", "weight",
+	"attach balloon", "detach",
+	"tether status", "tether cut", "tether length",
+	"chain status", "chain cut", "chaindump",
+	"splay list", "splay spawn", "splay clear", "splay status",
+	"dump",
+	"attacker target", "attacker part", "attacker weapon",
+	"attacker rate", "attacker stop", "attacker start", "attacker stats",
+	"attacker tether_length", "attacker tether_b",
+	"run", "suite", "tests", "cls",
+]
+
 # Test runner
 var _test_runner: Node = null
 
@@ -84,9 +109,13 @@ func _input(event: InputEvent) -> void:
 			KEY_ENTER:
 				_execute_input()
 				get_viewport().set_input_as_handled()
+			KEY_TAB:
+				_autocomplete()
+				get_viewport().set_input_as_handled()
 			KEY_BACKSPACE:
 				if _current_input.length() > 0:
 					_current_input = _current_input.substr(0, _current_input.length() - 1)
+					_tab_completions.clear()
 				get_viewport().set_input_as_handled()
 			KEY_UP:
 				_history_up()
@@ -102,6 +131,7 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			_:
 				# Type character
+				_tab_completions.clear()
 				if event.unicode > 0 and event.keycode != KEY_QUOTELEFT:
 					_current_input += char(event.unicode)
 					get_viewport().set_input_as_handled()
@@ -179,6 +209,69 @@ func _log_result(result: String) -> void:
 		_log(result, Color(1.0, 0.3, 0.3))
 	else:
 		_log(result, Color(0.8, 0.8, 0.8))
+
+
+func _autocomplete() -> void:
+	## Tab autocomplete — cycles through matching commands.
+	if _current_input.is_empty():
+		return
+
+	# Build completions list on first tab press
+	if _tab_completions.is_empty():
+		var prefix: String = _current_input.to_lower()
+		# Match against known commands
+		for cmd in COMMANDS:
+			if cmd.to_lower().begins_with(prefix):
+				_tab_completions.append(cmd)
+		# If input starts with "run " or "suite ", also complete test/suite names
+		if prefix.begins_with("run "):
+			var test_prefix: String = prefix.substr(4)
+			for test_name in _get_test_names():
+				if test_name.to_lower().begins_with(test_prefix):
+					_tab_completions.append("run " + test_name)
+		elif prefix.begins_with("suite "):
+			var suite_prefix: String = prefix.substr(6)
+			for suite_name in _get_suite_names():
+				if suite_name.to_lower().begins_with(suite_prefix):
+					_tab_completions.append("suite " + suite_name)
+		_tab_index = 0
+
+	if _tab_completions.is_empty():
+		return
+
+	# Cycle through completions
+	_current_input = _tab_completions[_tab_index]
+	_tab_index = (_tab_index + 1) % _tab_completions.size()
+
+
+func _get_test_names() -> Array[String]:
+	var names: Array[String] = []
+	for dir_path in ["res://data/tests/", "user://data/tests/"]:
+		var dir := DirAccess.open(dir_path)
+		if not dir:
+			continue
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				names.append(fname.replace(".json", ""))
+			fname = dir.get_next()
+	return names
+
+
+func _get_suite_names() -> Array[String]:
+	var names: Array[String] = []
+	for dir_path in ["res://data/tests/suites/", "user://data/tests/suites/"]:
+		var dir := DirAccess.open(dir_path)
+		if not dir:
+			continue
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				names.append(fname.replace(".json", ""))
+			fname = dir.get_next()
+	return names
 
 
 func _history_up() -> void:
@@ -274,6 +367,20 @@ func _draw_console() -> void:
 		var entry: Dictionary = _output_lines[i]
 		_panel.draw_string(font, Vector2(10, y + 10), entry["text"], HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 11, entry["color"])
 		y += line_h
+
+	# Autocomplete hint (above input line)
+	if not _tab_completions.is_empty():
+		var hint_y: float = _panel_y + ph - 36
+		var hint_parts: Array[String] = []
+		for ci in range(mini(_tab_completions.size(), 8)):
+			if ci == (_tab_index - 1 + _tab_completions.size()) % _tab_completions.size():
+				hint_parts.append("[%s]" % _tab_completions[ci])
+			else:
+				hint_parts.append(_tab_completions[ci])
+		var hint_text: String = "  ".join(hint_parts)
+		if _tab_completions.size() > 8:
+			hint_text += "  (+%d more)" % (_tab_completions.size() - 8)
+		_panel.draw_string(font, Vector2(10, hint_y + 10), hint_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 10, Color(0.5, 0.7, 0.5, 0.7))
 
 	# Input line
 	var input_y: float = _panel_y + ph - 20
