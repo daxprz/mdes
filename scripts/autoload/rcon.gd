@@ -925,7 +925,7 @@ func _cmd_chain(parts: PackedStringArray) -> String:
 				c.sever()
 			return "OK: severed %d chains" % count
 		_:
-			# Same parsing as tether: chain <idx> <point> floor [len] etc.
+			# chain <idx> <point> floor [len]
 			if parts.size() >= 4 and parts[3].to_lower() == "floor":
 				var idx: int = int(parts[1])
 				var point: String = parts[2]
@@ -933,6 +933,16 @@ func _cmd_chain(parts: PackedStringArray) -> String:
 				if parts.size() > 4:
 					length = float(parts[4])
 				return _create_chain_enemy_floor(idx, point, length)
+			# chain <idx> <point> wall <x> <y> [len]
+			elif parts.size() >= 6 and parts[3].to_lower() == "wall":
+				var idx: int = int(parts[1])
+				var point: String = parts[2]
+				var wall_x: float = float(parts[4])
+				var wall_y: float = float(parts[5])
+				var length: float = -1.0
+				if parts.size() > 6:
+					length = float(parts[6])
+				return _create_chain_enemy_wall(idx, point, Vector2(wall_x, wall_y), length)
 			elif parts.size() >= 5:
 				var idx1: int = int(parts[1])
 				var point1: String = parts[2]
@@ -974,6 +984,31 @@ func _create_chain_enemy_floor(enemy_idx: int, point: String, length: float) -> 
 	if "_chained" in enemy:
 		enemy._chained = true
 	return "OK: chained enemy %d (%s) to floor len=%.0f" % [enemy_idx, point, actual_length]
+
+
+func _create_chain_enemy_wall(enemy_idx: int, point: String, wall_pos: Vector2, length: float) -> String:
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if enemy_idx >= enemies.size():
+		return "ERR: enemy %d not found" % enemy_idx
+	var enemy: Node2D = enemies[enemy_idx]
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	var chain := Node2D.new()
+	chain.set_script(ChainScript)
+	var ap: String = ""
+	if "_attach_points" in enemy and enemy._attach_points.has(point):
+		ap = point
+	var a: Dictionary = ChainScript.make_anchor_body(enemy, ap)
+	var b: Dictionary = ChainScript.make_anchor_wall(wall_pos)
+	if length <= 0:
+		var attach_pos: Vector2 = enemy.global_position
+		if ap != "" and enemy.has_method("get_attach_world_position"):
+			attach_pos = enemy.get_attach_world_position(ap)
+		length = attach_pos.distance_to(wall_pos)
+	chain.setup(a, b, length)
+	get_tree().current_scene.add_child(chain)
+	if "_chained" in enemy:
+		enemy._chained = true
+	return "OK: chained enemy %d (%s) to wall (%.0f,%.0f) len=%.0f" % [enemy_idx, point, wall_pos.x, wall_pos.y, length]
 
 
 func _create_chain_enemy_enemy(idx1: int, point1: String, idx2: int, point2: String, length: float) -> String:
