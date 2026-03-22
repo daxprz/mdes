@@ -1599,6 +1599,25 @@ func _do_chase(_delta: float) -> void:
 	if _precog_has_waypoint or not _precog_path_edges.is_empty():
 		_time_since_strike_range = 0.0
 
+	# Chained: abandon unreachable precog waypoints
+	if _precog_has_waypoint and _chained:
+		for tether in get_tree().get_nodes_in_group("tethers"):
+			if not is_instance_valid(tether) or tether._severed:
+				continue
+			if tether.anchor_a.get("body") == self or tether.anchor_b.get("body") == self:
+				var other_anchor: Dictionary = tether.anchor_b if tether.anchor_a.get("body") == self else tether.anchor_a
+				var anchor_pos: Vector2
+				if other_anchor.get("is_wall", false):
+					anchor_pos = other_anchor.get("pos", Vector2.ZERO)
+				elif is_instance_valid(other_anchor.get("body")):
+					anchor_pos = other_anchor["body"].global_position
+				else:
+					continue
+				if _precog_waypoint.distance_to(anchor_pos) > tether.target_length:
+					_precog_has_waypoint = false
+					_precog_path_edges.clear()
+					break
+
 	if _precog_has_waypoint:
 		var to_waypoint: Vector2 = _precog_waypoint - global_position
 		var waypoint_dist: float = absf(to_waypoint.x)
