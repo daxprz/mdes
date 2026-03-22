@@ -17,6 +17,7 @@ sleep 5
 
 R "debug"
 R "clear"
+R "portal off"
 R "clearplayers"
 sleep 2
 

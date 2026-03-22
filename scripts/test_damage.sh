@@ -12,6 +12,7 @@ sleep 1
 sleep 5
 
 R "clear"
+R "portal off"
 R "clearplayers"
 sleep 1
 R "spawn dummy 1600 880"
@@ -108,6 +109,7 @@ echo ""
 echo "--- Test 6: Attack Dummy → Monster ---"
 # Respawn fresh monster for attack test
 R "clear"
+R "portal off"
 sleep 0.5
 R "spawn monster 960 880"
 sleep 1

@@ -35,9 +35,13 @@ var _fog_particles: Array = []
 var _particle_timer: float = 0.0
 var _fog_timer: float = 0.0
 var _hum_timer: float = 0.0
+var disabled: bool = false  # When true, portal doesn't check for players
 
 
 func _process(delta: float) -> void:
+	if disabled:
+		queue_redraw()
+		return
 	_timer += delta
 	_particle_timer += delta
 	_fog_timer += delta

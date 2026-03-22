@@ -12,6 +12,7 @@ sleep 1
 sleep 5
 
 R "clear"
+R "portal off"
 R "clearplayers"
 sleep 1
 R "spawn dummy 1600 880"

@@ -163,6 +163,40 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.24
+**Chained Creature AI, In-Game Console, Portal Test Safety**
+
+**Chained Creature AI:**
+- Active chained creatures walk, chase, and attack within chain reach
+- Horizontal chain constraint: uses Pythagorean max-X at current Y (no vertical yanking)
+- No precog pathfinding for chained creatures (can't multi-hop)
+- No leaping for chained creatures
+- Stale precog waypoints cleared on spawn
+- Chain constraint applied before move_and_slide (floor collision respected)
+- Asleep chained: stays frozen, zero velocity
+- Awake + on floor: full AI with chain limits
+- Awake + suspended: dangles with gravity, limbs enforced
+
+**In-Game Console (backtick `):**
+- Quake-style pop-down console, accepts all RCON commands
+- Test runner: `run <test>`, `suite <name>`, `tests`
+- File-based tests (JSON): setup commands, wait, checks
+- 13 combat test files + combat suite
+- Frame-based task queue for sequential test execution
+- Command history, scrollable output, color-coded results
+
+**Editor Fixes:**
+- Ctrl+E works on first press
+- Splay drag: stored creature reference (no proximity guessing)
+- Splay drag: Verlet chain points shift with creature
+- Rotation ring in splay edit (drag to rotate all points around origin)
+- FABRIK: 30 iterations, angle corrections propagate downstream
+
+**Portal Test Safety:**
+- `portal off` RCON command disables portal transitions
+- All test scripts + JSON test files include portal off in setup
+- Prevents test dummy from triggering level transition
+
 ### v0.9.21
 **Verlet Chain Physics, Chained Creature Mode, Breakaway Fix, Pose Lock Fix**
 

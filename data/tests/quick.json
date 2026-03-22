@@ -1,15 +1,26 @@
 {
 	"name": "quick",
-	"description": "Quick sanity check — spawn monster, verify it attacks",
+	"description": "Quick sanity check \u2014 spawn monster, verify it attacks",
 	"setup": [
 		"clear",
+		"portal off",
 		"clearplayers",
 		"spawn dummy 800 885",
 		"spawn monster 960 885"
 	],
 	"wait": 15.0,
 	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		{
+			"command": "hp",
+			"extract": "damage_taken",
+			"expect_gt": 0,
+			"label": "damage"
+		},
+		{
+			"command": "fps",
+			"extract": "fps",
+			"expect_gt": 20,
+			"label": "fps"
+		}
 	]
 }

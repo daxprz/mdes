@@ -3,14 +3,30 @@
 	"description": "Monster hunts dummy on platform 1",
 	"setup": [
 		"clear",
+		"portal off",
 		"clearplayers",
 		"spawn dummy 550 745",
 		"spawn monster 960 885"
 	],
 	"wait": 15.0,
 	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" },
-		{ "command": "ik", "extract": "ik_peak", "expect_lt": 2000, "label": "ik_peak" }
+		{
+			"command": "hp",
+			"extract": "damage_taken",
+			"expect_gt": 0,
+			"label": "damage"
+		},
+		{
+			"command": "fps",
+			"extract": "fps",
+			"expect_gt": 20,
+			"label": "fps"
+		},
+		{
+			"command": "ik",
+			"extract": "ik_peak",
+			"expect_lt": 2000,
+			"label": "ik_peak"
+		}
 	]
 }

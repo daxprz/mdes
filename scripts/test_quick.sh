@@ -20,6 +20,7 @@ if [ "$ERRORS" -gt 0 ]; then
 fi
 
 R "clear"
+R "portal off"
 R "clearplayers"
 sleep 1
 R "spawn dummy 800 880"

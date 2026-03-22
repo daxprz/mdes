@@ -316,6 +316,17 @@ func _execute(command: String) -> String:
 			var state_str: String = str(enemies[0].territorial) if "territorial" in enemies[0] else "?"
 			return "OK: territorial=%s on %d monsters" % [state_str, count]
 
+		"portal":
+			# portal on|off — enable/disable portal transition
+			var enable: bool = true
+			if parts.size() > 1 and parts[1].to_lower() == "off":
+				enable = false
+			for node in get_tree().current_scene.get_children():
+				if "disabled" in node and node.has_method("_process"):
+					if node.name.begins_with("Portal") or node.name.begins_with("Doorway") or ("_doors_open" in node):
+						node.disabled = not enable
+			return "OK: portal %s" % ("enabled" if enable else "disabled")
+
 		"standdown":
 			return _cmd_standdown(parts)
 

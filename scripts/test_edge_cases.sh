@@ -27,6 +27,7 @@ for SCENE in $SCENARIOS; do
     IFS=: read -r LABEL DX DY MX MY <<< "$SCENE"
 
     R "clear" > /dev/null 2>&1
+R "portal off" > /dev/null 2>&1
     R "clearplayers" > /dev/null 2>&1
     sleep 1
     R "spawn dummy $DX $DY" > /dev/null 2>&1

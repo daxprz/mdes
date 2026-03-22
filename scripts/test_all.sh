@@ -18,6 +18,7 @@ run_scenario() {
     local TITLE=$1 LABEL=$2 DX=$3 DY=$4 MX=$5 MY=$6 FORCE_PRECOG=$7
 
     R "clear" > /dev/null 2>&1
+R "portal off" > /dev/null 2>&1
     R "clearplayers" > /dev/null 2>&1
     sleep 1
     R "spawn dummy $DX $DY" > /dev/null 2>&1
