@@ -163,6 +163,38 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.9.25
+**Chain Surface Collision, Physical Chain Constraints, Console Autocomplete**
+
+**Chain Surface Collision:**
+- Verlet chain points raycast in 4 directions (down, up, left, right)
+- Chains drape over platforms, rest on ledges, slide against walls
+- Surface friction dampens horizontal sliding
+- Only collides with world geometry (players pass through)
+
+**Physical Chain Constraints:**
+- Leaps/precog/lunges all allowed for chained creatures — chain physically limits reach
+- On-floor: horizontal-only constraint (Pythagorean max-X at current Y)
+- Airborne: full 2D constraint with floor clamp (no clipping through geometry)
+- Chain constraint runs before move_and_slide (respects floor collision)
+- Standdown off now forces CHASE state + picks target
+
+**Console Autocomplete (Tab):**
+- Tab cycles through matching commands
+- Completes RCON commands, test names (`run <tab>`), suite names (`suite <tab>`)
+- Current match highlighted in [brackets] above input line
+- Up to 8 matches shown with overflow indicator
+
+**Chained Monster Tests:**
+- chained_floor: monster attacks nearby dummy within chain reach
+- chained_reach: dummy beyond chain length (expects 0 damage)
+- chained_above: dummy on platform above (expects 0 damage)
+- Test setup: spawn standdown → chain → spawn dummy → wake
+
+**Portal Safety:**
+- Portal disabled state persists across level rebuilds (stored as scene meta)
+- Re-applied every 60 frames to catch recreated portal nodes
+
 ### v0.9.24
 **Chained Creature AI, In-Game Console, Portal Test Safety**
 
