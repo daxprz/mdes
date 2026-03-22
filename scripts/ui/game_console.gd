@@ -43,6 +43,10 @@ const COMMANDS := [
 	"attacker tether_length", "attacker tether_b",
 	"run", "suite", "tests", "cls",
 	"etz", "daz", "zones", "clearzones",
+	"debug", "debug list", "debug on", "debug off",
+	"debug log", "debug console", "debug both", "debug nolog",
+	"debug save", "debug load", "debug filter type", "debug filter id",
+	"debug reset", "debug profile", "debug clear_transient",
 ]
 
 var _panel: Control = null

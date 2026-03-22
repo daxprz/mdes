@@ -70,11 +70,10 @@ func _execute(command: String) -> String:
 
 	match cmd:
 		"help":
-			return "Commands: help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <target|part|weapon|rate|stop|start|stats>, run <test>, suite <suite>, tests, etz <id> <x> <y> <r> [eid], daz <id> <x> <y> <r> [eid], zones, clearzones, status, quit"
+			return "Commands: help, debug [list|on|off|log|console|both|nolog|save|load|filter|reset|profile|clear_transient], spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <...>, run <test>, suite <suite>, tests, etz, daz, zones, clearzones, status, quit"
 
 		"debug":
-			PlayerHUD._debug_mode = not PlayerHUD._debug_mode
-			return "OK: debug=%s" % str(PlayerHUD._debug_mode)
+			return _cmd_debug(parts)
 
 		"spawn":
 			var what: String = parts[1] if parts.size() > 1 else "monster"
@@ -1396,6 +1395,144 @@ func _cmd_attacker(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown attacker subcommand '%s'. Try: target, part, weapon, rate, stop, start, stats, tether_length, tether_b" % subcmd
+
+
+func _cmd_debug(parts: PackedStringArray) -> String:
+	if parts.size() < 2:
+		# No subcommand: toggle global on/off
+		DebugOverlay.global_enabled = not DebugOverlay.global_enabled
+		# Sync legacy PlayerHUD._debug_mode for backward compat during migration
+		PlayerHUD._debug_mode = DebugOverlay.global_enabled
+		return "OK: debug=%s" % ("on" if DebugOverlay.global_enabled else "off")
+
+	var subcmd: String = parts[1].to_lower()
+
+	match subcmd:
+		"list":
+			return DebugOverlay.get_status_text()
+
+		"on":
+			if parts.size() < 3:
+				return "ERR: usage: debug on <aspect>[/<sub>]"
+			var path: String = parts[2]
+			_debug_set_human_visual(path, true)
+			return "OK: %s visual=on" % path
+
+		"off":
+			if parts.size() < 3:
+				return "ERR: usage: debug off <aspect>[/<sub>]"
+			var path: String = parts[2]
+			_debug_set_human_visual(path, false)
+			return "OK: %s visual=off" % path
+
+		"log":
+			if parts.size() < 3:
+				return "ERR: usage: debug log <aspect>[/<sub>]"
+			_debug_set_human_textual(parts[2], DebugOverlay.TextMode.LOG)
+			return "OK: %s textual=log" % parts[2]
+
+		"console":
+			if parts.size() < 3:
+				return "ERR: usage: debug console <aspect>[/<sub>]"
+			_debug_set_human_textual(parts[2], DebugOverlay.TextMode.CONSOLE)
+			return "OK: %s textual=console" % parts[2]
+
+		"both":
+			if parts.size() < 3:
+				return "ERR: usage: debug both <aspect>[/<sub>]"
+			_debug_set_human_textual(parts[2], DebugOverlay.TextMode.BOTH)
+			return "OK: %s textual=both" % parts[2]
+
+		"nolog":
+			if parts.size() < 3:
+				return "ERR: usage: debug nolog <aspect>[/<sub>]"
+			_debug_set_human_textual(parts[2], DebugOverlay.TextMode.NONE)
+			return "OK: %s textual=none" % parts[2]
+
+		"save":
+			DebugOverlay.save_profile()
+			return "OK: debug profile saved"
+
+		"load":
+			DebugOverlay.load_profile()
+			return "OK: debug profile loaded"
+
+		"filter":
+			return _cmd_debug_filter(parts)
+
+		"reset":
+			DebugOverlay.remove_observer("human")
+			return "OK: human observer state cleared"
+
+		"profile":
+			# Inline JSON profile: debug profile {"pathing/waypoints":"log"}
+			if parts.size() < 3:
+				return "ERR: usage: debug profile <json>"
+			var json_str: String = " ".join(parts.slice(2))
+			var json := JSON.new()
+			if json.parse(json_str) != OK:
+				return "ERR: invalid JSON: %s" % json.get_error_message()
+			DebugOverlay.apply_profile("script:rcon", json.data)
+			return "OK: applied debug profile (%d aspects)" % json.data.size()
+
+		"clear_transient":
+			DebugOverlay.clear_transient_observers()
+			return "OK: transient observers cleared"
+
+		_:
+			return "ERR: unknown debug subcommand '%s'. Try: list, on, off, log, console, both, nolog, save, load, filter, reset, profile, clear_transient" % subcmd
+
+
+## Set human visual for an aspect or all aspects in a group.
+func _debug_set_human_visual(path: String, visual: bool) -> void:
+	# Check if it's a group name (no "/" in path)
+	if "/" not in path:
+		# Try as group
+		var aspects: Array[String] = DebugOverlay.get_aspects_in_group(path)
+		if aspects.size() > 0:
+			DebugOverlay.set_group_visual(path, visual)
+			return
+	# Single aspect
+	var state: Array = DebugOverlay.get_observer_state(path, "human")
+	DebugOverlay.set_observer(path, "human", visual, state[1])
+
+
+## Set human textual for an aspect or all aspects in a group.
+func _debug_set_human_textual(path: String, textual: int) -> void:
+	if "/" not in path:
+		var aspects: Array[String] = DebugOverlay.get_aspects_in_group(path)
+		if aspects.size() > 0:
+			DebugOverlay.set_group_textual(path, textual)
+			return
+	var state: Array = DebugOverlay.get_observer_state(path, "human")
+	DebugOverlay.set_observer(path, "human", state[0], textual)
+
+
+func _cmd_debug_filter(parts: PackedStringArray) -> String:
+	# debug filter type <type> on|off
+	# debug filter id <pattern>
+	if parts.size() < 4:
+		return "ERR: usage: debug filter type <type> on|off  |  debug filter id <pattern>"
+
+	var filter_type: String = parts[2].to_lower()
+	match filter_type:
+		"type":
+			var type_name: String = parts[3].to_lower()
+			if parts.size() < 5:
+				# Show current state
+				var enabled: bool = DebugOverlay.entity_type_filter.get(type_name, true)
+				return "filter type %s=%s" % [type_name, "on" if enabled else "off"]
+			var on_off: String = parts[4].to_lower()
+			DebugOverlay.entity_type_filter[type_name] = (on_off == "on")
+			return "OK: filter type %s=%s" % [type_name, on_off]
+
+		"id":
+			var pattern: String = parts[3]
+			DebugOverlay.entity_id_pattern = pattern
+			return "OK: filter id=%s" % pattern
+
+		_:
+			return "ERR: unknown filter type '%s'. Try: type, id" % filter_type
 
 
 func _ensure_test_runner() -> void:
