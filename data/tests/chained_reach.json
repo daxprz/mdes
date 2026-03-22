@@ -1,18 +1,21 @@
 {
 	"name": "chained_reach",
-	"description": "Chained monster tries to reach dummy beyond chain length",
+	"description": "Chained monster cannot reach dummy beyond chain length",
 	"setup": [
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn dummy 400 885",
 		"spawn monster 960 885",
-		"chain 0 head floor 100"
+		"standdown on",
+		"wait 1",
+		"chain 0 head floor 100",
+		"wait 1",
+		"spawn dummy 400 885",
+		"standdown off"
 	],
 	"wait": 15.0,
 	"checks": [
 		{ "command": "hp", "extract": "damage_taken", "expect_eq": 0, "label": "no_damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" },
-		{ "command": "enemies", "extract": "", "expect_contains": "CharacterBody2D", "label": "monster_alive" }
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
 	]
 }

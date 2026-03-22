@@ -1,13 +1,17 @@
 {
 	"name": "chained_above",
-	"description": "Chained monster on floor, dummy on platform above — monster should not teleport up",
+	"description": "Chained monster on floor cannot reach dummy on platform above",
 	"setup": [
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn dummy 960 520",
 		"spawn monster 960 885",
-		"chain 0 head floor 200"
+		"standdown on",
+		"wait 1",
+		"chain 0 head floor 200",
+		"wait 1",
+		"spawn dummy 960 520",
+		"standdown off"
 	],
 	"wait": 15.0,
 	"checks": [

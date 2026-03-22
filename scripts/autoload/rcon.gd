@@ -967,6 +967,9 @@ func _create_chain_enemy_floor(enemy_idx: int, point: String, length: float) -> 
 	var actual_length: float = length if length > 0 else attach_pos.distance_to(floor_pos)
 	chain.setup(a, b, actual_length)
 	get_tree().current_scene.add_child(chain)
+	# Set _chained flag on the enemy so it respects chain constraints
+	if "_chained" in enemy:
+		enemy._chained = true
 	return "OK: chained enemy %d (%s) to floor len=%.0f" % [enemy_idx, point, actual_length]
 
 
@@ -991,6 +994,10 @@ func _create_chain_enemy_enemy(idx1: int, point1: String, idx2: int, point2: Str
 		length = enemies[idx1].global_position.distance_to(enemies[idx2].global_position)
 	chain.setup(a, b, length)
 	get_tree().current_scene.add_child(chain)
+	if "_chained" in enemies[idx1]:
+		enemies[idx1]._chained = true
+	if "_chained" in enemies[idx2]:
+		enemies[idx2]._chained = true
 	return "OK: chained enemy %d (%s) to enemy %d (%s) len=%.0f" % [idx1, point1, idx2, point2, length]
 
 

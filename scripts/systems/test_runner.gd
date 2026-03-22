@@ -88,12 +88,31 @@ func _queue_test(test_data: Dictionary) -> void:
 	var wait_time: float = test_data.get("wait", 10.0)
 	var checks: Array = test_data.get("checks", [])
 
-	# Task 1: Setup — run RCON commands
-	_task_queue.append({
-		"type": TASK_RCON,
-		"test_name": test_name,
-		"commands": setup_cmds,
-	})
+	# Task 1: Setup — run RCON commands (split on "wait N" for inline delays)
+	var current_batch: Array = []
+	var first_batch: bool = true
+	for cmd in setup_cmds:
+		if cmd.begins_with("wait "):
+			# Flush current batch
+			if not current_batch.is_empty():
+				_task_queue.append({
+					"type": TASK_RCON,
+					"test_name": test_name if first_batch else "",
+					"commands": current_batch,
+				})
+				first_batch = false
+				current_batch = []
+			# Insert wait task
+			var wait_secs: float = float(cmd.substr(5))
+			_task_queue.append({"type": TASK_WAIT, "duration": wait_secs, "test_name": ""})
+		else:
+			current_batch.append(cmd)
+	if not current_batch.is_empty():
+		_task_queue.append({
+			"type": TASK_RCON,
+			"test_name": test_name if first_batch else "",
+			"commands": current_batch,
+		})
 
 	# Task 2: Wait
 	_task_queue.append({
