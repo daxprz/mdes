@@ -1683,18 +1683,15 @@ func _do_chase(_delta: float) -> void:
 		return
 
 	# If target is on a different platform, use precog pathfinding
-	# Chained creatures can't do multi-hop — just chase directly
-	if not _chained:
-		var target_above: bool = to_target.y < -80.0
-		var target_far_below: bool = to_target.y > 120.0
-		if (target_above or target_far_below) and _leap_cooldown <= 0.0:
-			_start_precognition()
-			return
+	var target_above: bool = to_target.y < -80.0
+	var target_far_below: bool = to_target.y > 120.0
+	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
+		_start_precognition()
+		return
 
 	# Fallback: if we haven't hit anything for a while, also use precog
-	# Chained creatures skip this too — just keep chasing
 	_time_since_strike_range += _delta
-	if _time_since_strike_range >= PRECOG_TRIGGER_TIME and not _chained:
+	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
 		_start_precognition()
 		return
 
@@ -1728,7 +1725,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		return
 
 	# VERTICAL LEAP: significant distance — must face target horizontally
-	if not _chained and dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
+	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
 		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < 20.0
 		if facing_target:
 			_start_leap()
