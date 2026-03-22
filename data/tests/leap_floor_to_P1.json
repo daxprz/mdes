@@ -1,6 +1,12 @@
 {
 	"name": "leap_floor_to_P1",
 	"description": "Monster leaps from floor to lower-left platform (P1)",
+	"debug": {
+		"pathing/waypoints": "log",
+		"pathing/platform_leap_path": "log",
+		"precog/current_path": "log",
+		"leap_attack/spots_considered": "log"
+	},
 	"setup": [
 		"clear",
 		"portal off",

@@ -9,6 +9,7 @@ const TASK_RCON := "rcon"       # Execute RCON commands
 const TASK_WAIT := "wait"       # Wait N seconds
 const TASK_CHECK := "check"     # Run checks and record results
 const TASK_RESULTS := "results" # Show aggregated results
+const TASK_DEBUG_PROFILE := "debug_profile"  # Apply/clear debug profile
 
 var _task_queue: Array = []   # Array of {type, data}
 var _running: bool = false
@@ -87,6 +88,16 @@ func _queue_test(test_data: Dictionary) -> void:
 	var setup_cmds: Array = test_data.get("setup", [])
 	var wait_time: float = test_data.get("wait", 10.0)
 	var checks: Array = test_data.get("checks", [])
+	var debug_profile: Dictionary = test_data.get("debug", {})
+
+	# Task 0: Apply debug profile (if present)
+	if not debug_profile.is_empty():
+		_task_queue.append({
+			"type": TASK_DEBUG_PROFILE,
+			"test_name": test_name,
+			"profile": debug_profile,
+			"action": "apply",
+		})
 
 	# Task 1: Setup — run RCON commands (split on "wait N" for inline delays)
 	var current_batch: Array = []
@@ -128,6 +139,14 @@ func _queue_test(test_data: Dictionary) -> void:
 		"checks": checks,
 	})
 
+	# Task 4: Clear debug profile (if one was applied)
+	if not debug_profile.is_empty():
+		_task_queue.append({
+			"type": TASK_DEBUG_PROFILE,
+			"test_name": test_name,
+			"action": "clear",
+		})
+
 
 func _start_queue() -> void:
 	if _running:
@@ -156,6 +175,9 @@ func _advance_queue() -> void:
 		TASK_CHECK:
 			_execute_check_task(task)
 			_wait_timer = 0.3
+		TASK_DEBUG_PROFILE:
+			_execute_debug_profile_task(task)
+			_wait_timer = 0.1
 		TASK_RESULTS:
 			_show_results()
 			_wait_timer = 0.1
@@ -320,6 +342,20 @@ func _check_zones(check: Dictionary, label: String, test_result: Dictionary) -> 
 		all_pass = false
 
 	return all_pass
+
+
+func _execute_debug_profile_task(task: Dictionary) -> void:
+	var test_name: String = task.get("test_name", "")
+	var action: String = task.get("action", "")
+	var observer_id: String = "test:%s" % test_name
+
+	if action == "apply":
+		var profile: Dictionary = task.get("profile", {})
+		DebugOverlay.apply_profile(observer_id, profile)
+		_log("  debug: applied %d aspects for %s" % [profile.size(), observer_id], Color(0.6, 0.8, 1.0))
+	elif action == "clear":
+		DebugOverlay.remove_profile(observer_id)
+		_log("  debug: cleared profile for %s" % observer_id, Color(0.6, 0.8, 1.0))
 
 
 func _log(text: String, color: Color = Color(0.7, 0.7, 0.7)) -> void:
