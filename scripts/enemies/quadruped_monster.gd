@@ -556,6 +556,29 @@ func get_attach_world_position(point_name: String) -> Vector2:
 	return global_position
 
 
+func get_chain_barrier() -> Dictionary:
+	## Returns the chain barrier circle: { center: Vector2, radius: float }
+	## Empty dict if not chained. Used by precog to filter unreachable positions.
+	if not _chained:
+		return {}
+	for tether in get_tree().get_nodes_in_group("tethers"):
+		if not is_instance_valid(tether) or tether._severed:
+			continue
+		var is_mine: bool = tether.anchor_a.get("body") == self or tether.anchor_b.get("body") == self
+		if not is_mine:
+			continue
+		var other_anchor: Dictionary = tether.anchor_b if tether.anchor_a.get("body") == self else tether.anchor_a
+		var center: Vector2
+		if other_anchor.get("is_wall", false):
+			center = other_anchor.get("pos", Vector2.ZERO)
+		elif is_instance_valid(other_anchor.get("body")):
+			center = other_anchor["body"].global_position
+		else:
+			continue
+		return { "center": center, "radius": tether.target_length }
+	return {}
+
+
 func _apply_chain_constraints() -> void:
 	## Clamp global_position so no attached chain/tether exceeds its target length.
 	## Finds all tethers/chains attached to this creature and constrains position.
@@ -2982,14 +3005,27 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 	if true:
 		var plat_from: Dictionary = _precog_platforms[_precog_process_i]
 		var plat_to: Dictionary = _precog_platforms[_precog_process_j]
+
+		# Chain barrier: skip edges where BOTH platforms are outside chain reach
+		var barrier: Dictionary = get_chain_barrier()
+		if not barrier.is_empty():
+			var from_reachable: bool = plat_from["pos"].distance_to(barrier["center"]) < barrier["radius"]
+			var to_reachable: bool = plat_to["pos"].distance_to(barrier["center"]) < barrier["radius"]
+			if not from_reachable or not to_reachable:
+				return  # Skip this edge — unreachable
 		var from_y: float = plat_from["pos"].y
 		var from_min_x: float = plat_from["min_x"]
 		var from_max_x: float = plat_from["max_x"]
 
 		# Collect ball landings that are on this platform
+		# Filter by chain barrier if chained (reuse barrier from above)
 		var launch_points: Array[Vector2] = []
 		for pos in _precog_ball_lands:
 			if absf(pos.y - from_y) < 15.0 and pos.x >= from_min_x - 5 and pos.x <= from_max_x + 5:
+				# Chain barrier: reject points outside chain reach
+				if not barrier.is_empty():
+					if pos.distance_to(barrier["center"]) > barrier["radius"]:
+						continue
 				launch_points.append(pos)
 
 		if _precog_process_i == 0 and _precog_process_j == 1:
@@ -4194,6 +4230,20 @@ func _draw() -> void:
 	_draw_legs()
 	_draw_neck_head()
 	_draw_blood_particles()
+	# Chain barrier visualization: candy-striped red circle showing reach limit
+	if _chained and PlayerHUD._debug_mode:
+		var chain_barrier: Dictionary = get_chain_barrier()
+		if not chain_barrier.is_empty():
+			var center_local: Vector2 = chain_barrier["center"] - global_position
+			var radius: float = chain_barrier["radius"]
+			# Draw candy-striped red/dark-red dashed circle
+			var stripe_count: int = 32
+			for si in range(stripe_count):
+				var a1: float = TAU * float(si) / float(stripe_count)
+				var a2: float = TAU * float(si + 1) / float(stripe_count)
+				var col: Color = Color(1.0, 0.2, 0.1, 0.4) if si % 2 == 0 else Color(0.5, 0.1, 0.05, 0.3)
+				draw_arc(center_local, radius, a1, a2, 4, col, 3.0)
+
 	# Selection indicator: pulsing cyan ring when TAB-selected
 	if PlayerHUD.debug_selected_enemy == self:
 		var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
