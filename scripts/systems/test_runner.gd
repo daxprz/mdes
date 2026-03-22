@@ -197,6 +197,14 @@ func _execute_check_task(task: Dictionary) -> void:
 		var cmd: String = check.get("command", "")
 		var extract_key: String = check.get("extract", "")
 		var label: String = check.get("label", cmd)
+
+		# Special zone check: validates ETZ/DAZ results
+		if cmd == "zones":
+			var zone_passed: bool = _check_zones(check, label, test_result)
+			if not zone_passed:
+				test_result["passed"] = false
+			continue
+
 		var response: String = rcon._execute(cmd)
 		var value: float = _extract_value(response, extract_key)
 
@@ -273,6 +281,45 @@ func _extract_value(response: String, key: String) -> float:
 	if end > start:
 		return float(response.substr(start, end - start))
 	return 0.0
+
+
+func _check_zones(check: Dictionary, label: String, test_result: Dictionary) -> bool:
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon or not rcon._zone_manager or not is_instance_valid(rcon._zone_manager):
+		_log("  [FAIL] %s: no zone manager" % label, Color(1.0, 0.3, 0.3))
+		test_result["checks"].append({"label": label, "value": 0, "expected": "zones", "passed": false})
+		return false
+
+	var result: Dictionary = rcon._zone_manager.get_check_result()
+	var all_pass: bool = true
+
+	# Check ETZ entered
+	var etz_ok: bool = result["etz_entered"] == result["etz_total"]
+	var etz_label: String = "etz (%d/%d)" % [result["etz_entered"], result["etz_total"]]
+	var etz_col: Color = Color(0.3, 1.0, 0.3) if etz_ok else Color(1.0, 0.3, 0.3)
+	_log("  [%s] %s" % ["PASS" if etz_ok else "FAIL", etz_label], etz_col)
+	test_result["checks"].append({"label": "etz", "value": result["etz_entered"], "expected": "= %d" % result["etz_total"], "passed": etz_ok})
+	if not etz_ok:
+		all_pass = false
+
+	# Check DAZ not violated
+	var daz_ok: bool = result["daz_violated"] == 0
+	var daz_label: String = "daz (violations: %d)" % result["daz_violated"]
+	var daz_col: Color = Color(0.3, 1.0, 0.3) if daz_ok else Color(1.0, 0.3, 0.3)
+	_log("  [%s] %s" % ["PASS" if daz_ok else "FAIL", daz_label], daz_col)
+	test_result["checks"].append({"label": "daz", "value": result["daz_violated"], "expected": "= 0", "passed": daz_ok})
+	if not daz_ok:
+		all_pass = false
+
+	# Check order
+	var order_ok: bool = result["order_ok"]
+	var order_col: Color = Color(0.3, 1.0, 0.3) if order_ok else Color(1.0, 0.3, 0.3)
+	_log("  [%s] order" % ("PASS" if order_ok else "FAIL"), order_col)
+	test_result["checks"].append({"label": "order", "value": 1 if order_ok else 0, "expected": "= 1", "passed": order_ok})
+	if not order_ok:
+		all_pass = false
+
+	return all_pass
 
 
 func _log(text: String, color: Color = Color(0.7, 0.7, 0.7)) -> void:

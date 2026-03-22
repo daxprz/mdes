@@ -1,0 +1,24 @@
+{
+	"name": "leap_cross_platforms",
+	"description": "Monster leaps from lower-left (P1) across to lower-right (P2)",
+	"setup": [
+		"clear",
+		"portal off",
+		"clearplayers",
+		"clearzones",
+		"spawn monster 540 730",
+		"standdown on",
+		"wait 1",
+		"debug",
+		"tab",
+		"debugdraw",
+		"etz 1 1380 730 80",
+		"spawn dummy 1400 730",
+		"standdown off"
+	],
+	"wait": 20.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+	]
+}

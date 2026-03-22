@@ -1,23 +1,29 @@
 {
-	"name": "chained_upper_platform",
-	"description": "Monster chained to right wall reaches under platform but LOS blocks through-floor damage",
+	"name": "chained_upper_platform_etz",
+	"description": "Chained monster walks toward target but cannot leap through platform — verified with zones",
 	"setup": [
 		"clear",
 		"portal off",
 		"clearplayers",
+		"clearzones",
 		"spawn monster 1300 885",
-		"debug",
-		"tab",
 		"standdown on",
 		"wait 1",
+		"debug",
+		"tab",
+		"debugdraw",
 		"chain 0 head wall 1920 820 800",
 		"wait 1",
+		"etz 1 1550 870 100",
+		"etz 2 1380 510 80",
+		"daz 1 1250 650 80",
 		"spawn dummy 1250 525",
 		"standdown off"
 	],
 	"wait": 25.0,
 	"checks": [
 		{ "command": "hp", "extract": "damage_taken", "expect_eq": 0, "label": "no_damage" },
+		{ "command": "zones", "label": "zones" },
 		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
 	]
 }

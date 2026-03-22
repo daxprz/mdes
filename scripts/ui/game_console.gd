@@ -42,10 +42,8 @@ const COMMANDS := [
 	"attacker rate", "attacker stop", "attacker start", "attacker stats",
 	"attacker tether_length", "attacker tether_b",
 	"run", "suite", "tests", "cls",
+	"etz", "daz", "zones", "clearzones",
 ]
-
-# Test runner
-var _test_runner: Node = null
 
 var _panel: Control = null
 
@@ -158,35 +156,29 @@ func _execute_input() -> void:
 		return
 
 	match parts[0].to_lower():
-		"run":
-			if parts.size() < 2:
-				_log("Usage: run <test_name>", Color(1.0, 0.5, 0.3))
-			else:
-				_run_test(parts[1])
-		"suite":
-			if parts.size() < 2:
-				_log("Usage: suite <suite_name>", Color(1.0, 0.5, 0.3))
-			else:
-				_run_suite(parts[1])
-		"tests":
-			_list_tests()
-		"clear":
-			if parts.size() == 1 and cmd == "clear":
-				# Ambiguous: could be "clear console" or "clear enemies"
-				# Use "cls" for console clear
-				var rcon: Node = get_node_or_null("/root/Rcon")
-				if rcon:
-					var result: String = rcon._execute(cmd)
-					_log_result(result)
-			else:
-				var rcon: Node = get_node_or_null("/root/Rcon")
-				if rcon:
-					var result: String = rcon._execute(cmd)
-					_log_result(result)
 		"cls":
 			_output_lines.clear()
+		"run":
+			# Route to RCON but pass console ref for test output
+			var rcon: Node = get_node_or_null("/root/Rcon")
+			if rcon:
+				rcon._ensure_test_runner()
+				if parts.size() < 2:
+					_log("Usage: run <test_name>", Color(1.0, 0.5, 0.3))
+				else:
+					rcon._test_runner.run_test(parts[1], self)
+					_log_result("OK: running test '%s'" % parts[1])
+		"suite":
+			var rcon: Node = get_node_or_null("/root/Rcon")
+			if rcon:
+				rcon._ensure_test_runner()
+				if parts.size() < 2:
+					_log("Usage: suite <suite_name>", Color(1.0, 0.5, 0.3))
+				else:
+					rcon._test_runner.run_suite(parts[1], self)
+					_log_result("OK: running suite '%s'" % parts[1])
 		_:
-			# Route to RCON
+			# Route everything to RCON
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
 				var result: String = rcon._execute(cmd)
@@ -297,47 +289,6 @@ func _history_down() -> void:
 
 # -- Test Runner Integration ---------------------------------------------------
 
-func _list_tests() -> void:
-	_log("=== Available Tests ===", Color(1.0, 0.9, 0.3))
-	_list_files_in_dir("res://data/tests/", "test")
-	_list_files_in_dir("user://data/tests/", "test (custom)")
-	_log("=== Available Suites ===", Color(1.0, 0.9, 0.3))
-	_list_files_in_dir("res://data/tests/suites/", "suite")
-	_list_files_in_dir("user://data/tests/suites/", "suite (custom)")
-
-
-func _list_files_in_dir(dir_path: String, label: String) -> void:
-	var dir := DirAccess.open(dir_path)
-	if not dir:
-		return
-	dir.list_dir_begin()
-	var fname: String = dir.get_next()
-	while fname != "":
-		if fname.ends_with(".json"):
-			_log("  %s: %s" % [label, fname.replace(".json", "")], Color(0.6, 0.8, 0.6))
-		fname = dir.get_next()
-
-
-func _run_test(test_name: String) -> void:
-	_ensure_test_runner()
-	if _test_runner:
-		_test_runner.run_test(test_name, self)
-
-
-func _run_suite(suite_name: String) -> void:
-	_ensure_test_runner()
-	if _test_runner:
-		_test_runner.run_suite(suite_name, self)
-
-
-func _ensure_test_runner() -> void:
-	if _test_runner and is_instance_valid(_test_runner):
-		return
-	var script: GDScript = load("res://scripts/systems/test_runner.gd")
-	_test_runner = Node.new()
-	_test_runner.name = "TestRunner"
-	_test_runner.set_script(script)
-	add_child(_test_runner)
 
 
 # -- Drawing -------------------------------------------------------------------

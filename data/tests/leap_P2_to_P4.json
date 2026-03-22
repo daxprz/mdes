@@ -1,0 +1,25 @@
+{
+	"name": "leap_P2_to_P4",
+	"description": "Monster leaps from lower-right platform (P2) to upper-right platform (P4)",
+	"setup": [
+		"clear",
+		"portal off",
+		"clearplayers",
+		"clearzones",
+		"spawn monster 1350 730",
+		"standdown on",
+		"wait 1",
+		"debug",
+		"tab",
+		"debugdraw",
+		"etz 1 1250 490 60",
+		"spawn dummy 1250 525",
+		"standdown off"
+	],
+	"wait": 20.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "zones", "label": "zones" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+	]
+}

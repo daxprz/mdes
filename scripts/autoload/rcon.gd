@@ -9,6 +9,8 @@ const PORT := 9999
 var _server: TCPServer = null
 var _clients: Array = []  # Array of StreamPeerTCP
 var _title_layer: CanvasLayer = null
+var _test_runner: Node = null
+var _zone_manager: Node2D = null
 
 
 func _ready() -> void:
@@ -68,7 +70,7 @@ func _execute(command: String) -> String:
 
 	match cmd:
 		"help":
-			return "Commands: help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <target|part|weapon|rate|stop|start|stats>, status, quit"
+			return "Commands: help, debug, spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <target|part|weapon|rate|stop|start|stats>, run <test>, suite <suite>, tests, etz <id> <x> <y> <r> [eid], daz <id> <x> <y> <r> [eid], zones, clearzones, status, quit"
 
 		"debug":
 			PlayerHUD._debug_mode = not PlayerHUD._debug_mode
@@ -336,6 +338,57 @@ func _execute(command: String) -> String:
 		"attacker":
 			return _cmd_attacker(parts)
 
+		"run":
+			if parts.size() < 2:
+				return "ERR: usage: run <test_name>"
+			_ensure_test_runner()
+			if _test_runner:
+				_test_runner.run_test(parts[1], null)
+				return "OK: running test '%s'" % parts[1]
+			return "ERR: failed to create test runner"
+
+		"suite":
+			if parts.size() < 2:
+				return "ERR: usage: suite <suite_name>"
+			_ensure_test_runner()
+			if _test_runner:
+				_test_runner.run_suite(parts[1], null)
+				return "OK: running suite '%s'" % parts[1]
+			return "ERR: failed to create test runner"
+
+		"tests":
+			return _cmd_list_tests()
+
+		"etz":
+			# etz <id> <x> <y> <radius> [entity_id]
+			if parts.size() < 5:
+				return "ERR: usage: etz <id> <x> <y> <radius> [entity_id]"
+			var eid: String = parts[5] if parts.size() > 5 else ""
+			_ensure_zone_manager()
+			_zone_manager.add_etz(int(parts[1]), Vector2(float(parts[2]), float(parts[3])), float(parts[4]), eid)
+			return "OK: added ETZ-%s at (%.0f,%.0f) r=%.0f" % [parts[1], float(parts[2]), float(parts[3]), float(parts[4])]
+
+		"daz":
+			# daz <id> <x> <y> <radius> [entity_id]
+			if parts.size() < 5:
+				return "ERR: usage: daz <id> <x> <y> <radius> [entity_id]"
+			var eid: String = parts[5] if parts.size() > 5 else ""
+			_ensure_zone_manager()
+			_zone_manager.add_daz(int(parts[1]), Vector2(float(parts[2]), float(parts[3])), float(parts[4]), eid)
+			return "OK: added DAZ-%s at (%.0f,%.0f) r=%.0f" % [parts[1], float(parts[2]), float(parts[3]), float(parts[4])]
+
+		"zones":
+			if _zone_manager and is_instance_valid(_zone_manager):
+				return _zone_manager.get_status()
+			return "zones: 0"
+
+		"clearzones":
+			if _zone_manager and is_instance_valid(_zone_manager):
+				_zone_manager.clear_zones()
+			else:
+				_zone_manager = null  # Reset stale reference
+			return "OK: zones cleared"
+
 		"quit":
 			get_tree().quit()
 			return "OK: quitting"
@@ -414,14 +467,17 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0) -> String:
 			var monster := CharacterBody2D.new()
 			monster.set_script(script)
 			monster.global_position = Vector2(x, y)
+			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
+			monster.entity_id = "monster_%d" % monster_count
 			container.add_child(monster)
-			return "OK: spawned monster at (%.0f, %.0f)" % [x, y]
+			return "OK: spawned monster '%s' at (%.0f, %.0f)" % [monster.entity_id, x, y]
 
 		"dummy":
 			# Fake player — a simple CharacterBody2D in the "players" group
 			# that the monster can target. No controller needed.
 			var dummy := CharacterBody2D.new()
-			dummy.name = "DummyPlayer"
+			var dummy_count: int = get_tree().get_nodes_in_group("players").size()
+			dummy.name = "DummyPlayer_%d" % dummy_count
 			dummy.add_to_group("players")
 			dummy.global_position = Vector2(x, y)
 			dummy.set("player_index", 0)
@@ -439,6 +495,7 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0) -> String:
 			gravity_script.source_code = """extends CharacterBody2D
 
 var player_index: int = 0
+var entity_id: String = ""
 var health: int = 1000
 var max_health: int = 1000
 var damage_taken: int = 0
@@ -462,9 +519,10 @@ func take_damage(amount: int, _source: int = -1) -> void:
 """
 			gravity_script.reload()
 			dummy.set_script(gravity_script)
+			dummy.entity_id = "dummy_%d" % dummy_count
 			container.add_child(dummy)
 			dummy.queue_redraw()
-			return "OK: spawned dummy player at (%.0f, %.0f)" % [x, y]
+			return "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
 
 		"attacker":
 			var script := load("res://scripts/testing/attack_dummy.gd")
@@ -1338,3 +1396,47 @@ func _cmd_attacker(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown attacker subcommand '%s'. Try: target, part, weapon, rate, stop, start, stats, tether_length, tether_b" % subcmd
+
+
+func _ensure_test_runner() -> void:
+	if _test_runner and is_instance_valid(_test_runner):
+		return
+	var script: GDScript = load("res://scripts/systems/test_runner.gd")
+	_test_runner = Node.new()
+	_test_runner.name = "TestRunner"
+	_test_runner.set_script(script)
+	add_child(_test_runner)
+
+
+func _ensure_zone_manager() -> void:
+	if _zone_manager and is_instance_valid(_zone_manager):
+		return
+	var script: GDScript = load("res://scripts/systems/test_zones.gd")
+	_zone_manager = Node2D.new()
+	_zone_manager.name = "TestZones"
+	_zone_manager.set_script(script)
+	get_tree().current_scene.add_child(_zone_manager)
+
+
+func _cmd_list_tests() -> String:
+	var lines: Array[String] = ["tests:"]
+	for dir_path in ["res://data/tests/"]:
+		var dir := DirAccess.open(dir_path)
+		if dir:
+			dir.list_dir_begin()
+			var fname: String = dir.get_next()
+			while fname != "":
+				if fname.ends_with(".json") and not dir.current_is_dir():
+					lines.append("  %s" % fname.get_basename())
+				fname = dir.get_next()
+	lines.append("suites:")
+	for dir_path in ["res://data/tests/suites/"]:
+		var dir := DirAccess.open(dir_path)
+		if dir:
+			dir.list_dir_begin()
+			var fname: String = dir.get_next()
+			while fname != "":
+				if fname.ends_with(".json") and not dir.current_is_dir():
+					lines.append("  %s" % fname.get_basename())
+				fname = dir.get_next()
+	return "\n".join(lines)

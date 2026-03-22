@@ -333,6 +333,7 @@ func _spawn_creature(creature_type: String, pos: Vector2) -> Node2D:
 			var creature := CharacterBody2D.new()
 			creature.set_script(script)
 			creature.global_position = pos
+			creature.entity_id = "splay_%d" % get_tree().get_nodes_in_group("enemies").size()
 			var container: Node = get_tree().current_scene.get_node_or_null("Players")
 			if not container:
 				container = get_tree().current_scene

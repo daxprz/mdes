@@ -1,0 +1,24 @@
+{
+	"name": "leap_floor_to_P2",
+	"description": "Monster leaps from floor to lower-right platform (P2)",
+	"setup": [
+		"clear",
+		"portal off",
+		"clearplayers",
+		"clearzones",
+		"spawn monster 1300 885",
+		"standdown on",
+		"wait 1",
+		"debug",
+		"tab",
+		"debugdraw",
+		"etz 1 1380 700 60",
+		"spawn dummy 1400 730",
+		"standdown off"
+	],
+	"wait": 20.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+	]
+}

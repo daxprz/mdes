@@ -1,0 +1,15 @@
+{
+	"name": "leaping",
+	"description": "Sequential platform leaping tests",
+	"tests": [
+		"leap_floor_to_P1",
+		"leap_floor_to_P2",
+		"leap_P2_to_P4",
+		"leap_cross_platforms",
+		"leap_floor_to_P4"
+	],
+	"aggregation": {
+		"show_grid": true,
+		"pass_threshold": 1.0
+	}
+}
