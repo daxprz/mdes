@@ -1,0 +1,21 @@
+{
+	"name": "chained_platform",
+	"description": "Monster chained to right wall leaps to reach dummy on lower-right platform",
+	"setup": [
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn monster 1300 885",
+		"standdown on",
+		"wait 1",
+		"chain 0 head wall 1920 820 900",
+		"wait 1",
+		"spawn dummy 1400 745",
+		"standdown off"
+	],
+	"wait": 20.0,
+	"checks": [
+		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
+		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+	]
+}

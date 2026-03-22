@@ -1599,8 +1599,11 @@ func _do_chase(_delta: float) -> void:
 	if _precog_has_waypoint or not _precog_path_edges.is_empty():
 		_time_since_strike_range = 0.0
 
-	# Chained: abandon unreachable precog waypoints
-	if _precog_has_waypoint and _chained:
+	# Chained: abandon precog if the FINAL TARGET is unreachable by chain.
+	# Allow intermediate waypoints even if outside range — the chain constraint
+	# will physically limit how far the creature goes, and it might still reach
+	# the target via a shorter path.
+	if _precog_has_waypoint and _chained and is_instance_valid(_target):
 		for tether in get_tree().get_nodes_in_group("tethers"):
 			if not is_instance_valid(tether) or tether._severed:
 				continue
@@ -1613,7 +1616,8 @@ func _do_chase(_delta: float) -> void:
 					anchor_pos = other_anchor["body"].global_position
 				else:
 					continue
-				if _precog_waypoint.distance_to(anchor_pos) > tether.target_length:
+				# Check if the TARGET (not waypoint) is unreachable
+				if _target.global_position.distance_to(anchor_pos) > tether.target_length:
 					_precog_has_waypoint = false
 					_precog_path_edges.clear()
 					break

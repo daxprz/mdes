@@ -3,6 +3,7 @@
 	"description": "Chained monster behavior tests",
 	"tests": [
 		"chained_wall_attack",
+		"chained_platform",
 		"chained_floor",
 		"chained_reach",
 		"chained_above"
