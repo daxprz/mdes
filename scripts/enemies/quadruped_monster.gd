@@ -177,6 +177,8 @@ var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
 var _physics_frozen := false  # When true, skip all physics/gravity (used during splay setup)
 var _pose_locked := false     # When true, skip _solve_pose — external system controls skeleton (splay editor)
 var _chained := false         # When true, chains control position — skip gravity and move_and_slide
+var _chained_stuck_timer: float = 0.0  # How long we've been stuck at chain limit
+var _chained_last_pos: Vector2 = Vector2.ZERO  # Position last frame for stuck detection
 var territorial := false      # When true, attacks other monsters instead of/in addition to players
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
@@ -752,6 +754,25 @@ func _physics_process(delta: float) -> void:
 	# If asleep + not on floor: go limp (skip AI, dangle limbs).
 	# If awake + on floor: run normal AI but constrained by chains.
 	if _chained:
+		# Stuck detection: if position hasn't changed in 3 seconds, abandon current plan
+		if global_position.distance_to(_chained_last_pos) < 5.0:
+			_chained_stuck_timer += delta
+			if _chained_stuck_timer > 3.0:
+				_chained_stuck_timer = 0.0
+				# Abandon precog waypoint — try direct chase instead
+				if _precog_has_waypoint:
+					_precog_has_waypoint = false
+					_precog_path_edges.clear()
+				# Try a direct leap toward the target if close enough
+				if is_instance_valid(_target) and _state == State.CHASE:
+					var to_target: Vector2 = _target.global_position - global_position
+					if to_target.length() < LEAP_RANGE and _leap_cooldown <= 0.0:
+						_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
+						_start_leap()
+		else:
+			_chained_stuck_timer = 0.0
+		_chained_last_pos = global_position
+
 		var chained_on_floor: bool = is_on_floor()
 		if _asleep:
 			# ASLEEP: stay frozen in place, no gravity, no AI
@@ -1634,7 +1655,8 @@ func _do_chase(_delta: float) -> void:
 		_want_direction = signf(to_waypoint.x)
 		_move_speed = SPEED_FAST
 
-		if waypoint_dist < 25.0:
+		var arrival_tolerance: float = 50.0 if _chained else 25.0
+		if waypoint_dist < arrival_tolerance:
 			_precog_has_waypoint = false
 			var has_vel: bool = _precog_waypoint_edge.has("launch_vel")
 			var vel_val: String = str(_precog_waypoint_edge.get("launch_vel", "NONE"))
