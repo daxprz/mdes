@@ -592,13 +592,24 @@ func _apply_chain_constraints() -> void:
 		var dist: float = my_world_pos.distance_to(other_pos)
 		if dist > tether.target_length:
 			var dir: Vector2 = (my_world_pos - other_pos).normalized()
-			# Move body so the attachment point is exactly at chain length
-			global_position = other_pos + dir * tether.target_length - my_attach_offset
-			# Kill velocity component along the chain direction (away from anchor)
-			# Keep tangential velocity so creature can move along the chain arc
-			var vel_along: float = velocity.dot(dir)
-			if vel_along > 0:
-				velocity -= dir * vel_along
+			if is_on_floor():
+				# On floor: only constrain horizontal movement (don't yank vertically)
+				var horizontal_dist: float = absf(my_world_pos.x - other_pos.x)
+				# Calculate max horizontal distance allowed at current Y
+				var dy: float = my_world_pos.y - other_pos.y
+				var max_dx: float = sqrt(maxf(tether.target_length * tether.target_length - dy * dy, 0.0))
+				if horizontal_dist > max_dx:
+					var sign_x: float = signf(my_world_pos.x - other_pos.x)
+					global_position.x = other_pos.x + sign_x * max_dx - my_attach_offset.x
+					# Kill horizontal velocity moving away
+					if (velocity.x > 0 and sign_x > 0) or (velocity.x < 0 and sign_x < 0):
+						velocity.x = 0
+			else:
+				# Not on floor: full 2D constraint
+				global_position = other_pos + dir * tether.target_length - my_attach_offset
+				var vel_along: float = velocity.dot(dir)
+				if vel_along > 0:
+					velocity -= dir * vel_along
 
 
 func set_pose_overrides(overrides: Dictionary) -> void:
@@ -744,7 +755,6 @@ func _physics_process(delta: float) -> void:
 			return
 		elif not chained_on_floor:
 			# AWAKE but SUSPENDED: apply gravity, constrain by chain
-			# Don't run full AI — just dangle and wait to touch ground
 			velocity.y += GRAVITY * delta
 			_apply_chain_constraints()
 			move_and_slide()
@@ -756,6 +766,28 @@ func _physics_process(delta: float) -> void:
 						continue
 					_legs[li][2].y += GRAVITY * delta * 0.1
 			_enforce_spine_rigid()
+			# Enforce limb rigidity + replant unreachable feet
+			for li in range(4):
+				if _leg_severed[li]:
+					continue
+				if li < 2:
+					_legs[li][0] = _clavicles[li]
+				else:
+					_legs[li][0] = _hip_bones[li - 2]
+				if _foot_planted[li]:
+					var foot_local: Vector2 = _foot_world[li] - global_position
+					var reach: float = _legs[li][0].distance_to(foot_local)
+					if reach > LEG_UPPER_LEN + LEG_LOWER_LEN * (1.0 + LIMB_FLEX):
+						var floor_y: float = _raycast_floor(_legs[li][0])
+						_legs[li][2] = Vector2(_legs[li][0].x, floor_y)
+						_foot_world[li] = global_position + _legs[li][2]
+				var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
+				if upper_dir.length() > 0.01:
+					_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+				var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
+				if lower_dir.length() > 0.01:
+					var clamped: float = clampf(lower_dir.length(), LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+					_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 			_update_hitbox_positions()
 			_update_blood_particles(delta)
 			queue_redraw()
@@ -829,10 +861,11 @@ func _physics_process(delta: float) -> void:
 		# The collision sphere traps the player, not moves us.
 		velocity = Vector2.ZERO
 	else:
-		move_and_slide()
-		# Re-apply chain constraints after move_and_slide
+		# Apply chain constraints BEFORE move_and_slide to set direction
+		# move_and_slide handles floor collision — don't override after
 		if _chained:
 			_apply_chain_constraints()
+		move_and_slide()
 
 	if in_leap_flight:
 		_update_leap_pose(delta)
