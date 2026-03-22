@@ -8,7 +8,7 @@
 		"spawn monster 960 885",
 		"standdown on",
 		"wait 1",
-		"chain 0 head floor 200",
+		"chain 0 head floor 500",
 		"wait 1",
 		"spawn dummy 900 885",
 		"standdown off"
