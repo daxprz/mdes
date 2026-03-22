@@ -1,0 +1,52 @@
+# DAX — Claude Code Project Guide
+
+## Project Overview
+
+DAX is a 2D action game built in Godot 4.6, rendered entirely via `_draw()` (no sprites). The primary active development area is the quadruped monster system — a procedurally animated predator with physics-based movement, precognition pathfinding, and platform-based leap attacks.
+
+## Key Architecture
+
+- **Godot 4.6** with GDScript
+- **No sprites** — all rendering via immediate-mode `_draw()` calls
+- **RCON server** on port 9999 for external control and test automation
+- **Debug Overlay** system with per-aspect visual/textual toggles
+- **Test infrastructure** with JSON-defined test scenarios and ETZ/DAZ zone verification
+
+## Agent Recommendation
+
+When the user is working on testing, debugging, or monitoring the running game, suggest using the **tumu** agent:
+
+> "This looks like a good task for the `tumu` agent — it's set up to interact with the running game via RCON, run tests, and inspect debug diagnostics. Want me to hand this off to tumu?"
+
+Use tumu when:
+- Running or monitoring tests
+- Inspecting debug output from the game
+- Verifying fixes by running test suites
+- Investigating pathfinding or monster behavior issues
+- Spawning entities and observing results
+
+Do NOT use tumu when:
+- Writing new code or making edits (use the default agent)
+- Planning architecture or designing features
+- Working on non-game files (docs, configs)
+
+## Important Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/enemies/quadruped_monster.gd` | The monster (~5000 lines) |
+| `scripts/autoload/rcon.gd` | RCON server + all commands |
+| `scripts/autoload/debug_overlay.gd` | Debug aspect system |
+| `scripts/autoload/debug_aspects.gd` | Registered debug aspects |
+| `scripts/systems/test_runner.gd` | Test execution engine |
+| `scripts/ui/debug_drawer.gd` | Debug config UI |
+| `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
+| `docs/epics/EPIC_quadruped_monster.md` | Monster system spec |
+
+## Conventions
+
+- All debug rendering must route through `DebugOverlay.should_draw()` / `DebugOverlay.log()`
+- New features should register debug aspects in `debug_aspects.gd`
+- Tests are JSON files in `data/tests/`, suites in `data/tests/suites/`
+- RCON commands go through `rcon.gd:_execute()`
+- Console commands route through RCON (unified in `game_console.gd`)
