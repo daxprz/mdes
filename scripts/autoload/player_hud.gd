@@ -987,6 +987,16 @@ func dump_entity_skeleton(entity: Node2D, trigger: String = "manual") -> Diction
 		data["physics_frozen"] = entity._physics_frozen
 	if "_facing" in entity:
 		data["facing"] = entity._facing
+	if "_want_direction" in entity:
+		data["want_direction"] = entity._want_direction
+	if "_move_speed" in entity:
+		data["move_speed"] = entity._move_speed
+	if "_target" in entity:
+		if is_instance_valid(entity._target):
+			data["target"] = entity._target.name
+			data["target_pos"] = _v2d(entity._target.global_position)
+		else:
+			data["target"] = "null"
 
 	if "_spine" in entity:
 		data["spine"] = []

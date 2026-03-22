@@ -341,7 +341,10 @@ func _setup_splays_from_config(splays_config: Array) -> void:
 		var pos := Vector2(pos_arr[0], pos_arr[1])
 		var rot: float = splay_data.get("rotation", 0.0)
 		var behavior: String = splay_data.get("behavior", "asleep")
-		mgr.spawn_splay(pose_name, pos, rot, behavior)
+		var result: Dictionary = mgr.spawn_splay(pose_name, pos, rot, behavior)
+		# Store creature reference for the level editor drag system
+		if not result.is_empty() and not result.get("creatures", []).is_empty():
+			splay_data["_creature_ref"] = result["creatures"][0]
 
 
 # -- Process -------------------------------------------------------------------
@@ -598,8 +601,7 @@ func _toggle_editor() -> void:
 		_editor.setup("title_screen", _current_config)
 		_editor.config_changed.connect(_rebuild_from_config)
 		add_child(_editor)
-	else:
-		_editor.toggle()
+	_editor.toggle()
 
 
 func _rebuild_from_config(new_config: Dictionary) -> void:

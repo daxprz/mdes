@@ -5,7 +5,7 @@ extends RefCounted
 ## respecting max bend angles at each joint.
 ## Used by the splay editor for interactive pose dragging.
 
-const MAX_ITERATIONS := 10
+const MAX_ITERATIONS := 30  # More iterations needed for long chains with tight angle constraints
 const TOLERANCE := 0.5  # px — close enough to target
 
 
@@ -73,6 +73,7 @@ static func solve(chain: Array[Vector2], lengths: Array[float], max_angles: Arra
 static func _apply_angle_constraints(chain: Array[Vector2], lengths: Array[float], max_angles: Array[float]) -> void:
 	## Enforce max bend angle at each joint.
 	## The angle at joint i is measured between segment (i-1→i) and segment (i→i+1).
+	## When a joint is corrected, all downstream points shift by the same delta (propagation).
 	for i in range(1, chain.size() - 1):
 		if i - 1 >= max_angles.size() or i >= max_angles.size():
 			continue
@@ -91,7 +92,12 @@ static func _apply_angle_constraints(chain: Array[Vector2], lengths: Array[float
 			var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -max_angle, max_angle)
 			var new_dir: Vector2 = Vector2(cos(clamped_angle), sin(clamped_angle))
 			var seg_len: float = lengths[i] if i < lengths.size() else chain[i].distance_to(chain[i + 1])
+			var old_pos: Vector2 = chain[i + 1]
 			chain[i + 1] = chain[i] + new_dir * seg_len
+			# Propagate: shift all downstream points by the same delta
+			var shift: Vector2 = chain[i + 1] - old_pos
+			for j in range(i + 2, chain.size()):
+				chain[j] += shift
 
 
 static func get_chain_for_point(point_name: String, creature: Node2D) -> Dictionary:

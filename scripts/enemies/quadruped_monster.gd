@@ -580,28 +580,25 @@ func _apply_chain_constraints() -> void:
 				other_pos = body.global_position + other_anchor.get("body_offset", Vector2.ZERO)
 		else:
 			other_pos = other_anchor.get("pos", global_position)
-		# For physics chains: constrain to last link position, not wall anchor
-		var constrain_pos: Vector2 = other_pos
-		var max_dist: float = tether.target_length
-		if tether.is_in_group("chains") and "_links" in tether and not tether._links.is_empty():
-			# Clamp to the nearest chain link endpoint (one link length away)
-			var nearest_link: Node2D = null
-			if is_anchor_a and tether._links.size() > 0:
-				nearest_link = tether._links[0]  # First link (closest to anchor A = creature)
-			elif tether._links.size() > 0:
-				nearest_link = tether._links[tether._links.size() - 1]  # Last link
-			if is_instance_valid(nearest_link):
-				constrain_pos = nearest_link.global_position
-				max_dist = tether.target_length / float(tether._link_count)  # One link length
+		# Determine which attachment point on THIS creature the chain connects to
+		var my_anchor: Dictionary = tether.anchor_a if is_anchor_a else tether.anchor_b
+		var my_attach_point: String = my_anchor.get("attach_point", "")
+		var my_attach_offset: Vector2 = Vector2.ZERO
+		if my_attach_point != "" and _attach_points.has(my_attach_point):
+			my_attach_offset = _attach_points[my_attach_point].position
 
-		var dist: float = global_position.distance_to(constrain_pos)
-		if dist > max_dist:
-			var dir: Vector2 = (global_position - constrain_pos).normalized()
-			global_position = constrain_pos + dir * max_dist
-			# Kill velocity component moving away from anchor
-			var vel_away: float = velocity.dot(dir)
-			if vel_away > 0:
-				velocity -= dir * vel_away
+		# Check distance from the attachment point (not body center) to the other anchor
+		var my_world_pos: Vector2 = global_position + my_attach_offset
+		var dist: float = my_world_pos.distance_to(other_pos)
+		if dist > tether.target_length:
+			var dir: Vector2 = (my_world_pos - other_pos).normalized()
+			# Move body so the attachment point is exactly at chain length
+			global_position = other_pos + dir * tether.target_length - my_attach_offset
+			# Kill velocity component along the chain direction (away from anchor)
+			# Keep tangential velocity so creature can move along the chain arc
+			var vel_along: float = velocity.dot(dir)
+			if vel_along > 0:
+				velocity -= dir * vel_along
 
 
 func set_pose_overrides(overrides: Dictionary) -> void:
@@ -731,76 +728,40 @@ func _physics_process(delta: float) -> void:
 	if _state_lock_timer > 0.0:
 		_state_lock_timer -= delta
 
-	# Chained mode: gravity applies, but chains constrain position.
-	# Creature hangs naturally, can walk within chain reach, can't escape.
+	# Chained mode: apply chain constraints before and after movement.
+	# If asleep + not on floor: go limp (skip AI, dangle limbs).
+	# If awake + on floor: run normal AI but constrained by chains.
 	if _chained:
-		# Apply gravity
-		velocity.y += GRAVITY * delta
-		# Apply chain constraints: clamp position so no chain exceeds its length
-		_apply_chain_constraints()
-		# Move with constraints
-		move_and_slide()
-		# Re-apply chain constraints after move_and_slide (it may have pushed past)
-		_apply_chain_constraints()
-		# Check if touching ground
-		var on_floor: bool = is_on_floor()
-		# Skeleton behavior based on state
-		if _asleep or not on_floor:
-			# GO LIMP: skeleton dangles, no pose solving
-			# Let gravity pull limbs down naturally
+		var chained_on_floor: bool = is_on_floor()
+		if _asleep:
+			# ASLEEP: stay frozen in place, no gravity, no AI
+			# Pose-locked creatures hold their skeleton shape
+			velocity = Vector2.ZERO
+			_enforce_spine_rigid()
+			_update_hitbox_positions()
+			_update_blood_particles(delta)
+			queue_redraw()
+			return
+		elif not chained_on_floor:
+			# AWAKE but SUSPENDED: apply gravity, constrain by chain
+			# Don't run full AI — just dangle and wait to touch ground
+			velocity.y += GRAVITY * delta
+			_apply_chain_constraints()
+			move_and_slide()
+			_apply_chain_constraints()
 			if not _pose_locked:
 				_update_spine()
-				# Limbs dangle — don't solve pose, just let gravity pull feet down
 				for li in range(4):
 					if _leg_severed[li]:
 						continue
-					# Dangle: feet pulled down by gravity
 					_legs[li][2].y += GRAVITY * delta * 0.1
-		elif not _pose_locked:
-			# AWAKE + ON FLOOR: try to stand/walk within chain reach
-			_update_spine()
-			_update_gait(delta)
-			_solve_pose(delta)
-		# Always enforce rigidity
-		_enforce_spine_rigid()
-		# Always enforce limb constraints
-		if not _tail_severed:
-			var prev_dir: Vector2 = (_spine[2] - _spine[1]).normalized()
-			var tail_parent: Vector2 = _spine[2] + Vector2(-4 * _facing, -2)
-			for ti in range(_tail.size()):
-				var tail_dir: Vector2 = _tail[ti] - tail_parent
-				var tail_dist: float = tail_dir.length()
-				if tail_dist > 0.01:
-					var current_dir: Vector2 = tail_dir.normalized()
-					var angle_diff: float = prev_dir.angle_to(current_dir)
-					if absf(angle_diff) > TAIL_MAX_BEND:
-						var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
-						current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-					var clamped_len: float = clampf(tail_dist, TAIL_SEG_LEN * (1.0 - TAIL_FLEX), TAIL_SEG_LEN * (1.0 + TAIL_FLEX))
-					_tail[ti] = tail_parent + current_dir * clamped_len
-					prev_dir = current_dir
-				tail_parent = _tail[ti]
-		for li in range(4):
-			if _leg_severed[li]:
-				continue
-			if li < 2:
-				_legs[li][0] = _clavicles[li]
-			else:
-				_legs[li][0] = _hip_bones[li - 2]
-			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
-			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
-			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
-			var lower_dist: float = lower_dir.length()
-			if lower_dist > 0.01:
-				var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
-				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
-		_update_hitbox_positions()
-		_accumulate_attach_forces()
-		_apply_attach_forces(delta)
-		_update_blood_particles(delta)
-		queue_redraw()
-		return
+			_enforce_spine_rigid()
+			_update_hitbox_positions()
+			_update_blood_particles(delta)
+			queue_redraw()
+			return
+		# AWAKE + ON FLOOR: fall through to normal AI below,
+		# chain constraints applied after move_and_slide
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
@@ -869,6 +830,9 @@ func _physics_process(delta: float) -> void:
 		velocity = Vector2.ZERO
 	else:
 		move_and_slide()
+		# Re-apply chain constraints after move_and_slide
+		if _chained:
+			_apply_chain_constraints()
 
 	if in_leap_flight:
 		_update_leap_pose(delta)
@@ -1677,15 +1641,18 @@ func _do_chase(_delta: float) -> void:
 		return
 
 	# If target is on a different platform, use precog pathfinding
-	var target_above: bool = to_target.y < -80.0
-	var target_far_below: bool = to_target.y > 120.0
-	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
-		_start_precognition()
-		return
+	# Chained creatures can't do multi-hop — just chase directly
+	if not _chained:
+		var target_above: bool = to_target.y < -80.0
+		var target_far_below: bool = to_target.y > 120.0
+		if (target_above or target_far_below) and _leap_cooldown <= 0.0:
+			_start_precognition()
+			return
 
 	# Fallback: if we haven't hit anything for a while, also use precog
+	# Chained creatures skip this too — just keep chasing
 	_time_since_strike_range += _delta
-	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
+	if _time_since_strike_range >= PRECOG_TRIGGER_TIME and not _chained:
 		_start_precognition()
 		return
 
@@ -1719,7 +1686,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		return
 
 	# VERTICAL LEAP: significant distance — must face target horizontally
-	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
+	if not _chained and dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
 		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < 20.0
 		if facing_target:
 			_start_leap()

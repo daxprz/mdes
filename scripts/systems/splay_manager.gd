@@ -263,6 +263,9 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 				var surface_pos: Vector2 = result["position"]
 				var length: float = cast_origin.distance_to(surface_pos)
+				# Active creatures get extra slack so they can move within chain reach
+				if c["behavior"] == "active":
+					length += 100.0  # 100px slack for movement
 				var link_type: String = conn.get("link_type", "rope")
 
 				if link_type == "chain":
@@ -285,12 +288,25 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		# Set behavior per creature
 		_apply_behavior(creature, c["behavior"])
 
-		# Unfreeze physics, set chained mode — chains hold the body.
-		# Chained mode: no gravity, no AI, chains control position.
+		# Unfreeze physics, set chained mode — chains constrain position.
 		if "_physics_frozen" in creature:
 			creature._physics_frozen = false
 		if "_chained" in creature:
 			creature._chained = true
+		# Active creatures need pose_locked OFF so skeleton animates
+		# Clear precog state and force chase toward nearest player
+		if c["behavior"] == "active":
+			if "_pose_locked" in creature:
+				creature._pose_locked = false
+			if "_state" in creature:
+				creature._state = 1  # CHASE
+			# Clear any stale precog waypoints — chained creatures chase directly
+			if "_precog_has_waypoint" in creature:
+				creature._precog_has_waypoint = false
+			if "_precog_path_edges" in creature:
+				creature._precog_path_edges.clear()
+			if creature.has_method("_pick_target"):
+				creature._pick_target()
 
 	# Track instance
 	var instance: Dictionary = {

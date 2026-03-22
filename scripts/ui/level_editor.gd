@@ -442,6 +442,7 @@ func _stop_drag() -> void:
 	_drag_moved = false
 	_drag_handle = -1
 	_splay_edit_dragging_endpoint = false
+	_splay_edit_rotating = false
 
 
 func _do_drag(screen_pos: Vector2) -> void:
@@ -1145,21 +1146,35 @@ func _drag_splay(world_pos: Vector2) -> void:
 		var delta_pos: Vector2 = world_pos - old_pos
 		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
 		_mark_changed("splays", _selected_idx)
-		# Move the actual creature(s) associated with this splay instance
-		# Find matching creatures by proximity to old position
-		for enemy in get_tree().get_nodes_in_group("enemies"):
-			if "_physics_frozen" in enemy and enemy._physics_frozen:
-				if enemy.global_position.distance_to(old_pos) < 100.0:
-					enemy.global_position = world_pos
-					# Also move any tethers/chains anchored to walls for this creature
-					for tether in get_tree().get_nodes_in_group("tethers"):
-						if is_instance_valid(tether):
-							var ta: Dictionary = tether.anchor_a
-							var tb: Dictionary = tether.anchor_b
-							if ta.get("body") == enemy and tb.get("is_wall", false):
-								tb["pos"] = tb["pos"] + delta_pos
-							elif tb.get("body") == enemy and ta.get("is_wall", false):
-								ta["pos"] = ta["pos"] + delta_pos
+		# Move the creature associated with this specific splay instance
+		# Only use stored reference — never guess by proximity (prevents moving wrong creature)
+		var target_enemy: Node2D = null
+		if splays[_selected_idx].has("_creature_ref"):
+			var ref: Node2D = splays[_selected_idx]["_creature_ref"] as Node2D
+			if is_instance_valid(ref):
+				target_enemy = ref
+		# Move the creature and its chains
+		if is_instance_valid(target_enemy):
+			target_enemy.global_position = world_pos
+			for tether in get_tree().get_nodes_in_group("tethers"):
+				if not is_instance_valid(tether):
+					continue
+				var ta: Dictionary = tether.anchor_a
+				var tb: Dictionary = tether.anchor_b
+				if ta.get("body") != target_enemy and tb.get("body") != target_enemy:
+					continue
+				# Move wall anchors
+				if ta.get("body") == target_enemy and tb.get("is_wall", false):
+					tb["pos"] = tb["pos"] + delta_pos
+				elif tb.get("body") == target_enemy and ta.get("is_wall", false):
+					ta["pos"] = ta["pos"] + delta_pos
+				# Shift chain Verlet points
+				if "_points" in tether:
+					for pi in range(tether._points.size()):
+						tether._points[pi] += delta_pos
+					if "_prev_points" in tether:
+						for pi in range(tether._prev_points.size()):
+							tether._prev_points[pi] += delta_pos
 
 
 func _splay_toggle_physics_preview() -> void:
@@ -1379,6 +1394,8 @@ var _splay_edit_all_points: Array[String] = []  # All available attachment point
 var _splay_edit_active: Dictionary = {}  # point_name -> { enabled: bool, cast_end: Vector2, pos_override: Vector2 }
 var _splay_edit_selected_point: String = ""  # Currently selected point name
 var _splay_edit_dragging_endpoint: bool = false  # True when dragging a cast endpoint
+var _splay_edit_rotating: bool = false           # True when dragging the rotation ring
+var _splay_edit_last_rotate_angle: float = 0.0   # Last angle during rotation drag
 var _splay_edit_pinned: Dictionary = {}  # point_name -> bool (pinned = doesn't respond to IK pulling)
 var _splay_edit_mirror: bool = false  # When true, L/R changes are mirrored along body axis
 var _splay_edit_link_type: Dictionary = {}  # point_name -> "rope" or "chain"
@@ -1650,8 +1667,17 @@ func _try_select_splay_connection(world_pos: Vector2) -> void:
 		return
 
 	# Check if clicking the origin (center) to drag the whole creature
-	if world_pos.distance_to(_splay_edit_origin) < 20.0:
+	if world_pos.distance_to(_splay_edit_origin) < 15.0:
 		_splay_edit_selected_point = "_origin"
+		_dragging = true
+		return
+
+	# Check if clicking the rotation ring (radius ~40px from origin, ±8px tolerance)
+	var ring_dist: float = world_pos.distance_to(_splay_edit_origin)
+	if ring_dist > 32.0 and ring_dist < 48.0:
+		_splay_edit_selected_point = "_rotate"
+		_splay_edit_rotating = true
+		_splay_edit_last_rotate_angle = (_splay_edit_origin).angle_to_point(world_pos)
 		_dragging = true
 		return
 
@@ -1681,6 +1707,11 @@ func _try_select_splay_connection(world_pos: Vector2) -> void:
 
 
 func _drag_splay_connection(world_pos: Vector2) -> void:
+	if _splay_edit_selected_point == "_rotate" and _splay_edit_rotating:
+		# Rotate everything around the origin
+		_splay_edit_rotate_all(world_pos)
+		return
+
 	if _splay_edit_selected_point == "_origin":
 		# Move the whole creature + all overrides
 		if is_instance_valid(_splay_edit_creature):
@@ -1800,6 +1831,56 @@ func _splay_edit_set_default_cast(data: Dictionary, point_name: String) -> void:
 	if away.length() < 0.1:
 		away = Vector2(0, -1)
 	data["cast_end"] = _splay_edit_origin + away * body_len
+
+
+func _splay_edit_rotate_all(world_pos: Vector2) -> void:
+	## Rotate the entire skeleton + all connection points around the origin.
+	var current_angle: float = _splay_edit_origin.angle_to_point(world_pos)
+	var delta_angle: float = current_angle - _splay_edit_last_rotate_angle
+	_splay_edit_last_rotate_angle = current_angle
+
+	if absf(delta_angle) < 0.001 or not is_instance_valid(_splay_edit_creature):
+		return
+
+	var origin: Vector2 = _splay_edit_origin
+	var cr: Node2D = _splay_edit_creature
+
+	# Rotate all skeleton points around the origin (in local space, origin = creature global_pos)
+	# Since skeleton points are local to the creature, and creature is at origin, rotate around (0,0)
+	for i in range(cr._spine.size()):
+		cr._spine[i] = cr._spine[i].rotated(delta_angle)
+	for i in range(cr._neck.size()):
+		cr._neck[i] = cr._neck[i].rotated(delta_angle)
+	cr._skull = cr._skull.rotated(delta_angle)
+	cr._jaw = cr._jaw.rotated(delta_angle)
+	if "_clavicles" in cr:
+		for i in range(cr._clavicles.size()):
+			cr._clavicles[i] = cr._clavicles[i].rotated(delta_angle)
+	if "_hip_bones" in cr:
+		for i in range(cr._hip_bones.size()):
+			cr._hip_bones[i] = cr._hip_bones[i].rotated(delta_angle)
+	if "_tail" in cr:
+		for i in range(cr._tail.size()):
+			cr._tail[i] = cr._tail[i].rotated(delta_angle)
+	if "_legs" in cr:
+		for li in range(cr._legs.size()):
+			for ji in range(cr._legs[li].size()):
+				cr._legs[li][ji] = cr._legs[li][ji].rotated(delta_angle)
+
+	# Update attachment positions
+	if cr.has_method("_update_hitbox_positions"):
+		cr._update_hitbox_positions()
+	cr.queue_redraw()
+
+	# Rotate all active point overrides and cast endpoints around the origin (world space)
+	for pn in _splay_edit_active:
+		var data: Dictionary = _splay_edit_active[pn]
+		var pos_ov: Vector2 = data.get("pos_override", Vector2.ZERO)
+		if pos_ov != Vector2.ZERO:
+			data["pos_override"] = origin + (pos_ov - origin).rotated(delta_angle)
+		var cast_end: Vector2 = data.get("cast_end", Vector2.ZERO)
+		if cast_end != Vector2.ZERO:
+			data["cast_end"] = origin + (cast_end - origin).rotated(delta_angle)
 
 
 func _splay_edit_ik_drag(point_name: String, world_pos: Vector2) -> void:
@@ -2209,6 +2290,21 @@ func _draw_splay_edit_overlay() -> void:
 
 	var origin: Vector2 = _splay_edit_origin
 	var font: Font = ThemeDB.fallback_font
+
+	# Draw rotation ring (outer circle for drag-to-rotate)
+	var rotate_selected: bool = (_splay_edit_selected_point == "_rotate")
+	var ring_col: Color = Color(1.0, 0.7, 0.2, 0.7) if rotate_selected else Color(0.6, 0.5, 0.3, 0.4)
+	# Dashed ring at 40px radius
+	for seg in range(16):
+		if seg % 2 == 1:
+			continue
+		var a1: float = TAU * float(seg) / 16.0
+		var a2: float = TAU * float(seg + 1) / 16.0
+		_overlay.draw_arc(origin, 40.0, a1, a2, 4, ring_col, 1.5)
+	# Small arrow on the ring to indicate rotation direction
+	var arrow_pos: Vector2 = origin + Vector2(40, 0)
+	_overlay.draw_line(arrow_pos, arrow_pos + Vector2(-4, -6), ring_col, 1.5)
+	_overlay.draw_line(arrow_pos, arrow_pos + Vector2(4, -6), ring_col, 1.5)
 
 	# Draw origin (draggable center)
 	var origin_selected: bool = (_splay_edit_selected_point == "_origin")
