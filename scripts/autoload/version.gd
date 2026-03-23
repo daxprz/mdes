@@ -6,8 +6,8 @@ extends Node
 ## PATCH (Y): visual-only changes, art tweaks, UI polish. No gameplay impact.
 
 const MAJOR := 0
-const MINOR := 9
-const PATCH := 25
+const MINOR := 10
+const PATCH := 0
 
 static func get_string() -> String:
 	return "%d.%d.%d" % [MAJOR, MINOR, PATCH]
