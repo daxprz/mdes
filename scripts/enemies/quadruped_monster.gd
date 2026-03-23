@@ -73,9 +73,9 @@ const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around targ
 const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
 const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
 const LEAP_FLIGHT_TIME_MAX := 1.2 # Longest flight time to test
-const LEAP_ARC_STEPS := 24        # Simulation steps per arc (covers ~1.0s flight at 0.04s dt)
+const LEAP_ARC_STEPS := 40        # Simulation steps per arc (covers ~1.2s flight at 0.03s dt)
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
-const LEAP_ARC_DT := 0.04         # Simulation timestep
+const LEAP_ARC_DT := 0.03         # Simulation timestep (small enough to catch thin platforms)
 
 # Health
 const MAX_HEALTH := 1500
@@ -3400,10 +3400,14 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				arc_l.append(Vector2(pt.x - effective_radius, pt.y))
 				arc_r.append(Vector2(pt.x + effective_radius, pt.y))
 
-			# Sweep a circle of effective_radius along the center arc to check
-			# for collisions. This is the "lamborghini through a hallway" check —
-			# the full body width must clear all obstacles at every point.
 			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
+			# 1. Forward raycasts on center arc: catch walls and platforms during
+			#    launch/landing (handles one-way platform detection properly).
+			if not _check_arc_clear_ignore(arc_c, landing_zone):
+				_dbg_arc += 1
+				continue
+			# 2. Circle sweep at mid-flight: sweep body-radius circle at points
+			#    above both platforms to catch obstacles the body would clip.
 			if not _check_arc_circle_sweep(arc_c, effective_radius, landing_zone):
 				_dbg_arc += 1
 				continue
@@ -3707,32 +3711,37 @@ func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> boo
 
 
 func _check_arc_circle_sweep(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
-	## Sweep a circle of the given radius along each point of the arc.
-	## Returns false if the circle overlaps any physics body at any point.
-	## Ignores collisions within ignore_rect (the landing zone).
-	## Skips first 2 points (inside launch platform) and last 2 (landing).
+	## Sweep a circle of the given radius along the center arc to check clearance.
+	## At each mid-flight point, cast the circle HORIZONTALLY (left and right) to
+	## detect walls and platform edges within body-width. This avoids false positives
+	## from one-way platforms below the arc (which the body passes through during ascent).
+	## Vertical clearance (floors/ceilings) is handled by _check_arc_clear_ignore.
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
-	if arc.size() < 4:
+	if arc.size() < 6:
 		return true
 
-	var shape := CircleShape2D.new()
-	shape.radius = radius
-	var query := PhysicsShapeQueryParameters2D.new()
-	query.shape = shape
-	query.collision_mask = 1  # World layer
-	query.exclude = [get_rid()]
-
-	for i in range(2, arc.size() - 2):
+	for i in range(3, arc.size() - 3):
 		var pt: Vector2 = arc[i]
 		if ignore_rect.has_point(pt):
 			continue
-		query.transform = Transform2D(0, pt)
-		var results: Array = space.intersect_shape(query, 1)
-		if not results.is_empty():
+		# Raycast left and right to check horizontal clearance
+		var query_l := PhysicsRayQueryParameters2D.create(pt, pt + Vector2(-radius, 0), 1)
+		query_l.exclude = [get_rid()]
+		var hit_l: Dictionary = space.intersect_ray(query_l)
+		if not hit_l.is_empty() and not ignore_rect.has_point(hit_l["position"]):
 			DebugOverlay.log("leap_attack/lateral_clearance", self,
-				"CIRCLE SWEEP HIT at (%.0f,%.0f) radius=%.0f", [pt.x, pt.y, radius])
+				"LATERAL HIT LEFT at (%.0f,%.0f) wall=(%.0f,%.0f) radius=%.0f",
+				[pt.x, pt.y, hit_l["position"].x, hit_l["position"].y, radius])
+			return false
+		var query_r := PhysicsRayQueryParameters2D.create(pt, pt + Vector2(radius, 0), 1)
+		query_r.exclude = [get_rid()]
+		var hit_r: Dictionary = space.intersect_ray(query_r)
+		if not hit_r.is_empty() and not ignore_rect.has_point(hit_r["position"]):
+			DebugOverlay.log("leap_attack/lateral_clearance", self,
+				"LATERAL HIT RIGHT at (%.0f,%.0f) wall=(%.0f,%.0f) radius=%.0f",
+				[pt.x, pt.y, hit_r["position"].x, hit_r["position"].y, radius])
 			return false
 	return true
 
@@ -5138,10 +5147,10 @@ func _draw_debug() -> void:
 				var perp: Vector2 = Vector2(-dir.y, dir.x)
 				draw_line(tip, tip - dir * 8 + perp * 5, Color(0.2, 0.6, 1.0, 0.9), 2.0)
 				draw_line(tip, tip - dir * 8 - perp * 5, Color(0.2, 0.6, 1.0, 0.9), 2.0)
-			# Bounding arcs: thin grey
-			for ei in range(arc_l.size() - 1):
+			# Bounding arcs: thin grey — skip first 3 and last 3 points (inside platforms)
+			for ei in range(3, arc_l.size() - 4):
 				draw_line(arc_l[ei] - global_position, arc_l[ei + 1] - global_position, Color(0.5, 0.5, 0.5, 0.4), 1.0)
-			for ei in range(arc_r.size() - 1):
+			for ei in range(3, arc_r.size() - 4):
 				draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, Color(0.5, 0.5, 0.5, 0.4), 1.0)
 			# Launch dot: green
 			draw_circle(launch, 5.0, Color(0.2, 1.0, 0.3, 0.9))
