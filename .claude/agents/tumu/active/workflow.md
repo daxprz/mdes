@@ -18,6 +18,8 @@
 - ALWAYS run tests via the game UI so the human can SEE what's happening
 - When running a single test, use the test editor (Ctrl+T → Tests... → pick → play)
 - When running a suite, use the console (`suite <name>`)
+- When polling for results, NEVER sleep longer than 1 second. Check frequently.
+- Prefer `sleep 1` loops over `sleep 30/60/90` blocks that block the user.
 
 ## Directory Structure
 ```
