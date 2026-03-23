@@ -3400,7 +3400,14 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				arc_l.append(Vector2(pt.x - effective_radius, pt.y))
 				arc_r.append(Vector2(pt.x + effective_radius, pt.y))
 
-			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
+			# Landing zone: ignore body clips near the destination platform.
+			# Extends well below the surface to cover the approach arc path,
+			# and expanded horizontally by body radius for side approaches.
+			var landing_zone := Rect2(
+				plat_min_x - effective_radius - 20,
+				plat_y - 80,
+				plat_max_x - plat_min_x + effective_radius * 2 + 40,
+				200 + effective_radius)
 			# 1. Forward raycasts on all three arcs: center + body-width edges.
 			#    Catches walls and platforms the body would physically hit.
 			# Arc clearance: sweep a body-sized circle along arc_c and check
@@ -3761,7 +3768,7 @@ func _check_arc_body_clearance(arc: PackedVector2Array, radius: float, ignore_re
 	# and points inside the ignore_rect (destination platform area).
 	var launch_y: float = arc[0].y
 
-	for i in range(4, arc.size() - 4, 4):
+	for i in range(4, arc.size() - 4, 2):
 		var pt: Vector2 = arc[i]
 		# Skip if still near launch platform height
 		if pt.y > launch_y - radius - 20:

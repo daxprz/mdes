@@ -2032,10 +2032,12 @@ func _cmd_notify(notify_name: String, message: String, buttons_str: String, time
 	_notify_mode = mode
 	_notify_dismissed_button = ""
 
+	# Always clean up any previous blocking layer
+	if _notify_layer and is_instance_valid(_notify_layer):
+		_notify_layer.queue_free()
+		_notify_layer = null
+
 	if mode == "blocking":
-		# Build blocking modal UI
-		if _notify_layer and is_instance_valid(_notify_layer):
-			_notify_layer.queue_free()
 		_notify_layer = CanvasLayer.new()
 		_notify_layer.layer = 115
 		var panel := Control.new()

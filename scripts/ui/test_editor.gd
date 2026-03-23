@@ -92,6 +92,7 @@ var _picker_sel: int = 0
 
 # Runner state & results
 var _run_running: bool = false
+var _results_collected: bool = false  # True after _collect_results, even if runner still waiting on notify
 var _run_blink: float = 0.0
 var _run_results: Dictionary = {}   # {row_idx: "pass"|"fail"|"info", ...}
 var _run_detail: Dictionary = {}    # {row_idx: Array[String]} — per-check detail log lines
@@ -156,14 +157,16 @@ func _process(delta: float) -> void:
 	if _run_running:
 		var rcon: Node = get_node_or_null("/root/Rcon")
 		if rcon and rcon._test_runner:
-			# Collect results when COMPLETE fires (results written, but notify may still be active)
-			if rcon._test_runner._test_state == "COMPLETE" and _run_leap_edges.is_empty() and not _run_results.has(0):
+			# Collect results ONCE when COMPLETE fires
+			if rcon._test_runner._test_state == "COMPLETE" and not _results_collected:
 				_collect_results(rcon._test_runner)
-			# Fully done when runner stops (notify dismissed)
-			if not rcon._test_runner._running:
+				# Results are in — stop tracking as "running" so the editor is interactive
 				_run_running = false
-				if _run_leap_edges.is_empty():
-					_collect_results(rcon._test_runner)  # Fallback if COMPLETE was missed
+			# Fully done when runner stops (notify dismissed)
+			elif not rcon._test_runner._running:
+				_run_running = false
+				if not _results_collected:
+					_collect_results(rcon._test_runner)
 				if not _suite_queue.is_empty() or not _suite_name.is_empty():
 					_suite_advance()
 	if _panel:
@@ -281,7 +284,9 @@ func _input(event: InputEvent) -> void:
 	# Mouse button — only consume if click is on our window or on a handle
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
-			if _get_window_rect().has_point(event.position) or _is_over_handle(event.position):
+			var full_rect := _get_window_rect()
+			full_rect.size.y += 60
+			if full_rect.has_point(event.position) or _is_over_handle(event.position):
 				_on_mouse_press(event.position)
 				get_viewport().set_input_as_handled()
 		else:
@@ -493,7 +498,6 @@ func _cancel_edit() -> void:
 
 func _on_mouse_press(screen_pos: Vector2) -> void:
 	var win_rect := _get_window_rect()
-
 	# Title bar → start window drag
 	if Rect2(win_rect.position, Vector2(win_rect.size.x, TITLE_H)).has_point(screen_pos):
 		_win_drag = true
@@ -540,10 +544,18 @@ func _handle_window_click(screen_pos: Vector2, win_rect: Rect2) -> void:
 	# Below title bar
 	var y_offset: float = TITLE_H
 	var row_zone_h: float = _visible_row_count() * ROW_H
-
 	if local_y >= y_offset and local_y < y_offset + row_zone_h:
 		var row_idx: int = _row_scroll + int((local_y - y_offset) / ROW_H)
 		var local_x: float = screen_pos.x - win_rect.position.x
+
+		if _run_running or _results_collected:
+			# Run/review mode: click selects row (to view details) but no editing/drag
+			if row_idx < _script.size():
+				var old_sel := _selected_row
+				_selected_row = row_idx
+				_edit_focused = false
+				print("ROW_SELECT: old=%d new=%d script_size=%d" % [old_sel, row_idx, _script.size()])
+			return
 
 		# Ghost "add" row at bottom
 		if row_idx >= _script.size():
@@ -578,13 +590,16 @@ func _handle_window_click(screen_pos: Vector2, win_rect: Rect2) -> void:
 
 	y_offset += row_zone_h
 
-	if _selected_row >= 0 and local_y >= y_offset and local_y < y_offset + _edit_field_height():
-		# Click in edit field → focus it
-		_edit_focused = true
-		return
-
 	if _selected_row >= 0:
+		if not _run_running and local_y >= y_offset and local_y < y_offset + _edit_field_height():
+			# Click in edit field → focus it (only in edit mode)
+			_edit_focused = true
+			return
 		y_offset += _edit_field_height()
+		y_offset += _detail_panel_height()
+		# Notify help panel height
+		if _selected_row < _script.size() and _script[_selected_row].strip_edges().begins_with("notify ") and get_meta("notify_active", false):
+			y_offset += 56.0
 
 	# Button bar
 	if local_y >= y_offset and local_y < y_offset + BUTTON_H:
@@ -1004,6 +1019,7 @@ func _load_test(test_name: String) -> void:
 	_run_detail.clear()
 	_run_summary = ""
 	_run_leap_edges.clear()
+	_results_collected = false
 	# Clear the scene for a clean test environment
 	rcon._execute("clear")
 	rcon._execute("clearplayers")
@@ -1048,6 +1064,7 @@ func _run_test() -> void:
 
 func _collect_results(runner: Node) -> void:
 	## Map the test runner's results back to script row indices and build the summary.
+	_results_collected = true
 	_run_results.clear()
 	var total: int = 0
 	var passed: int = 0
@@ -1786,7 +1803,8 @@ func _visible_row_count() -> int:
 
 func _edit_field_height() -> float:
 	## Dynamic height for the edit field based on text length (word wrap).
-	if _selected_row < 0:
+	## Hidden during review mode (results collected, no editing).
+	if _selected_row < 0 or _results_collected:
 		return 0.0
 	var font: Font = ThemeDB.fallback_font
 	var text_w: float = font.get_string_size("  " + _edit_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
@@ -1810,7 +1828,13 @@ func _window_height() -> float:
 	if _selected_row >= 0:
 		h += _edit_field_height()
 		h += _detail_panel_height()
+		# Notify help panel (when notify row is selected and active)
+		if _selected_row < _script.size() and _script[_selected_row].strip_edges().begins_with("notify ") and get_meta("notify_active", false):
+			h += 56.0
 	h += BUTTON_H
+	# Result summary bar
+	if not _run_summary.is_empty():
+		h += 22.0
 	return h
 
 
@@ -2206,7 +2230,7 @@ func _draw_panel() -> void:
 				"info":
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "·",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
-		elif _run_running and not line_state.is_empty():
+		elif _run_running and not _results_collected and not line_state.is_empty():
 			# During run — show execution state
 			match line_state:
 				"pending":
@@ -2234,6 +2258,17 @@ func _draw_panel() -> void:
 				"complete":
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✓",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.7, 0.5))
+		# Notify line: show ⏸ + countdown when notify is active (after results collected)
+		if _results_collected and _script[script_idx].strip_edges().begins_with("notify "):
+			var rcon_cd: Node = get_node_or_null("/root/Rcon")
+			if rcon_cd and rcon_cd._notify_active:
+				_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "⏸",
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.8, 0.3))
+				_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.2, 0.2, 0.05, 0.3))
+				var secs: int = ceili(rcon_cd._notify_timer)
+				var cd_text: String = "%02d:%02d" % [secs / 60, secs % 60]
+				_panel.draw_string(font, Vector2(wx + ww - 48, row_y + 15), cd_text,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.3, 0.7))
 
 		# Command text — truncated (leave room for result icon + X button)
 		var cmd_text: String = _script[script_idx]
