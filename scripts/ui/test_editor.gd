@@ -2215,6 +2215,15 @@ func _draw_panel() -> void:
 						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "⏸",
 							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.8, 0.3))
 						_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.2, 0.2, 0.05, 0.3))
+						# Countdown on the right
+						var rcon_cd: Node = get_node_or_null("/root/Rcon")
+						if rcon_cd and rcon_cd._notify_active:
+							var secs: int = ceili(rcon_cd._notify_timer)
+							var mm: int = secs / 60
+							var ss: int = secs % 60
+							var cd_text: String = "%02d:%02d" % [mm, ss]
+							_panel.draw_string(font, Vector2(wx + ww - 48, row_y + 15), cd_text,
+								HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.3, 0.7))
 					else:
 						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "●",
 							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
@@ -2256,6 +2265,21 @@ func _draw_panel() -> void:
 		if _run_detail.has(_selected_row):
 			_draw_detail_panel(wx, by, ww)
 			by += _detail_panel_height()
+		# Notify help (when notify row is selected and active)
+		elif _selected_row >= 0 and _selected_row < _script.size() and _script[_selected_row].strip_edges().begins_with("notify ") and get_meta("notify_active", false):
+			var nh: float = 56.0
+			_panel.draw_rect(Rect2(wx, by, ww, nh), Color(0.1, 0.1, 0.05, 1.0))
+			_panel.draw_rect(Rect2(wx, by, ww, nh), Color(0.6, 0.6, 0.3, 0.4), false, 1.0)
+			_panel.draw_string(font, Vector2(wx + 10, by + 16),
+				"Review the test results above. Click check rows to see details.",
+				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.8, 0.8, 0.5))
+			_panel.draw_string(font, Vector2(wx + 10, by + 32),
+				"Inspect violations in the game world. Drag handles to adjust.",
+				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.8, 0.8, 0.5))
+			_panel.draw_string(font, Vector2(wx + 10, by + 48),
+				"Click [Done ✓] when finished reviewing.",
+				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.6, 0.9, 0.5))
+			by += nh
 
 	# Button bar
 	_draw_buttons(wx, by, ww)
