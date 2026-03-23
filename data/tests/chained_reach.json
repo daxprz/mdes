@@ -12,7 +12,7 @@
 		"chain 0 head floor 100",
 		"spawn dummy 400 885",
 		"standdown off",
-		"wait 15 unless breach 47 718 1854 718 monster* dummy* unless breach 859 901 856 704 monster* dummy* unless breach 1119 901 1119 696 monster* dummy*",
+		"wait 5 unless breach 47 718 1854 718 monster* dummy* unless breach 859 901 856 704 monster* dummy* unless breach 1119 901 1119 696 monster* dummy*",
 		"standdown on",
 		"debug off chain/tether_arc",
 		"debug off chain/chain_barrier",

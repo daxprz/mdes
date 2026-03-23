@@ -23,7 +23,7 @@
 		"daz 2 1234 818 53",
 		"spawn dummy 1250 525",
 		"standdown off",
-		"wait 25 unless breach 1252 890 1202 349 monster* dummy* unless breach 1203 340 1903 291 monster* dummy*",
+		"wait 25 unless breach 1252 890 1202 349 monster* dummy* unless breach 1203 340 1903 291 monster* dummy* unless exit_circle 1250 521 31 dummy*",
 		"standdown on",
 		"debug off chain/tether_arc",
 		"debug off chain/chain_barrier",
