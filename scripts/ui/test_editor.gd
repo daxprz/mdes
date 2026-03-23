@@ -2210,9 +2210,15 @@ func _draw_panel() -> void:
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "○",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
 				"running":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "●",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
-					_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.1, 0.25, 0.1, 0.3))
+					var is_notify_line: bool = _script[script_idx].strip_edges().begins_with("notify ")
+					if is_notify_line:
+						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "⏸",
+							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.8, 0.3))
+						_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.2, 0.2, 0.05, 0.3))
+					else:
+						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "●",
+							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
+						_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.1, 0.25, 0.1, 0.3))
 				"complete":
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✓",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.7, 0.5))
