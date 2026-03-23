@@ -155,12 +155,17 @@ func _process(delta: float) -> void:
 	# Poll test runner for results when a run finishes
 	if _run_running:
 		var rcon: Node = get_node_or_null("/root/Rcon")
-		if rcon and rcon._test_runner and not rcon._test_runner._running:
-			_run_running = false
-			_collect_results(rcon._test_runner)
-			# If running a suite, record result and advance to next test
-			if not _suite_queue.is_empty() or not _suite_name.is_empty():
-				_suite_advance()
+		if rcon and rcon._test_runner:
+			# Collect results when COMPLETE fires (results written, but notify may still be active)
+			if rcon._test_runner._test_state == "COMPLETE" and _run_leap_edges.is_empty() and not _run_results.has(0):
+				_collect_results(rcon._test_runner)
+			# Fully done when runner stops (notify dismissed)
+			if not rcon._test_runner._running:
+				_run_running = false
+				if _run_leap_edges.is_empty():
+					_collect_results(rcon._test_runner)  # Fallback if COMPLETE was missed
+				if not _suite_queue.is_empty() or not _suite_name.is_empty():
+					_suite_advance()
 	if _panel:
 		_panel.queue_redraw()
 	if _overlay:
@@ -487,6 +492,17 @@ func _cancel_edit() -> void:
 # -- Mouse handling ------------------------------------------------------------
 
 func _on_mouse_press(screen_pos: Vector2) -> void:
+	# Notify pill (top-center of screen)
+	if get_meta("notify_active", false):
+		var vp := get_viewport().get_visible_rect().size
+		var ok_x: float = (vp.x - 240.0) / 2.0 + 240.0 - 56.0
+		if Rect2(ok_x, 4, 50, 22).has_point(screen_pos):
+			var rcon: Node = get_node_or_null("/root/Rcon")
+			if rcon:
+				var btns: Array = get_meta("notify_buttons", ["OK"])
+				rcon._cmd_notify_dismiss(str(btns[0]) if not btns.is_empty() else "OK")
+			return
+
 	var win_rect := _get_window_rect()
 
 	# Title bar → start window drag
@@ -585,6 +601,8 @@ func _handle_window_click(screen_pos: Vector2, win_rect: Rect2) -> void:
 	if local_y >= y_offset and local_y < y_offset + BUTTON_H:
 		var lx := screen_pos.x - win_rect.position.x
 		_handle_button_click(lx)
+		return
+
 
 
 func _handle_button_click(local_x: float) -> void:
@@ -1069,11 +1087,18 @@ func _collect_results(runner: Node) -> void:
 
 	_run_summary = "%d/%d PASSED" % [passed, total]
 	_status_msg = _run_summary
-	_status_timer = 5.0
+	_status_timer = 999.0  # Keep visible until next test or dismiss
+
+	# Auto-select the first failed check row so the human can see what went wrong
+	for si in range(_script.size()):
+		if _run_results.get(si, "") == "fail":
+			_select_row(si)
+			break
 	_mode = Mode.EDIT
 
 	# Use the test runner's captured leap evaluation (evaluated at check time, not after)
 	_run_leap_edges = runner._last_leap_eval.duplicate(true)
+	print("EDITOR: collected %d leap edges for overlay" % _run_leap_edges.size())
 
 
 func _capture_leap_edges() -> void:
@@ -2232,6 +2257,28 @@ func _draw_panel() -> void:
 		_panel.draw_rect(Rect2(wx, by, ww, 22), sum_bg)
 		_panel.draw_string(font, Vector2(wx + 10, by + 16), _run_summary,
 			HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 12, sum_col)
+
+	# Notify pill (floating at top-center of screen — NOT part of the window)
+	if get_meta("notify_active", false):
+		var n_name: String = get_meta("notify_name", "")
+		var n_buttons: Array = get_meta("notify_buttons", ["OK"])
+		var rcon_n: Node = get_node_or_null("/root/Rcon")
+		var remaining: float = rcon_n._notify_timer if rcon_n and rcon_n._notify_active else 0.0
+		var pill_w: float = 240.0
+		var pill_h: float = 28.0
+		var pill_x: float = (vp.x - pill_w) / 2.0
+		var pill_y: float = 4.0
+		_panel.draw_rect(Rect2(pill_x, pill_y, pill_w, pill_h), Color(0.08, 0.15, 0.08, 0.92))
+		_panel.draw_rect(Rect2(pill_x, pill_y, pill_w, pill_h), Color(0.4, 0.8, 0.4, 0.5), false, 1.0)
+		var pill_text: String = "%s  %.0fs" % [n_name.to_upper(), remaining]
+		_panel.draw_string(font, Vector2(pill_x + 10, pill_y + 19), pill_text,
+			HORIZONTAL_ALIGNMENT_LEFT, pill_w - 80, 11, Color(0.7, 1.0, 0.7))
+		# OK button in the pill
+		var ok_x: float = pill_x + pill_w - 56
+		_panel.draw_rect(Rect2(ok_x, pill_y + 3, 50, 22), Color(0.3, 0.9, 0.3, 0.2))
+		_panel.draw_rect(Rect2(ok_x, pill_y + 3, 50, 22), Color(0.3, 0.9, 0.3, 0.6), false, 1.0)
+		_panel.draw_string(font, Vector2(ok_x + 14, pill_y + 19), str(n_buttons[0]) if not n_buttons.is_empty() else "OK",
+			HORIZONTAL_ALIGNMENT_LEFT, 40, 11, Color(0.3, 0.9, 0.3))
 
 	# Status flash message (save feedback etc.)
 	if _status_timer > 0 and not _status_msg.is_empty():

@@ -10,7 +10,7 @@ const TASK_WAIT := "wait"       # Wait N seconds
 const TASK_CHECK := "check"     # Run checks and record results
 const TASK_RESULTS := "results" # Show aggregated results
 const TASK_DEBUG_PROFILE := "debug_profile"  # Apply/clear debug profile
-const TASK_MODAL := "modal"     # Show modal dialog and wait for dismiss
+const TASK_NOTIFY := "notify"   # Show notification and wait for dismiss
 
 var _task_queue: Array = []   # Array of {type, data}
 var _running: bool = false
@@ -24,7 +24,7 @@ var _current_test_script: Array = []  # Copy of the script being run
 var _test_vars: Dictionary = {}      # Test variables from "var <name> default=<val>"
 var _test_state: String = ""         # Current state: INITIALIZING/RUNNING/COMPLETE/FINALIZED
 var _state_timestamps: Dictionary = {} # {state: msec}
-var _waiting_for_modal: bool = false # True only during TASK_MODAL wait
+var _waiting_for_notify: bool = false # True only during TASK_NOTIFY wait
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -97,19 +97,21 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 		_current_test_script.append(str(line))
 	_test_start_time = Time.get_ticks_msec()
 
-	_queue_script(script, test_name)
+	var trailing_modal: Dictionary = _queue_script(script, test_name)
 
 	_task_queue.append({"type": TASK_RESULTS})
+	if not trailing_modal.is_empty():
+		_task_queue.append(trailing_modal)
 	_start_queue()
 
 
-func _queue_script(script: Array, test_name: String) -> void:
-	## Queue tasks from a flat script array. Used by both run_test_script and _queue_test.
-	## Automatically clears stale zones/debug state from previous tests.
-	## Handles meta-commands: var, wait, check, emit, modal.
+func _queue_script(script: Array, test_name: String) -> Dictionary:
+	## Queue tasks from a flat script array. Returns trailing modal task (if any).
+	## Caller should append TASK_RESULTS then the modal AFTER this returns.
+	var trailing_modal: Dictionary = {}
 	_test_vars = {}
 	_state_timestamps = {}
-	_waiting_for_modal = false
+	_waiting_for_notify = false
 	_set_test_state("INITIALIZING")
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if rcon:
@@ -152,8 +154,8 @@ func _queue_script(script: Array, test_name: String) -> void:
 				current_batch.append(l)
 			continue
 
-		# Modal: "modal <name> <message> <buttons_json> <timeout>"
-		if l.begins_with("modal "):
+		# Notify: "notify <name> <message> <buttons_json> <timeout> [mode]"
+		if l.begins_with("notify "):
 			# Flush batch first
 			if not current_batch.is_empty():
 				_task_queue.append({
@@ -163,7 +165,8 @@ func _queue_script(script: Array, test_name: String) -> void:
 				})
 				first_batch = false
 				current_batch = []
-			_task_queue.append({"type": TASK_MODAL, "command": l})
+			# Store as trailing modal — will be appended AFTER TASK_RESULTS by caller
+			trailing_modal = {"type": TASK_NOTIFY, "command": l}
 			continue
 
 		if l.begins_with("wait "):
@@ -209,6 +212,7 @@ func _queue_script(script: Array, test_name: String) -> void:
 			"test_name": test_name if first_batch else "",
 			"commands": current_batch.duplicate(),
 		})
+	return trailing_modal
 
 
 func _parse_script_check(line: String) -> Dictionary:
@@ -362,7 +366,10 @@ func _queue_test(test_data: Dictionary) -> void:
 	if test_data.has("script"):
 		_reset_bleap_state()
 		var script: Array = test_data["script"]
-		_queue_script(script, test_name)
+		var modal: Dictionary = _queue_script(script, test_name)
+		# Note: _queue_test doesn't append TASK_RESULTS — the caller (run_suite) does
+		if not modal.is_empty():
+			_task_queue.append(modal)
 		return
 
 	# Legacy format: setup/wait/checks
@@ -476,13 +483,13 @@ func _advance_queue() -> void:
 			_set_test_state("COMPLETE")
 			_show_results()
 			_wait_timer = 0.1
-		TASK_MODAL:
+		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
-				rcon._modal_dismissed_button = ""  # Clear stale dismiss
+				rcon._notify_dismissed_button = ""  # Clear stale dismiss
 				rcon._execute(task["command"])
-			_waiting_for_modal = true
+			_waiting_for_notify = true
 			_wait_timer = 999.0  # Wait indefinitely — modal dismiss advances
 
 
@@ -502,14 +509,14 @@ func _process(delta: float) -> void:
 					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
-		# Check if modal was dismissed — advance the queue (only during TASK_MODAL)
-		if _waiting_for_modal:
+		# Check if modal was dismissed — advance the queue (only during TASK_NOTIFY)
+		if _waiting_for_notify:
 			var rcon_modal: Node = get_node_or_null("/root/Rcon")
-			if rcon_modal and not rcon_modal._modal_active:
+			if rcon_modal and not rcon_modal._notify_active:
 				_wait_timer = 0.0
-				_waiting_for_modal = false
+				_waiting_for_notify = false
 				_set_test_state("FINALIZED")
-				rcon_modal._modal_dismissed_button = ""
+				rcon_modal._notify_dismissed_button = ""
 		# Poll bounded leap graph monitoring
 		if _bleap_monitor_active:
 			_bleap_monitor_poll -= delta
