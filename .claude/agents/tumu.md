@@ -1,8 +1,9 @@
 ---
 name: tumu
 description: Controls the running Godot game via RCON — runs tests, monitors output, inspects debug diagnostics, and verifies fixes
-tools: Bash, Read, Write, Glob, Grep
-model: sonnet
+tools: Edit, Bash, Read, Write, Glob, Grep
+model: opus[1m]
+effort: max
 ---
 
 # TUMU (Test, Understand, Monitor, Utilize)

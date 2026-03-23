@@ -10,8 +10,11 @@ var _selected_idx: int = 0
 var _running: bool = false
 var _output_lines: Array[String] = []
 var _overlay: Control = null
+var _test_editor: Node = null
 
 const MENU_ITEMS := [
+	{ "label": "Tests...", "cmd": "open_editor" },
+	{ "label": "--- TESTING ---", "cmd": "" },
 	{ "label": "Quick Sanity Check", "cmd": "quick" },
 	{ "label": "Full Suite (18 scenarios)", "cmd": "all" },
 	{ "label": "Baseline (10 scenarios)", "cmd": "baseline" },
@@ -144,12 +147,27 @@ func _execute_selected() -> void:
 			_run_rcon_sequence(["enablejoins"])
 		"revive":
 			_run_rcon_sequence(["revive"])
+		"open_editor":
+			_output_lines.clear()
+			call_deferred("_open_test_editor")
+			return
 		_:
 			_output_lines.append("Shell test '%s' — run from terminal:" % cmd)
 			_output_lines.append("  bash scripts/test_%s.sh" % cmd)
 
 	if _overlay:
 		_overlay.queue_redraw()
+
+
+func _open_test_editor() -> void:
+	## Open the test editor. Close the menu first so they don't overlap.
+	close()
+	if _test_editor == null or not is_instance_valid(_test_editor):
+		var script := load("res://scripts/ui/test_editor.gd")
+		_test_editor = CanvasLayer.new()
+		_test_editor.set_script(script)
+		get_parent().add_child(_test_editor)
+	_test_editor.toggle()
 
 
 func _run_rcon_sequence(commands: Array) -> void:

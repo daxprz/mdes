@@ -42,6 +42,9 @@ func _register_all() -> void:
 
 	# -- Testing --
 	r.call("testing/etz_daz_zones", "ETZ/DAZ zone circles and labels")
+	r.call("testing/planned_leaps", "Planned hop arcs: launch/landing dots, center arc, bounding arcs")
+	r.call("testing/bounded_leap_checks", "Bounded leap constraint shapes (A/B circles, START/END/DISALLOW) with results")
+	r.call("testing/violations", "Leap constraint violations: pulsing red circles at breach points on failed arcs")
 
 	# -- Body Mechanics --
 	r.call("body_mechanics/collision_shapes", "Body collision sphere (belly)")

@@ -1,32 +1,31 @@
 {
 	"name": "P1_to_P3",
-	"description": "Monster from P1 to P3",
-	"setup": [
+	"script": [
+		"debug on precog/platform_list",
+		"debug on precog/graph_edges",
+		"debug on testing/planned_leaps",
+		"debug on testing/bounded_leap_checks",
+		"debug log precog/current_path",
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn dummy 670 525",
-		"spawn monster 550 745"
-	],
-	"wait": 15.0,
-	"checks": [
-		{
-			"command": "hp",
-			"extract": "damage_taken",
-			"expect_gt": 0,
-			"label": "damage"
-		},
-		{
-			"command": "fps",
-			"extract": "fps",
-			"expect_gt": 20,
-			"label": "fps"
-		},
-		{
-			"command": "ik",
-			"extract": "ik_peak",
-			"expect_lt": 2000,
-			"label": "ik_peak"
-		}
+		"spawn dummy 738 506",
+		"spawn monster 550",
+		"bleap reset",
+		"bleap a 542 749 21",
+		"bleap b 676 527 19",
+		"bleap plan opt start 327 730 190 39 end 670 534 142 disallow 60 540 819 610 491",
+		"wait 15 unless breach 540 558 767 653 monster* dummy* unless breach 4 131 162 883 monster* dummy* unless breach 718 890 804 549 monster* dummy* unless breach 13 120 671 256 monster* dummy* unless breach 688 262 805 530 monster* dummy* unless breach 0 -80 1920 -80 monster* dummy* unless breach 0 -180 1920 -180 monster* dummy*",
+		"standdown on",
+		"debug off precog/platform_list",
+		"debug off precog/graph_edges",
+		"debug off testing/planned_leaps",
+		"debug off testing/bounded_leap_checks",
+		"debug nolog precog/current_path",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0",
+		"check ik extract:ik_peak < 2000.0 label:ik_peak",
+		"check bounded_leaps P1-to-P3 leap graph edge"
 	]
 }

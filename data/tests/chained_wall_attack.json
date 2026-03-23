@@ -1,21 +1,24 @@
 {
 	"name": "chained_wall_attack",
-	"description": "Monster chained to right wall attacks dummy standing within reach",
-	"setup": [
+	"script": [
+		"debug on chain/tether_arc",
+		"debug on chain/chain_barrier",
+		"debug log precog/current_path",
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn monster 1300 885",
-		"standdown on",
+		"spawn monster 1300 885 standdown",
 		"wait 1",
 		"chain 0 head wall 1920 820 700",
-		"wait 1",
 		"spawn dummy 1550 885",
-		"standdown off"
-	],
-	"wait": 15.0,
-	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		"standdown off",
+		"wait 10 unless breach 1215 894 1220 730 monster* dummy* unless breach 1199 755 1639 758 monster* dummy* unless breach 1600 896 1604 714 monster* dummy*",
+		"standdown on",
+		"debug off chain/tether_arc",
+		"debug off chain/chain_barrier",
+		"debug nolog precog/current_path",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0"
 	]
 }

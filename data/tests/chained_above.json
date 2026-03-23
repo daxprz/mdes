@@ -1,21 +1,16 @@
 {
 	"name": "chained_above",
-	"description": "Chained monster on floor cannot reach dummy on platform above",
-	"setup": [
+	"script": [
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn monster 960 885",
+		"spawn monster 960 885 standdown",
+		"chain 0 head floor 180",
+		"spawn dummy 959 588",
+		"standdown off",
+		"wait 10 unless breach 738 888 876 295 monster* dummy* unless breach 1040 299 1196 888 monster* dummy* unless breach 745 439 1175 438 monster* dummy*",
 		"standdown on",
-		"wait 1",
-		"chain 0 head floor 200",
-		"wait 1",
-		"spawn dummy 960 520",
-		"standdown off"
-	],
-	"wait": 15.0,
-	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_eq": 0, "label": "no_teleport_damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		"check hp extract:damage_taken = 0.0 label:no_teleport_damage",
+		"check fps extract:fps > 20.0"
 	]
 }

@@ -251,9 +251,8 @@ func should_draw(aspect_path: String, entity: Node = null) -> bool:
 
 ## Check if textual debug should be logged for this aspect + entity.
 ## Returns TextMode (NONE if nothing should be logged).
+## Note: logging bypasses global_enabled — tests need logs even without the visual overlay.
 func should_log(aspect_path: String, entity: Node = null) -> int:
-	if not global_enabled:
-		return TextMode.NONE
 	if not _aspects.has(aspect_path):
 		return TextMode.NONE
 	var txt: int = _aspects[aspect_path]._actual_textual

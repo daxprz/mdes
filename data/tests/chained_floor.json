@@ -1,21 +1,26 @@
 {
 	"name": "chained_floor",
-	"description": "Chained monster on floor attacks nearby dummy",
-	"setup": [
+	"script": [
+		"debug on precog/platform_list",
+		"debug on precog/graph_edges",
+		"debug on testing/planned_leaps",
+		"debug log precog/current_path",
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn monster 960 885",
-		"standdown on",
+		"spawn monster 960 885 standdown",
 		"wait 1",
 		"chain 0 head floor 500",
-		"wait 1",
 		"spawn dummy 900 885",
-		"standdown off"
-	],
-	"wait": 15.0,
-	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		"standdown off",
+		"wait 15 unless breach 868 325 1317 904 monster* dummy* unless breach 641 905 1028 330 monster* dummy*",
+		"standdown on",
+		"debug off precog/platform_list",
+		"debug off precog/graph_edges",
+		"debug off testing/planned_leaps",
+		"debug nolog precog/current_path",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0"
 	]
 }

@@ -1,32 +1,17 @@
 {
 	"name": "floor_to_upper",
-	"description": "Monster from floor to upper platform",
-	"setup": [
+	"script": [
 		"clear",
 		"portal off",
 		"clearplayers",
 		"spawn dummy 670 525",
-		"spawn monster 960 885"
-	],
-	"wait": 15.0,
-	"checks": [
-		{
-			"command": "hp",
-			"extract": "damage_taken",
-			"expect_gt": 0,
-			"label": "damage"
-		},
-		{
-			"command": "fps",
-			"extract": "fps",
-			"expect_gt": 20,
-			"label": "fps"
-		},
-		{
-			"command": "ik",
-			"extract": "ik_peak",
-			"expect_lt": 2000,
-			"label": "ik_peak"
-		}
+		"spawn monster 960 885",
+		"wait 15 unless breach 598 540 677 450 dummy* unless breach 638 453 736 549 dummy* unless breach 634 886 636 768 monster* dummy*",
+		"standdown on",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0",
+		"check ik extract:ik_peak < 2000.0 label:ik_peak",
+		"daz 1 692 833 55"
 	]
 }

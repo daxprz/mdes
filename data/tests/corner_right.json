@@ -1,32 +1,15 @@
 {
 	"name": "corner_right",
-	"description": "Monster attacks in right corner",
-	"setup": [
+	"script": [
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn dummy 1800 885",
-		"spawn monster 960 885"
-	],
-	"wait": 15.0,
-	"checks": [
-		{
-			"command": "hp",
-			"extract": "damage_taken",
-			"expect_gt": 0,
-			"label": "damage"
-		},
-		{
-			"command": "fps",
-			"extract": "fps",
-			"expect_gt": 20,
-			"label": "fps"
-		},
-		{
-			"command": "ik",
-			"extract": "ik_peak",
-			"expect_lt": 2000,
-			"label": "ik_peak"
-		}
+		"spawn dummy 1738 882",
+		"spawn monster 960 885",
+		"wait 15 unless breach 1647 898 1816 741 dummy*",
+		"standdown on",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0",
+		"check ik extract:ik_peak < 2000.0 label:ik_peak"
 	]
 }

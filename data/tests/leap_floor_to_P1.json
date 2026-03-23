@@ -1,30 +1,42 @@
 {
 	"name": "leap_floor_to_P1",
-	"description": "Monster leaps from floor to lower-left platform (P1)",
-	"debug": {
-		"pathing/waypoints": "log",
-		"pathing/platform_leap_path": "log",
-		"precog/current_path": "log",
-		"leap_attack/spots_considered": "log"
-	},
-	"setup": [
+	"script": [
+		"debug on precog/platform_list",
+		"debug on precog/graph_edges",
+		"debug on precog/status_text",
+		"debug on testing/planned_leaps",
+		"debug on testing/bounded_leap_checks",
+		"debug on leap_attack/chosen_arc",
+		"debug log precog/current_path",
+		"debug log leap_attack/rays_cast",
+		"debug log pathing/platform_leap_path",
 		"clear",
 		"portal off",
 		"clearplayers",
 		"clearzones",
-		"spawn monster 700 885",
-		"standdown on",
-		"wait 1",
-		"debug",
-		"tab",
-		"debugdraw",
-		"etz 1 540 700 60",
+		"spawn monster 700 885 standdown",
 		"spawn dummy 540 730",
-		"standdown off"
-	],
-	"wait": 20.0,
-	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		"bleap reset",
+		"bleap a 960 885 49",
+		"bleap b 540 750 30",
+		"bleap plan opt start 745 843 293 63 end 540 750 211 disallow 13 738 765 732 890",
+		"bleap plan opt start 100 865 225 42 end 540 750 211 disallow 13 338 765 340 890",
+		"bleap min 1",
+		"standdown off",
+		"wait 20 unless breach 347 815 740 809 monster* dummy* unless exit_circle 540 730 50 dummy*",
+		"standdown on",
+		"debug off precog/platform_list",
+		"debug off precog/graph_edges",
+		"debug off precog/status_text",
+		"debug off testing/planned_leaps",
+		"debug off testing/bounded_leap_checks",
+		"debug off leap_attack/chosen_arc",
+		"debug nolog precog/current_path",
+		"debug nolog leap_attack/rays_cast",
+		"debug nolog pathing/platform_leap_path",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0",
+		"check bounded_leaps floor-to-P1 leap arc"
 	]
 }

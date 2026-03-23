@@ -1,0 +1,33 @@
+{
+	"name": "verify_leap_graph_P0_P1",
+	"script": [
+		"debug on precog/platform_list",
+		"debug on precog/graph_edges",
+		"debug on testing/planned_leaps",
+		"debug on testing/bounded_leap_checks",
+		"debug log precog/current_path",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"clearzones",
+		"spawn monster 573 834",
+		"spawn dummy 540 730",
+		"bleap reset",
+		"bleap a 847 890 46",
+		"bleap b 540 750 29",
+		"bleap plan opt start 760 860 300 44 end 634 706 125 disallow 60 695 812 698 918 disallow 60 808 490 1180 858",
+		"bleap plan opt start 145 850 159 54 end 390 696 79 disallow 60 344 913 376 814 disallow 60 60 852 236 432",
+		"bleap min 1",
+		"standdown off",
+		"wait 8 unless breach 206 544 856 544 monster* dummy* unless breach 861 544 1156 916 monster* dummy* unless breach 58 914 1164 916 monster* dummy* unless breach 76 912 210 520 monster* dummy* unless breach 587 759 550 660 monster* dummy* unless breach 479 754 550 660 monster* dummy*",
+		"standdown on",
+		"debug off precog/platform_list",
+		"debug off precog/graph_edges",
+		"debug off testing/planned_leaps",
+		"debug off testing/bounded_leap_checks",
+		"debug nolog precog/current_path",
+		"debug on testing/violations",
+		"check bounded_leaps P0-to-P1 leap graph edge",
+		"check fps > 20"
+	]
+}

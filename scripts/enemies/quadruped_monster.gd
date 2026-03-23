@@ -276,6 +276,7 @@ const SEGMENT_WEIGHTS: Dictionary = {
 }
 var _attach_forces: Dictionary = {}  # point_name -> Vector2 (accumulated force from attached items)
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
+var _dbg_arc_log: bool = false        # Log arc collision details (first failure only)
 var debug_draw_lite: bool = true     # Lightweight debug (state, platforms, waypoint, target)
 
 # IK quality scoring (lower = better)
@@ -293,6 +294,7 @@ var _last_target_pos: Vector2 = Vector2.ZERO  # Dummy position last check
 var _plan_attempts: int = 0        # How many times we've tried the current plan
 const MAX_PLAN_ATTEMPTS := 3      # Commit to a plan for this many attempts before changing
 var _state_lock_timer: float = 0.0 # Don't change state until this expires
+var entity_id: String = ""         # Unique ID for test zone tracking
 
 
 func _ready() -> void:
@@ -806,8 +808,9 @@ func _physics_process(delta: float) -> void:
 			_update_blood_particles(delta)
 			queue_redraw()
 			return
-		elif not chained_on_floor:
-			# AWAKE but SUSPENDED: apply gravity, constrain by chain
+		elif not chained_on_floor and _state != State.ATTACK_LEAP_AIRBORNE and _state != State.ATTACK_LEAP_WINDUP:
+			# AWAKE but SUSPENDED (dangling): apply gravity, constrain by chain
+			# Skip during leap flight — let the leap physics run freely
 			velocity.y += GRAVITY * delta
 			_apply_chain_constraints()
 			move_and_slide()
@@ -914,9 +917,9 @@ func _physics_process(delta: float) -> void:
 		# The collision sphere traps the player, not moves us.
 		velocity = Vector2.ZERO
 	else:
-		# Apply chain constraints BEFORE move_and_slide to set direction
-		# move_and_slide handles floor collision — don't override after
-		if _chained:
+		# Apply chain constraints BEFORE move_and_slide — but NOT during
+		# airborne leaps. Chain only limits ROUTE PLANNING, not flight physics.
+		if _chained and not in_leap_flight:
 			_apply_chain_constraints()
 		move_and_slide()
 
@@ -1661,7 +1664,9 @@ func _do_chase(_delta: float) -> void:
 				else:
 					continue
 				# Check if the TARGET (not waypoint) is unreachable
-				if _target.global_position.distance_to(anchor_pos) > tether.target_length:
+				var target_dist: float = _target.global_position.distance_to(anchor_pos)
+				if target_dist > tether.target_length:
+					DebugOverlay.log("precog/current_path", self, "PRECOG CHAIN ABORT: target dist=%.0f > chain len=%.0f", [target_dist, tether.target_length])
 					_precog_has_waypoint = false
 					_precog_path_edges.clear()
 					break
@@ -1670,7 +1675,7 @@ func _do_chase(_delta: float) -> void:
 		var to_waypoint: Vector2 = _precog_waypoint - global_position
 		var waypoint_dist: float = absf(to_waypoint.x)
 		if Engine.get_frames_drawn() % 30 == 0:
-			print("PRECOG WALK: wpt=(%.0f,%.0f) me=(%.0f,%.0f) dx=%.0f edge_empty=%s" % [
+			DebugOverlay.log("pathing/walk_run_path", self, "PRECOG WALK: wpt=(%.0f,%.0f) me=(%.0f,%.0f) dx=%.0f edge_empty=%s", [
 				_precog_waypoint.x, _precog_waypoint.y,
 				global_position.x, global_position.y,
 				waypoint_dist, str(_precog_waypoint_edge.is_empty())])
@@ -1684,15 +1689,14 @@ func _do_chase(_delta: float) -> void:
 			var has_vel: bool = _precog_waypoint_edge.has("launch_vel")
 			var vel_val: String = str(_precog_waypoint_edge.get("launch_vel", "NONE"))
 			var has_arcs: bool = _precog_waypoint_edge.has("arc_l") and _precog_waypoint_edge.has("arc_r")
-			print("PRECOG: ARRIVED. has_vel=%s vel=%s has_arcs=%s edge_keys=%s" % [
+			DebugOverlay.log("pathing/waypoints", self, "PRECOG: ARRIVED. has_vel=%s vel=%s has_arcs=%s edge_keys=%s", [
 				str(has_vel), vel_val, str(has_arcs), str(_precog_waypoint_edge.keys())])
 
 			if not _precog_waypoint_edge.is_empty() and _precog_waypoint_edge.has("launch_vel"):
 				# Use the pre-computed velocity — the arrival threshold ensures
 				# we're close enough to the planned launch point.
 				var edge: Dictionary = _precog_waypoint_edge
-				print("PRECOG: EXECUTING leap vel=(%.0f,%.0f)" % [edge["launch_vel"].x, edge["launch_vel"].y])
-
+				DebugOverlay.log("pathing/platform_leap_path", self, "PRECOG: EXECUTING leap vel=(%.0f,%.0f)", [edge["launch_vel"].x, edge["launch_vel"].y])
 				if is_instance_valid(_target):
 					_leap_target_pos = _target.global_position
 				else:
@@ -1711,23 +1715,16 @@ func _do_chase(_delta: float) -> void:
 					"arc_ratio": 0.5,
 					"launch_vel": edge["launch_vel"],
 				})
-				# Check facing before launching — abort if facing wrong way
+				# Force facing to match launch direction, then enter windup
 				var launch_vel: Vector2 = edge.get("launch_vel", Vector2.ZERO)
-				var launch_facing_ok: bool = true
-				if launch_vel.x > 20.0 and _facing < 0:
-					launch_facing_ok = false
-				elif launch_vel.x < -20.0 and _facing > 0:
-					launch_facing_ok = false
-				if launch_facing_ok:
-					_state = State.ATTACK_LEAP_WINDUP
-					_attack_timer = 0.0
-					_leap_ik_off = true
-					_leap_cooldown = LEAP_COOLDOWN
-					velocity.x = 0
-				else:
-					# Face the right direction first, try again next frame
-					_facing = signf(launch_vel.x) if absf(launch_vel.x) > 5.0 else _facing
-					_leap_cooldown = 0.2
+				if absf(launch_vel.x) > 5.0:
+					_facing = signf(launch_vel.x)
+				set_meta("_precog_leap", true)  # Flag: don't adjust velocity in windup
+				_state = State.ATTACK_LEAP_WINDUP
+				_attack_timer = 0.0
+				_leap_ik_off = true
+				_leap_cooldown = LEAP_COOLDOWN
+				velocity.x = 0
 			else:
 				_leap_cooldown = 0.0
 		return
@@ -1751,10 +1748,16 @@ func _do_chase(_delta: float) -> void:
 		return
 
 	# If target is on a different platform, use precog pathfinding
+	# But if we already have a precog waypoint, keep executing it
 	var target_above: bool = to_target.y < -80.0
 	var target_far_below: bool = to_target.y > 120.0
-	if (target_above or target_far_below) and _leap_cooldown <= 0.0:
-		_start_precognition()
+	if (target_above or target_far_below) and not _precog_has_waypoint:
+		if _leap_cooldown <= 0.0:
+			_start_precognition()
+		return  # Don't fall through to _choose_attack when target is on different level
+
+	# Don't interrupt precog execution with regular attacks or re-triggers
+	if _precog_has_waypoint:
 		return
 
 	# Fallback: if we haven't hit anything for a while, also use precog
@@ -1771,9 +1774,10 @@ func _do_chase(_delta: float) -> void:
 func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var target_behind: bool = signf(to_target.x) != _facing
 	var height_diff: float = to_target.y  # Negative = target is above
+	var dist_2d: float = to_target.length()
 
 	# DEATH BALL GRAB: very close / overlapping — highest priority
-	if dist < GRAB_RANGE and not _grab_disabled:
+	if dist_2d < GRAB_RANGE and not _grab_disabled:
 		_start_grab()
 		return
 
@@ -1800,12 +1804,12 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 			return
 
 	# Lunge at medium distance
-	if dist > 80.0 and dist < 200.0 and randf() < 0.3:
+	if dist_2d > 80.0 and dist_2d < 200.0 and randf() < 0.3:
 		_start_attack(State.ATTACK_LUNGE)
 		return
 
 	# Close range: bite or standing swipe
-	if dist < BITE_RANGE:
+	if dist_2d < BITE_RANGE:
 		if randf() < 0.6 or _count_front_legs() == 0:
 			_start_attack(State.ATTACK_BITE)
 		else:
@@ -1935,6 +1939,10 @@ func _do_lunge(delta: float) -> void:
 # -- Death Ball Grab (close proximity) -----------------------------------------
 
 func _start_grab() -> void:
+	if is_instance_valid(_target):
+		DebugOverlay.log("leap_attack/attack_zone", self, "GRAB START: monster at (%.0f,%.0f), target at (%.0f,%.0f)", [
+			global_position.x, global_position.y,
+			_target.global_position.x, _target.global_position.y])
 	_state = State.ATTACK_GRAB
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
@@ -2396,6 +2404,10 @@ func _update_leap_pose(delta: float) -> void:
 
 
 func _start_leap() -> void:
+	DebugOverlay.log("leap_attack/attack_zone", self, "LEAP START: planning from (%.0f,%.0f) toward target (%.0f,%.0f)", [
+		global_position.x, global_position.y,
+		_target.global_position.x if is_instance_valid(_target) else 0,
+		_target.global_position.y if is_instance_valid(_target) else 0])
 	_state = State.ATTACK_LEAP_PLAN
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
@@ -2414,6 +2426,9 @@ func _start_leap() -> void:
 	_leap_chosen_arc_r.clear()
 	if is_instance_valid(_target):
 		_leap_target_pos = _target.global_position
+
+
+
 
 
 func _do_leap_plan(delta: float) -> void:
@@ -2752,7 +2767,10 @@ func _precache_platforms() -> void:
 	_precog_graph_building = true
 	_precog_process_i = 0
 	_precog_process_j = 1
-	print("PRECOG PRECACHE: %d platforms detected, building graph..." % _precog_platforms.size())
+	DebugOverlay.log("precog/platform_list", self, "PRECOG PRECACHE: %d platforms detected, building graph...", [_precog_platforms.size()])
+	for pi in range(_precog_platforms.size()):
+		var p: Dictionary = _precog_platforms[pi]
+		DebugOverlay.log("precog/platform_list", self, "  P%d: (%.0f,%.0f) x=[%.0f..%.0f]", [pi, p["pos"].x, p["pos"].y, p["min_x"], p["max_x"]])
 
 
 var _precog_graph_building: bool = false
@@ -2766,7 +2784,7 @@ func _precog_build_graph_tick() -> void:
 	while pairs_this_frame < 5:
 		if _precog_process_i >= n:
 			_precog_graph_building = false
-			print("PRECOG GRAPH READY: %d edges" % _precog_edges.size())
+			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH READY: %d edges", [_precog_edges.size()])
 			return
 		if _precog_process_i != _precog_process_j:
 			_precog_build_one_edge(_precog_process_i, _precog_process_j)
@@ -2833,9 +2851,15 @@ func _do_precognition(delta: float) -> void:
 			if is_instance_valid(_target):
 				_precog_add_entity_platform(_target.global_position, "target")
 			_precog_find_path()
-			print("PRECOG: path=%s (len=%d) [%d plats, %d edges]" % [
+			DebugOverlay.log("precog/current_path", self, "PRECOG: path=%s (len=%d) [%d plats, %d edges]", [
 				str(_precog_path), _precog_path_edges.size(),
 				_precog_platforms.size(), _precog_edges.size()])
+			for hi in range(_precog_path_edges.size()):
+				var he: Dictionary = _precog_path_edges[hi]
+				DebugOverlay.log("precog/current_path", self, "  HOP %d: from=(%.0f,%.0f) vel=(%.0f,%.0f) arrival=(%.0f,%.0f)", [
+					hi, he.get("from_pos", Vector2.ZERO).x, he.get("from_pos", Vector2.ZERO).y,
+					he.get("launch_vel", Vector2.ZERO).x, he.get("launch_vel", Vector2.ZERO).y,
+					he.get("arrival", Vector2.ZERO).x, he.get("arrival", Vector2.ZERO).y])
 			_precog_phase = 3
 		3:
 			_precog_start_execution()
@@ -2871,6 +2895,7 @@ func _precog_drop_and_detect() -> void:
 			y += PRECOG_GRID_SPACING
 
 		_precog_detect_platforms()
+		_precog_refine_platform_edges()
 		_precog_platforms_cached = true
 
 	# Clear entity labels (monster/target move between precog cycles)
@@ -2952,6 +2977,62 @@ func _precog_detect_platforms() -> void:
 
 
 
+func _precog_refine_platform_edges() -> void:
+	## 2nd pass: refine platform edges using ball-drop technique.
+	## For each platform, drop balls just outside the detected edges.
+	## If the ball lands at the same Y level, the platform extends further.
+	## Binary-search to find the precise drop-off point.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return
+	for plat in _precog_platforms:
+		var y: float = plat["pos"].y
+		# Floor platform: only refine edges near walls (don't waste time
+		# probing the middle). Still refine to find cliff corners.
+
+
+		# Refine left edge
+		plat["min_x"] = _find_platform_edge(space, plat["min_x"], y, -1.0)
+		# Refine right edge
+		plat["max_x"] = _find_platform_edge(space, plat["max_x"], y, 1.0)
+		# Update center
+		plat["pos"].x = (plat["min_x"] + plat["max_x"]) * 0.5
+
+
+func _find_platform_edge(space: PhysicsDirectSpaceState2D, start_x: float, plat_y: float, direction: float) -> float:
+	## Binary-search for the exact platform edge by dropping balls.
+	## direction: -1 = search left, +1 = search right
+	var edge_x: float = start_x
+	var step: float = PRECOG_GRID_SPACING
+
+	# First: extend outward while surface exists
+	for _i in range(3):
+		var test_x: float = edge_x + direction * step
+		# Drop a ball from above
+		var query := PhysicsRayQueryParameters2D.create(
+			Vector2(test_x, plat_y - 100), Vector2(test_x, plat_y + 100), 1)
+		var hit: Dictionary = space.intersect_ray(query)
+		if not hit.is_empty() and absf(hit["position"].y - plat_y) < 15:
+			edge_x = test_x  # Surface continues
+		else:
+			break  # Surface ended
+
+	# Then: binary-search between last-good and first-bad
+	var good_x: float = edge_x
+	var bad_x: float = edge_x + direction * step
+	for _i in range(4):  # 4 iterations = ~3px precision
+		var mid_x: float = (good_x + bad_x) * 0.5
+		var query := PhysicsRayQueryParameters2D.create(
+			Vector2(mid_x, plat_y - 100), Vector2(mid_x, plat_y + 100), 1)
+		var hit: Dictionary = space.intersect_ray(query)
+		if not hit.is_empty() and absf(hit["position"].y - plat_y) < 15:
+			good_x = mid_x
+		else:
+			bad_x = mid_x
+
+	return good_x
+
+
 func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 	## Tag the platform the entity is standing on.
 	## First tries exact match (on the platform), then falls back to
@@ -2975,11 +3056,11 @@ func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 
 	if not best_plat.is_empty():
 		best_plat["label"] = label
-		print("PRECOG ENTITY: %s at (%.0f,%.0f) floor=%.0f → nearest P '%s' at (%.0f,%.0f) dist=%.0f" % [
+		DebugOverlay.log("precog/platform_list", self, "PRECOG ENTITY: %s at (%.0f,%.0f) floor=%.0f → nearest P '%s' at (%.0f,%.0f) dist=%.0f", [
 			label, world_pos.x, world_pos.y, floor_y,
 			best_plat.get("label", ""), best_plat["pos"].x, best_plat["pos"].y, best_dist])
 	else:
-		print("PRECOG ENTITY: %s at (%.0f,%.0f) — NO platforms at all!" % [label, world_pos.x, world_pos.y])
+		DebugOverlay.log("precog/platform_list", self, "PRECOG ENTITY: %s at (%.0f,%.0f) — NO platforms at all!", [label, world_pos.x, world_pos.y])
 
 
 func _precog_build_graph_step() -> void:
@@ -3006,13 +3087,14 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 		var plat_from: Dictionary = _precog_platforms[_precog_process_i]
 		var plat_to: Dictionary = _precog_platforms[_precog_process_j]
 
-		# Chain barrier: skip edges where BOTH platforms are outside chain reach
+		# Chain barrier: skip edges where the destination platform center is
+		# outside chain reach. Launch points on the source platform are filtered
+		# individually below (they must be within chain reach too).
 		var barrier: Dictionary = get_chain_barrier()
 		if not barrier.is_empty():
-			var from_reachable: bool = plat_from["pos"].distance_to(barrier["center"]) < barrier["radius"]
 			var to_reachable: bool = plat_to["pos"].distance_to(barrier["center"]) < barrier["radius"]
-			if not from_reachable or not to_reachable:
-				return  # Skip this edge — unreachable
+			if not to_reachable:
+				return  # Destination unreachable
 		var from_y: float = plat_from["pos"].y
 		var from_min_x: float = plat_from["min_x"]
 		var from_max_x: float = plat_from["max_x"]
@@ -3028,8 +3110,8 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 						continue
 				launch_points.append(pos)
 
-		if _precog_process_i == 0 and _precog_process_j == 1:
-			print("PRECOG GRAPH: P%d->P%d launches=%d from=(%.0f,%.0f) to=(%.0f,%.0f)" % [
+		if launch_points.size() > 0:
+			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH: P%d->P%d launches=%d from=(%.0f,%.0f) to=(%.0f,%.0f)", [
 				_precog_process_i, _precog_process_j, launch_points.size(),
 				plat_from["pos"].x, plat_from["pos"].y,
 				plat_to["pos"].x, plat_to["pos"].y])
@@ -3050,14 +3132,21 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 		var is_down_jump: bool = plat_from["pos"].y < plat_to["pos"].y - 20
 
 		for launch_pos in unique_launches:
-			# Skip lateral clearance for down-jumps (can drop through narrow gaps)
-			if not is_down_jump and not _has_lateral_clearance(launch_pos):
-				continue
+			# Skip lateral clearance for down-jumps and for launches
+			# near platform edges (tree/wall proximity is expected there)
+			if not is_down_jump:
+				var near_edge: bool = (launch_pos.x > plat_to["max_x"] or launch_pos.x < plat_to["min_x"])
+				if not near_edge and not _has_lateral_clearance(launch_pos):
+					continue
 
 			# Target the platform surface directly
 			var result: Dictionary = _plan_leap_to_surface(launch_pos, plat_to, is_down_jump)
 			if not result.is_empty():
-				var score: float = result["arrival"].distance_to(plat_to["pos"])
+				# Score: prefer short walk + close landing. Launch distance
+				# matters because the monster has to walk there first.
+				var landing_dist: float = result["arrival"].distance_to(plat_to["pos"])
+				var walk_dist: float = launch_pos.distance_to(plat_to["pos"]) * 0.3
+				var score: float = landing_dist + walk_dist
 				if score < best_score:
 					best_score = score
 					best_edge = result
@@ -3071,6 +3160,9 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 
 func _precog_find_path() -> void:
 	## Dijkstra from monster's platform to target's platform using the edge graph.
+	for ei in range(_precog_edges.size()):
+		var e: Dictionary = _precog_edges[ei]
+		DebugOverlay.log("precog/graph_edges", self, "  EDGE[%d]: P%d->P%d", [ei, e["from"], e["to"]])
 	var n: int = _precog_platforms.size()
 	var monster_plat: int = -1
 	var target_plat: int = -1
@@ -3081,13 +3173,13 @@ func _precog_find_path() -> void:
 		if _precog_platforms[i]["label"] == "target":
 			target_plat = i
 
-	print("PRECOG PATHFIND: monster=P%d target=P%d" % [monster_plat, target_plat])
+	DebugOverlay.log("precog/current_path", self, "PRECOG PATHFIND: monster=P%d target=P%d", [monster_plat, target_plat])
 	if monster_plat < 0 or target_plat < 0:
-		print("PRECOG PATHFIND: FAILED — monster or target not on a platform")
+		DebugOverlay.log("precog/current_path", self, "PRECOG PATHFIND: FAILED — monster or target not on a platform")
 		_precog_path.clear()
 		return
 	if monster_plat == target_plat:
-		print("PRECOG PATHFIND: same platform — no leap needed")
+		DebugOverlay.log("precog/current_path", self, "PRECOG PATHFIND: same platform — no leap needed")
 		_precog_path.clear()
 		return
 
@@ -3162,10 +3254,15 @@ func _precog_find_path() -> void:
 
 func _precog_start_execution() -> void:
 	## Start executing the path: walk to first hop's launch point, then leap.
+	DebugOverlay.log("precog/current_path", self, "PRECOG EXEC: path=%s edges=%d", [str(_precog_path), _precog_path_edges.size()])
 	if _precog_path.size() < 2 or _precog_path_edges.is_empty():
+		DebugOverlay.log("precog/current_path", self, "PRECOG EXEC: ABORT — path too short or no edges")
 		_state = State.CHASE
 		_time_since_strike_range = 0.0
 		return
+	# Reset stuck timer so execution isn't immediately cancelled
+	_chained_stuck_timer = 0.0
+	_chained_last_pos = global_position
 
 	_precog_current_hop = 0
 	_precog_start_next_hop()
@@ -3187,7 +3284,7 @@ func _precog_start_next_hop() -> void:
 	_state = State.CHASE
 	_time_since_strike_range = 0.0
 
-	print("PRECOG: hop %d/%d → walk to (%.0f,%.0f) then leap" % [
+	DebugOverlay.log("pathing/waypoints", self, "PRECOG: hop %d/%d → walk to (%.0f,%.0f) then leap", [
 		_precog_current_hop + 1, _precog_path_edges.size(),
 		_precog_waypoint.x, _precog_waypoint.y])
 
@@ -3200,24 +3297,55 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 	var plat_y: float = plat["pos"].y
 	var plat_min_x: float = plat["min_x"]
 	var plat_max_x: float = plat["max_x"]
+	var _dbg_solid: int = 0
+	var _dbg_speed: int = 0
+	var _dbg_vy: int = 0
+	var _dbg_arc: int = 0
+	var _dbg_ok: int = 0
+	var _dbg_total: int = 0
 
 	# For down-jumps: smaller effective body radius (can curl up and drop)
 	var effective_radius: float = LEAP_BODY_RADIUS * 0.4 if down_jump else LEAP_BODY_RADIUS
 
 	var landing_y: float = plat_y - 5.0
+	# Sample landing points: evenly spaced + precise edge points
 	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / PRECOG_GRID_SPACING) + 1)
 	sample_count = mini(sample_count, 5)
+	# Add edge landing points (just inside each edge with body clearance)
+	var edge_landings: Array[float] = [
+		plat_min_x + effective_radius + 5,
+		plat_max_x - effective_radius - 5,
+	]
 
+	# Build all landing X positions: regular samples + edge points
+	var all_landing_xs: Array[float] = []
 	for si in range(sample_count):
 		var t: float = float(si) / float(sample_count - 1) if sample_count > 1 else 0.5
 		var inset: float = effective_radius
-		var landing_x: float = lerpf(plat_min_x + inset, plat_max_x - inset, t)
+		all_landing_xs.append(lerpf(plat_min_x + inset, plat_max_x - inset, t))
+	for ex in edge_landings:
+		if ex >= plat_min_x and ex <= plat_max_x:
+			all_landing_xs.append(ex)
+
+	for landing_x in all_landing_xs:
 		var arrival := Vector2(landing_x, landing_y)
 
 		if _is_point_in_solid(arrival):
+			_dbg_solid += 1
 			continue
 
+		# Reject if launch is under the platform — solid platforms block
+		# upward movement. Margin scales with height difference (higher
+		# platforms need more horizontal clearance to arc over).
+		if not down_jump and from_pos.y > plat_y + 20:
+			var height_diff: float = from_pos.y - plat_y
+			var edge_margin: float = height_diff * 0.15  # 15% of height as horizontal clearance
+			edge_margin = clampf(edge_margin, 20.0, 120.0)
+			if from_pos.x >= plat_min_x - edge_margin and from_pos.x <= plat_max_x + edge_margin:
+				continue
+
 		for fi in range(LEAP_FLIGHT_TIMES):
+			_dbg_total += 1
 			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
 				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
 
@@ -3230,9 +3358,17 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			var speed: float = launch_vel.length()
 			var min_speed: float = 50.0 if down_jump else 200.0  # Down-jumps can be gentle
 			if speed < min_speed or speed > LEAP_LAUNCH_SPEED * 1.5:
+				_dbg_speed += 1
 				continue
 			if not down_jump and launch_vy > -50:
-				continue  # Up-jumps must launch upward; down-jumps can go any direction
+				_dbg_vy += 1
+				continue  # Up-jumps must launch upward
+			# Reject if arrival velocity is still ascending — the arc hasn't
+			# peaked yet and would pass through the platform from below.
+			var arrival_vy: float = launch_vy + LEAP_PLAN_GRAVITY * t_flight
+			if not down_jump and arrival_vy < 0:
+				_dbg_vy += 1
+				continue  # Still going up at arrival — through-floor
 
 			var launch_dir: Vector2 = launch_vel.normalized()
 			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
@@ -3243,28 +3379,98 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * effective_radius, launch_vel)
 			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * effective_radius, launch_vel)
 
-			# Check clearance but ignore hits near the destination platform
-			var dest_rect := Rect2(plat_min_x - 10, plat_y - 30, plat_max_x - plat_min_x + 20, 40)
-			if not (_check_arc_clear_ignore(arc_c, dest_rect) and _check_arc_clear_ignore(arc_l, dest_rect) and _check_arc_clear_ignore(arc_r, dest_rect)):
+			# Check arc clearance with landing zone near destination platform.
+			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
+			if not (_check_arc_clear_ignore(arc_c, landing_zone) and _check_arc_clear_ignore(arc_l, landing_zone) and _check_arc_clear_ignore(arc_r, landing_zone)):
+				_dbg_arc += 1
 				continue
 
-			# Surface landing already ensures we approach from above
+			# Verify ALL arc paths (center + body-width) stay ABOVE the
+			# destination platform. Any arc dipping below = through-floor.
+			# Check ASCENDING portion only: reject arcs where the body passes
+			# below the platform surface while still going UP. This catches
+			# through-floor arcs but allows the descending/landing portion.
+			var arc_goes_below: bool = false
+			# Find the peak (where arc stops ascending)
+			var peak_i: int = arc_c.size() - 1  # Default: entire arc is ascending
+			for pi in range(1, arc_c.size()):
+				if arc_c[pi].y > arc_c[pi - 1].y:
+					peak_i = pi - 1
+					break
+			# Check ascending portion: no arc point should be below destination
+			# platform surface within its X range
+			# Only flag when arc is deep inside the platform (inner half).
+			# Arc points near the edges are side-approach trajectories.
+			var plat_half_w: float = (plat_max_x - plat_min_x) * 0.4
+			var asc_inset: float = maxf(plat_half_w, effective_radius)
+			for arc in [arc_c, arc_l, arc_r]:
+				for pi in range(1, mini(peak_i + 1, arc.size())):
+					if arc[pi].y > plat_y:
+						if arc[pi].x >= plat_min_x + asc_inset and arc[pi].x <= plat_max_x - asc_inset:
+							arc_goes_below = true
+							break
+				if arc_goes_below:
+					break
+			if arc_goes_below:
+				_dbg_arc += 100  # +100 = ascending fail (vs +1 = clear_ignore fail)
+				continue
 
-			# Score: prefer landing near platform center
-			var center_dist: float = absf(landing_x - plat["pos"].x)
-			var time_penalty: float = absf(t_flight - 0.6) * 20.0
-			var score: float = center_dist + time_penalty
+			_dbg_ok += 1
+
+			# Score: prefer arcs with maximum clearance from platform edges.
+			# Lower score = better. Penalize arcs that pass close to surfaces.
+			var min_clearance: float = 999.0
+			for pi in range(1, arc_c.size() - 3):
+				# How far above destination platform surface?
+				if arc_c[pi].x >= plat_min_x - 40 and arc_c[pi].x <= plat_max_x + 40:
+					var above_plat: float = plat_y - arc_c[pi].y  # Positive = above
+					if above_plat < min_clearance:
+						min_clearance = above_plat
+			var clearance_penalty: float = maxf(0, 120.0 - min_clearance)  # Penalize arcs with < 120px clearance
+			var time_penalty: float = absf(t_flight - 0.8) * 5.0  # Prefer ~0.8s flight (higher arcs)
+			var score: float = clearance_penalty * 2.0 + time_penalty
 			if score < best_score:
 				best_score = score
 				best = {
 					"arrival": arrival,
 					"launch_vel": launch_vel,
+					"arc_c": arc_c,
 					"arc_l": arc_l,
 					"arc_r": arc_r,
 					"from_pos": from_pos,
 				}
 
+	if _dbg_total > 0 and best.is_empty():
+		DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_FAIL: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) to_plat=(%.0f,%.0f)", [
+			_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
+			from_pos.x, from_pos.y, plat["pos"].x, plat["pos"].y])
 	return best
+
+
+func get_leap_graph() -> Array:
+	## Returns all planned hop edges with platform and arc data for external inspection.
+	## Called by the test runner to evaluate bounded leap constraints.
+	var result: Array = []
+	for edge in _precog_edges:
+		var fi: int = edge.get("from", -1)
+		var ti: int = edge.get("to", -1)
+		var from_plat: Dictionary = _precog_platforms[fi] if fi >= 0 and fi < _precog_platforms.size() else {}
+		var to_plat: Dictionary = _precog_platforms[ti] if ti >= 0 and ti < _precog_platforms.size() else {}
+		result.append({
+			"from_plat_pos": from_plat.get("pos", Vector2.ZERO),
+			"from_plat_min_x": from_plat.get("min_x", 0.0),
+			"from_plat_max_x": from_plat.get("max_x", 0.0),
+			"to_plat_pos": to_plat.get("pos", Vector2.ZERO),
+			"to_plat_min_x": to_plat.get("min_x", 0.0),
+			"to_plat_max_x": to_plat.get("max_x", 0.0),
+			"from_pos": edge.get("from_pos", Vector2.ZERO),
+			"arrival": edge.get("arrival", Vector2.ZERO),
+			"launch_vel": edge.get("launch_vel", Vector2.ZERO),
+			"arc_c": edge.get("arc_c", PackedVector2Array()),
+			"arc_l": edge.get("arc_l", PackedVector2Array()),
+			"arc_r": edge.get("arc_r", PackedVector2Array()),
+		})
+	return result
 
 
 func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
@@ -3381,6 +3587,36 @@ func _apply_curl_pose(delta: float) -> void:
 
 
 
+func _check_arc_swept_circle(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
+	## Check arc clearance using a swept circle along the center path.
+	## This catches obstacles between the body-width edge arcs that raycasts miss.
+	## Skip first 2 segments (launch) and last 2 segments (landing).
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	if arc.size() < 5:
+		return true
+
+	var shape := CircleShape2D.new()
+	shape.radius = radius
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.collision_mask = 1  # World layer
+	query.exclude = [get_rid()]
+
+	var check_end: int = arc.size() - 2
+	for i in range(2, check_end):
+		query.transform = Transform2D(0, arc[i])
+		var results: Array = space.intersect_shape(query, 1)
+		if not results.is_empty():
+			# Check if hit is in the landing zone (ignore destination platform)
+			var hit_pos: Vector2 = arc[i]  # Approximate — shape query doesn't give exact hit pos
+			if ignore_rect.has_point(hit_pos):
+				continue
+			return false
+	return true
+
+
 func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
 	## Simulate a parabolic arc from start with launch_vel, returning world-space points.
 	## Stops early if the arc descends past the starting height (landed).
@@ -3405,41 +3641,71 @@ func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
 
 
 func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> bool:
-	## Like _check_arc_clear but ignores hits within ignore_rect (the destination platform).
+	## Check arc clearance, ignoring hits within ignore_rect (destination platform).
+	## Detects both solid walls (forward raycasts) AND one-way platforms crossed
+	## from below (downward probes at mid-flight arc points).
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
+	if arc.size() < 4:
+		return true
 
-	for i in range(arc.size() - 1):
+	var launch_y: float = arc[0].y  # Source platform surface Y
+	var check_end: int = arc.size() - 2  # Skip last 2 segments (landing)
+
+	for i in range(2, check_end):  # Skip first 2 segments (body-width arcs may start inside floor)
 		var from: Vector2 = arc[i]
 		var to: Vector2 = arc[i + 1]
+		# Forward raycast: catches solid walls
 		var query := PhysicsRayQueryParameters2D.create(from, to, 1)
 		query.exclude = [get_rid()]
 		var result: Dictionary = space.intersect_ray(query)
 		if not result.is_empty():
-			# If the hit is within the destination rect, ignore it
 			if ignore_rect.has_point(result["position"]):
 				continue
 			return false
+
+		# One-way platform detection: when moving upward mid-flight, check
+		# if we just crossed through a platform by raycasting downward.
+		# Only flag if a surface is within 8px below (practically inside it).
+		if to.y < from.y and to.y < launch_y - 60:
+			var probe := PhysicsRayQueryParameters2D.create(to, to + Vector2(0, 8), 1)
+			probe.exclude = [get_rid()]
+			var probe_hit: Dictionary = space.intersect_ray(probe)
+			if not probe_hit.is_empty():
+				if not ignore_rect.has_point(probe_hit["position"]):
+					return false
 	return true
 
 
 func _check_arc_clear(arc: PackedVector2Array) -> bool:
-	## Raycast along each segment of the arc. If any hit, path is blocked.
-	## Skip only the very last segment (the touchdown).
+	## Check arc clearance for solid walls and one-way platforms.
+	## Skip last 2 segments (landing approach).
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
+	if arc.size() < 4:
+		return true
 
-	var check_count: int = maxi(1, arc.size() - 3)  # Skip last 2 segments (landing approach)
-	for i in range(check_count):
+	var launch_y: float = arc[0].y
+	var check_end: int = arc.size() - 3
+
+	for i in range(check_end):
 		var from: Vector2 = arc[i]
 		var to: Vector2 = arc[i + 1]
-		var query := PhysicsRayQueryParameters2D.create(from, to, 1)  # Mask 1 = world
+		# Forward raycast: solid walls
+		var query := PhysicsRayQueryParameters2D.create(from, to, 1)
 		query.exclude = [get_rid()]
-		var result: Dictionary = space.intersect_ray(query)
-		if not result.is_empty():
+		if not space.intersect_ray(query).is_empty():
 			return false
+
+		# Note: one-way platform detection is handled by the ascending arc
+		# check in _plan_leap_to_surface, not by probes here.
+		if false:  # Disabled — ascending check handles one-way platforms
+			var probe := PhysicsRayQueryParameters2D.create(to, to + Vector2(0, 20), 1)
+			probe.exclude = [get_rid()]
+			if not space.intersect_ray(probe).is_empty():
+				return false
 
 	return true
 
@@ -3491,13 +3757,12 @@ func _do_leap_windup(delta: float) -> void:
 			var compressed_foot: Vector2 = hip + Vector2(0, (LEG_UPPER_LEN + LEG_LOWER_LEN) * (1.0 - compress * 0.4))
 			_legs[li][2] = _legs[li][2].lerp(compressed_foot, 4.0 * delta)
 
-	# LAUNCH at end of windup — only if body faces the target (not backwards)
+	# LAUNCH at end of windup — check facing (skip for precog hops which
+	# may face away from the target to reach an intermediate platform).
 	if _attack_timer >= LEAP_WINDUP_TIME:
-		if is_instance_valid(_target):
+		if is_instance_valid(_target) and not get_meta("_precog_leap", false):
 			var to_target_x: float = _target.global_position.x - global_position.x
-			# Body must face the same horizontal direction as the target
 			if (to_target_x > 20.0 and _facing < 0) or (to_target_x < -20.0 and _facing > 0):
-				# Facing wrong way — abort leap, flip and return to chase
 				_facing = signf(to_target_x)
 				_end_leap()
 				_state = State.CHASE
@@ -3506,16 +3771,23 @@ func _do_leap_windup(delta: float) -> void:
 		_state = State.ATTACK_LEAP_AIRBORNE
 		_attack_timer = 0.0
 		_leap_ik_off = true
+		# Disable floor snap so the monster actually leaves the ground
+		floor_snap_length = 0.0
 		var leap_mult: float = get_leap_speed_multiplier()
-		# Use the pre-computed launch velocity from planning, adjusted for current target
+		# Use the pre-computed launch velocity from planning.
 		if has_meta("_leap_chosen_vel"):
 			var planned_vel: Vector2 = get_meta("_leap_chosen_vel")
-			# Adjust horizontal direction toward current target position
-			if is_instance_valid(_target):
-				_leap_target_pos = _target.global_position
-				var to_target: Vector2 = _leap_target_pos - global_position
-				planned_vel.x = signf(to_target.x) * absf(planned_vel.x)
-			velocity = planned_vel * leap_mult
+			if get_meta("_precog_leap", false):
+				# Precog hop: use EXACT planned velocity (arc was validated)
+				velocity = planned_vel * leap_mult
+				remove_meta("_precog_leap")
+			else:
+				# Direct leap: adjust toward current target position
+				if is_instance_valid(_target):
+					_leap_target_pos = _target.global_position
+					var to_target: Vector2 = _leap_target_pos - global_position
+					planned_vel.x = signf(to_target.x) * absf(planned_vel.x)
+				velocity = planned_vel * leap_mult
 		else:
 			# Fallback if no plan data
 			var to_target: Vector2 = _leap_target_pos - global_position
@@ -3538,7 +3810,8 @@ func _do_leap_airborne(delta: float) -> void:
 	# Apply gravity for parabolic arc
 	velocity.y += GRAVITY * delta
 
-	# Force facing to match horizontal velocity — no backwards flight
+
+# Force facing to match horizontal velocity — no backwards flight
 	if absf(velocity.x) > 10.0:
 		_facing = signf(velocity.x)
 
@@ -3585,6 +3858,9 @@ func _do_leap_airborne(delta: float) -> void:
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
 		if dist_to_target < LEAP_STRIKE_REACH:
+			DebugOverlay.log("leap_attack/chosen_arc", self, "LEAP ARRIVED: monster at (%.0f,%.0f), target at (%.0f,%.0f), dist=%.0f", [
+					global_position.x, global_position.y,
+					_target.global_position.x, _target.global_position.y, dist_to_target])
 			# 25% chance: transition to grab-ball instead of normal slash
 			if randf() < 0.25 and not _grab_disabled:
 				_start_grab()
@@ -3690,6 +3966,9 @@ func _do_leap_thrash(delta: float) -> void:
 
 
 func _end_leap() -> void:
+	DebugOverlay.log("pathing/platform_leap_path", self, "LEAP END: at (%.0f,%.0f) on_floor=%s timer=%.2f", [
+		global_position.x, global_position.y, str(is_on_floor()), _attack_timer])
+	floor_snap_length = 1.0  # Re-enable floor snapping
 	_jaw_open = 0.0
 	_posture_blend = 0.0
 	_tail_whipping = false
@@ -3747,7 +4026,7 @@ func _end_leap() -> void:
 				_attack_timer = 0.0
 				_leap_ik_off = true
 				_leap_cooldown = LEAP_COOLDOWN
-				print("PRECOG: RAW AERIAL STRIKE at (%.0f,%.0f) vel=(%.0f,%.0f)" % [
+				DebugOverlay.log("leap_attack/attack_zone", self, "PRECOG: RAW AERIAL STRIKE at (%.0f,%.0f) vel=(%.0f,%.0f)", [
 					_target.global_position.x, _target.global_position.y, velocity.x, velocity.y])
 				return
 
@@ -3832,8 +4111,12 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 				var los_query := PhysicsRayQueryParameters2D.create(world_pos, node.global_position, 1)  # World layer only
 				var los_result: Dictionary = space.intersect_ray(los_query)
 				if los_result:
+					DebugOverlay.log("leap_attack/rays_cast", self, "DMG BLOCKED by LOS: attack at (%.0f,%.0f) → player at (%.0f,%.0f), hit geometry", [
+							world_pos.x, world_pos.y, node.global_position.x, node.global_position.y])
 					continue  # Blocked by geometry — can't attack through floors/walls
 			# Damage via node method (supports dummy) or PlayerManager (real players)
+			DebugOverlay.log("leap_attack/attack_zone", self, "DMG DEALT: %d from (%.0f,%.0f) → player at (%.0f,%.0f)", [
+					damage, world_pos.x, world_pos.y, node.global_position.x, node.global_position.y])
 			if node.has_method("take_damage"):
 				node.take_damage(damage)
 			else:
@@ -4238,12 +4521,11 @@ func _draw() -> void:
 	_draw_neck_head()
 	_draw_blood_particles()
 	# Chain barrier visualization: candy-striped red circle showing reach limit
-	if _chained and PlayerHUD._debug_mode:
+	if _chained and DebugOverlay.should_draw("chain/tether_arc", self):
 		var chain_barrier: Dictionary = get_chain_barrier()
 		if not chain_barrier.is_empty():
 			var center_local: Vector2 = chain_barrier["center"] - global_position
 			var radius: float = chain_barrier["radius"]
-			# Draw candy-striped red/dark-red dashed circle
 			var stripe_count: int = 32
 			for si in range(stripe_count):
 				var a1: float = TAU * float(si) / float(stripe_count)
@@ -4252,28 +4534,24 @@ func _draw() -> void:
 				draw_arc(center_local, radius, a1, a2, 4, col, 3.0)
 
 	# Selection indicator: pulsing cyan ring when TAB-selected
-	if PlayerHUD.debug_selected_enemy == self:
+	if PlayerHUD.debug_selected_enemy == self and DebugOverlay.should_draw("state_info/selection_indicator", self):
 		var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
 		var sel_col := Color(0, 0.9, 1.0, pulse)
 		draw_arc(_spine[1], 30.0, 0, TAU, 24, sel_col, 2.0)
 		draw_string(ThemeDB.fallback_font, _spine[1] + Vector2(-20, -35), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, sel_col)
-	if _asleep:
-		# ZZZ indicator above head
-		var zzz_pos: Vector2 = _skull + Vector2(10, -20)
-		var zzz_alpha: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 800.0)
-		draw_string(ThemeDB.fallback_font, zzz_pos, "ZZZ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 1.0, zzz_alpha))
-	if _standdown:
-		# White flag / STANDDOWN indicator above the monster
-		var flag_pos: Vector2 = _spine[1] + Vector2(0, -40)
-		draw_string(ThemeDB.fallback_font, flag_pos, "STANDDOWN", HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(1, 1, 1, 0.8))
-		# Small white flag triangle
-		var fp: Vector2 = flag_pos + Vector2(-20, -12)
-		draw_line(fp, fp + Vector2(0, 14), Color.WHITE, 1.5)
-		var flag_pts := PackedVector2Array([fp, fp + Vector2(10, 3), fp + Vector2(0, 6)])
-		draw_polygon(flag_pts, PackedColorArray([Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7)]))
-	if PlayerHUD._debug_mode and PlayerHUD.debug_selected_enemy == self:
-		if debug_draw_lite or debug_draw_enabled:
-			_draw_debug()
+	if DebugOverlay.should_draw("state_info/sleep_standdown", self):
+		if _asleep:
+			var zzz_pos: Vector2 = _skull + Vector2(10, -20)
+			var zzz_alpha: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 800.0)
+			draw_string(ThemeDB.fallback_font, zzz_pos, "ZZZ", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 1.0, zzz_alpha))
+		if _standdown:
+			var flag_pos: Vector2 = _spine[1] + Vector2(0, -40)
+			draw_string(ThemeDB.fallback_font, flag_pos, "STANDDOWN", HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(1, 1, 1, 0.8))
+			var fp: Vector2 = flag_pos + Vector2(-20, -12)
+			draw_line(fp, fp + Vector2(0, 14), Color.WHITE, 1.5)
+			var flag_pts := PackedVector2Array([fp, fp + Vector2(10, 3), fp + Vector2(0, 6)])
+			draw_polygon(flag_pts, PackedColorArray([Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7), Color(1, 1, 1, 0.7)]))
+	_draw_debug()
 
 
 func _draw_body() -> void:
@@ -4434,159 +4712,167 @@ func _draw_neck_head() -> void:
 
 func _draw_debug() -> void:
 	var dbg := Color(0, 1, 0, 0.7)
-	var dbg_dim := Color(0, 1, 0, 0.3)
 	var red := Color(1, 0.2, 0.2, 0.7)
 	var cyan := Color(0, 0.9, 1, 0.7)
 	var yellow := Color(1, 1, 0, 0.6)
 	var font: Font = ThemeDB.fallback_font
 
-	# -- Origin crosshair (CharacterBody2D position in local space = 0,0) --
-	draw_line(Vector2(-20, 0), Vector2(20, 0), red, 1.5)
-	draw_line(Vector2(0, -20), Vector2(0, 20), red, 1.5)
-	draw_string(font, Vector2(4, -4), "ORIGIN(0,0)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, red)
+	# -- Origin crosshair --
+	if DebugOverlay.should_draw("body_mechanics/origin_marker", self):
+		draw_line(Vector2(-20, 0), Vector2(20, 0), red, 1.5)
+		draw_line(Vector2(0, -20), Vector2(0, 20), red, 1.5)
+		draw_string(font, Vector2(4, -4), "ORIGIN(0,0)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, red)
 
-	# -- Floor line (raycast from center) --
-	var floor_y: float = _raycast_floor(Vector2(0, _spine[1].y))
-	draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
-	draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
+	# -- Floor line --
+	var floor_y: float = 0.0
+	if DebugOverlay.should_draw("body_mechanics/floor_line", self):
+		floor_y = _raycast_floor(Vector2(0, _spine[1].y))
+		draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
+		draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
 	# -- Body collision sphere (belly) --
-	if _body_collision:
-		var col_col := Color(1, 0, 1, 0.3)
-		draw_arc(_body_collision.position, 14.0, 0, TAU, 16, col_col, 1.5)
-		draw_string(font, _body_collision.position + Vector2(-12, -18), "BELLY", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
+	if DebugOverlay.should_draw("body_mechanics/collision_shapes", self):
+		if _body_collision:
+			var col_col := Color(1, 0, 1, 0.3)
+			draw_arc(_body_collision.position, 14.0, 0, TAU, 16, col_col, 1.5)
+			draw_string(font, _body_collision.position + Vector2(-12, -18), "BELLY", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
 
 	# -- Spine points --
-	for i in range(_spine.size()):
-		draw_circle(_spine[i], 3.0, dbg)
-		draw_string(font, _spine[i] + Vector2(4, -4), "S%d(%.0f,%.0f)" % [i, _spine[i].x, _spine[i].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, dbg)
+	if DebugOverlay.should_draw("body_mechanics/spine_debug", self):
+		for i in range(_spine.size()):
+			draw_circle(_spine[i], 3.0, dbg)
+			draw_string(font, _spine[i] + Vector2(4, -4), "S%d(%.0f,%.0f)" % [i, _spine[i].x, _spine[i].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, dbg)
 
 	# -- Neck + head --
-	draw_circle(_neck[0], 2.5, cyan)
-	draw_circle(_neck[1], 2.5, cyan)
-	draw_line(_neck[0], _neck[1], cyan, 1.0)
-	draw_string(font, _neck[1] + Vector2(4, -4), "NECK", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, cyan)
-	draw_circle(_skull, 3.0, cyan)
-	draw_string(font, _skull + Vector2(4, -10), "SKULL(%.0f,%.0f)" % [_skull.x, _skull.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, cyan)
-	draw_circle(_jaw, 2.0, cyan)
+	if DebugOverlay.should_draw("body_mechanics/neck_skull", self):
+		draw_circle(_neck[0], 2.5, cyan)
+		draw_circle(_neck[1], 2.5, cyan)
+		draw_line(_neck[0], _neck[1], cyan, 1.0)
+		draw_string(font, _neck[1] + Vector2(4, -4), "NECK", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, cyan)
+		draw_circle(_skull, 3.0, cyan)
+		draw_string(font, _skull + Vector2(4, -10), "SKULL(%.0f,%.0f)" % [_skull.x, _skull.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, cyan)
+
+	# -- Jaw --
+	if DebugOverlay.should_draw("body_mechanics/jaw", self):
+		draw_circle(_jaw, 2.0, cyan)
 
 	# -- Tail points --
-	if not _tail_severed:
-		for i in range(_tail.size()):
-			draw_circle(_tail[i], 2.0, Color(1, 0.6, 0, 0.6))
-			if i == 0 or i == _tail.size() - 1:
-				draw_string(font, _tail[i] + Vector2(2, -4), "T%d(%.0f,%.0f)" % [i, _tail[i].x, _tail[i].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(1, 0.6, 0))
+	if DebugOverlay.should_draw("body_mechanics/tail_segments", self):
+		if not _tail_severed:
+			for i in range(_tail.size()):
+				draw_circle(_tail[i], 2.0, Color(1, 0.6, 0, 0.6))
+				if i == 0 or i == _tail.size() - 1:
+					draw_string(font, _tail[i] + Vector2(2, -4), "T%d(%.0f,%.0f)" % [i, _tail[i].x, _tail[i].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(1, 0.6, 0))
 
 	# -- Legs: joints, foot targets, home positions --
-	var leg_colors := [Color(0, 0.8, 1), Color(0.2, 1, 0.5), Color(1, 0.8, 0.2), Color(1, 0.4, 0.6)]
-	for li in range(4):
-		if _leg_severed[li]:
-			continue
-		var col: Color = leg_colors[li]
-		var leg: Array = _legs[li]
-		# Joint circles
-		for j in range(3):
-			draw_circle(leg[j], 2.5, col)
-		# Leg chain lines
-		draw_line(leg[0], leg[1], col * Color(1,1,1,0.5), 1.0)
-		draw_line(leg[1], leg[2], col * Color(1,1,1,0.5), 1.0)
-		# Labels
-		var label: String = ["FL", "FR", "RL", "RR"][li]
-		draw_string(font, leg[0] + Vector2(-8, -6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col)
-		# Foot local position
-		draw_string(font, leg[2] + Vector2(4, 10), "ft(%.0f,%.0f)" % [leg[2].x, leg[2].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
-		# World foot position (X marker, converted to local for drawing)
-		var fw_local: Vector2 = _foot_world[li] - global_position
-		draw_line(fw_local + Vector2(-5, -5), fw_local + Vector2(5, 5), col, 2.0)
-		draw_line(fw_local + Vector2(5, -5), fw_local + Vector2(-5, 5), col, 2.0)
-		# Ideal foot position (circle)
-		var ideal: Vector2 = _ideal_foot_world(li) - global_position
-		draw_arc(ideal, 6.0, 0, TAU, 12, col * Color(1,1,1,0.4), 1.0)
-		# Planted indicator
-		var planted_text: String = "PLANT" if _foot_planted[li] else "STEP"
-		draw_string(font, leg[2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+	if DebugOverlay.should_draw("body_mechanics/leg_debug", self):
+		var leg_colors := [Color(0, 0.8, 1), Color(0.2, 1, 0.5), Color(1, 0.8, 0.2), Color(1, 0.4, 0.6)]
+		for li in range(4):
+			if _leg_severed[li]:
+				continue
+			var col: Color = leg_colors[li]
+			var leg: Array = _legs[li]
+			for j in range(3):
+				draw_circle(leg[j], 2.5, col)
+			draw_line(leg[0], leg[1], col * Color(1,1,1,0.5), 1.0)
+			draw_line(leg[1], leg[2], col * Color(1,1,1,0.5), 1.0)
+			var label: String = ["FL", "FR", "RL", "RR"][li]
+			draw_string(font, leg[0] + Vector2(-8, -6), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col)
+			draw_string(font, leg[2] + Vector2(4, 10), "ft(%.0f,%.0f)" % [leg[2].x, leg[2].y], HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+			# World foot position (X marker)
+			var fw_local: Vector2 = _foot_world[li] - global_position
+			draw_line(fw_local + Vector2(-5, -5), fw_local + Vector2(5, 5), col, 2.0)
+			draw_line(fw_local + Vector2(5, -5), fw_local + Vector2(-5, 5), col, 2.0)
 
-	# -- State info (top-left of creature) --
-	# Draw debug text far from the creature so collision circles are visible
-	# Position on the opposite side of the screen from the creature
-	var screen_x: float = global_position.x
-	var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
-	var info_pos := Vector2(text_x, -global_position.y + 50)
-	# Faint line connecting text to creature
-	draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
-	var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
-	var state_text: String = state_names[_state] if _state < state_names.size() else "?"
-	var dy: int = 0
-	draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	dy += 12
-	draw_string(font, info_pos + Vector2(0, dy), "HP: %d  Legs: %d  Vel: (%.0f,%.0f)" % [health, _count_active_legs(), velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	dy += 12
-	var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
-	draw_string(font, info_pos + Vector2(0, dy), "Floor: %s  noHit: %.0fs%s" % [str(is_on_floor()), _time_since_strike_range, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	dy += 12
-	draw_string(font, info_pos + Vector2(0, dy), "Pos: (%.0f,%.0f)  floorY: %.1f" % [global_position.x, global_position.y, floor_y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-	dy += 14
-	var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
-	draw_string(font, info_pos + Vector2(0, dy), "IK: %.0f avg:%.0f pk:%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
-	dy += 12
-	var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
-	draw_string(font, info_pos + Vector2(0, dy), "Thrash: %d  plan: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
-	if _state == State.ATTACK_GRAB:
+	# -- IK plant marks (ideal foot positions + planted indicators) --
+	if DebugOverlay.should_draw("body_mechanics/ik_plant_marks", self):
+		var leg_colors2 := [Color(0, 0.8, 1), Color(0.2, 1, 0.5), Color(1, 0.8, 0.2), Color(1, 0.4, 0.6)]
+		for li in range(4):
+			if _leg_severed[li]:
+				continue
+			var col: Color = leg_colors2[li]
+			var ideal: Vector2 = _ideal_foot_world(li) - global_position
+			draw_arc(ideal, 6.0, 0, TAU, 12, col * Color(1,1,1,0.4), 1.0)
+			var planted_text: String = "PLANT" if _foot_planted[li] else "STEP"
+			draw_string(font, _legs[li][2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
+
+	# -- State info text panel --
+	if DebugOverlay.should_draw("state_info/state_text_panel", self):
+		if floor_y == 0.0:
+			floor_y = _raycast_floor(Vector2(0, _spine[1].y))
+		var screen_x: float = global_position.x
+		var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
+		var info_pos := Vector2(text_x, -global_position.y + 50)
+		draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
+		var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
+		var state_text: String = state_names[_state] if _state < state_names.size() else "?"
+		var dy: int = 0
+		draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
 		dy += 12
-		var ball_col: Color = Color(0, 1, 0) if _ball_score < 10 else (Color(1, 1, 0) if _ball_score < 50 else Color(1, 0, 0))
-		draw_string(font, info_pos + Vector2(0, dy), "Ball: %.0f pk:%.0f" % [_ball_score, _ball_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ball_col)
+		draw_string(font, info_pos + Vector2(0, dy), "HP: %d  Legs: %d  Vel: (%.0f,%.0f)" % [health, _count_active_legs(), velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+		dy += 12
+		var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
+		draw_string(font, info_pos + Vector2(0, dy), "Floor: %s  noHit: %.0fs%s" % [str(is_on_floor()), _time_since_strike_range, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+		dy += 12
+		draw_string(font, info_pos + Vector2(0, dy), "Pos: (%.0f,%.0f)  floorY: %.1f" % [global_position.x, global_position.y, floor_y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
+		dy += 14
+		var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
+		draw_string(font, info_pos + Vector2(0, dy), "IK: %.0f avg:%.0f pk:%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
+		dy += 12
+		var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
+		draw_string(font, info_pos + Vector2(0, dy), "Thrash: %d  plan: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
+		if _state == State.ATTACK_GRAB:
+			dy += 12
+			var ball_col: Color = Color(0, 1, 0) if _ball_score < 10 else (Color(1, 1, 0) if _ball_score < 50 else Color(1, 0, 0))
+			draw_string(font, info_pos + Vector2(0, dy), "Ball: %.0f pk:%.0f" % [_ball_score, _ball_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ball_col)
 
-	# Draw waypoint marker if active
-	if _precog_has_waypoint:
+	# -- Waypoint marker --
+	if _precog_has_waypoint and DebugOverlay.should_draw("pathing/waypoints", self):
 		var wpt_local: Vector2 = _precog_waypoint - global_position
 		draw_circle(wpt_local, 10.0, Color(1, 0.5, 0, 0.6))
 		draw_arc(wpt_local, 14.0, 0, TAU, 16, Color(1, 0.5, 0, 0.8), 2.0)
 		draw_string(font, wpt_local + Vector2(16, -4), "WAYPOINT", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1, 0.5, 0))
-		# Line from monster to waypoint
 		draw_line(Vector2.ZERO, wpt_local, Color(1, 0.5, 0, 0.4), 1.5)
 
-	# -- Target indicator: crosshair on the hunted player --
-	if is_instance_valid(_target):
+	# -- Target indicator --
+	if is_instance_valid(_target) and DebugOverlay.should_draw("state_info/target_indicator", self):
 		var target_local: Vector2 = _target.global_position - global_position
 		var tgt_col := Color(1, 0, 0, 0.8)
-		# Crosshair
 		draw_line(target_local + Vector2(-16, 0), target_local + Vector2(16, 0), tgt_col, 2.0)
 		draw_line(target_local + Vector2(0, -16), target_local + Vector2(0, 16), tgt_col, 2.0)
 		draw_arc(target_local, 12.0, 0, TAU, 16, tgt_col, 1.5)
 		draw_arc(target_local, 20.0, 0, TAU, 16, Color(1, 0, 0, 0.3), 1.0)
 		var target_dist: float = target_local.length()
 		draw_string(font, target_local + Vector2(14, -14), "TARGET P%d  dist:%.0f" % [_target_player_index, target_dist], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, tgt_col)
-		# Line from skull to target
 		draw_line(_skull, target_local, Color(1, 0.3, 0.1, 0.3), 1.0)
 
-	# -- Leap plan visualization --
+	# -- Leap attack: strike zone + arrival dots --
 	if is_instance_valid(_target) and (_state == State.ATTACK_LEAP_PLAN or not _leap_plan_results.is_empty()):
-		var tgt_local: Vector2 = _leap_target_pos - global_position
+		if DebugOverlay.should_draw("leap_attack/attack_zone", self):
+			var tgt_local: Vector2 = _leap_target_pos - global_position
+			draw_arc(tgt_local, LEAP_STRIKE_REACH, 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
+			draw_string(font, tgt_local + Vector2(LEAP_STRIKE_REACH + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
 
-		# Strike zone circle around target
-		draw_arc(tgt_local, LEAP_STRIKE_REACH, 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
-		draw_string(font, tgt_local + Vector2(LEAP_STRIKE_REACH + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
-
-		# Arrival point markers (dots on the strike circle)
-		for result in _leap_plan_results:
-			if result.has("arrival"):
-				var arr_local: Vector2 = result["arrival"] - global_position
-				var is_clear: bool = result["clear"]
-				var arr_col: Color = Color(0, 1, 0, 0.7) if is_clear else Color(1, 0.3, 0, 0.4)
-				draw_circle(arr_local, 3.0, arr_col)
+		if DebugOverlay.should_draw("leap_attack/spots_considered", self):
+			for result in _leap_plan_results:
+				if result.has("arrival"):
+					var arr_local: Vector2 = result["arrival"] - global_position
+					var is_clear: bool = result["clear"]
+					var arr_col: Color = Color(0, 1, 0, 0.7) if is_clear else Color(1, 0.3, 0, 0.4)
+					draw_circle(arr_local, 3.0, arr_col)
 
 	if not _leap_plan_results.is_empty():
-		# Summary
-		var plan_info: Vector2 = _spine[0] + Vector2(-40, -80)
-		var clear_count: int = 0
-		for r in _leap_plan_results:
-			if r["clear"]:
-				clear_count += 1
-		var phase_str: String = "P1" if _leap_plan_phase <= 1 else "P1+P2"
-		draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), LEAP_ARRIVAL_SAMPLES], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
+		if DebugOverlay.should_draw("leap_attack/attack_zone", self):
+			var plan_info: Vector2 = _spine[0] + Vector2(-40, -80)
+			var clear_count: int = 0
+			for r in _leap_plan_results:
+				if r["clear"]:
+					clear_count += 1
+			var phase_str: String = "P1" if _leap_plan_phase <= 1 else "P1+P2"
+			draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), LEAP_ARRIVAL_SAMPLES], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
 
-		# All arcs (heavy — only when full debug is on)
-		if debug_draw_enabled:
+		# All arcs (heavy)
+		if DebugOverlay.should_draw("leap_attack/arc_trajectories", self):
 			for result in _leap_plan_results:
 				var is_clear: bool = result["clear"]
 				var arc_col: Color = Color(0, 0.7, 0, 0.2) if is_clear else Color(0.7, 0, 0, 0.08)
@@ -4597,57 +4883,74 @@ func _draw_debug() -> void:
 				for i in range(ar.size() - 1):
 					draw_line(ar[i] - global_position, ar[i + 1] - global_position, arc_col, 1.0)
 
-		# Highlight the chosen path
+		# Chosen arc + launch point
 		if _leap_found_path:
-			var launch_local: Vector2 = _leap_launch_pos - global_position
-			draw_circle(launch_local, 8.0, Color(0, 1, 0.5, 0.8))
-			draw_string(font, launch_local + Vector2(10, -8), "LAUNCH", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
-			var chosen_col := Color(0, 1, 0.3, 0.8)
-			for i in range(_leap_chosen_arc_l.size() - 1):
-				draw_line(_leap_chosen_arc_l[i] - global_position, _leap_chosen_arc_l[i + 1] - global_position, chosen_col, 2.5)
-			for i in range(_leap_chosen_arc_r.size() - 1):
-				draw_line(_leap_chosen_arc_r[i] - global_position, _leap_chosen_arc_r[i + 1] - global_position, chosen_col, 2.5)
-			# Body width at peak
-			if _leap_chosen_arc_l.size() > 5 and _leap_chosen_arc_r.size() > 5:
-				var peak_l: Vector2 = _leap_chosen_arc_l[5] - global_position
-				var peak_r: Vector2 = _leap_chosen_arc_r[5] - global_position
-				draw_line(peak_l, peak_r, Color(0, 1, 0.5, 0.5), 1.0)
+			if DebugOverlay.should_draw("leap_attack/launch_point", self):
+				var launch_local: Vector2 = _leap_launch_pos - global_position
+				draw_circle(launch_local, 8.0, Color(0, 1, 0.5, 0.8))
+				draw_string(font, launch_local + Vector2(10, -8), "LAUNCH", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
+			if DebugOverlay.should_draw("leap_attack/chosen_arc", self):
+				var chosen_col := Color(0, 1, 0.3, 0.8)
+				for i in range(_leap_chosen_arc_l.size() - 1):
+					draw_line(_leap_chosen_arc_l[i] - global_position, _leap_chosen_arc_l[i + 1] - global_position, chosen_col, 2.5)
+				for i in range(_leap_chosen_arc_r.size() - 1):
+					draw_line(_leap_chosen_arc_r[i] - global_position, _leap_chosen_arc_r[i + 1] - global_position, chosen_col, 2.5)
+				if _leap_chosen_arc_l.size() > 5 and _leap_chosen_arc_r.size() > 5:
+					var peak_l: Vector2 = _leap_chosen_arc_l[5] - global_position
+					var peak_r: Vector2 = _leap_chosen_arc_r[5] - global_position
+					draw_line(peak_l, peak_r, Color(0, 1, 0.5, 0.5), 1.0)
 
-	# -- Pre-cognition visualization --
-	if _state == State.PRECOGNITION or not _precog_platforms.is_empty():
-		var precog_info: Vector2 = _spine[0] + Vector2(-40, -95)
-		var phase_labels := ["DETECT", "GRAPH", "PATH", "EXEC"]
-		var phase_lbl: String = phase_labels[_precog_phase] if _precog_phase < phase_labels.size() else "?"
-		draw_string(font, precog_info, "PRECOG: %s  plats:%d  edges:%d  path:%d  hop:%d/%d" % [
-			phase_lbl, _precog_platforms.size(), _precog_edges.size(),
-			_precog_path.size(), _precog_current_hop + 1, _precog_path_edges.size()
-		], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.8, 0.4, 1))
+	# -- Pre-cognition: status text --
+	if (_state == State.PRECOGNITION or not _precog_platforms.is_empty()):
+		if DebugOverlay.should_draw("precog/status_text", self):
+			var screen_x2: float = global_position.x
+			var text_x2: float = -global_position.x + 200 if screen_x2 > 960 else -global_position.x + 1700
+			var precog_info := Vector2(text_x2, -global_position.y + 160)
+			draw_line(precog_info + Vector2(0, 10), _spine[0], Color(0.6, 0.3, 0.8, 0.15), 1.0)
+			var phase_labels := ["DETECT", "GRAPH", "PATH", "EXEC"]
+			var phase_lbl: String = phase_labels[_precog_phase] if _precog_phase < phase_labels.size() else "?"
+			var pdy: int = 0
+			var pcol := Color(0.8, 0.4, 1)
+			draw_string(font, precog_info + Vector2(0, pdy), "PRECOG: %s  plats:%d  edges:%d" % [
+				phase_lbl, _precog_platforms.size(), _precog_edges.size()
+			], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
+			pdy += 12
+			draw_string(font, precog_info + Vector2(0, pdy), "Path: %s  hop:%d/%d" % [
+				str(_precog_path), _precog_current_hop + 1, _precog_path_edges.size()
+			], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, pcol)
+			if _precog_has_waypoint:
+				pdy += 12
+				draw_string(font, precog_info + Vector2(0, pdy), "WPT: (%.0f,%.0f)  edge_keys:%s" % [
+					_precog_waypoint.x, _precog_waypoint.y, str(_precog_waypoint_edge.keys())
+				], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1, 0.5, 0))
 
-		# Draw ball landings (dim dots)
-		for pos in _precog_ball_lands:
-			draw_circle(pos - global_position, 1.5, Color(0.5, 0.3, 0.8, 0.2))
+		# Ball landings
+		if DebugOverlay.should_draw("precog/ball_landings", self):
+			for pos in _precog_ball_lands:
+				draw_circle(pos - global_position, 1.5, Color(0.5, 0.3, 0.8, 0.2))
 
-		# Draw platforms (horizontal bars)
-		for i in range(_precog_platforms.size()):
-			var plat: Dictionary = _precog_platforms[i]
-			var p_local: Vector2 = plat["pos"] - global_position
-			var half_w: float = (plat["max_x"] - plat["min_x"]) * 0.5
-			var bar_l: Vector2 = Vector2(p_local.x - half_w, p_local.y)
-			var bar_r: Vector2 = Vector2(p_local.x + half_w, p_local.y)
-			var plat_col: Color = Color(0.7, 0.3, 1, 0.6)
-			if plat["label"] == "monster":
-				plat_col = Color(0, 1, 0.5, 0.8)
-			elif plat["label"] == "target":
-				plat_col = Color(1, 0.2, 0.2, 0.8)
-			draw_line(bar_l, bar_r, plat_col, 3.0)
-			draw_circle(p_local, 4.0, plat_col)
-			var lbl: String = "P%d" % i
-			if plat["label"] != "":
-				lbl += " [%s]" % plat["label"]
-			draw_string(font, p_local + Vector2(6, -6), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, plat_col)
+		# Platforms
+		if DebugOverlay.should_draw("precog/platform_list", self):
+			for i in range(_precog_platforms.size()):
+				var plat: Dictionary = _precog_platforms[i]
+				var p_local: Vector2 = plat["pos"] - global_position
+				var half_w: float = (plat["max_x"] - plat["min_x"]) * 0.5
+				var bar_l: Vector2 = Vector2(p_local.x - half_w, p_local.y)
+				var bar_r: Vector2 = Vector2(p_local.x + half_w, p_local.y)
+				var plat_col: Color = Color(0.7, 0.3, 1, 0.6)
+				if plat["label"] == "monster":
+					plat_col = Color(0, 1, 0.5, 0.8)
+				elif plat["label"] == "target":
+					plat_col = Color(1, 0.2, 0.2, 0.8)
+				draw_line(bar_l, bar_r, plat_col, 3.0)
+				draw_circle(p_local, 4.0, plat_col)
+				var lbl: String = "P%d" % i
+				if plat["label"] != "":
+					lbl += " [%s]" % plat["label"]
+				draw_string(font, p_local + Vector2(6, -6), lbl, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, plat_col)
 
-		# Draw edges (heavy — only when full debug is on)
-		if debug_draw_enabled:
+		# Graph edges (heavy)
+		if DebugOverlay.should_draw("precog/graph_edges", self):
 			for edge in _precog_edges:
 				var arc_l: PackedVector2Array = edge["arc_l"]
 				var arc_r: PackedVector2Array = edge["arc_r"]
@@ -4657,45 +4960,76 @@ func _draw_debug() -> void:
 				for ei in range(arc_r.size() - 1):
 					draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, edge_col, 1.0)
 
-		# Draw the chosen path (bright, thick)
-		if _precog_path.size() >= 2:
-			var path_col := Color(1, 0.8, 0, 0.8)
-			for pi in range(_precog_path.size() - 1):
-				var a_local: Vector2 = _precog_platforms[_precog_path[pi]]["pos"] - global_position
-				var b_local: Vector2 = _precog_platforms[_precog_path[pi + 1]]["pos"] - global_position
-				draw_line(a_local, b_local, path_col, 2.0)
-				draw_circle(a_local, 6.0, path_col)
-			draw_circle(_precog_platforms[_precog_path[_precog_path.size() - 1]]["pos"] - global_position, 6.0, path_col)
+		# Chosen path
+		if DebugOverlay.should_draw("precog/current_path", self):
+			if _precog_path.size() >= 2:
+				var path_col := Color(1, 0.8, 0, 0.8)
+				for pi in range(_precog_path.size() - 1):
+					var a_local: Vector2 = _precog_platforms[_precog_path[pi]]["pos"] - global_position
+					var b_local: Vector2 = _precog_platforms[_precog_path[pi + 1]]["pos"] - global_position
+					draw_line(a_local, b_local, path_col, 2.0)
+					draw_circle(a_local, 6.0, path_col)
+				draw_circle(_precog_platforms[_precog_path[_precog_path.size() - 1]]["pos"] - global_position, 6.0, path_col)
 
-			# Draw path edge arcs (bright)
-			for pe in _precog_path_edges:
-				var pe_col := Color(0, 1, 0.3, 0.6)
-				var pe_l: PackedVector2Array = pe["arc_l"]
-				var pe_r: PackedVector2Array = pe["arc_r"]
-				for ei in range(pe_l.size() - 1):
-					draw_line(pe_l[ei] - global_position, pe_l[ei + 1] - global_position, pe_col, 2.0)
-				for ei in range(pe_r.size() - 1):
-					draw_line(pe_r[ei] - global_position, pe_r[ei + 1] - global_position, pe_col, 2.0)
+				# Path edge arcs
+				for pe in _precog_path_edges:
+					var pe_col := Color(0, 1, 0.3, 0.6)
+					var pe_l: PackedVector2Array = pe["arc_l"]
+					var pe_r: PackedVector2Array = pe["arc_r"]
+					for ei in range(pe_l.size() - 1):
+						draw_line(pe_l[ei] - global_position, pe_l[ei + 1] - global_position, pe_col, 2.0)
+					for ei in range(pe_r.size() - 1):
+						draw_line(pe_r[ei] - global_position, pe_r[ei + 1] - global_position, pe_col, 2.0)
 
-	# -- Attachment points (dashed circles + labels) --
-	var attach_col := Color(0.4, 0.8, 1.0, 0.5)
-	for point_name in _attach_points:
-		var area: Area2D = _attach_points[point_name]
-		var pos: Vector2 = area.position
-		var r: float = 12.0
-		if area.get_child_count() > 0:
-			var shape_node: CollisionShape2D = area.get_child(0) as CollisionShape2D
-			if shape_node and shape_node.shape is CircleShape2D:
-				r = (shape_node.shape as CircleShape2D).radius
-		# Dashed circle approximation
-		var segments: int = 16
-		for si in range(segments):
-			if si % 2 == 1:
-				continue
-			var a1: float = TAU * float(si) / float(segments)
-			var a2: float = TAU * float(si + 1) / float(segments)
-			draw_line(pos + Vector2(cos(a1), sin(a1)) * r, pos + Vector2(cos(a2), sin(a2)) * r, attach_col, 1.0)
-		draw_string(font, pos + Vector2(-20, -r - 4), point_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, attach_col)
-		var acount: int = _attachments[point_name].size() if _attachments.has(point_name) else 0
-		if acount > 0:
-			draw_string(font, pos + Vector2(-8, r + 10), "x%d" % acount, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0.2))
+	# -- Planned leap edges (for test inspection) --
+	if DebugOverlay.should_draw("testing/planned_leaps", self) and not _precog_edges.is_empty():
+		for edge in _precog_edges:
+			var launch: Vector2 = edge.get("from_pos", Vector2.ZERO) - global_position
+			var landing: Vector2 = edge.get("arrival", Vector2.ZERO) - global_position
+			var arc_c: PackedVector2Array = edge.get("arc_c", PackedVector2Array())
+			var arc_l: PackedVector2Array = edge.get("arc_l", PackedVector2Array())
+			var arc_r: PackedVector2Array = edge.get("arc_r", PackedVector2Array())
+			# Center arc: bold blue
+			for ei in range(arc_c.size() - 1):
+				draw_line(arc_c[ei] - global_position, arc_c[ei + 1] - global_position, Color(0.2, 0.6, 1.0, 0.8), 2.5)
+			# Draw arrowhead at center arc end
+			if arc_c.size() >= 2:
+				var tip: Vector2 = arc_c[arc_c.size() - 1] - global_position
+				var dir: Vector2 = (arc_c[arc_c.size() - 1] - arc_c[arc_c.size() - 2]).normalized()
+				var perp: Vector2 = Vector2(-dir.y, dir.x)
+				draw_line(tip, tip - dir * 8 + perp * 5, Color(0.2, 0.6, 1.0, 0.9), 2.0)
+				draw_line(tip, tip - dir * 8 - perp * 5, Color(0.2, 0.6, 1.0, 0.9), 2.0)
+			# Bounding arcs: thin grey
+			for ei in range(arc_l.size() - 1):
+				draw_line(arc_l[ei] - global_position, arc_l[ei + 1] - global_position, Color(0.5, 0.5, 0.5, 0.4), 1.0)
+			for ei in range(arc_r.size() - 1):
+				draw_line(arc_r[ei] - global_position, arc_r[ei + 1] - global_position, Color(0.5, 0.5, 0.5, 0.4), 1.0)
+			# Launch dot: green
+			draw_circle(launch, 5.0, Color(0.2, 1.0, 0.3, 0.9))
+			draw_circle(launch, 7.0, Color(0.2, 1.0, 0.3, 0.4))
+			# Landing dot: orange
+			draw_circle(landing, 5.0, Color(1.0, 0.6, 0.1, 0.9))
+			draw_circle(landing, 7.0, Color(1.0, 0.6, 0.1, 0.4))
+
+	# -- Attachment points --
+	if DebugOverlay.should_draw("precog/attach_points", self):
+		var attach_col := Color(0.4, 0.8, 1.0, 0.5)
+		for point_name in _attach_points:
+			var area: Area2D = _attach_points[point_name]
+			var pos: Vector2 = area.position
+			var r: float = 12.0
+			if area.get_child_count() > 0:
+				var shape_node: CollisionShape2D = area.get_child(0) as CollisionShape2D
+				if shape_node and shape_node.shape is CircleShape2D:
+					r = (shape_node.shape as CircleShape2D).radius
+			var segments: int = 16
+			for si in range(segments):
+				if si % 2 == 1:
+					continue
+				var a1: float = TAU * float(si) / float(segments)
+				var a2: float = TAU * float(si + 1) / float(segments)
+				draw_line(pos + Vector2(cos(a1), sin(a1)) * r, pos + Vector2(cos(a2), sin(a2)) * r, attach_col, 1.0)
+			draw_string(font, pos + Vector2(-20, -r - 4), point_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, attach_col)
+			var acount: int = _attachments[point_name].size() if _attachments.has(point_name) else 0
+			if acount > 0:
+				draw_string(font, pos + Vector2(-8, r + 10), "x%d" % acount, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0.2))

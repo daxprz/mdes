@@ -78,6 +78,15 @@ func get_check_result() -> Dictionary:
 			if z["entered"]:
 				daz_violated += 1
 
+	# Per-zone detail for the test editor
+	var etz_details: Array = []
+	var daz_details: Array = []
+	for z in _zones:
+		if z["type"] == "etz":
+			etz_details.append({"id": z["id"], "entered": z["entered"]})
+		else:
+			daz_details.append({"id": z["id"], "violated": z["entered"]})
+
 	return {
 		"etz_entered": etz_entered,
 		"etz_total": etz_total,
@@ -85,6 +94,8 @@ func get_check_result() -> Dictionary:
 		"daz_total": daz_total,
 		"order_ok": not _order_violation,
 		"all_pass": etz_entered == etz_total and daz_violated == 0 and not _order_violation,
+		"etz_details": etz_details,
+		"daz_details": daz_details,
 	}
 
 

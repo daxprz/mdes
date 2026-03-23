@@ -11,6 +11,19 @@ var _clients: Array = []  # Array of StreamPeerTCP
 var _title_layer: CanvasLayer = null
 var _test_runner: Node = null
 var _zone_manager: Node2D = null
+var _leap_checker: Node2D = null
+
+# Bounded-leap builder state (populated by `bleap` commands)
+var _bleap_defs: Array = []              # Accumulated leap defs from previous `bleap next` calls
+var _bleap_plat_a: Dictionary = {}       # {x, y, radius} — current def being built
+var _bleap_plat_b: Dictionary = {}       # {x, y, radius}
+var _bleap_plans: Array = []             # Array of plan dicts
+var _bleap_current_plan: Dictionary = {} # Plan in progress (for multi-step plan building)
+var _bleap_min_matched: int = 1
+
+# Test script editor state
+var _test_script: Array[String] = []     # Script as flat command list
+var _test_script_name: String = ""       # Name of loaded test
 
 
 func _ready() -> void:
@@ -70,7 +83,7 @@ func _execute(command: String) -> String:
 
 	match cmd:
 		"help":
-			return "Commands: help, debug [list|on|off|log|console|both|nolog|save|load|filter|reset|profile|clear_transient], spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], attacker <...>, run <test>, suite <suite>, tests, etz, daz, zones, clearzones, status, quit"
+			return "Commands: help, debug [list|on|off|log|...], spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], run <test>, suite <suite>, tests, etz, daz, zones, clearzones, leaps, clearleaps, status, quit"
 
 		"debug":
 			return _cmd_debug(parts)
@@ -79,7 +92,8 @@ func _execute(command: String) -> String:
 			var what: String = parts[1] if parts.size() > 1 else "monster"
 			var x: float = float(parts[2]) if parts.size() > 2 else 960.0
 			var y: float = float(parts[3]) if parts.size() > 3 else 750.0
-			return _cmd_spawn(what, x, y)
+			var state: String = parts[4].to_lower() if parts.size() > 4 else ""
+			return _cmd_spawn(what, x, y, state)
 
 		"tab":
 			var count: int = int(parts[1]) if parts.size() > 1 else 1
@@ -388,6 +402,99 @@ func _execute(command: String) -> String:
 				_zone_manager = null  # Reset stale reference
 			return "OK: zones cleared"
 
+		"leaps":
+			# Return a summary of all planned hop edges from every monster
+			var _leap_lines: Array[String] = []
+			for _le in get_tree().get_nodes_in_group("enemies"):
+				if _le.has_method("get_leap_graph"):
+					var _graph: Array = _le.get_leap_graph()
+					_leap_lines.append("  %s: %d edges" % [_le.name, _graph.size()])
+					for _edge in _graph:
+						_leap_lines.append("    from=(%.0f,%.0f) arrival=(%.0f,%.0f) vel=(%.0f,%.0f)" % [
+							_edge["from_pos"].x, _edge["from_pos"].y,
+							_edge["arrival"].x, _edge["arrival"].y,
+							_edge["launch_vel"].x, _edge["launch_vel"].y])
+			if _leap_lines.is_empty():
+				return "leaps: 0 (no monsters with leap graph)"
+			return "leaps: " + str(get_tree().get_nodes_in_group("enemies").size()) + "\n" + "\n".join(_leap_lines)
+
+		"clearleaps":
+			if _leap_checker and is_instance_valid(_leap_checker):
+				_leap_checker.clear_checks()
+			else:
+				_leap_checker = null
+			return "OK: leap checks cleared"
+
+		"bleap":
+			return _cmd_bleap(parts, command)
+
+		"testload":
+			if parts.size() < 2:
+				return "ERR: usage: testload <test_name>"
+			return _cmd_testload(parts[1])
+
+		"testshow":
+			if _test_script.is_empty():
+				return "ERR: no test loaded — use testload <name>"
+			var ls: Array[String] = ["Test: %s (%d lines)" % [_test_script_name, _test_script.size()]]
+			for i in range(_test_script.size()):
+				ls.append("  %2d: %s" % [i + 1, _test_script[i]])
+			return "\n".join(ls)
+
+		"testedit":
+			# testedit <n> <new command...>
+			if parts.size() < 3:
+				return "ERR: usage: testedit <line_number> <new command>"
+			var ln: int = int(parts[1]) - 1
+			if ln < 0 or ln >= _test_script.size():
+				return "ERR: line %d out of range (1..%d)" % [ln + 1, _test_script.size()]
+			# Rebuild rest of command after the line number
+			var new_cmd: String = command.substr(command.find(parts[1]) + parts[1].length()).strip_edges()
+			_test_script[ln] = new_cmd
+			return "OK: line %d = \"%s\"" % [ln + 1, new_cmd]
+
+		"testinsert":
+			# testinsert <n> <command> — insert before line n
+			if parts.size() < 3:
+				return "ERR: usage: testinsert <line_number> <command>"
+			var ln: int = int(parts[1]) - 1
+			ln = clamp(ln, 0, _test_script.size())
+			var new_cmd: String = command.substr(command.find(parts[1]) + parts[1].length()).strip_edges()
+			_test_script.insert(ln, new_cmd)
+			return "OK: inserted at line %d: \"%s\"" % [ln + 1, new_cmd]
+
+		"testdelete":
+			if parts.size() < 2:
+				return "ERR: usage: testdelete <line_number>"
+			var ln: int = int(parts[1]) - 1
+			if ln < 0 or ln >= _test_script.size():
+				return "ERR: line %d out of range" % [ln + 1]
+			var removed: String = _test_script[ln]
+			_test_script.remove_at(ln)
+			return "OK: deleted line %d: \"%s\"" % [ln + 1, removed]
+
+		"testrun":
+			if _test_script.is_empty():
+				return "ERR: no test loaded — use testload <name>"
+			_ensure_test_runner()
+			if _test_runner:
+				_test_runner.run_test_script(_test_script, _test_script_name, null)
+				return "OK: running script '%s' (%d lines)" % [_test_script_name, _test_script.size()]
+			return "ERR: failed to create test runner"
+
+		"testsave":
+			var save_name: String = parts[1] if parts.size() > 1 else _test_script_name
+			if save_name.is_empty():
+				return "ERR: no name — use testsave <name>"
+			return _cmd_testsave(save_name)
+
+		"testnew":
+			if parts.size() < 2:
+				return "ERR: usage: testnew <name>"
+			_test_script_name = parts[1]
+			_test_script = ["# New test: " + parts[1], "clear", "portal off", "clearplayers", "clearzones"]
+			return "OK: new test '%s' — use testshow, testedit, testrun, testsave" % parts[1]
+
 		"quit":
 			get_tree().quit()
 			return "OK: quitting"
@@ -451,7 +558,7 @@ func _cmd_test(what: String) -> String:
 			return "ERR: unknown test '%s'" % what
 
 
-func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0) -> String:
+func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "") -> String:
 	var scene_root := get_tree().current_scene
 	if not scene_root:
 		return "ERR: no current scene"
@@ -469,7 +576,11 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0) -> String:
 			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
 			monster.entity_id = "monster_%d" % monster_count
 			container.add_child(monster)
-			return "OK: spawned monster '%s' at (%.0f, %.0f)" % [monster.entity_id, x, y]
+			# Apply optional initial state
+			if state == "standdown":
+				monster._standdown = true
+			var state_str: String = " (%s)" % state if not state.is_empty() else ""
+			return "OK: spawned monster '%s' at (%.0f, %.0f)%s" % [monster.entity_id, x, y, state_str]
 
 		"dummy":
 			# Fake player — a simple CharacterBody2D in the "players" group
@@ -1553,6 +1664,276 @@ func _ensure_zone_manager() -> void:
 	_zone_manager.name = "TestZones"
 	_zone_manager.set_script(script)
 	get_tree().current_scene.add_child(_zone_manager)
+
+
+func _ensure_leap_checker() -> void:
+	if _leap_checker and is_instance_valid(_leap_checker):
+		return
+	var script: GDScript = load("res://scripts/systems/test_bounded_leaps.gd")
+	_leap_checker = Node2D.new()
+	_leap_checker.name = "TestBoundedLeaps"
+	_leap_checker.set_script(script)
+	get_tree().current_scene.add_child(_leap_checker)
+
+
+func _cmd_bleap(parts: PackedStringArray, full_cmd: String) -> String:
+	## Bounded-leap builder. Configures leap check constraints step by step.
+	## Sub-commands: reset, a, b, plan, start, end, disallow, min, show
+	if parts.size() < 2:
+		return "ERR: usage: bleap <reset|a|b|plan|start|end|disallow|min|show>"
+
+	var sub: String = parts[1].to_lower()
+	match sub:
+		"reset":
+			_bleap_defs = []
+			_bleap_plat_a = {}
+			_bleap_plat_b = {}
+			_bleap_plans = []
+			_bleap_current_plan = {}
+			_bleap_min_matched = 1
+			return "OK: bleap state reset"
+
+		"a":
+			if parts.size() < 5:
+				return "ERR: usage: bleap a <x> <y> <radius>"
+			_bleap_plat_a = {"x": float(parts[2]), "y": float(parts[3]), "radius": float(parts[4])}
+			return "OK: platform_a = (%.0f,%.0f) r=%.0f" % [_bleap_plat_a["x"], _bleap_plat_a["y"], _bleap_plat_a["radius"]]
+
+		"b":
+			if parts.size() < 5:
+				return "ERR: usage: bleap b <x> <y> <radius>"
+			_bleap_plat_b = {"x": float(parts[2]), "y": float(parts[3]), "radius": float(parts[4])}
+			return "OK: platform_b = (%.0f,%.0f) r=%.0f" % [_bleap_plat_b["x"], _bleap_plat_b["y"], _bleap_plat_b["radius"]]
+
+		"plan":
+			# bleap plan req|opt [start x y w h] [end x y r] [disallow r x1 y1 x2 y2] ...
+			if parts.size() < 3:
+				return "ERR: usage: bleap plan req|opt [start x y w h] [end x y r] [disallow r x1 y1 x2 y2]"
+			var required: bool = parts[2].to_lower() == "req"
+			var plan: Dictionary = {"required": required, "start": {}, "end": {}, "disallow": []}
+			# Parse keyword args from remaining tokens
+			var i: int = 3
+			while i < parts.size():
+				match parts[i].to_lower():
+					"start":
+						if i + 4 < parts.size():
+							plan["start"] = {"x": float(parts[i+1]), "y": float(parts[i+2]),
+								"w": float(parts[i+3]), "h": float(parts[i+4])}
+							i += 5
+						else: i += 1
+					"end":
+						if i + 3 < parts.size():
+							plan["end"] = {"x": float(parts[i+1]), "y": float(parts[i+2]), "radius": float(parts[i+3])}
+							i += 4
+						else: i += 1
+					"disallow":
+						if i + 5 < parts.size():
+							plan["disallow"].append({"radius": float(parts[i+1]),
+								"x1": float(parts[i+2]), "y1": float(parts[i+3]),
+								"x2": float(parts[i+4]), "y2": float(parts[i+5])})
+							i += 6
+						else: i += 1
+					_: i += 1
+			_bleap_plans.append(plan)
+			var req_str: String = "REQUIRED" if required else "optional"
+			return "OK: plan %d (%s) — start=%s end=%s disallow=%d" % [
+				_bleap_plans.size(), req_str,
+				str(plan["start"]), str(plan["end"]), plan["disallow"].size()]
+
+		"start":
+			# bleap start x y w h — set start for current plan being built
+			if parts.size() < 6:
+				return "ERR: usage: bleap start <x> <y> <w> <h>"
+			_bleap_current_plan["start"] = {"x": float(parts[2]), "y": float(parts[3]),
+				"w": float(parts[4]), "h": float(parts[5])}
+			return "OK: current plan start = (%.0f,%.0f) %0.fx%.0f" % [float(parts[2]), float(parts[3]), float(parts[4]), float(parts[5])]
+
+		"end":
+			if parts.size() < 5:
+				return "ERR: usage: bleap end <x> <y> <radius>"
+			_bleap_current_plan["end"] = {"x": float(parts[2]), "y": float(parts[3]), "radius": float(parts[4])}
+			return "OK: current plan end = (%.0f,%.0f) r=%.0f" % [float(parts[2]), float(parts[3]), float(parts[4])]
+
+		"disallow":
+			if parts.size() < 7:
+				return "ERR: usage: bleap disallow <r> <x1> <y1> <x2> <y2>"
+			if not _bleap_current_plan.has("disallow"):
+				_bleap_current_plan["disallow"] = []
+			_bleap_current_plan["disallow"].append({"radius": float(parts[2]),
+				"x1": float(parts[3]), "y1": float(parts[4]),
+				"x2": float(parts[5]), "y2": float(parts[6])})
+			return "OK: disallow added (r=%.0f path=(%.0f,%.0f)→(%.0f,%.0f))" % [float(parts[2]), float(parts[3]), float(parts[4]), float(parts[5]), float(parts[6])]
+
+		"commit":
+			# Finalize current_plan and push to plans list
+			if _bleap_current_plan.is_empty():
+				return "ERR: no plan in progress (use bleap plan req|opt first)"
+			_bleap_plans.append(_bleap_current_plan.duplicate(true))
+			_bleap_current_plan = {}
+			return "OK: plan %d committed" % _bleap_plans.size()
+
+		"next":
+			# Commit current def and start a new one (without clearing accumulated defs)
+			if not _bleap_plat_a.is_empty() or not _bleap_plans.is_empty():
+				_bleap_defs.append({"platform_a": _bleap_plat_a, "platform_b": _bleap_plat_b, "plans": _bleap_plans})
+			_bleap_plat_a = {}
+			_bleap_plat_b = {}
+			_bleap_plans = []
+			_bleap_current_plan = {}
+			return "OK: def committed (%d total), ready for next" % _bleap_defs.size()
+
+		"min":
+			if parts.size() < 3:
+				return "ERR: usage: bleap min <n>"
+			_bleap_min_matched = int(parts[2])
+			return "OK: min_matched = %d" % _bleap_min_matched
+
+		"show":
+			var ls: Array[String] = ["bleap state:"]
+			ls.append("  platform_a: %s" % str(_bleap_plat_a))
+			ls.append("  platform_b: %s" % str(_bleap_plat_b))
+			ls.append("  min_matched: %d" % _bleap_min_matched)
+			ls.append("  plans: %d" % _bleap_plans.size())
+			for pi in range(_bleap_plans.size()):
+				var p: Dictionary = _bleap_plans[pi]
+				ls.append("    [%d] %s start=%s end=%s disallow=%d" % [
+					pi + 1, "REQUIRED" if p.get("required", false) else "optional",
+					str(p.get("start", {})), str(p.get("end", {})), p.get("disallow", []).size()])
+			if not _bleap_current_plan.is_empty():
+				ls.append("  (in-progress plan: %s)" % str(_bleap_current_plan))
+			return "\n".join(ls)
+
+		_:
+			return "ERR: unknown bleap sub-command '%s'" % sub
+
+
+func get_bleap_check_data() -> Dictionary:
+	## Returns all accumulated bleap defs (from `bleap next`) plus the current one being built.
+	var all_defs: Array = _bleap_defs.duplicate()
+	# Include the current def if it has content
+	if not _bleap_plat_a.is_empty() or not _bleap_plans.is_empty():
+		all_defs.append({"platform_a": _bleap_plat_a, "platform_b": _bleap_plat_b, "plans": _bleap_plans})
+	if all_defs.is_empty():
+		return {}
+	return {
+		"leaps": all_defs,
+		"min_matched": _bleap_min_matched,
+	}
+
+
+func _cmd_testload(test_name: String) -> String:
+	## Load a test JSON and convert it to a flat script list for editing.
+	var loaded_data: Dictionary = {}
+	for dir_path in ["res://data/tests/", "user://data/tests/"]:
+		var path: String = dir_path + test_name + ".json"
+		if FileAccess.file_exists(path):
+			var file := FileAccess.open(path, FileAccess.READ)
+			if file:
+				var json := JSON.new()
+				if json.parse(file.get_as_text()) == OK:
+					loaded_data = json.data
+				file.close()
+			break
+	if loaded_data.is_empty():
+		return "ERR: test '%s' not found" % test_name
+
+	_test_script_name = test_name
+	_test_script = []
+
+	# Use existing "script" field if present
+	if loaded_data.has("script"):
+		for line in loaded_data["script"]:
+			_test_script.append(str(line))
+		return "OK: loaded '%s' — %d lines (script format)" % [test_name, _test_script.size()]
+
+	# Convert legacy {setup, wait, checks, debug} format to flat script
+	var debug_profile: Dictionary = loaded_data.get("debug", {})
+	for aspect in debug_profile:
+		var mode: String = debug_profile[aspect]
+		match mode:
+			"on":        _test_script.append("debug on " + aspect)
+			"log":       _test_script.append("debug log " + aspect)
+			"both":      _test_script.append("debug both " + aspect)
+			"on+log", _: _test_script.append("debug on " + aspect)
+
+	for cmd in loaded_data.get("setup", []):
+		_test_script.append(str(cmd))
+
+	var wait_secs: float = loaded_data.get("wait", 10.0)
+	_test_script.append("wait %.0f" % wait_secs)
+
+	# Convert checks
+	for ch in loaded_data.get("checks", []):
+		var ch_cmd: String = ch.get("command", "")
+		var ch_label: String = ch.get("label", ch_cmd)
+		match ch_cmd:
+			"zones":
+				_test_script.append("check zones")
+			"bounded_leaps":
+				# Re-encode bounded_leaps as bleap commands
+				var leap_defs: Array = ch.get("leaps", [])
+				var ch_min: int = ch.get("min_matched", 1)
+				_test_script.append("bleap reset")
+				for ld in leap_defs:
+					var pa: Dictionary = ld.get("platform_a", {})
+					var pb: Dictionary = ld.get("platform_b", {})
+					if not pa.is_empty():
+						_test_script.append("bleap a %.0f %.0f %.0f" % [pa.get("x",0), pa.get("y",0), pa.get("radius",100)])
+					if not pb.is_empty():
+						_test_script.append("bleap b %.0f %.0f %.0f" % [pb.get("x",0), pb.get("y",0), pb.get("radius",100)])
+					for plan in ld.get("plans", []):
+						var req_str: String = "req" if plan.get("required", false) else "opt"
+						var plan_line: String = "bleap plan " + req_str
+						var ps: Dictionary = plan.get("start", {})
+						if not ps.is_empty():
+							plan_line += " start %.0f %.0f %.0f %.0f" % [ps.get("x",0), ps.get("y",0), ps.get("w",0), ps.get("h",0)]
+						var pe: Dictionary = plan.get("end", {})
+						if not pe.is_empty():
+							plan_line += " end %.0f %.0f %.0f" % [pe.get("x",0), pe.get("y",0), pe.get("radius",0)]
+						for dis in plan.get("disallow", []):
+							plan_line += " disallow %.0f %.0f %.0f %.0f %.0f" % [
+								dis.get("radius",20), dis.get("x1",0), dis.get("y1",0),
+								dis.get("x2",0), dis.get("y2",0)]
+						_test_script.append(plan_line)
+				_test_script.append("bleap min %d" % ch_min)
+				_test_script.append("check bounded_leaps " + ch_label)
+			"fps", "hp", _:
+				# Generic check: rebuild as "check <cmd> > <n>" etc.
+				var threshold_str: String = ""
+				if ch.has("expect_gt"):  threshold_str = "> %s" % str(ch["expect_gt"])
+				elif ch.has("expect_lt"): threshold_str = "< %s" % str(ch["expect_lt"])
+				elif ch.has("expect_eq"): threshold_str = "= %s" % str(ch["expect_eq"])
+				var extract: String = ch.get("extract", "")
+				var full_check: String = "check %s" % ch_cmd
+				if extract:  full_check += " extract:" + extract
+				if threshold_str: full_check += " " + threshold_str
+				if ch_label != ch_cmd: full_check += " label:" + ch_label
+				_test_script.append(full_check)
+
+	return "OK: loaded '%s' — %d lines (converted from legacy JSON)" % [test_name, _test_script.size()]
+
+
+func _cmd_testsave(save_name: String) -> String:
+	## Save the current script back to JSON (using the script field).
+	if _test_script.is_empty():
+		return "ERR: no script to save"
+	var data: Dictionary = {
+		"name": save_name,
+		"script": _test_script,
+	}
+	var path: String = "res://data/tests/" + save_name + ".json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		# Try user:// fallback
+		path = "user://data/tests/" + save_name + ".json"
+		DirAccess.make_dir_recursive_absolute("user://data/tests/")
+		file = FileAccess.open(path, FileAccess.WRITE)
+	if not file:
+		return "ERR: could not write to '%s'" % path
+	file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+	_test_script_name = save_name
+	return "OK: saved '%s' (%d lines) → %s" % [save_name, _test_script.size(), path]
 
 
 func _cmd_list_tests() -> String:
