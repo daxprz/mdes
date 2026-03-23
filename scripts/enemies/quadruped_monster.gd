@@ -3401,14 +3401,19 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				arc_r.append(Vector2(pt.x + effective_radius, pt.y))
 
 			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
-			# 1. Forward raycasts on center arc: catch walls and platforms during
-			#    launch/landing (handles one-way platform detection properly).
-			if not _check_arc_clear_ignore(arc_c, landing_zone):
+			# 1. Forward raycasts on all three arcs: center + body-width edges.
+			#    Catches walls and platforms the body would physically hit.
+			if not (_check_arc_clear_ignore(arc_c, landing_zone) and _check_arc_clear_ignore(arc_l, landing_zone) and _check_arc_clear_ignore(arc_r, landing_zone)):
 				_dbg_arc += 1
 				continue
-			# 2. Circle sweep at mid-flight: sweep body-radius circle at points
-			#    above both platforms to catch obstacles the body would clip.
+			# 2. Horizontal raycasts at mid-flight: verify body-width lateral clearance
+			#    from walls and platform edges.
 			if not _check_arc_circle_sweep(arc_c, effective_radius, landing_zone):
+				_dbg_arc += 1
+				continue
+			# 3. Platform edge clearance: verify the body-width bounding arcs
+			#    don't clip any known precog platform surface.
+			if not _check_arc_platform_edge_clearance(arc_l, arc_r, from_pos.y, plat):
 				_dbg_arc += 1
 				continue
 
@@ -3444,18 +3449,42 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 
 			_dbg_ok += 1
 
-			# Score: prefer arcs with maximum clearance from platform edges.
-			# Lower score = better. Penalize arcs that pass close to surfaces.
+			# Score: prefer arcs with maximum clearance from ALL platform edges.
+			# Lower score = better.
 			var min_clearance: float = 999.0
-			for pi in range(1, arc_c.size() - 3):
+			var min_edge_clearance: float = 999.0
+			for pi in range(3, arc_c.size() - 3):
 				# How far above destination platform surface?
 				if arc_c[pi].x >= plat_min_x - 40 and arc_c[pi].x <= plat_max_x + 40:
 					var above_plat: float = plat_y - arc_c[pi].y  # Positive = above
 					if above_plat < min_clearance:
 						min_clearance = above_plat
-			var clearance_penalty: float = maxf(0, 120.0 - min_clearance)  # Penalize arcs with < 120px clearance
-			var time_penalty: float = absf(t_flight - 0.8) * 5.0  # Prefer ~0.8s flight (higher arcs)
-			var score: float = clearance_penalty * 2.0 + time_penalty
+				# How far are the bounding arcs from any OTHER platform edge?
+				for other_plat in _precog_platforms:
+					if absf(other_plat["pos"].y - from_pos.y) < 20:
+						continue  # Skip source platform
+					var opy: float = other_plat["pos"].y
+					var opx_min: float = other_plat["min_x"]
+					var opx_max: float = other_plat["max_x"]
+					# Check horizontal distance from bounding arcs to platform edges
+					var lx: float = arc_c[pi].x - effective_radius
+					var rx: float = arc_c[pi].x + effective_radius
+					# Only care if arc point is near platform's Y level (within 150px)
+					if absf(arc_c[pi].y - opy) < 150:
+						# Distance from left body edge to platform right edge
+						if lx < opx_max and lx > opx_min:
+							var edge_dist: float = opx_max - lx
+							if edge_dist < min_edge_clearance:
+								min_edge_clearance = edge_dist
+						# Distance from right body edge to platform left edge
+						if rx > opx_min and rx < opx_max:
+							var edge_dist: float = rx - opx_min
+							if edge_dist < min_edge_clearance:
+								min_edge_clearance = edge_dist
+			var clearance_penalty: float = maxf(0, 120.0 - min_clearance)
+			var edge_penalty: float = maxf(0, 80.0 - min_edge_clearance) * 3.0  # Heavy penalty for close to edges
+			var time_penalty: float = absf(t_flight - 0.8) * 5.0
+			var score: float = clearance_penalty * 2.0 + edge_penalty + time_penalty
 			if score < best_score:
 				best_score = score
 				best = {
@@ -3806,11 +3835,12 @@ func _check_arc_platform_edge_clearance(arc_l: PackedVector2Array, arc_r: Packed
 		is_dest_plat = plat["pos"].distance_to(dest_pos) < 10
 		var px_min: float = plat["min_x"]
 		var px_max: float = plat["max_x"]
-		# Platform surface zone: the body clips if a bounding arc point is
-		# within the platform's horizontal extent and near its surface Y.
-		# Only check points that are close to the platform height — an arc
-		# passing well above or below a platform is not clipping it.
-		var surface_rect := Rect2(px_min, py - 30, px_max - px_min, 60)
+		# Platform edge zone: the body clips if a bounding arc point is within
+		# the platform's horizontal extent. The zone extends from above the
+		# surface (py - 30) down to well below (py + 150) to catch arcs that
+		# pass alongside the platform's vertical edge (e.g., floor-to-platform
+		# arcs whose body width clips the platform edge from below).
+		var surface_rect := Rect2(px_min, py - 30, px_max - px_min, 180)
 		for arc in [arc_l, arc_r]:
 			for i in range(3, arc.size() - 3):
 				# For dest platform: only check ascending portion

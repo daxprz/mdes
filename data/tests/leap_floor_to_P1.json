@@ -30,7 +30,6 @@
 		"debug off precog/graph_edges",
 		"debug off precog/status_text",
 		"debug off testing/planned_leaps",
-		"debug off testing/bounded_leap_checks",
 		"debug off leap_attack/chosen_arc",
 		"debug nolog precog/current_path",
 		"debug nolog leap_attack/rays_cast",
