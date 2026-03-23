@@ -2,9 +2,6 @@
 	"name": "todo",
 	"description": "Tests that currently fail — active work items",
 	"tests": [
-		"leap_floor_to_P4",
-		"verify_leap_graph_P0_P1",
-		"chained_upper_platform",
-		"chained_upper_platform_etz"
+		"leap_floor_to_P4"
 	]
 }
