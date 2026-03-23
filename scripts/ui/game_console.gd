@@ -308,16 +308,15 @@ func _execute_input() -> void:
 	match parts[0].to_lower():
 		"cls":
 			_output_lines.clear()
-		"run":
-			if parts.size() < 2:
-				_log("Usage: run <test_name>", Color(1.0, 0.5, 0.3))
-			else:
-				_run_test_in_editor(parts[1])
-		"suite":
-			if parts.size() < 2:
-				_log("Usage: suite <suite_name>", Color(1.0, 0.5, 0.3))
-			else:
-				_run_suite_in_editor(parts[1])
+		"run", "suite":
+			# Route through RCON so key=value args are parsed
+			var rcon2: Node = get_node_or_null("/root/Rcon")
+			if rcon2:
+				# Close console so editor is visible
+				_active = false
+				_target_y = -_panel_height
+				var result2: String = rcon2._execute(cmd)
+				_log_result(result2)
 		_:
 			# Route everything to RCON
 			var rcon: Node = get_node_or_null("/root/Rcon")
