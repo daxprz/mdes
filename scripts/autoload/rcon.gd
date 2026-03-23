@@ -14,6 +14,15 @@ var _zone_manager: Node2D = null
 var _leap_checker: Node2D = null
 var _test_editor: Node = null
 
+# Modal dialog state
+var _modal_layer: CanvasLayer = null
+var _modal_name: String = ""
+var _modal_buttons: Array = []
+var _modal_timeout: float = 0.0
+var _modal_timer: float = 0.0
+var _modal_active: bool = false
+var _modal_dismissed_button: String = ""  # Set when dismissed, read by test runner
+
 # Bounded-leap builder state (populated by `bleap` commands)
 var _bleap_defs: Array = []              # Accumulated leap defs from previous `bleap next` calls
 var _bleap_plat_a: Dictionary = {}       # {x, y, radius} — current def being built
@@ -38,6 +47,14 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
+	# Modal countdown timer
+	if _modal_active:
+		_modal_timer -= _delta
+		if _modal_timer <= 0:
+			_cmd_modal_dismiss(_modal_buttons[0] if not _modal_buttons.is_empty() else "OK")
+		elif _modal_layer and _modal_layer.get_child_count() > 0:
+			_modal_layer.get_child(0).queue_redraw()
+
 	# Re-apply portal state periodically (catches portals created after rebuild)
 	if Engine.get_frames_drawn() % 60 == 0:
 		_apply_portal_state()
@@ -496,6 +513,32 @@ func _execute(command: String) -> String:
 			_test_script_name = parts[1]
 			_test_script = ["# New test: " + parts[1], "clear", "portal off", "clearplayers", "clearzones"]
 			return "OK: new test '%s' — use testshow, testedit, testrun, testsave" % parts[1]
+
+		"modal":
+			# modal <name> <message> <buttons_json> <timeout>
+			# e.g.: modal observations "DONE" ["OK"] 5
+			if parts.size() < 5:
+				return "ERR: usage: modal <name> <message> <buttons_json> <timeout>"
+			var modal_name: String = parts[1]
+			var modal_msg: String = parts[2].replace("\"", "")
+			# Reconstruct buttons JSON — might have spaces
+			var btn_start: int = command.find("[")
+			var btn_end: int = command.find("]", btn_start)
+			var buttons_str: String = command.substr(btn_start, btn_end - btn_start + 1) if btn_start >= 0 else '["OK"]'
+			# Timeout is the last token
+			var timeout_val: float = float(parts[parts.size() - 1])
+			return _cmd_modal(modal_name, modal_msg, buttons_str, timeout_val)
+
+		"modal_dismiss":
+			if parts.size() < 2:
+				return "ERR: usage: modal_dismiss <button_label>"
+			return _cmd_modal_dismiss(parts[1].replace("\"", ""))
+
+		"emit":
+			# emit <event_name> <value>
+			if parts.size() < 3:
+				return "ERR: usage: emit <event_name> <value>"
+			return _cmd_emit(parts[1], parts[2])
 
 		"quit":
 			get_tree().quit()
@@ -1964,6 +2007,118 @@ func _cmd_testsave(save_name: String) -> String:
 	file.close()
 	_test_script_name = save_name
 	return "OK: saved '%s' (%d lines) → %s" % [save_name, _test_script.size(), path]
+
+
+func _cmd_modal(modal_name: String, message: String, buttons_str: String, timeout: float) -> String:
+	## Show a modal dialog with message, buttons, and countdown timer.
+	var json := JSON.new()
+	var buttons: Array = ["OK"]
+	if json.parse(buttons_str) == OK and json.data is Array:
+		buttons = json.data
+
+	_modal_name = modal_name
+	_modal_buttons = buttons
+	_modal_timeout = timeout
+	_modal_timer = timeout
+	_modal_active = true
+	_modal_dismissed_button = ""
+
+	# Build the UI
+	if _modal_layer and is_instance_valid(_modal_layer):
+		_modal_layer.queue_free()
+	_modal_layer = CanvasLayer.new()
+	_modal_layer.layer = 115  # Above console (110), above editor (108)
+	var panel := Control.new()
+	panel.name = "ModalPanel"
+	panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	panel.draw.connect(_draw_modal)
+	# Click handler
+	panel.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_modal_handle_click(event.position)
+	)
+	panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	_modal_layer.add_child(panel)
+	add_child(_modal_layer)
+
+	print("MODAL SHOW name=%s buttons=%s timeout=%.0f" % [modal_name, str(buttons), timeout])
+	return "OK: modal '%s' shown (%.0fs)" % [modal_name, timeout]
+
+
+func _cmd_modal_dismiss(button_label: String) -> String:
+	## Programmatically dismiss the modal by "clicking" a button.
+	if not _modal_active:
+		return "ERR: no modal active"
+	_modal_dismissed_button = button_label
+	_modal_active = false
+	if _modal_layer and is_instance_valid(_modal_layer):
+		_modal_layer.queue_free()
+		_modal_layer = null
+	print("MODAL DISMISS button=%s" % button_label)
+	return "OK: modal dismissed (button=%s)" % button_label
+
+
+func _cmd_emit(event_name: String, value: String) -> String:
+	## Emit a named event. Used by test scripts for state transitions.
+	print("EMIT %s=%s" % [event_name, value])
+	# Store the latest value for polling
+	set_meta("emit_" + event_name, value)
+	return "OK: emit %s=%s" % [event_name, value]
+
+
+func _draw_modal() -> void:
+	if not _modal_active or not _modal_layer:
+		return
+	var panel: Control = _modal_layer.get_child(0) if _modal_layer.get_child_count() > 0 else null
+	if not panel:
+		return
+	var font: Font = ThemeDB.fallback_font
+	var vp := get_viewport().get_visible_rect().size
+	var pw: float = 300.0
+	var ph: float = 120.0
+	var px: float = (vp.x - pw) / 2.0
+	var py: float = (vp.y - ph) / 2.0
+
+	# Dim background
+	panel.draw_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.4))
+	# Dialog box
+	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.1, 0.12, 0.1, 0.97))
+	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.4, 0.7, 0.4, 0.7), false, 2.0)
+	# Name label (small, top)
+	panel.draw_string(font, Vector2(px + 10, py + 16), _modal_name,
+		HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, Color(0.5, 0.5, 0.5))
+	# Message
+	panel.draw_string(font, Vector2(px + pw/2 - 30, py + 45), _modal_name.to_upper() if _modal_name == "observations" else "DONE",
+		HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 20, Color(0.9, 0.9, 0.9))
+	# Countdown
+	var countdown: int = ceili(_modal_timer)
+	panel.draw_string(font, Vector2(px + pw/2 - 10, py + 70), str(countdown),
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.8, 0.8, 0.3))
+	# Buttons
+	var bw: float = (pw - 20) / float(_modal_buttons.size())
+	for i in range(_modal_buttons.size()):
+		var bx: float = px + 10 + i * bw
+		var by: float = py + ph - 35
+		var col := Color(0.3, 0.8, 0.3)
+		panel.draw_rect(Rect2(bx, by, bw - 6, 25), col * Color(1, 1, 1, 0.2))
+		panel.draw_rect(Rect2(bx, by, bw - 6, 25), col * Color(1, 1, 1, 0.6), false, 1.0)
+		panel.draw_string(font, Vector2(bx + bw/2 - 12, by + 18), str(_modal_buttons[i]),
+			HORIZONTAL_ALIGNMENT_LEFT, bw - 10, 12, col)
+
+
+func _modal_handle_click(pos: Vector2) -> void:
+	var vp := get_viewport().get_visible_rect().size
+	var pw: float = 300.0
+	var ph: float = 120.0
+	var px: float = (vp.x - pw) / 2.0
+	var py: float = (vp.y - ph) / 2.0
+	var bw: float = (pw - 20) / float(_modal_buttons.size())
+	for i in range(_modal_buttons.size()):
+		var bx: float = px + 10 + i * bw
+		var by: float = py + ph - 35
+		if Rect2(bx, by, bw - 6, 25).has_point(pos):
+			_cmd_modal_dismiss(str(_modal_buttons[i]))
+			return
 
 
 func _cmd_list_tests() -> String:

@@ -169,7 +169,39 @@ On startup, read your `inbox/` for new work. Move items to `active/` when you be
 2. **NEVER** construct ad-hoc test scenarios inline — use or create test JSON files
 3. **ALWAYS** use `nc -w2 localhost 9999` for RCON (2-second timeout)
 4. **ALWAYS** check if Godot is running before sending RCON (`echo "status" | nc -w1 localhost 9999`)
-5. **ALWAYS** wait appropriate time for tests (check the `"wait"` field in test JSON)
-6. **ALWAYS** add debug aspects when implementing features that need inspection
-7. **PREFER** reading test results from Godot stdout/log over polling RCON
-8. When tests fail, inspect debug output FIRST before changing code
+5. **ALWAYS** add debug aspects when implementing features that need inspection
+6. **PREFER** reading test results from output JSON files over polling RCON
+7. When tests fail, inspect debug output FIRST before changing code
+8. **NEVER** sleep longer than 1 second when polling — check frequently
+9. **NEVER** change tests to fix code bugs — fix the code
+10. Tests succeed or fail fast — do NOT add long waits
+
+## Test Output & Observations
+
+Tests write output to `user://test-output/<version>/<testname>/<timestamp>/`:
+- `test.json` — copy of the script
+- `results.json` — checks, violations, durations, state timestamps
+
+Suites write to `user://test-output/<version>/<suitename>/<timestamp>.json`
+
+### Modal System
+Tests can end with `modal <name> <message> <buttons_json> <timeout>` which shows a
+dismissable dialog. Use `modal_dismiss <button>` via RCON to dismiss programmatically.
+
+### Observations (TUMU auto-generates)
+When TUMU runs a test, after the test reaches COMPLETE state:
+1. Read the results.json from the test output directory
+2. Analyze: what passed, what failed, what violations were detected
+3. Write `observations.md` alongside results.json with analysis
+4. Dismiss the modal via `echo "modal_dismiss OK" | nc -w2 localhost 9999`
+
+The observations.md should include:
+- Test outcome summary
+- Per-check analysis (why it passed/failed)
+- Violation details (which arcs, which disallow zones, positions)
+- Suggestions for next steps
+
+### Test State Machine
+Tests have states: INITIALIZING → RUNNING → COMPLETE → FINALIZED
+State transitions are logged: `TEST_STATE <name>=<state> t=<ms>`
+Timestamps are recorded in results.json under `state_timestamps`.

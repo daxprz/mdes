@@ -10,6 +10,7 @@ const TASK_WAIT := "wait"       # Wait N seconds
 const TASK_CHECK := "check"     # Run checks and record results
 const TASK_RESULTS := "results" # Show aggregated results
 const TASK_DEBUG_PROFILE := "debug_profile"  # Apply/clear debug profile
+const TASK_MODAL := "modal"     # Show modal dialog and wait for dismiss
 
 var _task_queue: Array = []   # Array of {type, data}
 var _running: bool = false
@@ -20,6 +21,9 @@ var _wait_timer: float = 0.0
 var _test_start_time: float = 0.0    # Time.get_ticks_msec() when test started
 var _current_test_name: String = ""   # Name of currently running test
 var _current_test_script: Array = []  # Copy of the script being run
+var _test_vars: Dictionary = {}      # Test variables from "var <name> default=<val>"
+var _test_state: String = ""         # Current state: INITIALIZING/RUNNING/COMPLETE/FINALIZED
+var _state_timestamps: Dictionary = {} # {state: msec}
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -101,6 +105,9 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 func _queue_script(script: Array, test_name: String) -> void:
 	## Queue tasks from a flat script array. Used by both run_test_script and _queue_test.
 	## Automatically clears stale zones/debug state from previous tests.
+	## Handles meta-commands: var, wait, check, emit, modal.
+	_test_vars = {}
+	_set_test_state("INITIALIZING")
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if rcon:
 		rcon._execute("clearzones")
@@ -114,6 +121,46 @@ func _queue_script(script: Array, test_name: String) -> void:
 	for line in script:
 		var l: String = str(line).strip_edges()
 		if l.is_empty() or l.begins_with("#"):
+			continue
+
+		# Variable declaration: "var <name> default=<value>"
+		if l.begins_with("var "):
+			var var_parts := l.split(" ", false)
+			if var_parts.size() >= 2:
+				var var_name: String = var_parts[1]
+				var default_val: String = "0"
+				for vp in var_parts.slice(2):
+					if vp.begins_with("default="):
+						default_val = vp.substr(8)
+				_test_vars[var_name] = default_val
+			continue
+
+		# Substitute {var_name} with variable values
+		for var_name: String in _test_vars:
+			l = l.replace("{%s}" % var_name, _test_vars[var_name])
+
+		# Emit: "emit <event_name> <value>" — state transition
+		if l.begins_with("emit "):
+			var emit_parts := l.split(" ", false)
+			if emit_parts.size() >= 3 and emit_parts[1] == "test_state":
+				# Queue as RCON (emit is an RCON command) but also track state
+				current_batch.append(l)
+			else:
+				current_batch.append(l)
+			continue
+
+		# Modal: "modal <name> <message> <buttons_json> <timeout>"
+		if l.begins_with("modal "):
+			# Flush batch first
+			if not current_batch.is_empty():
+				_task_queue.append({
+					"type": TASK_RCON,
+					"test_name": test_name if first_batch else "",
+					"commands": current_batch.duplicate(),
+				})
+				first_batch = false
+				current_batch = []
+			_task_queue.append({"type": TASK_MODAL, "command": l})
 			continue
 
 		if l.begins_with("wait "):
@@ -384,6 +431,7 @@ func _start_queue() -> void:
 		return
 	_running = true
 	set_process(true)
+	_set_test_state("RUNNING")
 	_advance_queue()
 
 
@@ -422,8 +470,15 @@ func _advance_queue() -> void:
 			_execute_debug_profile_task(task)
 			_wait_timer = 0.1
 		TASK_RESULTS:
+			_set_test_state("COMPLETE")
 			_show_results()
 			_wait_timer = 0.1
+		TASK_MODAL:
+			# Execute modal command via RCON and wait for dismiss
+			var rcon: Node = get_node_or_null("/root/Rcon")
+			if rcon:
+				rcon._execute(task["command"])
+			_wait_timer = 999.0  # Wait indefinitely — modal dismiss advances
 
 
 func _process(delta: float) -> void:
@@ -442,6 +497,12 @@ func _process(delta: float) -> void:
 					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
+		# Check if modal was dismissed — advance the queue
+		var rcon_modal: Node = get_node_or_null("/root/Rcon")
+		if rcon_modal and not rcon_modal._modal_active and not rcon_modal._modal_dismissed_button.is_empty():
+			_wait_timer = 0.0
+			_set_test_state("FINALIZED")
+			rcon_modal._modal_dismissed_button = ""
 		# Poll bounded leap graph monitoring
 		if _bleap_monitor_active:
 			_bleap_monitor_poll -= delta
@@ -653,6 +714,8 @@ func _write_test_output(passed: int, total: int) -> void:
 			"entity": _breach_result.get("entity", ""),
 			"pos": [_breach_result.get("pos", Vector2.ZERO).x, _breach_result.get("pos", Vector2.ZERO).y] if not _breach_result.is_empty() else [],
 		},
+		"state_timestamps": _state_timestamps.duplicate(),
+		"test_vars": _test_vars.duplicate(),
 	}
 
 	var results_file := FileAccess.open(base_dir + "/results.json", FileAccess.WRITE)
@@ -855,6 +918,12 @@ func _dist_point_to_segment(pt: Vector2, a: Vector2, b: Vector2) -> float:
 	return pt.distance_to(a + t * ab)
 
 # -- Bounded leap continuous monitoring ----------------------------------------
+
+func _set_test_state(state: String) -> void:
+	_test_state = state
+	_state_timestamps[state] = Time.get_ticks_msec()
+	print("TEST_STATE %s=%s t=%.0f" % [_current_test_name, state, Time.get_ticks_msec() - _test_start_time])
+
 
 func _reset_bleap_state() -> void:
 	## Clear all bleap monitor state AND reset RCON's bleap builder so stale

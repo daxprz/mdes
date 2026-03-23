@@ -1357,8 +1357,8 @@ func _suite_advance() -> void:
 	## Called when a test completes during a suite run. Record result, run next.
 	var has_fail: bool = "fail" in _run_results.values()
 	_suite_results.append({"name": _test_name, "passed": not has_fail, "summary": _run_summary})
-	# Small delay before next test so the user can see the result
-	get_tree().create_timer(1.5).timeout.connect(_suite_run_next)
+	# Advance immediately — the modal (if present) already gave pause time
+	_suite_run_next()
 
 
 func _suite_show_results() -> void:
