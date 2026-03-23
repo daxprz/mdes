@@ -1207,14 +1207,26 @@ func _glob_match(text: String, pattern: String) -> bool:
 
 
 func _within_segment_span(point: Vector2, seg_a: Vector2, seg_b: Vector2) -> bool:
-	## True if the point's projection onto the line through A→B falls within [0,1] of the segment.
-	## Uses a small margin so entities near the endpoints still trigger.
+	## True if the point is close to the actual segment (not the infinite line).
+	## Checks both: (1) projection t in [0,1] and (2) perpendicular distance
+	## is reasonable (within the segment length — a generous but finite bound).
 	var ab := seg_b - seg_a
 	var len_sq := ab.length_squared()
 	if len_sq < 0.001:
 		return point.distance_to(seg_a) < 30.0
+	var seg_len := sqrt(len_sq)
 	var t := (point - seg_a).dot(ab) / len_sq
-	return t >= 0.0 and t <= 1.0  # Strict segment bounds — no margin past endpoints
+	if t < 0.0 or t > 1.0:
+		return false
+	# Perpendicular distance: cross product / segment length
+	var ap := point - seg_a
+	var cross := ab.x * ap.y - ab.y * ap.x
+	var perp_dist := absf(cross) / seg_len
+	# The entity must be close to the actual segment line — not just
+	# within its projection range. A trip wire only detects entities
+	# that are near it, not entities flying far overhead.
+	var max_perp := 50.0  # Within 50px of the line
+	return perp_dist <= max_perp
 
 
 func _line_side(point: Vector2, line_a: Vector2, line_b: Vector2) -> float:
