@@ -2362,6 +2362,17 @@ func _draw_panel() -> void:
 		_panel.draw_string(font, Vector2(wx + 38, row_y + 15), cmd_text,
 			HORIZONTAL_ALIGNMENT_LEFT, ww - 62, 11, text_col)
 
+		# Show actual override value on the right for var lines
+		if cmd_text.strip_edges().begins_with("var "):
+			var var_parts := cmd_text.strip_edges().split(" ", false)
+			if var_parts.size() >= 2:
+				var var_name: String = var_parts[1]
+				if _test_override_vars.has(var_name):
+					var actual := str(_test_override_vars[var_name])
+					_panel.draw_string(font, Vector2(wx + ww - 65, row_y + 15),
+						"= " + actual, HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
+						Color(0.4, 0.9, 1.0, 0.8))
+
 		# Red X delete button on right edge — hidden during run mode
 		if not _run_running:
 			var xc := Vector2(wx + ww - 12, row_y + ROW_H * 0.5)
