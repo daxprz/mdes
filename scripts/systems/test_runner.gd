@@ -17,6 +17,9 @@ var _console: Node = null
 var _results: Array = []
 var _current_suite_name: String = ""
 var _wait_timer: float = 0.0
+var _test_start_time: float = 0.0    # Time.get_ticks_msec() when test started
+var _current_test_name: String = ""   # Name of currently running test
+var _current_test_script: Array = []  # Copy of the script being run
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -43,6 +46,9 @@ func run_test(test_name: String, console: Node) -> void:
 	_results.clear()
 	_current_suite_name = ""
 	_reset_bleap_state()
+	_current_test_name = test_name
+	_current_test_script = test_data.get("script", test_data.get("setup", []))
+	_test_start_time = Time.get_ticks_msec()
 	_queue_test(test_data)
 	_task_queue.append({"type": TASK_RESULTS})
 	_start_queue()
@@ -80,6 +86,11 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 	_reset_bleap_state()
 	_last_leap_eval.clear()
 	_breach_result = {}
+	_current_test_name = test_name
+	_current_test_script = []
+	for line in script:
+		_current_test_script.append(str(line))
+	_test_start_time = Time.get_ticks_msec()
 
 	_queue_script(script, test_name)
 
@@ -546,6 +557,102 @@ func _show_results() -> void:
 		for r in _results:
 			grid_parts.append("[%s] %s" % ["PASS" if r["passed"] else "FAIL", r["name"]])
 		rcon._execute("grid %s" % "|".join(grid_parts))
+
+	# Write test output to files
+	_write_test_output(passed, total)
+
+
+func _write_test_output(passed: int, total: int) -> void:
+	## Write test results to user://test-output/<version>/<testname>/<timestamp>/
+	var duration_ms: float = Time.get_ticks_msec() - _test_start_time
+	var duration_s: float = duration_ms / 1000.0
+	var version_str: String = Version.get_string()
+	var timestamp: String = Time.get_datetime_string_from_system().replace(":", "-")
+	var test_name: String = _current_test_name if not _current_test_name.is_empty() else "unnamed"
+
+	var base_dir: String = "user://test-output/%s/%s/%s" % [version_str, test_name, timestamp]
+	DirAccess.make_dir_recursive_absolute(base_dir)
+
+	# -- test.json: copy of the script that was run --
+	var test_file := FileAccess.open(base_dir + "/test.json", FileAccess.WRITE)
+	if test_file:
+		test_file.store_string(JSON.stringify({
+			"name": test_name,
+			"script": _current_test_script,
+		}, "\t"))
+		test_file.close()
+
+	# -- results.json: comprehensive output --
+	var checks_output: Array = []
+	for r: Dictionary in _results:
+		var check_entries: Array = []
+		for c: Dictionary in r.get("checks", []):
+			check_entries.append({
+				"label": c.get("label", ""),
+				"passed": c.get("passed", false),
+				"value": c.get("value", 0),
+				"expected": c.get("expected", ""),
+			})
+		checks_output.append({
+			"name": r.get("name", ""),
+			"passed": r.get("passed", false),
+			"checks": check_entries,
+			"log": r.get("log", []),
+		})
+
+	# Violation details from the leap monitor
+	var violations_output: Array = []
+	for edge: Dictionary in _last_leap_eval:
+		if edge.get("result", "") == "failed":
+			var breaches: Array = []
+			for bp: Dictionary in edge.get("breach_points", []):
+				breaches.append({
+					"pos": [bp["pos"].x, bp["pos"].y],
+					"reason": bp.get("reason", ""),
+				})
+			violations_output.append({
+				"from": [edge["from_pos"].x, edge["from_pos"].y],
+				"arrival": [edge["arrival"].x, edge["arrival"].y],
+				"result": edge.get("result", ""),
+				"breach_count": breaches.size(),
+				"breaches": breaches,
+			})
+
+	# Matched edges
+	var matched_output: Array = []
+	for edge: Dictionary in _last_leap_eval:
+		if edge.get("result", "") == "matched":
+			matched_output.append({
+				"from": [edge["from_pos"].x, edge["from_pos"].y],
+				"arrival": [edge["arrival"].x, edge["arrival"].y],
+			})
+
+	var results_data: Dictionary = {
+		"test_name": test_name,
+		"version": version_str,
+		"timestamp": timestamp,
+		"duration_seconds": snapped(duration_s, 0.01),
+		"passed": passed,
+		"total": total,
+		"all_passed": passed == total,
+		"checks": checks_output,
+		"violations": violations_output,
+		"matched_edges": matched_output,
+		"bleap_matched_count": _bleap_matched_keys.size(),
+		"bleap_violation_count": _bleap_violated_keys.size(),
+		"breach_result": {
+			"breached": not _breach_result.is_empty(),
+			"entity": _breach_result.get("entity", ""),
+			"pos": [_breach_result.get("pos", Vector2.ZERO).x, _breach_result.get("pos", Vector2.ZERO).y] if not _breach_result.is_empty() else [],
+		},
+	}
+
+	var results_file := FileAccess.open(base_dir + "/results.json", FileAccess.WRITE)
+	if results_file:
+		results_file.store_string(JSON.stringify(results_data, "\t"))
+		results_file.close()
+
+	_log("  Output: %s" % base_dir, Color(0.5, 0.5, 0.5))
 
 
 func _extract_value(response: String, key: String) -> float:

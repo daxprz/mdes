@@ -1362,7 +1362,7 @@ func _suite_advance() -> void:
 
 
 func _suite_show_results() -> void:
-	## Display suite results in the status bar and via RCON grid.
+	## Display suite results in the status bar, RCON grid, and write to file.
 	var total: int = _suite_results.size()
 	var passed: int = 0
 	for r: Dictionary in _suite_results:
@@ -1377,7 +1377,41 @@ func _suite_show_results() -> void:
 		for r: Dictionary in _suite_results:
 			grid_parts.append("[%s] %s" % ["PASS" if r["passed"] else "FAIL", r["name"]])
 		rcon._execute("grid %s" % "|".join(grid_parts))
+	# Write suite output to file
+	_write_suite_output(passed, total)
 	_suite_name = ""
+
+
+func _write_suite_output(passed: int, total: int) -> void:
+	## Write suite results to user://test-output/<version>/<suitename>/<timestamp>.json
+	var version_str: String = Version.get_string()
+	var timestamp: String = Time.get_datetime_string_from_system().replace(":", "-")
+	var dir_path: String = "user://test-output/%s/%s" % [version_str, _suite_name]
+	DirAccess.make_dir_recursive_absolute(dir_path)
+
+	var tests_output: Array = []
+	for r: Dictionary in _suite_results:
+		tests_output.append({
+			"name": r.get("name", ""),
+			"passed": r.get("passed", false),
+			"summary": r.get("summary", ""),
+		})
+
+	var suite_data: Dictionary = {
+		"suite_name": _suite_name,
+		"version": version_str,
+		"timestamp": timestamp,
+		"passed": passed,
+		"total": total,
+		"all_passed": passed == total,
+		"tests": tests_output,
+	}
+
+	var file_path: String = dir_path + "/" + timestamp + ".json"
+	var file := FileAccess.open(file_path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(suite_data, "\t"))
+		file.close()
 
 
 
