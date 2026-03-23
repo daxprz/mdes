@@ -155,21 +155,23 @@ func _process(delta: float) -> void:
 	if _status_timer > 0:
 		_status_timer -= delta
 	# Poll test runner for results when a run finishes
-	if _run_running:
-		var rcon: Node = get_node_or_null("/root/Rcon")
-		if rcon and rcon._test_runner:
-			# Collect results ONCE when COMPLETE fires
-			if rcon._test_runner._test_state == "COMPLETE" and not _results_collected:
-				_collect_results(rcon._test_runner)
-				# Results are in — stop tracking as "running" so the editor is interactive
-				_run_running = false
-			# Fully done when runner stops (notify dismissed)
-			elif not rcon._test_runner._running:
-				_run_running = false
-				if not _results_collected:
-					_collect_results(rcon._test_runner)
-				if not _suite_queue.is_empty() or not _suite_name.is_empty():
-					_suite_advance()
+	var rcon_poll: Node = get_node_or_null("/root/Rcon") if _run_running or _results_collected else null
+	if rcon_poll and rcon_poll._test_runner:
+		var runner: Node = rcon_poll._test_runner
+		# Collect results ONCE when COMPLETE fires — editor becomes interactive
+		if _run_running and runner._test_state == "COMPLETE" and not _results_collected:
+			_collect_results(runner)
+			_run_running = false  # Editor interactive immediately
+		# Track runner still running (for _run_running cleanup)
+		elif _run_running and not runner._running:
+			_run_running = false
+			if not _results_collected:
+				_collect_results(runner)
+		# Suite advance: results collected AND runner fully stopped (notify dismissed)
+		if _results_collected and not runner._running and not _run_running:
+			if (not _suite_queue.is_empty() or not _suite_name.is_empty()):
+				_results_collected = false  # Prevent re-triggering
+				_suite_advance()
 	if _panel:
 		_panel.queue_redraw()
 	if _overlay:
@@ -631,7 +633,6 @@ func _handle_button_click(local_x: float) -> void:
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
 				rcon._cmd_notify_dismiss("OK")
-			_results_collected = false  # Return to edit mode
 		"save":   _save_test()
 
 
@@ -1052,11 +1053,20 @@ func _run_test() -> void:
 		return
 	if _selected_row >= 0 and _edit_focused:
 		_apply_edit()
+	# Force-stop any previous run
+	if rcon._notify_active:
+		rcon._cmd_notify_dismiss("OK")
+	rcon._ensure_test_runner()
+	if rcon._test_runner:
+		rcon._test_runner._running = false
+		rcon._test_runner._task_queue.clear()
 	_run_results.clear()
 	_run_detail.clear()
 	_run_summary = ""
 	_run_leap_edges.clear()
 	_breach_marker = {}
+	_results_collected = false
+	_run_running = true
 	rcon._test_script = _script.duplicate()
 	rcon._test_script_name = _test_name
 	rcon._ensure_test_runner()
