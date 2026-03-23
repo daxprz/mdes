@@ -70,9 +70,9 @@ const LEAP_COOLDOWN := 2.0     # Seconds between leaps (aggressive)
 const LEAP_BODY_RADIUS := 55.0    # Half-size of body for clearance checks (spine + legs + head)
 const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
 const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around target
-const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
+const LEAP_FLIGHT_TIMES := 7      # Number of flight durations to try per arrival point
 const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
-const LEAP_FLIGHT_TIME_MAX := 1.2 # Longest flight time to test
+const LEAP_FLIGHT_TIME_MAX := 1.6 # Longest flight time to test (higher arcs clear platform corners)
 const LEAP_ARC_STEPS := 40        # Simulation steps per arc (covers ~1.2s flight at 0.03s dt)
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.03         # Simulation timestep (small enough to catch thin platforms)
@@ -277,6 +277,7 @@ const SEGMENT_WEIGHTS: Dictionary = {
 var _attach_forces: Dictionary = {}  # point_name -> Vector2 (accumulated force from attached items)
 var debug_draw_enabled: bool = false  # Heavy arc/edge rendering (toggle via RCON debugdraw)
 var _dbg_arc_log: bool = false        # Log arc collision details (first failure only)
+var _dbg_first_body_clip: String = "" # First body clip position for diagnostics
 var debug_draw_lite: bool = true     # Lightweight debug (state, platforms, waypoint, target)
 
 # IK quality scoring (lower = better)
@@ -3350,6 +3351,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			all_landing_xs.append(ex)
 
 	for landing_x in all_landing_xs:
+		_dbg_first_body_clip = ""
 		var arrival := Vector2(landing_x, landing_y)
 
 		if _is_point_in_solid(arrival):
@@ -3411,12 +3413,10 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			# 1. Forward raycasts on all three arcs: center + body-width edges.
 			#    Catches walls and platforms the body would physically hit.
 			# Arc clearance: sweep a body-sized circle along arc_c and check
-			# for intersection with ANY collision object (platforms, walls,
-			# keystones — everything on physics layer 1). This is the single
-			# unified check that replaces forward raycasts + lateral raycasts
-			# + platform edge rect. The body circle must not overlap any
-			# collider at any mid-flight point.
-			if not _check_arc_body_clearance(arc_c, effective_radius, landing_zone):
+			# for intersection with ANY collision object. Near the destination
+			# platform, the check radius reduces dynamically to allow landing
+			# from above while still catching corner clips from the side.
+			if not _check_arc_body_clearance(arc_c, effective_radius, plat_min_x, plat_max_x, plat_y):
 				_dbg_arc += 1
 				continue
 
@@ -3501,9 +3501,9 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 
 	if _dbg_total > 0:
 		if best.is_empty():
-			DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_FAIL: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) to_plat=(%.0f,%.0f)", [
+			DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_FAIL: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) to_plat=(%.0f,%.0f) clip=%s", [
 				_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
-				from_pos.x, from_pos.y, plat["pos"].x, plat["pos"].y])
+				from_pos.x, from_pos.y, plat["pos"].x, plat["pos"].y, _dbg_first_body_clip])
 		else:
 			DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_OK: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) arrival=(%.0f,%.0f)", [
 				_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
@@ -3742,12 +3742,19 @@ func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> boo
 	return true
 
 
-func _check_arc_body_clearance(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
+func _check_arc_body_clearance(arc: PackedVector2Array, radius: float,
+		dest_min_x: float, dest_max_x: float, dest_y: float) -> bool:
 	## Sweep a body-sized circle along the center arc and check for intersection
-	## with ANY collision object on physics layer 1 (platforms, walls, keystones).
-	## Skips first 3 points (inside launch platform), last 3 (landing approach),
-	## and points inside ignore_rect (destination platform area).
-	## This is the definitive body-width clearance check.
+	## with ANY collision object on physics layer 1.
+	##
+	## Dynamic radius near the destination platform:
+	## - Full radius during mid-flight (no clipping anything)
+	## - When DIRECTLY ABOVE the destination (x within platform, descending),
+	##   reduce radius proportionally to height above surface — allows landing
+	## - When BESIDE the destination (x outside platform range), keep full radius
+	##   — catches corner clips from the side
+	##
+	## All ratios are relative to body radius for future dynamic monster sizing.
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
@@ -3755,30 +3762,59 @@ func _check_arc_body_clearance(arc: PackedVector2Array, radius: float, ignore_re
 		return true
 
 	var shape := CircleShape2D.new()
-	shape.radius = radius
 	var query := PhysicsShapeQueryParameters2D.new()
 	query.shape = shape
 	query.collision_mask = 1  # World layer
 	query.exclude = [get_rid()]
 
-	var do_log: bool = DebugOverlay.should_log("leap_attack/lateral_clearance", self)
-
-	# Check every 4th point to keep performance reasonable.
-	# Skip points near the launch height (within radius of launch Y)
-	# and points inside the ignore_rect (destination platform area).
 	var launch_y: float = arc[0].y
+	# Height above destination where radius starts reducing (ratio of body radius)
+	var fade_start_height: float = radius * 3.0  # Start fading at 3x body radius above
+	# Inset from platform edges — only reduce radius when well inside the platform
+	var edge_margin: float = radius * 0.8  # 80% of body radius as edge buffer
 
 	for i in range(4, arc.size() - 4, 2):
 		var pt: Vector2 = arc[i]
 		# Skip if still near launch platform height
 		if pt.y > launch_y - radius - 20:
 			continue
-		# Skip if near destination platform
-		if ignore_rect.has_point(pt):
-			continue
+
+		# Compute the effective check radius at this point
+		var check_radius: float = radius
+		var height_above_dest: float = dest_y - pt.y  # Positive = above platform
+
+		if height_above_dest > 0 and height_above_dest < fade_start_height:
+			# Near the destination — check if we're ABOVE the interior (not beside the edge)
+			var inside_platform_x: bool = (pt.x > dest_min_x + edge_margin
+				and pt.x < dest_max_x - edge_margin)
+			if inside_platform_x:
+				# Directly above the platform interior and descending toward it.
+				# Reduce radius proportionally: at fade_start_height → full radius,
+				# at surface (0) → zero radius (body is landing).
+				var fade_t: float = height_above_dest / fade_start_height
+				check_radius = radius * fade_t
+		elif height_above_dest <= 0:
+			# Below the destination surface. If the arc center is within the
+			# platform x range (approaching from below), reduce the radius so the
+			# body circle doesn't reach UP and clip the platform from underneath.
+			var inside_platform_x: bool = (pt.x > dest_min_x + edge_margin
+				and pt.x < dest_max_x - edge_margin)
+			if inside_platform_x:
+				# Reduce radius so the top of the circle can't reach the platform surface.
+				# body_top = pt.y - check_radius. We need body_top > dest_y (stay below).
+				# So check_radius < pt.y - dest_y = -height_above_dest.
+				var max_safe_radius: float = -height_above_dest - 5.0  # 5px margin
+				check_radius = maxf(0.0, minf(check_radius, max_safe_radius))
+
+		if check_radius < 5.0:
+			continue  # Radius too small to meaningfully check
+
+		shape.radius = check_radius
 		query.transform = Transform2D(0, pt)
 		var results: Array = space.intersect_shape(query, 1)
 		if not results.is_empty():
+			if _dbg_first_body_clip.is_empty():
+				_dbg_first_body_clip = "at (%.0f,%.0f) r=%.0f h_above=%.0f" % [pt.x, pt.y, check_radius, dest_y - pt.y]
 			return false
 	return true
 
