@@ -18,6 +18,8 @@ var _console: Node = null
 var _results: Array = []
 var _current_suite_name: String = ""
 var _wait_timer: float = 0.0
+var _current_task_line: int = -1     # Script line index of the currently executing task
+var _line_states: Dictionary = {}    # {line_idx: "pending"|"running"|"complete"}
 var _test_start_time: float = 0.0    # Time.get_ticks_msec() when test started
 var _current_test_name: String = ""   # Name of currently running test
 var _current_test_script: Array = []  # Copy of the script being run
@@ -121,9 +123,18 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 		rcon._execute("debug off testing/bounded_leap_checks")
 		rcon._execute("debug off testing/planned_leaps")
 	var current_batch: Array = []
+	var current_batch_lines: Array = []
 	var first_batch: bool = true
+	_line_states.clear()
+	# Mark all executable lines as pending
+	for li in range(script.size()):
+		var sl: String = str(script[li]).strip_edges()
+		if not sl.is_empty() and not sl.begins_with("#") and not sl.begins_with("var "):
+			_line_states[li] = "pending"
 
+	var line_idx: int = -1
 	for line in script:
+		line_idx += 1
 		var l: String = str(line).strip_edges()
 		if l.is_empty() or l.begins_with("#"):
 			continue
@@ -146,64 +157,65 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 
 		# Emit: "emit <event_name> <value>" — state transition
 		if l.begins_with("emit "):
-			var emit_parts := l.split(" ", false)
-			if emit_parts.size() >= 3 and emit_parts[1] == "test_state":
-				# Queue as RCON (emit is an RCON command) but also track state
-				current_batch.append(l)
-			else:
-				current_batch.append(l)
+			current_batch.append(l)
+			current_batch_lines.append(line_idx)
 			continue
 
 		# Notify: "notify <name> <message> <buttons_json> <timeout> [mode]"
 		if l.begins_with("notify "):
-			# Flush batch first
 			if not current_batch.is_empty():
 				_task_queue.append({
 					"type": TASK_RCON,
 					"test_name": test_name if first_batch else "",
 					"commands": current_batch.duplicate(),
+					"lines": current_batch_lines.duplicate(),
 				})
 				first_batch = false
 				current_batch = []
-			# Store as trailing modal — will be appended AFTER TASK_RESULTS by caller
-			trailing_modal = {"type": TASK_NOTIFY, "command": l}
+				current_batch_lines = []
+			trailing_modal = {"type": TASK_NOTIFY, "command": l, "lines": [line_idx]}
 			continue
 
 		if l.begins_with("wait "):
-			# Flush current batch, then queue a wait
 			if not current_batch.is_empty():
 				_task_queue.append({
 					"type": TASK_RCON,
 					"test_name": test_name if first_batch else "",
 					"commands": current_batch.duplicate(),
+					"lines": current_batch_lines.duplicate(),
 				})
 				first_batch = false
 				current_batch = []
+				current_batch_lines = []
 			var wait_task: Dictionary = _parse_wait_line(l)
+			wait_task["lines"] = [line_idx]
 			_task_queue.append(wait_task)
 			continue
 
 		if l.begins_with("check "):
-			# Flush batch first so bleap commands run before the check evaluates
 			if not current_batch.is_empty():
 				_task_queue.append({
 					"type": TASK_RCON,
 					"test_name": test_name if first_batch else "",
 					"commands": current_batch.duplicate(),
+					"lines": current_batch_lines.duplicate(),
 				})
 				first_batch = false
 				current_batch = []
+				current_batch_lines = []
 			var check_dict: Dictionary = _parse_script_check(l)
 			if not check_dict.is_empty():
 				_task_queue.append({
 					"type": TASK_CHECK,
 					"test_name": test_name,
 					"checks": [check_dict],
+					"lines": [line_idx],
 				})
 			continue
 
 		# Regular RCON command (bleap, debug, spawn, standdown, etc.)
 		current_batch.append(l)
+		current_batch_lines.append(line_idx)
 
 	# Flush any remaining commands
 	if not current_batch.is_empty():
@@ -211,6 +223,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 			"type": TASK_RCON,
 			"test_name": test_name if first_batch else "",
 			"commands": current_batch.duplicate(),
+			"lines": current_batch_lines.duplicate(),
 		})
 	return trailing_modal
 
@@ -452,7 +465,18 @@ func _advance_queue() -> void:
 		set_process(false)
 		return
 
+	# Mark previous task's lines as complete
+	if _current_task_line >= 0:
+		for li: int in _line_states:
+			if _line_states[li] == "running":
+				_line_states[li] = "complete"
+
 	var task: Dictionary = _task_queue.pop_front()
+	# Mark this task's lines as running
+	for li in task.get("lines", []):
+		_line_states[li] = "running"
+		_current_task_line = li
+
 	match task["type"]:
 		TASK_RCON:
 			_execute_rcon_task(task)

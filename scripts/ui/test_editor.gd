@@ -2184,8 +2184,13 @@ func _draw_panel() -> void:
 		_panel.draw_string(font, Vector2(wx + 6, row_y + 15),
 			"%2d" % (script_idx + 1), HORIZONTAL_ALIGNMENT_LEFT, 20, 10, num_col)
 
-		# Result indicator (left of line number)
+		# Status indicator — shows run state during execution, result after completion
+		var rcon_ls: Node = get_node_or_null("/root/Rcon")
+		var line_state: String = ""
+		if rcon_ls and rcon_ls._test_runner and rcon_ls._test_runner._line_states.has(script_idx):
+			line_state = rcon_ls._test_runner._line_states[script_idx]
 		if _run_results.has(script_idx):
+			# Post-run result
 			var res: String = _run_results[script_idx]
 			match res:
 				"pass":
@@ -2194,11 +2199,23 @@ func _draw_panel() -> void:
 				"fail":
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✗",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.3, 0.3))
-					# Also tint the row background red
 					_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.4, 0.1, 0.1, 0.3))
 				"info":
 					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "·",
 						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
+		elif _run_running and not line_state.is_empty():
+			# During run — show execution state
+			match line_state:
+				"pending":
+					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "○",
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
+				"running":
+					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "●",
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
+					_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.1, 0.25, 0.1, 0.3))
+				"complete":
+					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✓",
+						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.7, 0.5))
 
 		# Command text — truncated (leave room for result icon + X button)
 		var cmd_text: String = _script[script_idx]
@@ -2206,10 +2223,11 @@ func _draw_panel() -> void:
 		_panel.draw_string(font, Vector2(wx + 38, row_y + 15), cmd_text,
 			HORIZONTAL_ALIGNMENT_LEFT, ww - 62, 11, text_col)
 
-		# Red X delete button on right edge
-		var xc := Vector2(wx + ww - 12, row_y + ROW_H * 0.5)
-		_panel.draw_string(font, xc + Vector2(-4, 5), "✕",
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.3, 0.3, 0.5 if not is_sel else 0.8))
+		# Red X delete button on right edge — hidden during run mode
+		if not _run_running:
+			var xc := Vector2(wx + ww - 12, row_y + ROW_H * 0.5)
+			_panel.draw_string(font, xc + Vector2(-4, 5), "✕",
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.3, 0.3, 0.5 if not is_sel else 0.8))
 
 	# Separator
 	_panel.draw_line(Vector2(wx, ry + list_h), Vector2(wx + ww, ry + list_h),
