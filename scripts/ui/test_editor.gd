@@ -1376,7 +1376,17 @@ func _pause_test() -> void:
 
 
 func _stop_test() -> void:
+	## Stop everything — dismiss notify, kill runner, return to full edit mode.
+	## Does NOT advance the suite. The user can edit and re-run.
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		if rcon._notify_active:
+			rcon._cmd_notify_dismiss("OK")
+		if rcon._test_runner:
+			rcon._test_runner._running = false
+			rcon._test_runner._task_queue.clear()
 	_run_running = false
+	_results_collected = false
 	_mode = Mode.EDIT
 
 
