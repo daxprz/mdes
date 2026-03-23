@@ -302,6 +302,7 @@ func _parse_wait_line(line: String) -> Dictionary:
 
 	# Collect all "unless breach/exit_circle" clauses
 	var conditions: Array = []
+	var cond_idx: int = 0
 	var i: int = 2
 	while i < parts.size():
 		if parts[i].to_lower() == "unless" and i + 1 < parts.size():
@@ -309,10 +310,12 @@ func _parse_wait_line(line: String) -> Dictionary:
 			if cond_type == "breach" and i + 6 < parts.size():
 				var cond: Dictionary = {
 					"cond_type": "breach",
+					"idx": cond_idx,
 					"x1": float(parts[i + 2]), "y1": float(parts[i + 3]),
 					"x2": float(parts[i + 4]), "y2": float(parts[i + 5]),
 					"patterns": [],
 				}
+				cond_idx += 1
 				var j: int = i + 6
 				while j < parts.size() and parts[j].to_lower() != "unless":
 					cond["patterns"].append(parts[j])
@@ -322,10 +325,12 @@ func _parse_wait_line(line: String) -> Dictionary:
 			elif cond_type == "exit_circle" and i + 5 < parts.size():
 				var cond: Dictionary = {
 					"cond_type": "exit_circle",
+					"idx": cond_idx,
 					"x": float(parts[i + 2]), "y": float(parts[i + 3]),
 					"r": float(parts[i + 4]),
 					"patterns": [],
 				}
+				cond_idx += 1
 				var j: int = i + 5
 				while j < parts.size() and parts[j].to_lower() != "unless":
 					cond["patterns"].append(parts[j])
@@ -529,8 +534,12 @@ func _process(delta: float) -> void:
 				_wait_timer = 0.0
 				var breach_entity: String = _breach_result.get("entity", "?")
 				var breach_pos: Vector2 = _breach_result.get("pos", Vector2.ZERO)
-				_log("  BREACH: %s at (%.0f,%.0f) crossed fence — wait aborted" % [
-					breach_entity, breach_pos.x, breach_pos.y],
+				var breach_cond: Dictionary = _breach_result.get("condition", {})
+				var breach_idx: int = breach_cond.get("idx", -1)
+				var breach_type: String = breach_cond.get("cond_type", "?")
+				var line_num: int = _current_task_line + 1  # 1-based for display
+				_log("  BREACH L%d[%d] (%s): %s at (%.0f,%.0f) — wait aborted" % [
+					line_num, breach_idx, breach_type, breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
 		# Check if modal was dismissed — advance the queue (only during TASK_NOTIFY)
