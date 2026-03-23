@@ -1914,23 +1914,28 @@ func _draw_overlay() -> void:
 				var p_c: Vector2 = tip - dir * arrow_size - perp * arrow_size * 0.5
 				_overlay.draw_colored_polygon(PackedVector2Array([p_a, p_b, p_c]), land_col)
 
-			# Breach points — pulsing red circles with reason label
-			# For disallow breaches, thin to every 4th point to reduce clutter
+			# Breach points — show the body circle (r=55) at each breach position
+			# so the user can see WHERE the body clips the platform/disallow zone.
+			# Thin to every 4th disallow point to reduce clutter.
+			var body_r: float = 55.0
 			var drawn_disallow: int = 0
 			for bp: Dictionary in breach_pts:
 				var bpos: Vector2 = bp.get("pos", Vector2.ZERO)
 				var reason: String = bp.get("reason", "")
-				if reason == "disallow":
+				if reason.begins_with("disallow"):
 					drawn_disallow += 1
 					if drawn_disallow % 4 != 1:
-						# Still draw a small dot for skipped points
-						_overlay.draw_circle(bpos, 3.0, Color(1.0, 0.2, 0.2, 0.4))
+						_overlay.draw_circle(bpos, 2.0, Color(1.0, 0.2, 0.2, 0.3))
 						continue
-				var pulse: float = 6.0 + 3.0 * sin(_run_blink * 4.0)
-				_overlay.draw_circle(bpos, pulse, Color(1.0, 0.0, 0.0, 0.5))
-				_overlay.draw_arc(bpos, pulse + 2.0, 0, TAU, 12, Color(1.0, 0.2, 0.2, 0.9), 2.0)
-				_overlay.draw_string(font, bpos + Vector2(-30, -pulse - 6), reason,
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.2, 0.2))
+				# Draw the body circle at this arc point — shows the actual footprint
+				var pulse_alpha: float = 0.3 + 0.15 * sin(_run_blink * 3.0)
+				_overlay.draw_circle(bpos, body_r, Color(1.0, 0.1, 0.1, pulse_alpha * 0.3))
+				_overlay.draw_arc(bpos, body_r, 0, TAU, 24, Color(1.0, 0.2, 0.2, pulse_alpha), 1.5)
+				# Small dot at center
+				_overlay.draw_circle(bpos, 3.0, Color(1.0, 0.3, 0.3, 0.8))
+				# Label
+				_overlay.draw_string(font, bpos + Vector2(-30, -body_r - 6), reason,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.2, 0.2, 0.8))
 
 
 func _draw_command_visual(p: Dictionary, dim: float, line_num: String, font: Font, result: String = "") -> void:
