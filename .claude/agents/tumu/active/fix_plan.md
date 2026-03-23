@@ -55,12 +55,21 @@ arcs are rejected and why.
 4. **Fix P4** (IK damping) → regression test
 5. **Fix P5** (ETZ) → final regression
 
-### P6: Arc distance optimization (low priority)
+### P6: Arc distance optimization (low priority) — OBSERVED in leap_floor_to_P2
 **Tests:** leap_floor_to_P1 (observed)
 **Symptom:** Monster chooses a long-distance arc when a shorter one would clear better
 **Root cause:** Scoring favors proximity to target over clearance distance
 **Fix:** Improve arc scoring to prefer shorter travel distance when multiple arcs are valid
 **Impact:** Low — arcs work, just suboptimal
+
+### P7: Show unmatched candidate arcs in the editor
+**Tests:** leap_floor_to_P2 (observed)
+**Symptom:** Monitor shows 0 matched, 0 violations — but arcs exist from the source platform.
+They fail START/END constraints and are silently ignored.
+**Request:** Show these as "unmatched starting-arc" in the editor overlay — any arc from the
+source platform that doesn't satisfy any plan's START/END. Helps diagnose why the planner's
+chosen arc doesn't match the test constraints.
+**Impact:** Diagnostic improvement, not a code fix
 
 ## Current Status: P1 IN PROGRESS — body circle clearance via intersect_shape
 - `_check_arc_body_clearance` implemented but landing zone ignore rect needs tuning
