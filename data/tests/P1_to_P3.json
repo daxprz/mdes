@@ -1,7 +1,7 @@
 {
 	"name": "P1_to_P3",
 	"script": [
-		"var observations_wait default=0",
+		"var owait default=0",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",
@@ -28,6 +28,6 @@
 		"check fps extract:fps > 20.0",
 		"check ik extract:ik_peak < 2000.0 label:ik_peak",
 		"check bounded_leaps P1-to-P3 leap graph edge",
-		"notify observations DONE [\"OK\"] {observations_wait} editor"
+		"notify observations DONE [\"OK\"] {owait} editor"
 	]
 }

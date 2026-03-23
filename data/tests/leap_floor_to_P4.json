@@ -1,7 +1,7 @@
 {
 	"name": "leap_floor_to_P4",
 	"script": [
-		"var observations_wait default=0",
+		"var owait default=0",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on precog/status_text",
@@ -48,6 +48,6 @@
 		"check zones",
 		"check fps extract:fps > 20.0",
 		"check bounded_leaps floor-to-P4 multi-hop arcs",
-		"notify observations DONE [\"OK\"] {observations_wait} editor"
+		"notify observations DONE [\"OK\"] {owait} editor"
 	]
 }

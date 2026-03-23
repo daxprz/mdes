@@ -1,7 +1,7 @@
 {
 	"name": "chained_upper_platform",
 	"script": [
-		"var observations_wait default=0",
+		"var owait default=0",
 		"debug on chain/tether_arc",
 		"debug on chain/chain_barrier",
 		"debug on precog/platform_list",
@@ -43,6 +43,6 @@
 		"check hp extract:damage_taken = 0.0 label:no_damage",
 		"check fps extract:fps > 20.0",
 		"check bounded_leaps chained arc check",
-		"notify observations DONE [\"OK\"] {observations_wait} editor"
+		"notify observations DONE [\"OK\"] {owait} editor"
 	]
 }

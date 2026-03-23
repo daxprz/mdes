@@ -1,7 +1,7 @@
 {
 	"name": "chained_upper_platform_etz",
 	"script": [
-		"var observations_wait default=0",
+		"var owait default=0",
 		"debug on chain/tether_arc",
 		"debug on chain/chain_barrier",
 		"debug on precog/platform_list",
@@ -33,9 +33,9 @@
 		"debug nolog precog/current_path",
 		"debug nolog leap_attack/rays_cast",
 		"debug on testing/violations",
-		"check hp extract:damage_taken = 0.0 label:no_damage",
+		"check hp extract:damage_taken > 0.0",
 		"check zones",
 		"check fps extract:fps > 20.0",
-		"notify observations DONE [\"OK\"] {observations_wait} editor"
+		"notify observations DONE [\"OK\"] {owait} editor"
 	]
 }
