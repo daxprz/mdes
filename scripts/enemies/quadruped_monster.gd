@@ -1747,14 +1747,32 @@ func _do_chase(_delta: float) -> void:
 		# Just chase — don't trigger precog or change attack strategy
 		return
 
-	# If target is on a different platform, use precog pathfinding
-	# But if we already have a precog waypoint, keep executing it
+	# If target is on a different platform, use precog pathfinding.
+	# Triggers when: target is above/below OR target is across a gap (same height
+	# but far horizontally with no floor between). The "across a gap" case catches
+	# P1→P2 and similar same-level platform hops.
 	var target_above: bool = to_target.y < -80.0
 	var target_far_below: bool = to_target.y > 120.0
-	if (target_above or target_far_below) and not _precog_has_waypoint:
+	var target_across_gap: bool = false
+	if not target_above and not target_far_below and dist > 200.0:
+		# Check if there's a gap between us and the target by probing the floor
+		# ahead. If there's no floor within 100px below our current Y at the
+		# midpoint between us and the target, there's a gap.
+		var mid_x: float = global_position.x + to_target.x * 0.5
+		var probe_from := Vector2(mid_x, global_position.y - 10)
+		var probe_to := Vector2(mid_x, global_position.y + 100)
+		var space := get_world_2d().direct_space_state
+		if space:
+			var query := PhysicsRayQueryParameters2D.create(probe_from, probe_to, 1)
+			query.exclude = [get_rid()]
+			var result: Dictionary = space.intersect_ray(query)
+			if result.is_empty():
+				target_across_gap = true
+				DebugOverlay.log("pathing/waypoints", self, "GAP DETECTED: mid_x=%.0f no floor below", [mid_x])
+	if (target_above or target_far_below or target_across_gap) and not _precog_has_waypoint:
 		if _leap_cooldown <= 0.0:
 			_start_precognition()
-		return  # Don't fall through to _choose_attack when target is on different level
+		return  # Don't fall through to _choose_attack when target is on different platform
 
 	# Don't interrupt precog execution with regular attacks or re-triggers
 	if _precog_has_waypoint:
