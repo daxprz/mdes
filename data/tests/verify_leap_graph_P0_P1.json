@@ -1,7 +1,7 @@
 {
 	"name": "verify_leap_graph_P0_P1",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",

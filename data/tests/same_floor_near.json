@@ -1,7 +1,7 @@
 {
 	"name": "same_floor_near",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"clear",
 		"portal off",
 		"clearplayers",

@@ -1,7 +1,7 @@
 {
 	"name": "P2_to_P4",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",
@@ -16,7 +16,7 @@
 		"bleap a 1380 750 21",
 		"bleap b 1251 527 19",
 		"bleap plan opt start 1390 730 190 39 end 1251 534 142 disallow 19 1367 754 1363 556",
-		"wait 15 unless breach 1097 70 1110 901 monster* dummy* unless breach 1118 776 1588 774 monster* dummy* unless breach 1600 916 1607 32 monster* dummy* unless breach 0 -80 1920 -80 monster* dummy*",
+		"wait 15 unless breach 1097 70 1110 901 monster* dummy* unless breach 1118 776 1588 774 monster* dummy* unless breach 1600 916 1607 32 monster* dummy* unless breach 0 -80 1920 -80 monster* dummy* unless exit_circle 1203 515 40 dummy*",
 		"standdown on",
 		"debug off precog/platform_list",
 		"debug off precog/graph_edges",

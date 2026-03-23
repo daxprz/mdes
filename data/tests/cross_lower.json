@@ -1,7 +1,7 @@
 {
 	"name": "cross_lower",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"clear",
 		"portal off",
 		"clearplayers",

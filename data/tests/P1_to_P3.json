@@ -1,7 +1,7 @@
 {
 	"name": "P1_to_P3",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",

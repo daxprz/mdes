@@ -1,7 +1,7 @@
 {
 	"name": "chained_wall_attack",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"debug on chain/tether_arc",
 		"debug on chain/chain_barrier",
 		"debug log precog/current_path",

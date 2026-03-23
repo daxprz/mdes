@@ -1,7 +1,7 @@
 {
 	"name": "hunt_P3",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"clear",
 		"portal off",
 		"clearplayers",

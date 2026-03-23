@@ -1,7 +1,7 @@
 {
 	"name": "chained_reach",
 	"script": [
-		"var observations_wait default=5",
+		"var observations_wait default=0",
 		"debug on chain/tether_arc",
 		"debug on chain/chain_barrier",
 		"clear",
