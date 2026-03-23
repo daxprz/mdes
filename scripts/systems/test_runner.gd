@@ -42,6 +42,7 @@ func run_test(test_name: String, console: Node) -> void:
 		return
 	_results.clear()
 	_current_suite_name = ""
+	_reset_bleap_state()
 	_queue_test(test_data)
 	_task_queue.append({"type": TASK_RESULTS})
 	_start_queue()
@@ -76,17 +77,23 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 	_console = console
 	_results.clear()
 	_current_suite_name = ""
-	_bleap_matched_keys.clear()
-	_bleap_violated_keys.clear()
-	_bleap_monitor_active = false
+	_reset_bleap_state()
 	_last_leap_eval.clear()
 	_breach_result = {}
 
+	_queue_script(script, test_name)
+
+	_task_queue.append({"type": TASK_RESULTS})
+	_start_queue()
+
+
+func _queue_script(script: Array, test_name: String) -> void:
+	## Queue tasks from a flat script array. Used by both run_test_script and _queue_test.
 	var current_batch: Array = []
 	var first_batch: bool = true
 
 	for line in script:
-		var l: String = line.strip_edges()
+		var l: String = str(line).strip_edges()
 		if l.is_empty() or l.begins_with("#"):
 			continue
 
@@ -133,9 +140,6 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 			"test_name": test_name if first_batch else "",
 			"commands": current_batch.duplicate(),
 		})
-
-	_task_queue.append({"type": TASK_RESULTS})
-	_start_queue()
 
 
 func _parse_script_check(line: String) -> Dictionary:
@@ -282,8 +286,17 @@ func _load_suite(suite_name: String) -> Dictionary:
 # -- Task Queue ----------------------------------------------------------------
 
 func _queue_test(test_data: Dictionary) -> void:
-	## Queue setup + wait + check tasks for a single test.
+	## Queue tasks for a single test. Handles both script format and legacy format.
 	var test_name: String = test_data.get("name", "unnamed")
+
+	# Script format: flat array of RCON commands + meta-commands
+	if test_data.has("script"):
+		_reset_bleap_state()
+		var script: Array = test_data["script"]
+		_queue_script(script, test_name)
+		return
+
+	# Legacy format: setup/wait/checks
 	var setup_cmds: Array = test_data.get("setup", [])
 	var wait_time: float = test_data.get("wait", 10.0)
 	var checks: Array = test_data.get("checks", [])
@@ -728,6 +741,18 @@ func _dist_point_to_segment(pt: Vector2, a: Vector2, b: Vector2) -> float:
 
 # -- Bounded leap continuous monitoring ----------------------------------------
 
+func _reset_bleap_state() -> void:
+	## Clear all bleap monitor state AND reset RCON's bleap builder so stale
+	## state from a previous test doesn't leak into the next.
+	_bleap_matched_keys.clear()
+	_bleap_violated_keys.clear()
+	_bleap_monitor_active = false
+	_bleap_monitor_defs = {}
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		rcon._execute("bleap reset")
+
+
 func _start_bleap_monitor() -> void:
 	## Begin monitoring if RCON has bleap state defined.
 	var rcon: Node = get_node_or_null("/root/Rcon")
@@ -742,8 +767,6 @@ func _start_bleap_monitor() -> void:
 	_bleap_monitor_active = true
 	_bleap_monitor_poll = 0.0  # Poll immediately on first frame
 	# Don't clear accumulated results — they persist across waits within the same test
-	_log("  Bounded leap monitor: active (%d defs)" % bleap_data.get("leaps", []).size(),
-		Color(0.5, 0.8, 0.8))
 
 
 func _poll_bleap_monitor() -> void:

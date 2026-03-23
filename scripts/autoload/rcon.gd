@@ -832,11 +832,17 @@ func _show_results_grid(data: String) -> void:
 			lbl.add_theme_color_override("font_color", Color(0.8, 0.8, 0.8))
 		container.add_child(lbl)
 
-	# Hold for 8 seconds then fade
+	# Stay visible until clicked or 30 seconds
 	var tween := container.create_tween()
-	tween.tween_interval(8.0)
+	tween.tween_interval(30.0)
 	tween.tween_property(container, "modulate:a", 0.0, 2.0)
 	tween.tween_callback(container.queue_free)
+	# Click anywhere to dismiss early
+	container.gui_input.connect(func(event: InputEvent):
+		if event is InputEventMouseButton and event.pressed:
+			container.queue_free()
+	)
+	container.mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 func _show_title(text: String) -> void:
