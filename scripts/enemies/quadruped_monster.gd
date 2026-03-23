@@ -3403,17 +3403,13 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
 			# 1. Forward raycasts on all three arcs: center + body-width edges.
 			#    Catches walls and platforms the body would physically hit.
-			if not (_check_arc_clear_ignore(arc_c, landing_zone) and _check_arc_clear_ignore(arc_l, landing_zone) and _check_arc_clear_ignore(arc_r, landing_zone)):
-				_dbg_arc += 1
-				continue
-			# 2. Horizontal raycasts at mid-flight: verify body-width lateral clearance
-			#    from walls and platform edges.
-			if not _check_arc_circle_sweep(arc_c, effective_radius, landing_zone):
-				_dbg_arc += 1
-				continue
-			# 3. Platform edge clearance: verify the body-width bounding arcs
-			#    don't clip any known precog platform surface.
-			if not _check_arc_platform_edge_clearance(arc_l, arc_r, from_pos.y, plat):
+			# Arc clearance: sweep a body-sized circle along arc_c and check
+			# for intersection with ANY collision object (platforms, walls,
+			# keystones — everything on physics layer 1). This is the single
+			# unified check that replaces forward raycasts + lateral raycasts
+			# + platform edge rect. The body circle must not overlap any
+			# collider at any mid-flight point.
+			if not _check_arc_body_clearance(arc_c, effective_radius, landing_zone):
 				_dbg_arc += 1
 				continue
 
@@ -3736,6 +3732,47 @@ func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> boo
 			if not probe_hit.is_empty():
 				if not ignore_rect.has_point(probe_hit["position"]):
 					return false
+	return true
+
+
+func _check_arc_body_clearance(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
+	## Sweep a body-sized circle along the center arc and check for intersection
+	## with ANY collision object on physics layer 1 (platforms, walls, keystones).
+	## Skips first 3 points (inside launch platform), last 3 (landing approach),
+	## and points inside ignore_rect (destination platform area).
+	## This is the definitive body-width clearance check.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	if arc.size() < 8:
+		return true
+
+	var shape := CircleShape2D.new()
+	shape.radius = radius
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.collision_mask = 1  # World layer
+	query.exclude = [get_rid()]
+
+	var do_log: bool = DebugOverlay.should_log("leap_attack/lateral_clearance", self)
+
+	# Check every 4th point to keep performance reasonable.
+	# Skip points near the launch height (within radius of launch Y)
+	# and points inside the ignore_rect (destination platform area).
+	var launch_y: float = arc[0].y
+
+	for i in range(4, arc.size() - 4, 4):
+		var pt: Vector2 = arc[i]
+		# Skip if still near launch platform height
+		if pt.y > launch_y - radius - 20:
+			continue
+		# Skip if near destination platform
+		if ignore_rect.has_point(pt):
+			continue
+		query.transform = Transform2D(0, pt)
+		var results: Array = space.intersect_shape(query, 1)
+		if not results.is_empty():
+			return false
 	return true
 
 
