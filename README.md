@@ -163,6 +163,58 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.0
+**In-Game Test Editor, Arc Planning Fixes, Bounded Leap System — 25/26 tests pass (96%)**
+
+**In-Game Test Editor:**
+- Visual test editor (Ctrl+T → Tests...) with draggable control points for all command types
+- Spawn, bleap, ETZ/DAZ, fence, exit_circle — all editable in the game world
+- Floating window: numbered script list, click to select, inline text editing with Tab autocomplete
+- Run mode: per-line execution state (pending/running/complete), auto-select failed row
+- Suite runner with prev/next navigation, position in title bar [N/M]
+- Notify system with variable substitution (`var owait default=0`)
+- Double-click to execute single line, drag-drop row reordering
+- Post-run review: violations render as body circles (r=55), breach markers shown
+- `suite all owait=0` runs all 26 tests; `suite todo owait=600` for interactive review
+
+**Arc Planning Fixes (P1):**
+- Body circle clearance via `intersect_shape` with `CircleShape2D` at each arc point
+- Dynamic radius reduction near destination: full radius mid-flight, fades when directly above landing zone
+- Below-surface cap: radius limited so body can't reach UP and clip platform from underneath
+- Higher arcs: LEAP_FLIGHT_TIME_MAX 1.2→1.6, LEAP_FLIGHT_TIMES 5→7
+- Finer simulation: LEAP_ARC_STEPS 16→40, LEAP_ARC_DT 0.04→0.03
+- Gap detection: same-level platforms trigger precog when floor probe finds no ground at midpoint
+- Horizontal bounding arcs (arc_l/arc_r) replace diagonal launch-perpendicular offset
+
+**Bounded Leap Monitor:**
+- Continuous graph monitoring during wait (polls every 0.5s)
+- Collects matches and violations over test lifetime
+- MATCHED = START+END fit, no disallow breach; VIOLATION = START+END fit but arc clips disallow
+- Unmatched arcs (fail START/END) silently ignored — not violations
+- `bleap next` accumulates multiple leap defs; single `check bounded_leaps` evaluates all
+- Monitor checks body circle (r=55) against disallow capsules
+
+**Breach Fences & Exit Circles:**
+- `wait N unless breach X1 Y1 X2 Y2 patterns...` — finite segment trip wire
+- `wait N unless exit_circle X Y R patterns...` — abort if entity leaves circle
+- Fences are TRUE segments: perpendicular distance limit (50px), strict [0,1] span
+- Breach markers rendered in editor (orange circle with L<line>[idx] label)
+- Breach just aborts wait — not a test failure
+
+**Test Infrastructure:**
+- All 26 tests in script format with parameterized `notify` and `var owait default=0`
+- Comprehensive JSON output: `user://test-output/<version>/<test>/<timestamp>/results.json`
+- Suite output: `user://test-output/<version>/<suite>/<timestamp>.json`
+- Test state machine: INITIALIZING → RUNNING → COMPLETE → FINALIZED
+- `suite all` runs all tests; `suite todo` runs failing tests only
+- RCON key=value args: `suite all owait=600`, `run test owait=10`
+- Auto-clear zones and debug state between suite tests
+
+**Console Improvements:**
+- Cursor position, text selection, Ctrl+A/C/X/V cut/copy/paste
+- Test name autocomplete for `testload`, `run`, `testsave`, `suite`
+- `run` and `suite` from console route through RCON (consistent arg parsing)
+
 ### v0.9.25
 **Chain Surface Collision, Physical Chain Constraints, Console Autocomplete**
 
