@@ -537,9 +537,11 @@ func _process(delta: float) -> void:
 				var breach_cond: Dictionary = _breach_result.get("condition", {})
 				var breach_idx: int = breach_cond.get("idx", -1)
 				var breach_type: String = breach_cond.get("cond_type", "?")
-				var line_num: int = _current_task_line + 1  # 1-based for display
+				# Store the wait line number in the breach result for the editor
+				_breach_result["line"] = _current_task_line + 1  # 1-based
 				_log("  BREACH L%d[%d] (%s): %s at (%.0f,%.0f) — wait aborted" % [
-					line_num, breach_idx, breach_type, breach_entity, breach_pos.x, breach_pos.y],
+					_current_task_line + 1, breach_idx, breach_type,
+					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
 		# Check if modal was dismissed — advance the queue (only during TASK_NOTIFY)

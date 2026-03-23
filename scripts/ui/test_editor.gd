@@ -1124,7 +1124,7 @@ func _collect_results(runner: Node) -> void:
 			"entity": runner._breach_result.get("entity", ""),
 			"idx": bc.get("idx", -1),
 			"type": bc.get("cond_type", ""),
-			"line": runner._current_task_line + 1,
+			"line": runner._breach_result.get("line", runner._current_task_line + 1),
 		}
 
 
