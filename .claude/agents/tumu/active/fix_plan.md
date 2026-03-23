@@ -55,4 +55,15 @@ arcs are rejected and why.
 4. **Fix P4** (IK damping) → regression test
 5. **Fix P5** (ETZ) → final regression
 
-## Current Status: READY TO START P1
+### P6: Arc distance optimization (low priority)
+**Tests:** leap_floor_to_P1 (observed)
+**Symptom:** Monster chooses a long-distance arc when a shorter one would clear better
+**Root cause:** Scoring favors proximity to target over clearance distance
+**Fix:** Improve arc scoring to prefer shorter travel distance when multiple arcs are valid
+**Impact:** Low — arcs work, just suboptimal
+
+## Current Status: P1 IN PROGRESS — body circle clearance via intersect_shape
+- `_check_arc_body_clearance` implemented but landing zone ignore rect needs tuning
+- The check correctly rejects arcs that clip corners
+- User confirmed: violation renders correctly, body circle shows the clip
+- Next: ensure the planner rejects these arcs so the monitor finds 0 violations
