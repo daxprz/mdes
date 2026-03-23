@@ -372,25 +372,34 @@ func _execute(command: String) -> String:
 
 		"run":
 			if parts.size() < 2:
-				return "ERR: usage: run <test_name>"
+				return "ERR: usage: run <test_name> [key=value ...]"
 			var editor: Node = _ensure_test_editor()
 			if editor:
-				# RCON-initiated runs get 600s observation time
-				editor._test_override_vars = {"observations_wait": "600"}
+				var override_vars: Dictionary = {"observations_wait": "600"}
+				for pi in range(2, parts.size()):
+					var eq := parts[pi].find("=")
+					if eq > 0:
+						override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
+				editor._test_override_vars = override_vars
 				editor._load_test(parts[1])
 				editor.call_deferred("_run_test")
-				return "OK: running test '%s' in editor (observations_wait=600)" % parts[1]
+				return "OK: running test '%s' in editor (%s)" % [parts[1], str(override_vars)]
 			return "ERR: failed to open test editor"
 
 		"suite":
 			if parts.size() < 2:
-				return "ERR: usage: suite <suite_name>"
+				return "ERR: usage: suite <suite_name> [key=value ...]"
 			var editor: Node = _ensure_test_editor()
 			if editor:
-				# RCON-initiated suites get 600s observation time
-				editor._test_override_vars = {"observations_wait": "600"}
+				# Parse optional key=value args
+				var override_vars: Dictionary = {"observations_wait": "600"}  # Default for RCON
+				for pi in range(2, parts.size()):
+					var eq := parts[pi].find("=")
+					if eq > 0:
+						override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
+				editor._test_override_vars = override_vars
 				editor.run_suite(parts[1])
-				return "OK: running suite '%s' in editor (observations_wait=600)" % parts[1]
+				return "OK: running suite '%s' in editor (%s)" % [parts[1], str(override_vars)]
 			return "ERR: failed to open test editor"
 
 		"tests":
