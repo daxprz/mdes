@@ -1,21 +1,26 @@
 {
 	"name": "chained_platform",
-	"description": "Monster chained to right wall leaps to reach dummy on lower-right platform",
-	"setup": [
+	"script": [
+		"var observations_wait default=5",
+		"debug on chain/tether_arc",
+		"debug on chain/chain_barrier",
+		"debug log precog/current_path",
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn monster 1300 885",
-		"standdown on",
+		"spawn monster 1300 885 standdown",
 		"wait 1",
 		"chain 0 head wall 1920 820 900",
-		"wait 1",
 		"spawn dummy 1400 745",
-		"standdown off"
-	],
-	"wait": 20.0,
-	"checks": [
-		{ "command": "hp", "extract": "damage_taken", "expect_gt": 0, "label": "damage" },
-		{ "command": "fps", "extract": "fps", "expect_gt": 20, "label": "fps" }
+		"standdown off",
+		"wait 20 unless exit_circle 1400 745 50 dummy*",
+		"standdown on",
+		"debug off chain/tether_arc",
+		"debug off chain/chain_barrier",
+		"debug nolog precog/current_path",
+		"debug on testing/violations",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] {observations_wait} editor"
 	]
 }
