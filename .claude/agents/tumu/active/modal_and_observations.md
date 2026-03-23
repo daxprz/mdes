@@ -1,40 +1,69 @@
 # Feature: Modal Dialog + Test State Machine + Observations
 
-## Overview
-Add a modal dialog system for test completion, test state machine with observer pattern,
-and automatic observations capture by TUMU.
+## Collaboration Protocol
 
-## Implementation Plan
+The observation flow is a collaboration between TUMU (AI) and the human:
 
-### Phase 1: Modal Dialog System
-1. RCON command: `modal <name> <message> <buttons_json> <timeout_seconds>`
-   - Shows a modal dialog with message, buttons, countdown timer
-   - Logs: `MODAL SHOW name=<name> buttons=["OK"] timeout=5`
-   - Auto-dismisses after timeout
-2. RCON command: `modal_dismiss <button_label>`
-   - Programmatically clicks a button on the current modal
-   - Logs: `MODAL DISMISS button=OK`
-3. Render: centered overlay with message, countdown, clickable buttons
+```
+1. TUMU initiates test via RCON
+2. Test runs (setup, wait, checks)
+3. Test reaches COMPLETE → modal appears (long timeout: 600s interactive, 10s automated)
+4. TUMU sees COMPLETE, reads results.json, generates AI observations
+5. TUMU does NOT dismiss yet — waits for the human
+6. Human looks at the game, editor, violation markers, clicks things
+7. Human optionally types observations to TUMU via Claude Code
+8. TUMU consolidates AI + human observations into observations.md
+9. TUMU dismisses the modal → test advances to FINALIZED
+```
 
-### Phase 2: Test State Machine
-1. States: INITIALIZING → RUNNING → COMPLETE → FINALIZED
-2. Script commands:
-   - `emit <event_name> <value>` — fires a named event (e.g., `emit test_state RUNNING`)
-   - `var <name> default=<value>` — declares a test variable (first line)
-   - `modal <name> <message> <buttons> {var_name}` — uses variable for timeout
-3. State transitions logged with timestamps
-4. Test runner sets INITIALIZING at start, FINALIZED after modal dismissed
+### Modal Modes
+- **BLOCKING** — modal dialog with countdown, dismissable by click or RCON
+- **TEST_EDITOR** — (future) control the editor to highlight specific things
 
-### Phase 3: Suite Runner Integration
-- Suite runner listens for state transitions
-- COMPLETE → modal shown → FINALIZED → suite advances to next test
-- The 1.5s timer replaced by the modal timeout
+### Timeout Behavior
+- Interactive mode (default): 600s (10 min) — human has time to look
+- Automated/suite mode: 10s — quick review
+- Human or TUMU can dismiss at any time via click or `modal_dismiss`
 
-### Phase 4: TUMU Observations
-- When TUMU runs a test, after COMPLETE:
-  1. Read the results.json output
-  2. Generate observations.md with analysis
-  3. Dismiss the modal via `modal_dismiss OK`
-- observations.md stored alongside results.json in the test output dir
+### observations.md Structure
+```markdown
+# Observations — <test_name> — <timestamp>
 
-## Status: NOT STARTED
+## AI Observations (auto-generated)
+- Test outcome: PASS/FAIL (N/M checks)
+- Duration: Xs
+- Per-check results with values
+- Violations detected (positions, reasons)
+- Breach events
+- Suggested next steps
+
+## Human Observations (from user input)
+- (captured from Claude Code conversation)
+
+## Consolidated Analysis
+- (AI synthesis of both)
+```
+
+## Implementation Status
+
+### Phase 1: Modal Dialog System ✓
+- RCON: `modal <name> <message> <buttons_json> <timeout>`
+- RCON: `modal_dismiss <button>`
+- Visual overlay with countdown, clickable buttons
+
+### Phase 2: Test State Machine ✓
+- States: INITIALIZING → RUNNING → COMPLETE → FINALIZED
+- `var`, `emit`, `modal` script commands
+- State timestamps in results.json
+
+### Phase 3: Suite Integration ✓
+- Modal dismiss triggers queue advance
+- `_waiting_for_modal` flag prevents stale dismiss
+
+### Phase 4: TUMU Observation Flow
+- [x] Results.json written with comprehensive data
+- [ ] TUMU auto-reads results after COMPLETE
+- [ ] TUMU generates AI observations section
+- [ ] TUMU waits for human input
+- [ ] TUMU consolidates and writes observations.md
+- [ ] TUMU dismisses modal

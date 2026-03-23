@@ -24,6 +24,7 @@ var _current_test_script: Array = []  # Copy of the script being run
 var _test_vars: Dictionary = {}      # Test variables from "var <name> default=<val>"
 var _test_state: String = ""         # Current state: INITIALIZING/RUNNING/COMPLETE/FINALIZED
 var _state_timestamps: Dictionary = {} # {state: msec}
+var _waiting_for_modal: bool = false # True only during TASK_MODAL wait
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -107,6 +108,8 @@ func _queue_script(script: Array, test_name: String) -> void:
 	## Automatically clears stale zones/debug state from previous tests.
 	## Handles meta-commands: var, wait, check, emit, modal.
 	_test_vars = {}
+	_state_timestamps = {}
+	_waiting_for_modal = false
 	_set_test_state("INITIALIZING")
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if rcon:
@@ -477,7 +480,9 @@ func _advance_queue() -> void:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
+				rcon._modal_dismissed_button = ""  # Clear stale dismiss
 				rcon._execute(task["command"])
+			_waiting_for_modal = true
 			_wait_timer = 999.0  # Wait indefinitely — modal dismiss advances
 
 
@@ -497,12 +502,14 @@ func _process(delta: float) -> void:
 					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
-		# Check if modal was dismissed — advance the queue
-		var rcon_modal: Node = get_node_or_null("/root/Rcon")
-		if rcon_modal and not rcon_modal._modal_active and not rcon_modal._modal_dismissed_button.is_empty():
-			_wait_timer = 0.0
-			_set_test_state("FINALIZED")
-			rcon_modal._modal_dismissed_button = ""
+		# Check if modal was dismissed — advance the queue (only during TASK_MODAL)
+		if _waiting_for_modal:
+			var rcon_modal: Node = get_node_or_null("/root/Rcon")
+			if rcon_modal and not rcon_modal._modal_active:
+				_wait_timer = 0.0
+				_waiting_for_modal = false
+				_set_test_state("FINALIZED")
+				rcon_modal._modal_dismissed_button = ""
 		# Poll bounded leap graph monitoring
 		if _bleap_monitor_active:
 			_bleap_monitor_poll -= delta
