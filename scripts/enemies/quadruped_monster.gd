@@ -2553,8 +2553,12 @@ func _simulate_leap_paths() -> void:
 				launch_perp = -launch_perp
 
 			var arc_c: PackedVector2Array = _simulate_arc(monster_pos, launch_vel)
-			var arc_l: PackedVector2Array = _simulate_arc(monster_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
-			var arc_r: PackedVector2Array = _simulate_arc(monster_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			# Bounding arcs: horizontal offset at each point (body stays upright)
+			var arc_l: PackedVector2Array = PackedVector2Array()
+			var arc_r: PackedVector2Array = PackedVector2Array()
+			for pt: Vector2 in arc_c:
+				arc_l.append(Vector2(pt.x - LEAP_BODY_RADIUS, pt.y))
+				arc_r.append(Vector2(pt.x + LEAP_BODY_RADIUS, pt.y))
 
 			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
@@ -3376,12 +3380,35 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				launch_perp = -launch_perp
 
 			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
-			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * effective_radius, launch_vel)
-			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * effective_radius, launch_vel)
+			# Build bounding arcs as horizontal offsets at each point on the center arc.
+			# This represents the actual body width at every point along the flight,
+			# regardless of the velocity angle (the body stays upright during the leap).
+			var arc_l: PackedVector2Array = PackedVector2Array()
+			var arc_r: PackedVector2Array = PackedVector2Array()
+			for pt: Vector2 in arc_c:
+				arc_l.append(Vector2(pt.x - effective_radius, pt.y))
+				arc_r.append(Vector2(pt.x + effective_radius, pt.y))
 
 			# Check arc clearance with landing zone near destination platform.
+			# 1. Forward raycasts: center + bounding arcs must not hit walls/platforms
 			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
 			if not (_check_arc_clear_ignore(arc_c, landing_zone) and _check_arc_clear_ignore(arc_l, landing_zone) and _check_arc_clear_ignore(arc_r, landing_zone)):
+				_dbg_arc += 1
+				continue
+			# 2. Lateral clearance: at each mid-flight point on the center arc,
+			# verify there is at least LEAP_BODY_RADIUS of free space on both sides.
+			# This catches arcs that squeeze past platform edges without enough room
+			# for the body width — "driving a lamborghini through a hallway."
+			if not _check_arc_lateral_clearance(arc_c, effective_radius, landing_zone):
+				_dbg_arc += 1
+				continue
+
+			# 3. Platform edge clearance: check that the bounding arcs (arc_l/arc_r)
+			# do not clip any known platform surface. The body is LEAP_BODY_RADIUS wide,
+			# and the bounding arcs represent its left/right edges. If a bounding arc
+			# point falls within any platform's surface zone, the body would clip that
+			# platform edge during the leap.
+			if not _check_arc_platform_edge_clearance(arc_l, arc_r, from_pos.y, plat):
 				_dbg_arc += 1
 				continue
 
@@ -3440,10 +3467,15 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 					"from_pos": from_pos,
 				}
 
-	if _dbg_total > 0 and best.is_empty():
-		DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_FAIL: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) to_plat=(%.0f,%.0f)", [
-			_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
-			from_pos.x, from_pos.y, plat["pos"].x, plat["pos"].y])
+	if _dbg_total > 0:
+		if best.is_empty():
+			DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_FAIL: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) to_plat=(%.0f,%.0f)", [
+				_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
+				from_pos.x, from_pos.y, plat["pos"].x, plat["pos"].y])
+		else:
+			DebugOverlay.log("leap_attack/rays_cast", self, "  LEAP_PLAN_OK: solid=%d speed=%d vy=%d arc=%d ok=%d total=%d from=(%.0f,%.0f) arrival=(%.0f,%.0f)", [
+				_dbg_solid, _dbg_speed, _dbg_vy, _dbg_arc, _dbg_ok, _dbg_total,
+				best["from_pos"].x, best["from_pos"].y, best["arrival"].x, best["arrival"].y])
 	return best
 
 
@@ -3674,6 +3706,88 @@ func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> boo
 			var probe_hit: Dictionary = space.intersect_ray(probe)
 			if not probe_hit.is_empty():
 				if not ignore_rect.has_point(probe_hit["position"]):
+					return false
+	return true
+
+
+func _check_arc_lateral_clearance(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
+	## At each mid-flight point on the center arc, raycast left and right to verify
+	## there is at least `radius` pixels of free space on both sides.
+	## Skips points near launch (first 3) and landing (last 3), and points inside ignore_rect.
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	if arc.size() < 6:
+		return true
+
+	var do_log: bool = DebugOverlay.should_log("leap_attack/lateral_clearance", self)
+
+	# Check every 3rd point to avoid excessive raycasts
+	for i in range(3, arc.size() - 3, 3):
+		var pt: Vector2 = arc[i]
+		if ignore_rect.has_point(pt):
+			continue
+		# Raycast left
+		var query_l := PhysicsRayQueryParameters2D.create(pt, pt + Vector2(-radius, 0), 1)
+		query_l.exclude = [get_rid()]
+		var hit_l: Dictionary = space.intersect_ray(query_l)
+		if not hit_l.is_empty() and not ignore_rect.has_point(hit_l["position"]):
+			if do_log:
+				DebugOverlay.log("leap_attack/lateral_clearance", self,
+					"LATERAL FAIL LEFT at (%.0f,%.0f) — hit at (%.0f,%.0f) dist=%.0f radius=%.0f",
+					[pt.x, pt.y, hit_l["position"].x, hit_l["position"].y,
+					pt.distance_to(hit_l["position"]), radius])
+			return false
+		# Raycast right
+		var query_r := PhysicsRayQueryParameters2D.create(pt, pt + Vector2(radius, 0), 1)
+		query_r.exclude = [get_rid()]
+		var hit_r: Dictionary = space.intersect_ray(query_r)
+		if not hit_r.is_empty() and not ignore_rect.has_point(hit_r["position"]):
+			if do_log:
+				DebugOverlay.log("leap_attack/lateral_clearance", self,
+					"LATERAL FAIL RIGHT at (%.0f,%.0f) — hit at (%.0f,%.0f) dist=%.0f radius=%.0f",
+					[pt.x, pt.y, hit_r["position"].x, hit_r["position"].y,
+					pt.distance_to(hit_r["position"]), radius])
+			return false
+	return true
+
+
+func _check_arc_platform_edge_clearance(arc_l: PackedVector2Array, arc_r: PackedVector2Array,
+		source_y: float, dest_plat: Dictionary) -> bool:
+	## Check that the bounding arcs (representing body width) do not clip any known
+	## platform surface. Skips the source platform (by Y) and destination platform.
+	## A bounding arc point "clips" a platform if it falls within the platform's
+	## surface zone: [min_x, max_x] horizontally, [plat_y - 15, plat_y + 15] vertically.
+	var dest_pos: Vector2 = dest_plat.get("pos", Vector2.ZERO)
+	var is_dest_plat: bool = false
+	var do_log: bool = DebugOverlay.should_log("leap_attack/lateral_clearance", self)
+
+	for plat in _precog_platforms:
+		var py: float = plat["pos"].y
+		# Skip source platform (same Y level as launch)
+		if absf(py - source_y) < 20:
+			continue
+		is_dest_plat = plat["pos"].distance_to(dest_pos) < 10
+		var px_min: float = plat["min_x"]
+		var px_max: float = plat["max_x"]
+		# Platform surface zone: the body clips if a bounding arc point is
+		# within the platform's horizontal extent and near or below its surface Y.
+		# The zone extends from well above (body height) to well below (catching
+		# arcs that clip the underside of platforms). The body is ~80px tall.
+		var surface_rect := Rect2(px_min, py - 40, px_max - px_min, 120)
+		for arc in [arc_l, arc_r]:
+			for i in range(3, arc.size() - 3):
+				# For dest platform: only flag clips during the ASCENDING portion
+				# (arc still going up). The descending/landing approach is expected
+				# to be near the destination surface.
+				if is_dest_plat and i > 0 and arc[i].y > arc[i - 1].y:
+					break  # Past the peak — descending toward dest, stop checking
+				if surface_rect.has_point(arc[i]):
+					if do_log:
+						DebugOverlay.log("leap_attack/lateral_clearance", self,
+							"PLATFORM CLIP at (%.0f,%.0f) — hits platform at y=%.0f x=[%.0f..%.0f]%s",
+							[arc[i].x, arc[i].y, py, px_min, px_max,
+							" (dest)" if is_dest_plat else ""])
 					return false
 	return true
 

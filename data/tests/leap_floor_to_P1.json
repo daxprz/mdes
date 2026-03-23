@@ -9,6 +9,7 @@
 		"debug on leap_attack/chosen_arc",
 		"debug log precog/current_path",
 		"debug log leap_attack/rays_cast",
+		"debug log leap_attack/lateral_clearance",
 		"debug log pathing/platform_leap_path",
 		"clear",
 		"portal off",

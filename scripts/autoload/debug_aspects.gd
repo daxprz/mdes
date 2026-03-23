@@ -20,6 +20,7 @@ func _register_all() -> void:
 	# -- Leap Attack --
 	r.call("leap_attack/spots_considered", "Arrival point dots on strike circle")
 	r.call("leap_attack/rays_cast", "Arc clearance raycasts")
+	r.call("leap_attack/lateral_clearance", "Lateral body-width clearance probes at each arc point")
 	r.call("leap_attack/attack_zone", "Strike zone circle and range")
 	r.call("leap_attack/arc_trajectories", "All planned arc paths (heavy)")
 	r.call("leap_attack/chosen_arc", "Chosen launch arc (highlighted)")
