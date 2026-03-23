@@ -633,13 +633,7 @@ func _show_results() -> void:
 	var overall_col: Color = Color(0.3, 1.0, 0.3) if passed == total else Color(1.0, 0.8, 0.2)
 	_log("=== %d/%d PASSED ===" % [passed, total], overall_col)
 
-	# Show on-screen grid
-	var rcon: Node = get_node_or_null("/root/Rcon")
-	if rcon and total > 0:
-		var grid_parts: Array[String] = ["=== %d/%d PASSED ===" % [passed, total]]
-		for r in _results:
-			grid_parts.append("[%s] %s" % ["PASS" if r["passed"] else "FAIL", r["name"]])
-		rcon._execute("grid %s" % "|".join(grid_parts))
+	# Results are shown in the test editor — no separate grid overlay needed
 
 	# Write test output to files
 	_write_test_output(passed, total)
