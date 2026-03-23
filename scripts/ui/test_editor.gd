@@ -98,6 +98,7 @@ var _run_results: Dictionary = {}   # {row_idx: "pass"|"fail"|"info", ...}
 var _run_detail: Dictionary = {}    # {row_idx: Array[String]} — per-check detail log lines
 var _run_summary: String = ""       # "2/2 PASSED" etc.
 var _run_leap_edges: Array = []     # Captured leap graph edges after run, with match info
+var _breach_marker: Dictionary = {} # {pos: Vector2, entity: String, line: int, idx: int} — rendered on overlay
 
 # Suite queue — runs tests sequentially through the editor
 var _suite_queue: Array[String] = []
@@ -1020,6 +1021,7 @@ func _load_test(test_name: String) -> void:
 	_run_detail.clear()
 	_run_summary = ""
 	_run_leap_edges.clear()
+	_breach_marker = {}
 	_results_collected = false
 	# Clear the scene for a clean test environment
 	rcon._execute("clear")
@@ -1054,6 +1056,7 @@ func _run_test() -> void:
 	_run_detail.clear()
 	_run_summary = ""
 	_run_leap_edges.clear()
+	_breach_marker = {}
 	rcon._test_script = _script.duplicate()
 	rcon._test_script_name = _test_name
 	rcon._ensure_test_runner()
@@ -1112,10 +1115,23 @@ func _collect_results(runner: Node) -> void:
 	_run_leap_edges = runner._last_leap_eval.duplicate(true)
 	print("EDITOR: collected %d leap edges for overlay" % _run_leap_edges.size())
 
+	# Capture breach marker for rendering
+	_breach_marker = {}
+	if not runner._breach_result.is_empty():
+		var bc: Dictionary = runner._breach_result.get("condition", {})
+		_breach_marker = {
+			"pos": runner._breach_result.get("pos", Vector2.ZERO),
+			"entity": runner._breach_result.get("entity", ""),
+			"idx": bc.get("idx", -1),
+			"type": bc.get("cond_type", ""),
+			"line": runner._current_task_line + 1,
+		}
+
 
 func _capture_leap_edges() -> void:
 	## Grab the monster's leap graph and evaluate each edge against the bleap plan constraints.
 	_run_leap_edges.clear()
+	_breach_marker = {}
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if not rcon:
 		return
@@ -1961,6 +1977,24 @@ func _draw_overlay() -> void:
 				# Label
 				_overlay.draw_string(font, bpos + Vector2(-30, -body_r - 6), reason,
 					HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.2, 0.2, 0.8))
+
+	# Pass 4: breach marker — big pulsing circle where the entity crossed a fence
+	if not _breach_marker.is_empty():
+		var bpos: Vector2 = _breach_marker.get("pos", Vector2.ZERO)
+		var bentity: String = _breach_marker.get("entity", "?")
+		var bidx: int = _breach_marker.get("idx", -1)
+		var bline: int = _breach_marker.get("line", 0)
+		var btype: String = _breach_marker.get("type", "")
+		var pulse: float = 12.0 + 4.0 * sin(_run_blink * 3.0)
+		# Orange circle marker — breaches are informational (early abort), not errors
+		_overlay.draw_arc(bpos, pulse + 4, 0, TAU, 16, Color(1.0, 0.7, 0.2, 0.6), 2.0)
+		_overlay.draw_circle(bpos, 4.0, Color(1.0, 0.7, 0.2, 0.8))
+		# Label
+		var blabel: String = "BREACH L%d[%d] %s" % [bline, bidx, bentity]
+		_overlay.draw_string(font, bpos + Vector2(-60, -pulse - 10), blabel,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.7, 0.2))
+		_overlay.draw_string(font, bpos + Vector2(-40, pulse + 16), "(%.0f, %.0f)" % [bpos.x, bpos.y],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.7, 0.2, 0.6))
 
 
 func _draw_command_visual(p: Dictionary, dim: float, line_num: String, font: Font, result: String = "") -> void:
