@@ -73,7 +73,7 @@ const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around targ
 const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point
 const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
 const LEAP_FLIGHT_TIME_MAX := 1.2 # Longest flight time to test
-const LEAP_ARC_STEPS := 16        # Simulation steps per arc (fast)
+const LEAP_ARC_STEPS := 24        # Simulation steps per arc (covers ~1.0s flight at 0.04s dt)
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.04         # Simulation timestep
 
@@ -3789,17 +3789,15 @@ func _check_arc_platform_edge_clearance(arc_l: PackedVector2Array, arc_r: Packed
 		var px_min: float = plat["min_x"]
 		var px_max: float = plat["max_x"]
 		# Platform surface zone: the body clips if a bounding arc point is
-		# within the platform's horizontal extent and near or below its surface Y.
-		# The zone extends from well above (body height) to well below (catching
-		# arcs that clip the underside of platforms). The body is ~80px tall.
-		var surface_rect := Rect2(px_min, py - 40, px_max - px_min, 120)
+		# within the platform's horizontal extent and near its surface Y.
+		# Only check points that are close to the platform height — an arc
+		# passing well above or below a platform is not clipping it.
+		var surface_rect := Rect2(px_min, py - 30, px_max - px_min, 60)
 		for arc in [arc_l, arc_r]:
 			for i in range(3, arc.size() - 3):
-				# For dest platform: only flag clips during the ASCENDING portion
-				# (arc still going up). The descending/landing approach is expected
-				# to be near the destination surface.
+				# For dest platform: only check ascending portion
 				if is_dest_plat and i > 0 and arc[i].y > arc[i - 1].y:
-					break  # Past the peak — descending toward dest, stop checking
+					break
 				if surface_rect.has_point(arc[i]):
 					if do_log:
 						DebugOverlay.log("leap_attack/lateral_clearance", self,
