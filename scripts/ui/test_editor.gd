@@ -630,6 +630,7 @@ func _handle_button_click(local_x: float) -> void:
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
 				rcon._cmd_notify_dismiss("OK")
+			_results_collected = false  # Return to edit mode
 		"save":   _save_test()
 
 
