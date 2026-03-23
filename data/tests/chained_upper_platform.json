@@ -41,6 +41,7 @@
 		"debug on testing/violations",
 		"check hp extract:damage_taken = 0.0 label:no_damage",
 		"check fps extract:fps > 20.0",
-		"check bounded_leaps chained arc check"
+		"check bounded_leaps chained arc check",
+		"notify observations DONE [\"OK\"] 600 editor"
 	]
 }

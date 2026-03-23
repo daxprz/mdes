@@ -9,6 +9,7 @@
 		"wait 15 unless breach 1417 633 1351 776 dummy* unless breach 1450 769 1384 659 dummy*",
 		"check hp extract:damage_taken > 0.0 label:damage",
 		"check fps extract:fps > 20.0",
-		"check ik extract:ik_peak < 2000.0 label:ik_peak"
+		"check ik extract:ik_peak < 2000.0 label:ik_peak",
+		"notify observations DONE [\"OK\"] 600 editor"
 	]
 }

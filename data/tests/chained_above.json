@@ -11,6 +11,7 @@
 		"wait 10 unless breach 738 888 876 295 monster* dummy* unless breach 1040 299 1196 888 monster* dummy* unless breach 745 439 1175 438 monster* dummy*",
 		"standdown on",
 		"check hp extract:damage_taken = 0.0 label:no_teleport_damage",
-		"check fps extract:fps > 20.0"
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] 600 editor"
 	]
 }
