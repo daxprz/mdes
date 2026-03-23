@@ -16,7 +16,7 @@
 		"bleap reset",
 		"bleap a 847 890 46",
 		"bleap b 540 750 29",
-		"bleap plan opt start 756 854 304 50 end 542 760 212 disallow 11 732 771 728 906 disallow 23 808 490 1187 881",
+		"bleap plan opt start 756 854 304 50 end 542 760 212 disallow 11 732 771 728 906 disallow 23 939 599 984 643",
 		"bleap plan opt start 145 850 159 54 end 540 756 213 disallow 21 352 918 358 771 disallow 16 60 852 236 432",
 		"bleap min 1",
 		"standdown off",

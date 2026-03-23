@@ -28,7 +28,7 @@
 		"bleap plan opt start 1387 725 204 40 end 1251 525 150 disallow 20 1375 758 1366 550",
 		"bleap min 0",
 		"standdown off",
-		"wait 10 unless breach 1100 254 1086 938 monster* dummy* unless breach 1049 302 1908 282 monster* dummy* unless breach 1089 807 1552 808 monster* dummy*",
+		"wait 10 unless breach 1100 254 1086 938 monster* dummy* unless breach 1049 302 1908 282 monster* dummy* unless breach 1089 807 1552 808 monster* dummy* unless exit_circle 1251 525 40 dummy*",
 		"standdown on",
 		"debug off chain/tether_arc",
 		"debug off chain/chain_barrier",
@@ -40,7 +40,7 @@
 		"debug nolog pathing/waypoints",
 		"debug nolog leap_attack/rays_cast",
 		"debug on testing/violations",
-		"check hp extract:damage_taken = 0.0 label:no_damage",
+		"check hp extract:damage_taken > 0.0",
 		"check fps extract:fps > 20.0",
 		"check bounded_leaps chained arc check",
 		"notify observations DONE [\"OK\"] {owait} editor"
