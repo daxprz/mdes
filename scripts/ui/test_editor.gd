@@ -611,6 +611,10 @@ func _handle_button_click(local_x: float) -> void:
 		"add_dis": _try_add_disallow()
 		"add_fence": _try_add_fence()
 		"add_exit_circle": _try_add_exit_circle()
+		"notify_done":
+			var rcon: Node = get_node_or_null("/root/Rcon")
+			if rcon:
+				rcon._cmd_notify_dismiss("OK")
 		"save":   _save_test()
 
 
@@ -630,6 +634,9 @@ func _get_buttons() -> Array:
 		elif sel_type == "wait_plain" or sel_type == "wait_breach":
 			btns.append(["+fence", Color(1.0, 0.6, 0.1), "add_fence"])
 			btns.append(["+exit", Color(0.9, 0.7, 0.2), "add_exit_circle"])
+	# Show "Done ✓" when notify is waiting for dismiss
+	if get_meta("notify_active", false):
+		btns.append(["Done ✓", Color(0.3, 1.0, 0.6), "notify_done"])
 	btns.append(["💾", Color(0.8, 0.8, 0.4), "save"])
 	return btns
 
