@@ -309,15 +309,10 @@ func _execute_input() -> void:
 		"cls":
 			_output_lines.clear()
 		"run":
-			# Route to RCON but pass console ref for test output
-			var rcon: Node = get_node_or_null("/root/Rcon")
-			if rcon:
-				rcon._ensure_test_runner()
-				if parts.size() < 2:
-					_log("Usage: run <test_name>", Color(1.0, 0.5, 0.3))
-				else:
-					rcon._test_runner.run_test(parts[1], self)
-					_log_result("OK: running test '%s'" % parts[1])
+			if parts.size() < 2:
+				_log("Usage: run <test_name>", Color(1.0, 0.5, 0.3))
+			else:
+				_run_test_in_editor(parts[1])
 		"suite":
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
@@ -335,6 +330,34 @@ func _execute_input() -> void:
 				_log_result(result)
 			else:
 				_log("ERR: RCON not available", Color(1.0, 0.3, 0.3))
+
+
+func _run_test_in_editor(test_name: String) -> void:
+	## Open the test editor, load the test, and hit play — so the human can SEE it.
+	# Find or create the test editor via the test menu
+	var scene_root := get_tree().current_scene
+	var editor: Node = null
+	# Look for existing test editor in the scene tree
+	for node in scene_root.get_children():
+		if node.has_method("toggle") and node.has_method("_load_test") and node.has_method("_run_test"):
+			editor = node
+			break
+	if editor == null:
+		# Create one
+		var script := load("res://scripts/ui/test_editor.gd")
+		editor = CanvasLayer.new()
+		editor.set_script(script)
+		scene_root.add_child(editor)
+	# Ensure it's open
+	if not editor._active:
+		editor.toggle()
+	# Close the console so it doesn't cover the editor
+	_active = false
+	_target_y = -_panel_height
+	# Load and run (deferred so the editor is ready)
+	editor._load_test(test_name)
+	editor.call_deferred("_run_test")
+	_log("Opening test '%s' in editor..." % test_name, Color(0.5, 0.9, 0.5))
 
 
 func _log(text: String, color: Color = Color(0.7, 0.7, 0.7)) -> void:
