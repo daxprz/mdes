@@ -100,6 +100,14 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 
 func _queue_script(script: Array, test_name: String) -> void:
 	## Queue tasks from a flat script array. Used by both run_test_script and _queue_test.
+	## Automatically clears stale zones/debug state from previous tests.
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		rcon._execute("clearzones")
+		rcon._execute("debug off testing/etz_daz_zones")
+		rcon._execute("debug off testing/violations")
+		rcon._execute("debug off testing/bounded_leap_checks")
+		rcon._execute("debug off testing/planned_leaps")
 	var current_batch: Array = []
 	var first_batch: bool = true
 
