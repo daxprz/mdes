@@ -314,14 +314,10 @@ func _execute_input() -> void:
 			else:
 				_run_test_in_editor(parts[1])
 		"suite":
-			var rcon: Node = get_node_or_null("/root/Rcon")
-			if rcon:
-				rcon._ensure_test_runner()
-				if parts.size() < 2:
-					_log("Usage: suite <suite_name>", Color(1.0, 0.5, 0.3))
-				else:
-					rcon._test_runner.run_suite(parts[1], self)
-					_log_result("OK: running suite '%s'" % parts[1])
+			if parts.size() < 2:
+				_log("Usage: suite <suite_name>", Color(1.0, 0.5, 0.3))
+			else:
+				_run_suite_in_editor(parts[1])
 		_:
 			# Route everything to RCON
 			var rcon: Node = get_node_or_null("/root/Rcon")
@@ -358,6 +354,27 @@ func _run_test_in_editor(test_name: String) -> void:
 	editor._load_test(test_name)
 	editor.call_deferred("_run_test")
 	_log("Opening test '%s' in editor..." % test_name, Color(0.5, 0.9, 0.5))
+
+
+func _run_suite_in_editor(suite_name: String) -> void:
+	## Open the test editor and run the suite through it — each test loads visually.
+	var scene_root := get_tree().current_scene
+	var editor: Node = null
+	for node in scene_root.get_children():
+		if node.has_method("toggle") and node.has_method("run_suite"):
+			editor = node
+			break
+	if editor == null:
+		var script := load("res://scripts/ui/test_editor.gd")
+		editor = CanvasLayer.new()
+		editor.set_script(script)
+		scene_root.add_child(editor)
+	if not editor._active:
+		editor.toggle()
+	_active = false
+	_target_y = -_panel_height
+	editor.run_suite(suite_name)
+	_log("Running suite '%s' in editor..." % suite_name, Color(0.5, 0.9, 0.5))
 
 
 func _log(text: String, color: Color = Color(0.7, 0.7, 0.7)) -> void:

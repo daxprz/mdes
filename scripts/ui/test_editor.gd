@@ -98,6 +98,11 @@ var _run_detail: Dictionary = {}    # {row_idx: Array[String]} — per-check det
 var _run_summary: String = ""       # "2/2 PASSED" etc.
 var _run_leap_edges: Array = []     # Captured leap graph edges after run, with match info
 
+# Suite queue — runs tests sequentially through the editor
+var _suite_queue: Array[String] = []
+var _suite_name: String = ""
+var _suite_results: Array = []      # [{name, passed}]
+
 # Status flash
 var _status_msg: String = ""
 var _status_timer: float = 0.0
@@ -153,6 +158,9 @@ func _process(delta: float) -> void:
 		if rcon and rcon._test_runner and not rcon._test_runner._running:
 			_run_running = false
 			_collect_results(rcon._test_runner)
+			# If running a suite, record result and advance to next test
+			if not _suite_queue.is_empty() or not _suite_name.is_empty():
+				_suite_advance()
 	if _panel:
 		_panel.queue_redraw()
 	if _overlay:
@@ -1312,6 +1320,65 @@ func _stop_test() -> void:
 func _restart_test() -> void:
 	_stop_test()
 	_run_test()
+
+
+func run_suite(suite_name: String) -> void:
+	## Load a suite and run each test sequentially through the editor.
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon:
+		return
+	rcon._ensure_test_runner()
+	var suite: Dictionary = rcon._test_runner._load_suite(suite_name)
+	if suite.is_empty():
+		_status_msg = "ERR: suite '%s' not found" % suite_name
+		_status_timer = 3.0
+		return
+	_suite_name = suite.get("name", suite_name)
+	_suite_queue = []
+	_suite_results = []
+	for t in suite.get("tests", []):
+		_suite_queue.append(str(t))
+	_status_msg = "Suite '%s' — %d tests" % [_suite_name, _suite_queue.size()]
+	_status_timer = 2.0
+	_suite_run_next()
+
+
+func _suite_run_next() -> void:
+	## Load and run the next test in the suite queue.
+	if _suite_queue.is_empty():
+		_suite_show_results()
+		return
+	var next_test: String = _suite_queue.pop_front()
+	_load_test(next_test)
+	_run_test()
+
+
+func _suite_advance() -> void:
+	## Called when a test completes during a suite run. Record result, run next.
+	var has_fail: bool = "fail" in _run_results.values()
+	_suite_results.append({"name": _test_name, "passed": not has_fail, "summary": _run_summary})
+	# Small delay before next test so the user can see the result
+	get_tree().create_timer(1.5).timeout.connect(_suite_run_next)
+
+
+func _suite_show_results() -> void:
+	## Display suite results in the status bar and via RCON grid.
+	var total: int = _suite_results.size()
+	var passed: int = 0
+	for r: Dictionary in _suite_results:
+		if r["passed"]:
+			passed += 1
+	_status_msg = "Suite '%s': %d/%d PASSED" % [_suite_name, passed, total]
+	_status_timer = 10.0
+	# Show grid overlay
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		var grid_parts: Array[String] = ["=== %s: %d/%d PASSED ===" % [_suite_name, passed, total]]
+		for r: Dictionary in _suite_results:
+			grid_parts.append("[%s] %s" % ["PASS" if r["passed"] else "FAIL", r["name"]])
+		rcon._execute("grid %s" % "|".join(grid_parts))
+	_suite_name = ""
+
 
 
 # -- Command parsing -----------------------------------------------------------
