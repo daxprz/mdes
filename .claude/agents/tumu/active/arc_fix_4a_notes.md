@@ -50,4 +50,15 @@ This catches arcs where the body center is just outside the platform but the bod
 2. OR: replace with `intersect_shape` at arc points near platform edges
 3. The scoring already penalizes edge proximity — but the check should REJECT, not just penalize
 
+## CORRECTION from user
+The circles must not intersect with any **COLLISION OBJECT** — not just known platforms.
+This includes walls, floor, keystone, and any other StaticBody2D in the scene.
+
+The precog platform list is incomplete — it doesn't know about walls or decorative collision
+geometry. The correct check is `intersect_shape` with `CircleShape2D(r=effective_radius)`
+at each arc point against the physics world (layer 1). This catches everything.
+
+The platform edge clearance rect approach is wrong because it only checks against precog
+platforms, missing walls and other geometry.
+
 ## DO NOT IMPLEMENT YET — waiting for user direction
