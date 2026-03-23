@@ -1,6 +1,7 @@
 {
 	"name": "floor_to_upper",
 	"script": [
+		"var observations_wait default=5",
 		"clear",
 		"portal off",
 		"clearplayers",
@@ -13,6 +14,6 @@
 		"check fps extract:fps > 20.0",
 		"check ik extract:ik_peak < 2000.0 label:ik_peak",
 		"daz 1 692 833 55",
-		"notify observations DONE [\"OK\"] 600 editor"
+		"notify observations DONE [\"OK\"] {observations_wait} editor"
 	]
 }

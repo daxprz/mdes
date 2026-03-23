@@ -375,9 +375,11 @@ func _execute(command: String) -> String:
 				return "ERR: usage: run <test_name>"
 			var editor: Node = _ensure_test_editor()
 			if editor:
+				# RCON-initiated runs get 600s observation time
+				editor._test_override_vars = {"observations_wait": "600"}
 				editor._load_test(parts[1])
 				editor.call_deferred("_run_test")
-				return "OK: running test '%s' in editor" % parts[1]
+				return "OK: running test '%s' in editor (observations_wait=600)" % parts[1]
 			return "ERR: failed to open test editor"
 
 		"suite":
@@ -385,8 +387,10 @@ func _execute(command: String) -> String:
 				return "ERR: usage: suite <suite_name>"
 			var editor: Node = _ensure_test_editor()
 			if editor:
+				# RCON-initiated suites get 600s observation time
+				editor._test_override_vars = {"observations_wait": "600"}
 				editor.run_suite(parts[1])
-				return "OK: running suite '%s' in editor" % parts[1]
+				return "OK: running suite '%s' in editor (observations_wait=600)" % parts[1]
 			return "ERR: failed to open test editor"
 
 		"tests":

@@ -99,6 +99,7 @@ var _run_detail: Dictionary = {}    # {row_idx: Array[String]} — per-check det
 var _run_summary: String = ""       # "2/2 PASSED" etc.
 var _run_leap_edges: Array = []     # Captured leap graph edges after run, with match info
 var _breach_marker: Dictionary = {} # {pos: Vector2, entity: String, line: int, idx: int} — rendered on overlay
+var _test_override_vars: Dictionary = {} # Variables passed to test runner (e.g., observations_wait)
 
 # Suite queue — runs tests sequentially through the editor
 var _suite_queue: Array[String] = []
@@ -1071,6 +1072,8 @@ func _run_test() -> void:
 	rcon._test_script_name = _test_name
 	rcon._ensure_test_runner()
 	if rcon._test_runner:
+		# Pass override variables (e.g., observations_wait=600 for interactive mode)
+		rcon._test_runner._override_vars = _test_override_vars.duplicate()
 		rcon._test_runner.run_test_script(_script, _test_name, null)
 		_run_running = true
 		_mode = Mode.RUN

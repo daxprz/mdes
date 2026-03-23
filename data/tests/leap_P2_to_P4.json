@@ -1,6 +1,7 @@
 {
 	"name": "leap_P2_to_P4",
 	"script": [
+		"var observations_wait default=5",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",
@@ -31,6 +32,6 @@
 		"check hp extract:damage_taken > 0.0 label:damage",
 		"check fps extract:fps > 20.0",
 		"check bounded_leaps P2-to-P4 leap arc",
-		"notify observations DONE [\"OK\"] 600 editor"
+		"notify observations DONE [\"OK\"] {observations_wait} editor"
 	]
 }

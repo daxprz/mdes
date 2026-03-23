@@ -83,6 +83,8 @@ func run_suite(suite_name: String, console: Node) -> void:
 	_start_queue()
 
 
+var _override_vars: Dictionary = {}  # Variables to inject before script runs
+
 func run_test_script(script: Array[String], test_name: String, console: Node) -> void:
 	## Execute a flat RCON script loaded via testload/testnew.
 	## Meta-commands: "wait N", "check bounded_leaps <label>", "check fps > N".
@@ -140,15 +142,19 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 			continue
 
 		# Variable declaration: "var <name> default=<value>"
+		# Override vars take precedence over defaults.
 		if l.begins_with("var "):
 			var var_parts := l.split(" ", false)
 			if var_parts.size() >= 2:
 				var var_name: String = var_parts[1]
-				var default_val: String = "0"
-				for vp in var_parts.slice(2):
-					if vp.begins_with("default="):
-						default_val = vp.substr(8)
-				_test_vars[var_name] = default_val
+				if _override_vars.has(var_name):
+					_test_vars[var_name] = str(_override_vars[var_name])
+				else:
+					var default_val: String = "0"
+					for vp in var_parts.slice(2):
+						if vp.begins_with("default="):
+							default_val = vp.substr(8)
+					_test_vars[var_name] = default_val
 			continue
 
 		# Substitute {var_name} with variable values

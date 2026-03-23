@@ -1,6 +1,7 @@
 {
 	"name": "leap_floor_to_P2",
 	"script": [
+		"var observations_wait default=5",
 		"debug on precog/platform_list",
 		"debug on precog/graph_edges",
 		"debug on precog/status_text",
@@ -20,7 +21,7 @@
 		"bleap a 960 885 49",
 		"bleap b 1380 750 30",
 		"bleap plan opt start 1597 858 165 46 end 1380 750 209 disallow 16 1577 778 1580 900",
-		"bleap plan opt start 1000 858 176 46 end 1380 750 209 disallow 16 1188 769 1192 898",
+		"bleap plan opt start 875 858 301 46 end 1380 750 209 disallow 16 1188 769 1192 898",
 		"bleap min 1",
 		"standdown off",
 		"wait 20 unless breach 881 890 1070 495 monster* dummy* unless breach 1628 476 1920 790 monster* dummy* unless breach 1076 491 1626 473 monster* dummy* unless exit_circle 1401 742 33 dummy*",
@@ -38,6 +39,6 @@
 		"check hp extract:damage_taken > 0.0 label:damage",
 		"check fps extract:fps > 20.0",
 		"check bounded_leaps floor-to-P2 leap arc",
-		"notify observations DONE [\"OK\"] 600 editor"
+		"notify observations DONE [\"OK\"] {observations_wait} editor"
 	]
 }

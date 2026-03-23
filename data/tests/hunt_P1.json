@@ -1,6 +1,7 @@
 {
 	"name": "hunt_P1",
 	"script": [
+		"var observations_wait default=5",
 		"clear",
 		"portal off",
 		"clearplayers",
@@ -10,6 +11,6 @@
 		"check hp extract:damage_taken > 0.0 label:damage",
 		"check fps extract:fps > 20.0",
 		"check ik extract:ik_peak < 2000.0 label:ik_peak",
-		"notify observations DONE [\"OK\"] 600 editor"
+		"notify observations DONE [\"OK\"] {observations_wait} editor"
 	]
 }
