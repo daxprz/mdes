@@ -12,6 +12,7 @@ var _title_layer: CanvasLayer = null
 var _test_runner: Node = null
 var _zone_manager: Node2D = null
 var _leap_checker: Node2D = null
+var _test_editor: Node = null
 
 # Bounded-leap builder state (populated by `bleap` commands)
 var _bleap_defs: Array = []              # Accumulated leap defs from previous `bleap next` calls
@@ -354,20 +355,21 @@ func _execute(command: String) -> String:
 		"run":
 			if parts.size() < 2:
 				return "ERR: usage: run <test_name>"
-			_ensure_test_runner()
-			if _test_runner:
-				_test_runner.run_test(parts[1], null)
-				return "OK: running test '%s'" % parts[1]
-			return "ERR: failed to create test runner"
+			var editor: Node = _ensure_test_editor()
+			if editor:
+				editor._load_test(parts[1])
+				editor.call_deferred("_run_test")
+				return "OK: running test '%s' in editor" % parts[1]
+			return "ERR: failed to open test editor"
 
 		"suite":
 			if parts.size() < 2:
 				return "ERR: usage: suite <suite_name>"
-			_ensure_test_runner()
-			if _test_runner:
-				_test_runner.run_suite(parts[1], null)
-				return "OK: running suite '%s'" % parts[1]
-			return "ERR: failed to create test runner"
+			var editor: Node = _ensure_test_editor()
+			if editor:
+				editor.run_suite(parts[1])
+				return "OK: running suite '%s' in editor" % parts[1]
+			return "ERR: failed to open test editor"
 
 		"tests":
 			return _cmd_list_tests()
@@ -1650,6 +1652,28 @@ func _cmd_debug_filter(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown filter type '%s'. Try: type, id" % filter_type
+
+
+func _ensure_test_editor() -> Node:
+	## Find or create the test editor. Returns the editor node.
+	if _test_editor and is_instance_valid(_test_editor):
+		if not _test_editor._active:
+			_test_editor.toggle()
+		return _test_editor
+	# Look for existing editor in the scene
+	for node in get_tree().current_scene.get_children():
+		if node.has_method("toggle") and node.has_method("_load_test") and node.has_method("_run_test"):
+			_test_editor = node
+			if not _test_editor._active:
+				_test_editor.toggle()
+			return _test_editor
+	# Create one
+	var script: GDScript = load("res://scripts/ui/test_editor.gd")
+	_test_editor = CanvasLayer.new()
+	_test_editor.set_script(script)
+	get_tree().current_scene.add_child(_test_editor)
+	_test_editor.toggle()
+	return _test_editor
 
 
 func _ensure_test_runner() -> void:
