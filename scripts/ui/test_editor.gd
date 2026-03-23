@@ -1082,8 +1082,6 @@ func _collect_results(runner: Node) -> void:
 				_run_results[si] = "info"
 
 	_run_summary = "%d/%d PASSED" % [passed, total]
-	_status_msg = _run_summary
-	_status_timer = 999.0  # Keep visible until next test or dismiss
 
 	# Auto-select the first failed check row so the human can see what went wrong
 	for si in range(_script.size()):
