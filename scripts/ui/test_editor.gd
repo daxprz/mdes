@@ -103,6 +103,8 @@ var _test_override_vars: Dictionary = {} # Variables passed to test runner (e.g.
 
 # Suite queue — runs tests sequentially through the editor
 var _suite_queue: Array[String] = []
+var _suite_all_tests: Array[String] = []  # Full list of tests in the suite (for prev/next)
+var _suite_current_idx: int = 0           # Current position in _suite_all_tests
 var _suite_name: String = ""
 var _suite_results: Array = []      # [{name, passed}]
 
@@ -630,6 +632,8 @@ func _handle_button_click(local_x: float) -> void:
 		"add_dis": _try_add_disallow()
 		"add_fence": _try_add_fence()
 		"add_exit_circle": _try_add_exit_circle()
+		"suite_prev": _suite_goto(_suite_current_idx - 1)
+		"suite_next": _suite_goto(_suite_current_idx + 1)
 		"notify_done":
 			var rcon: Node = get_node_or_null("/root/Rcon")
 			if rcon:
@@ -653,8 +657,15 @@ func _get_buttons() -> Array:
 		elif sel_type == "wait_plain" or sel_type == "wait_breach":
 			btns.append(["+fence", Color(1.0, 0.6, 0.1), "add_fence"])
 			btns.append(["+exit", Color(0.9, 0.7, 0.2), "add_exit_circle"])
-	# Show "Done ✓" when notify is waiting for dismiss
-	if get_meta("notify_active", false):
+	# Suite navigation
+	if not _suite_all_tests.is_empty():
+		if _suite_current_idx > 0:
+			btns.append(["◀", Color(0.6, 0.7, 1.0), "suite_prev"])
+		if get_meta("notify_active", false):
+			btns.append(["Done ▶", Color(0.3, 1.0, 0.6), "notify_done"])
+		if _suite_current_idx < _suite_all_tests.size() - 1 and not get_meta("notify_active", false):
+			btns.append(["▶", Color(0.6, 0.7, 1.0), "suite_next"])
+	elif get_meta("notify_active", false):
 		btns.append(["Done ✓", Color(0.3, 1.0, 0.6), "notify_done"])
 	btns.append(["💾", Color(0.8, 0.8, 0.4), "save"])
 	return btns
@@ -1410,13 +1421,26 @@ func run_suite(suite_name: String) -> void:
 		_status_timer = 3.0
 		return
 	_suite_name = suite.get("name", suite_name)
+	_suite_all_tests = []
 	_suite_queue = []
 	_suite_results = []
+	_suite_current_idx = 0
 	for t in suite.get("tests", []):
+		_suite_all_tests.append(str(t))
 		_suite_queue.append(str(t))
-	_status_msg = "Suite '%s' — %d tests" % [_suite_name, _suite_queue.size()]
+	_status_msg = "Suite '%s' — %d tests" % [_suite_name, _suite_all_tests.size()]
 	_status_timer = 2.0
 	_suite_run_next()
+
+
+func _suite_goto(idx: int) -> void:
+	## Jump to a specific test in the suite by index. Stops current run.
+	if idx < 0 or idx >= _suite_all_tests.size():
+		return
+	_stop_test()
+	_suite_current_idx = idx
+	_load_test(_suite_all_tests[idx])
+	_run_test()
 
 
 func _suite_run_next() -> void:
@@ -1425,6 +1449,7 @@ func _suite_run_next() -> void:
 		_suite_show_results()
 		return
 	var next_test: String = _suite_queue.pop_front()
+	_suite_current_idx = _suite_all_tests.size() - _suite_queue.size() - 1
 	_load_test(next_test)
 	_run_test()
 
@@ -2232,7 +2257,10 @@ func _draw_panel() -> void:
 		title_str = "Test Editor  —  (no test)  press T"
 	else:
 		var dirty_mark := " ●" if _dirty else ""
-		title_str = "Test Editor — %s%s" % [_test_name, dirty_mark]
+		var suite_pos := ""
+		if not _suite_all_tests.is_empty():
+			suite_pos = " [%d/%d]" % [_suite_current_idx + 1, _suite_all_tests.size()]
+		title_str = "%s%s%s" % [_test_name, suite_pos, dirty_mark]
 	_panel.draw_string(font, Vector2(wx + 10, wy + 17), title_str,
 		HORIZONTAL_ALIGNMENT_LEFT, ww - 80, 12, Color(0.85, 0.85, 0.85))
 	var mode_str := "EDIT" if _mode == Mode.EDIT else "▶ RUN"
