@@ -3392,41 +3392,19 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				_dbg_vy += 1
 				continue  # Still going up at arrival — through-floor
 
-			var launch_dir: Vector2 = launch_vel.normalized()
-			var launch_perp: Vector2 = Vector2(-launch_dir.y, launch_dir.x)
-			if launch_perp.y > 0:
-				launch_perp = -launch_perp
-
 			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
-			# Build bounding arcs as horizontal offsets at each point on the center arc.
-			# This represents the actual body width at every point along the flight,
-			# regardless of the velocity angle (the body stays upright during the leap).
+			# Build bounding arcs as horizontal offsets for visualization.
 			var arc_l: PackedVector2Array = PackedVector2Array()
 			var arc_r: PackedVector2Array = PackedVector2Array()
 			for pt: Vector2 in arc_c:
 				arc_l.append(Vector2(pt.x - effective_radius, pt.y))
 				arc_r.append(Vector2(pt.x + effective_radius, pt.y))
 
-			# Check arc clearance with landing zone near destination platform.
-			# 1. Forward raycasts: center + bounding arcs must not hit walls/platforms
+			# Sweep a circle of effective_radius along the center arc to check
+			# for collisions. This is the "lamborghini through a hallway" check —
+			# the full body width must clear all obstacles at every point.
 			var landing_zone := Rect2(plat_min_x - 20, plat_y - 80, plat_max_x - plat_min_x + 40, 110)
-			if not (_check_arc_clear_ignore(arc_c, landing_zone) and _check_arc_clear_ignore(arc_l, landing_zone) and _check_arc_clear_ignore(arc_r, landing_zone)):
-				_dbg_arc += 1
-				continue
-			# 2. Lateral clearance: at each mid-flight point on the center arc,
-			# verify there is at least LEAP_BODY_RADIUS of free space on both sides.
-			# This catches arcs that squeeze past platform edges without enough room
-			# for the body width — "driving a lamborghini through a hallway."
-			if not _check_arc_lateral_clearance(arc_c, effective_radius, landing_zone):
-				_dbg_arc += 1
-				continue
-
-			# 3. Platform edge clearance: check that the bounding arcs (arc_l/arc_r)
-			# do not clip any known platform surface. The body is LEAP_BODY_RADIUS wide,
-			# and the bounding arcs represent its left/right edges. If a bounding arc
-			# point falls within any platform's surface zone, the body would clip that
-			# platform edge during the leap.
-			if not _check_arc_platform_edge_clearance(arc_l, arc_r, from_pos.y, plat):
+			if not _check_arc_circle_sweep(arc_c, effective_radius, landing_zone):
 				_dbg_arc += 1
 				continue
 
@@ -3725,6 +3703,37 @@ func _check_arc_clear_ignore(arc: PackedVector2Array, ignore_rect: Rect2) -> boo
 			if not probe_hit.is_empty():
 				if not ignore_rect.has_point(probe_hit["position"]):
 					return false
+	return true
+
+
+func _check_arc_circle_sweep(arc: PackedVector2Array, radius: float, ignore_rect: Rect2) -> bool:
+	## Sweep a circle of the given radius along each point of the arc.
+	## Returns false if the circle overlaps any physics body at any point.
+	## Ignores collisions within ignore_rect (the landing zone).
+	## Skips first 2 points (inside launch platform) and last 2 (landing).
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return true
+	if arc.size() < 4:
+		return true
+
+	var shape := CircleShape2D.new()
+	shape.radius = radius
+	var query := PhysicsShapeQueryParameters2D.new()
+	query.shape = shape
+	query.collision_mask = 1  # World layer
+	query.exclude = [get_rid()]
+
+	for i in range(2, arc.size() - 2):
+		var pt: Vector2 = arc[i]
+		if ignore_rect.has_point(pt):
+			continue
+		query.transform = Transform2D(0, pt)
+		var results: Array = space.intersect_shape(query, 1)
+		if not results.is_empty():
+			DebugOverlay.log("leap_attack/lateral_clearance", self,
+				"CIRCLE SWEEP HIT at (%.0f,%.0f) radius=%.0f", [pt.x, pt.y, radius])
+			return false
 	return true
 
 

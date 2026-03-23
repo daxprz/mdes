@@ -853,15 +853,20 @@ func _poll_bleap_monitor() -> void:
 
 				# START and END both match — now check DISALLOW zones.
 				# If the arc breaches a disallow, THIS is a violation.
+				# Check: at each point on arc_c, does a circle of body_radius
+				# intersect the disallow capsule? This matches the planner's
+				# circle-sweep approach. The effective check distance is
+				# disallow_radius + body_radius.
+				var body_radius: float = 55.0  # LEAP_BODY_RADIUS from monster
 				var disallows: Array = plan.get("disallow", [])
 				for dis in disallows:
 					var dr: float = float(dis.get("radius", 20))
 					var p1 := Vector2(float(dis.get("x1",0)), float(dis.get("y1",0)))
 					var p2 := Vector2(float(dis.get("x2",0)), float(dis.get("y2",0)))
-					for arc_key in ["arc_c", "arc_l", "arc_r"]:
-						for pt: Vector2 in edge.get(arc_key, PackedVector2Array()):
-							if _dist_point_to_segment(pt, p1, p2) < dr:
-								disallow_breaches.append({"pos": pt, "reason": "disallow (%s)" % arc_key})
+					var check_dist: float = dr + body_radius  # Circle-to-capsule intersection
+					for pt: Vector2 in arc_c:
+						if _dist_point_to_segment(pt, p1, p2) < check_dist:
+							disallow_breaches.append({"pos": pt, "reason": "disallow (body r=%.0f)" % body_radius})
 
 				if disallow_breaches.is_empty():
 					# START ok, END ok, no disallow breach → MATCHED
