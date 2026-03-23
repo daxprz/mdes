@@ -900,9 +900,16 @@ func _record_breach_initial_sides(cond: Dictionary) -> void:
 	var patterns: Array = cond.get("patterns", [])
 	var entities := _find_matching_entities(patterns)
 	for entity: Node2D in entities:
+		# Only record initial side if entity is within the segment span.
+		# Entities outside the span are not tracked — the fence is a finite segment.
+		if not _within_segment_span(entity.global_position, p1, p2):
+			continue
 		var side := _line_side(entity.global_position, p1, p2)
 		var key := entity.name + "|" + str(cond.get("x1")) + "," + str(cond.get("y1"))
 		_breach_initial_sides[key] = side
+		print("BREACH INIT: entity=%s pos=(%.0f,%.0f) fence=(%.0f,%.0f)→(%.0f,%.0f) side=%.0f patterns=%s" % [
+			entity.name, entity.global_position.x, entity.global_position.y,
+			p1.x, p1.y, p2.x, p2.y, side, str(cond.get("patterns", []))])
 
 
 func _check_breach_conditions() -> void:
@@ -926,6 +933,9 @@ func _check_breach_conditions() -> void:
 					continue
 				var current_side := _line_side(pos, p1, p2)
 				if initial_side * current_side < 0:
+					print("BREACH DEBUG: entity=%s pos=(%.0f,%.0f) fence=(%.0f,%.0f)→(%.0f,%.0f) patterns=%s initial_side=%.0f current_side=%.0f" % [
+						entity.name, pos.x, pos.y, p1.x, p1.y, p2.x, p2.y,
+						str(patterns), initial_side, current_side])
 					_breach_result = {"breached": true, "entity": entity.name, "pos": pos, "condition": cond}
 					return
 
@@ -972,7 +982,7 @@ func _within_segment_span(point: Vector2, seg_a: Vector2, seg_b: Vector2) -> boo
 	if len_sq < 0.001:
 		return point.distance_to(seg_a) < 30.0
 	var t := (point - seg_a).dot(ab) / len_sq
-	return t >= -0.05 and t <= 1.05  # Small margin past endpoints
+	return t >= 0.0 and t <= 1.0  # Strict segment bounds — no margin past endpoints
 
 
 func _line_side(point: Vector2, line_a: Vector2, line_b: Vector2) -> float:
