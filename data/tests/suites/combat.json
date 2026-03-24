@@ -1,7 +1,9 @@
 {
 	"name": "combat",
 	"description": "Full combat test suite — 12 scenarios",
+	"gate": true,
 	"tests": [
+		"quick",
 		"same_floor_near",
 		"same_floor_far",
 		"hunt_P1",
@@ -13,7 +15,8 @@
 		"P1_to_P3",
 		"P2_to_P4",
 		"corner_left",
-		"corner_right"
+		"corner_right",
+		"verify_leap_graph_P0_P1"
 	],
 	"aggregation": {
 		"show_grid": true,

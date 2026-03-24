@@ -1,6 +1,7 @@
 {
 	"name": "all",
 	"description": "All tests",
+	"gate": false,
 	"tests": [
 		"quick",
 		"same_floor_near",

@@ -163,6 +163,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.2
+**Test Gate System, Suite Partitioning, Release Workflow**
+
+- Test suites now have `"gate": true/false` field — gate suites auto-run, non-gate suites are manual-only
+- Gate suites (`chained`, `combat`, `leaping`, `scaling`) partition all 27 tests with no overlaps
+- Non-gate suites (`all`, `todo`) excluded from automated gating
+- New `scaling` gate suite for scaled monster tests
+- `combat` suite expanded: added `quick` and `verify_leap_graph_P0_P1` to close coverage gaps
+- `/test-gate` command: checks staleness via `ts/<suite>/pass` and `ts/<suite>/fail` git tags, runs stale suites, records results
+- `/release` command: pushes trunk + version tag, enforces all gate suites passing at HEAD
+- `/ship-it` command: bumps patch version, updates docs, writes release notes, commits
+
 ### v0.10.1
 **Procedural Monster Scaling, Splay Scale Controls, Chain Scaling**
 

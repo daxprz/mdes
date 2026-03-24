@@ -1,6 +1,7 @@
 {
 	"name": "chained",
 	"description": "Chained monster behavior tests",
+	"gate": true,
 	"tests": [
 		"chained_wall_attack",
 		"chained_platform",

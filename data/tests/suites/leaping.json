@@ -1,6 +1,7 @@
 {
 	"name": "leaping",
 	"description": "Sequential platform leaping tests",
+	"gate": true,
 	"tests": [
 		"leap_floor_to_P1",
 		"leap_floor_to_P2",

@@ -1,0 +1,12 @@
+{
+	"name": "scaling",
+	"description": "Scaled monster tests — non-default creature_scale values",
+	"gate": true,
+	"tests": [
+		"giant_floor_to_P3"
+	],
+	"aggregation": {
+		"show_grid": true,
+		"pass_threshold": 1.0
+	}
+}

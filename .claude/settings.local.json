@@ -63,7 +63,8 @@
       "Bash(scripts/run_test.sh verify_leap_graph_P0_P1 12)",
       "Read(//proc/12705/**)",
       "Bash(ps -p 12705 -o command=)",
-      "Bash(osascript:*)"
+      "Bash(osascript:*)",
+      "Bash(xargs -I{} basename {} .json)"
     ]
   }
 }
