@@ -1,14 +1,20 @@
 ---
 description: Tag, push, and release the current version — requires all gate suites passing at HEAD
+argument-hint: [-f|force] (skip gate suite check)
 ---
 
 # Release
 
-Push the current commit, create a version tag, and push it. Only proceeds if all gate suites pass at HEAD.
+Push the current commit, create a version tag, and push it. Only proceeds if all gate suites pass at HEAD — unless forced.
 
 ## Steps
 
-### 1. Pre-flight Checks
+### 1. Check for Force Flag
+
+If `$ARGUMENTS` contains `-f` or `force`, set FORCE mode. Skip step 2 (gate suite verification) and print a warning:
+> "FORCE RELEASE — skipping gate suite verification."
+
+### 2. Pre-flight Checks
 
 Read the current version from `scripts/autoload/version.gd` and build the tag name `vMAJOR.MINOR.PATCH`.
 
@@ -16,9 +22,9 @@ Verify there are NO uncommitted changes:
 ```bash
 git status --porcelain
 ```
-If dirty, STOP: "Uncommitted changes — run /ship-it first."
+If dirty, STOP: "Uncommitted changes — run /ship-it first." (This check applies even with force.)
 
-### 2. Verify Gate Suites
+### 3. Verify Gate Suites (skip if FORCE)
 
 Check that ALL gate suites have a `ts/<suite>/pass` tag pointing at HEAD:
 
@@ -38,11 +44,9 @@ done
 ```
 
 If ANY gate suite is missing or stale, STOP with:
-> "Gate suites not passing at HEAD. Run /test-gate first."
+> "Gate suites not passing at HEAD. Run /test-gate first, or use /release force to skip."
 
-List which suites are blocking.
-
-### 3. Check Tag Doesn't Already Exist
+### 4. Check Tag Doesn't Already Exist
 
 ```bash
 git tag -l "vX.Y.Z"
@@ -50,7 +54,7 @@ git tag -l "vX.Y.Z"
 
 If the tag already exists, STOP: "Tag vX.Y.Z already exists. Bump the version in version.gd first."
 
-### 4. Push, Tag, Push Tag
+### 5. Push, Tag, Push Tag
 
 ```bash
 git push origin trunk
@@ -58,12 +62,12 @@ git tag -a "vX.Y.Z" -m "vX.Y.Z"
 git push origin "vX.Y.Z"
 ```
 
-### 5. Report
+### 6. Report
 
 Print:
 ```
 Released vX.Y.Z
   Commit: <hash>
-  Gate suites: chained PASS, combat PASS, leaping PASS, scaling PASS
+  Gate suites: chained PASS, combat PASS, leaping PASS, scaling PASS  (or "SKIPPED (force)" if forced)
   Tag: vX.Y.Z pushed to origin
 ```
