@@ -59,6 +59,7 @@ func get_all_pose_names() -> Array[String]:
 
 # Skeleton chain distances from torso (spine[1]) to each attachment point
 # These define the maximum distance each point can be from the body origin.
+# Base chain distances at scale 1.0 — multiply by creature_scale at point of use
 const CHAIN_LENGTHS: Dictionary = {
 	"shoulders": 28.0,    # spine[1] → spine[0]
 	"waist": 28.0,        # spine[1] → spine[2]
@@ -70,7 +71,7 @@ const CHAIN_LENGTHS: Dictionary = {
 	"knee_r": 64.0,
 }
 
-# Maximum distances between any two attachment points (chain lengths between them)
+# Base maximum distances between any two attachment points at scale 1.0
 const PAIR_MAX_DISTANCES: Dictionary = {
 	"shoulders-waist": 56.0,       # spine[0] → spine[1] → spine[2]
 	"shoulders-head": 40.0,        # spine[0] → neck → skull (22+18)
@@ -81,23 +82,24 @@ const PAIR_MAX_DISTANCES: Dictionary = {
 }
 
 
-static func get_max_distance_from_origin(point: String) -> float:
-	return CHAIN_LENGTHS.get(point, 100.0)
+static func get_max_distance_from_origin(point: String, scale: float = 1.0) -> float:
+	return CHAIN_LENGTHS.get(point, 100.0) * scale
 
 
-static func get_max_distance_between(point_a: String, point_b: String) -> float:
+static func get_max_distance_between(point_a: String, point_b: String, scale: float = 1.0) -> float:
 	var key1: String = point_a + "-" + point_b
 	var key2: String = point_b + "-" + point_a
 	if PAIR_MAX_DISTANCES.has(key1):
-		return PAIR_MAX_DISTANCES[key1]
+		return PAIR_MAX_DISTANCES[key1] * scale
 	if PAIR_MAX_DISTANCES.has(key2):
-		return PAIR_MAX_DISTANCES[key2]
-	return 200.0  # Generous fallback
+		return PAIR_MAX_DISTANCES[key2] * scale
+	return 200.0 * scale  # Generous fallback
 
 
-func validate_pose(pose: Dictionary) -> Dictionary:
+func validate_pose(pose: Dictionary, scale: float = 1.0) -> Dictionary:
 	## Validate and clamp connection relative_pos values to be reachable
-	## given the skeleton's rigid segment lengths. Returns the corrected pose.
+	## given the skeleton's rigid segment lengths (scaled by creature_scale).
+	## Returns the corrected pose.
 	var connections: Array = pose.get("connections", [])
 
 	# Clamp each point's distance from origin
@@ -105,7 +107,7 @@ func validate_pose(pose: Dictionary) -> Dictionary:
 		var point: String = conn.get("point", "")
 		var rel: Array = conn.get("relative_pos", [0, 0])
 		var pos := Vector2(rel[0], rel[1])
-		var max_dist: float = get_max_distance_from_origin(point)
+		var max_dist: float = get_max_distance_from_origin(point, scale)
 		if pos.length() > max_dist:
 			pos = pos.normalized() * max_dist
 			conn["relative_pos"] = [pos.x, pos.y]
@@ -118,7 +120,7 @@ func validate_pose(pose: Dictionary) -> Dictionary:
 			var rel_a := Vector2(connections[i]["relative_pos"][0], connections[i]["relative_pos"][1])
 			var rel_b := Vector2(connections[j]["relative_pos"][0], connections[j]["relative_pos"][1])
 			var dist: float = rel_a.distance_to(rel_b)
-			var max_dist: float = get_max_distance_between(point_a, point_b)
+			var max_dist: float = get_max_distance_between(point_a, point_b, scale)
 			if dist > max_dist:
 				# Pull both points toward their midpoint
 				var mid: Vector2 = (rel_a + rel_b) / 2.0
@@ -146,10 +148,11 @@ func save_pose(pose: Dictionary) -> void:
 	_poses[name] = pose
 
 
-func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, behavior: String = "asleep") -> Dictionary:
+func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, behavior: String = "asleep", scale_override: float = -1.0) -> Dictionary:
 	## Spawn a splay instance: creature(s) + tethers. Returns instance data dict.
 	## Supports single-creature (legacy "creature" + "connections" keys) and
 	## multi-creature ("creatures" array) pose formats.
+	## scale_override: if > 0, overrides pose-level "scale" field.
 	var pose: Dictionary = load_pose(pose_name)
 	if pose.is_empty():
 		push_warning("SplayManager: pose '%s' not found — skipping (missing pose reference)" % pose_name)
@@ -161,8 +164,11 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 
 	var rotation_rad: float = deg_to_rad(rotation_deg)
 
-	# Validate pose constraints before spawning
-	pose = validate_pose(pose)
+	# Top-level scale: explicit override > pose JSON > default 1.0
+	var pose_scale: float = scale_override if scale_override > 0 else pose.get("scale", 1.0)
+
+	# Validate pose constraints before spawning (use top-level scale for validation)
+	pose = validate_pose(pose, pose_scale)
 
 	# Determine creature list — support both single and multi formats
 	var creature_defs: Array = []
@@ -186,7 +192,9 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		if rotation_rad != 0.0:
 			c_offset = c_offset.rotated(rotation_rad)
 		var c_behavior: String = cdef.get("behavior", behavior)
-		var creature: Node2D = _spawn_creature(c_type, pos + c_offset)
+		# Per-creature scale overrides top-level pose scale
+		var c_scale: float = cdef.get("scale", pose_scale)
+		var creature: Node2D = _spawn_creature(c_type, pos + c_offset * c_scale, c_scale)
 		if creature:
 			# Freeze physics AND lock pose until skeleton is restored
 			if "_physics_frozen" in creature:
@@ -219,6 +227,9 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 		var creature: Node2D = c["node"]
 		var connections: Array = c["def"].get("connections", [])
 
+		# Get this creature's scale for connection offset scaling
+		var c_scale: float = creature.creature_scale if "creature_scale" in creature else 1.0
+
 		for conn in connections:
 			var point_name: String = conn.get("point", "")
 			var target: String = conn.get("target", "world")  # "world" or "creature:<idx>:<point>"
@@ -241,9 +252,10 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 						tethers.append(tether)
 			else:
 				# World tether: raycast in cast direction
+				# Scale relative_pos by creature_scale (authored at scale 1.0)
 				var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
 				var cast_dir_arr: Array = conn.get("cast_dir", [0, -1])
-				var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
+				var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1]) * c_scale
 				var cast_dir := Vector2(cast_dir_arr[0], cast_dir_arr[1]).normalized()
 
 				if rotation_rad != 0.0:
@@ -326,12 +338,14 @@ func spawn_splay(pose_name: String, pos: Vector2, rotation_deg: float = 0.0, beh
 	return instance
 
 
-func _spawn_creature(creature_type: String, pos: Vector2) -> Node2D:
+func _spawn_creature(creature_type: String, pos: Vector2, scale: float = 1.0) -> Node2D:
 	match creature_type:
 		"quadruped":
 			var script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
 			var creature := CharacterBody2D.new()
 			creature.set_script(script)
+			# Set scale BEFORE add_child so _init_skeleton() uses it
+			creature.creature_scale = scale
 			creature.global_position = pos
 			creature.entity_id = "splay_%d" % get_tree().get_nodes_in_group("enemies").size()
 			var container: Node = get_tree().current_scene.get_node_or_null("Players")
@@ -363,64 +377,67 @@ func _apply_behavior(creature: Node2D, behavior: String) -> void:
 
 
 func _apply_pose_overrides(creature: Node2D, pose: Dictionary, rotation_rad: float) -> void:
-	# Restore full skeleton snapshot if available
+	# Determine scale factor — pose snapshots are authored at scale 1.0
+	var cs: float = creature.creature_scale if "creature_scale" in creature else 1.0
+
+	# Restore full skeleton snapshot if available, scaled by creature_scale
 	var skel: Dictionary = pose.get("skeleton", {})
 	if not skel.is_empty():
 		if skel.has("spine") and "_spine" in creature and skel["spine"].size() >= 3:
 			for i in range(3):
-				var pt := Vector2(skel["spine"][i][0], skel["spine"][i][1])
+				var pt := Vector2(skel["spine"][i][0], skel["spine"][i][1]) * cs
 				if rotation_rad != 0.0:
 					pt = pt.rotated(rotation_rad)
 				creature._spine[i] = pt
 		if skel.has("neck") and "_neck" in creature:
 			for i in range(mini(skel["neck"].size(), creature._neck.size())):
-				var pt := Vector2(skel["neck"][i][0], skel["neck"][i][1])
+				var pt := Vector2(skel["neck"][i][0], skel["neck"][i][1]) * cs
 				if rotation_rad != 0.0:
 					pt = pt.rotated(rotation_rad)
 				creature._neck[i] = pt
 		if skel.has("skull") and "_skull" in creature:
-			var pt := Vector2(skel["skull"][0], skel["skull"][1])
+			var pt := Vector2(skel["skull"][0], skel["skull"][1]) * cs
 			if rotation_rad != 0.0:
 				pt = pt.rotated(rotation_rad)
 			creature._skull = pt
 		if skel.has("jaw") and "_jaw" in creature:
-			var pt := Vector2(skel["jaw"][0], skel["jaw"][1])
+			var pt := Vector2(skel["jaw"][0], skel["jaw"][1]) * cs
 			if rotation_rad != 0.0:
 				pt = pt.rotated(rotation_rad)
 			creature._jaw = pt
 		if skel.has("clavicles") and "_clavicles" in creature:
 			for i in range(2):
-				var pt := Vector2(skel["clavicles"][i][0], skel["clavicles"][i][1])
+				var pt := Vector2(skel["clavicles"][i][0], skel["clavicles"][i][1]) * cs
 				if rotation_rad != 0.0:
 					pt = pt.rotated(rotation_rad)
 				creature._clavicles[i] = pt
 		if skel.has("hip_bones") and "_hip_bones" in creature:
 			for i in range(2):
-				var pt := Vector2(skel["hip_bones"][i][0], skel["hip_bones"][i][1])
+				var pt := Vector2(skel["hip_bones"][i][0], skel["hip_bones"][i][1]) * cs
 				if rotation_rad != 0.0:
 					pt = pt.rotated(rotation_rad)
 				creature._hip_bones[i] = pt
 		if skel.has("tail") and "_tail" in creature:
 			for ti in range(mini(skel["tail"].size(), creature._tail.size())):
-				var pt := Vector2(skel["tail"][ti][0], skel["tail"][ti][1])
+				var pt := Vector2(skel["tail"][ti][0], skel["tail"][ti][1]) * cs
 				if rotation_rad != 0.0:
 					pt = pt.rotated(rotation_rad)
 				creature._tail[ti] = pt
 		if skel.has("legs") and "_legs" in creature:
 			for li in range(mini(skel["legs"].size(), creature._legs.size())):
 				for ji in range(3):
-					var pt := Vector2(skel["legs"][li][ji][0], skel["legs"][li][ji][1])
+					var pt := Vector2(skel["legs"][li][ji][0], skel["legs"][li][ji][1]) * cs
 					if rotation_rad != 0.0:
 						pt = pt.rotated(rotation_rad)
 					creature._legs[li][ji] = pt
 
-	# Also set pose overrides for ongoing enforcement
+	# Also set pose overrides for ongoing enforcement (scale connection offsets)
 	if creature.has_method("set_pose_overrides"):
 		var overrides: Dictionary = {}
 		for conn in pose.get("connections", []):
 			var point_name: String = conn.get("point", "")
 			var rel_pos_arr: Array = conn.get("relative_pos", [0, 0])
-			var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1])
+			var rel_pos := Vector2(rel_pos_arr[0], rel_pos_arr[1]) * cs
 			if rotation_rad != 0.0:
 				rel_pos = rel_pos.rotated(rotation_rad)
 			overrides[point_name] = rel_pos

@@ -299,6 +299,9 @@ func _draw() -> void:
 
 	var shaking: bool = _shake_timer > 0
 
+	# Chain link thickness scales with creature size
+	var cs: float = maxf(_get_creature_scale(anchor_a), _get_creature_scale(anchor_b))
+
 	# Draw alternating thin/thick segments
 	for i in range(_points.size() - 1):
 		var p1: Vector2 = _points[i] - global_position
@@ -314,7 +317,7 @@ func _draw() -> void:
 		var draw_col: Color = dark_grey
 		if shaking and _shake_timer > 0.3:
 			draw_col = dark_grey.lerp(Color(0.9, 0.9, 0.8, 1.0), (_shake_timer - 0.3) * 10.0)
-		var width: float = 4.0 if i % 2 == 0 else 2.0
+		var width: float = (4.0 if i % 2 == 0 else 2.0) * cs
 		draw_line(p1, p2, draw_col, width)
 
 	# Anchor hardware
@@ -322,28 +325,40 @@ func _draw() -> void:
 	_draw_anchor_hardware(anchor_b, _points[_points.size() - 1])
 
 
+func _get_creature_scale(anchor: Dictionary) -> float:
+	## Get creature_scale from the anchor's body, defaulting to 1.0.
+	var body: Node2D = anchor.get("body")
+	if is_instance_valid(body) and "creature_scale" in body:
+		return body.creature_scale
+	return 1.0
+
+
 func _draw_anchor_hardware(anchor: Dictionary, world_pos: Vector2) -> void:
 	var chain_col := Color(0.3, 0.28, 0.26, 0.95)
 	var local_pos: Vector2 = world_pos - global_position
+	var cs: float = _get_creature_scale(anchor)
 	if anchor.get("is_wall", false):
-		# Peg + ring
-		draw_line(local_pos, local_pos + Vector2(0, -10), chain_col, 4.0)
-		draw_arc(local_pos, 5.0, 0, TAU, 12, chain_col, 2.0)
+		# Peg + ring — scale with the OTHER anchor's creature
+		var other: Dictionary = anchor_b if anchor == anchor_a else anchor_a
+		cs = _get_creature_scale(other)
+		draw_line(local_pos, local_pos + Vector2(0, -10 * cs), chain_col, 4.0 * cs)
+		draw_arc(local_pos, 5.0 * cs, 0, TAU, 12, chain_col, 2.0 * cs)
 	else:
-		# Shackle — solid rectangle at attachment point
+		# Shackle — solid rectangle at attachment point, scaled to creature
 		var body: Node2D = anchor.get("body")
 		var draw_pos: Vector2 = local_pos
 		if is_instance_valid(body):
 			var ap: String = anchor.get("attach_point", "")
 			if ap != "" and "_attach_points" in body and body._attach_points.has(ap):
 				draw_pos = body.global_position + body._attach_points[ap].position - global_position
-		var limb_w: float = _get_limb_width(anchor)
-		var hw: float = limb_w * 0.5 + 2.0
+		var limb_w: float = _get_limb_width(anchor) * cs
+		var hw: float = limb_w * 0.5 + 2.0 * cs
 		var hh: float = hw * 0.6
 		draw_rect(Rect2(draw_pos.x - hw, draw_pos.y - hh, hw * 2, hh * 2), chain_col)
 
 
 func _get_limb_width(anchor: Dictionary) -> float:
+	## Base limb width at scale 1.0 — caller multiplies by creature_scale.
 	var ap: String = anchor.get("attach_point", "")
 	match ap:
 		"head": return 14.0

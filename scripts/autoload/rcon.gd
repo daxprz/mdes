@@ -111,8 +111,21 @@ func _execute(command: String) -> String:
 			var what: String = parts[1] if parts.size() > 1 else "monster"
 			var x: float = float(parts[2]) if parts.size() > 2 else 960.0
 			var y: float = float(parts[3]) if parts.size() > 3 else 750.0
-			var state: String = parts[4].to_lower() if parts.size() > 4 else ""
-			return _cmd_spawn(what, x, y, state)
+			var state: String = ""
+			var spawn_scale: float = 1.0
+			var spawn_pathing_radius: float = -1.0
+			# Parse remaining args: positional state OR key=value pairs
+			for pi in range(4, parts.size()):
+				var arg: String = parts[pi]
+				if arg.contains("="):
+					var kv: PackedStringArray = arg.split("=", true, 1)
+					if kv[0] == "scale":
+						spawn_scale = float(kv[1])
+					elif kv[0] == "pathing_radius":
+						spawn_pathing_radius = float(kv[1])
+				elif state.is_empty():
+					state = arg.to_lower()
+			return _cmd_spawn(what, x, y, state, spawn_scale, spawn_pathing_radius)
 
 		"tab":
 			var count: int = int(parts[1]) if parts.size() > 1 else 1
@@ -622,7 +635,7 @@ func _cmd_test(what: String) -> String:
 			return "ERR: unknown test '%s'" % what
 
 
-func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "") -> String:
+func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "", spawn_scale: float = 1.0, spawn_pathing_radius: float = -1.0) -> String:
 	var scene_root := get_tree().current_scene
 	if not scene_root:
 		return "ERR: no current scene"
@@ -636,6 +649,9 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			var script := load("res://scripts/enemies/quadruped_monster.gd")
 			var monster := CharacterBody2D.new()
 			monster.set_script(script)
+			# Set scale and pathing radius BEFORE _ready() so _init_skeleton() uses them
+			monster.creature_scale = spawn_scale
+			monster.pathing_radius = spawn_pathing_radius
 			monster.global_position = Vector2(x, y)
 			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
 			monster.entity_id = "monster_%d" % monster_count
@@ -643,8 +659,9 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			# Apply optional initial state
 			if state == "standdown":
 				monster._standdown = true
+			var scale_str: String = " scale=%.1f" % spawn_scale if spawn_scale != 1.0 else ""
 			var state_str: String = " (%s)" % state if not state.is_empty() else ""
-			return "OK: spawned monster '%s' at (%.0f, %.0f)%s" % [monster.entity_id, x, y, state_str]
+			return "OK: spawned monster '%s' at (%.0f, %.0f)%s%s" % [monster.entity_id, x, y, state_str, scale_str]
 
 		"dummy":
 			# Fake player — a simple CharacterBody2D in the "players" group
@@ -1083,17 +1100,24 @@ func _cmd_splay(parts: PackedStringArray) -> String:
 			return "splay poses: %s" % ", ".join(names)
 
 		"spawn":
-			# splay spawn <pose> [x y] [rotation] [behavior]
+			# splay spawn <pose> [x y] [rotation] [behavior] [scale=N]
 			if parts.size() < 3:
-				return "ERR: usage: splay spawn <pose> [x y] [rotation] [behavior]"
+				return "ERR: usage: splay spawn <pose> [x y] [rotation] [behavior] [scale=N]"
 			var pose_name: String = parts[2]
 			var x: float = float(parts[3]) if parts.size() > 3 else 960.0
 			var y: float = float(parts[4]) if parts.size() > 4 else 500.0
 			var rot: float = float(parts[5]) if parts.size() > 5 else 0.0
 			var behavior: String = parts[6] if parts.size() > 6 else "asleep"
-			# spawn_splay is async (uses await) — call deferred
-			mgr.spawn_splay(pose_name, Vector2(x, y), rot, behavior)
-			return "OK: spawning splay '%s' at (%.0f,%.0f) rot=%.0f behavior=%s" % [pose_name, x, y, rot, behavior]
+			# Parse key=value args from remaining parts
+			var splay_scale: float = -1.0
+			for pi in range(3, parts.size()):
+				if parts[pi].contains("="):
+					var kv: PackedStringArray = parts[pi].split("=", true, 1)
+					if kv[0] == "scale":
+						splay_scale = float(kv[1])
+			mgr.spawn_splay(pose_name, Vector2(x, y), rot, behavior, splay_scale)
+			var scale_str: String = " scale=%.1f" % splay_scale if splay_scale > 0 else ""
+			return "OK: spawning splay '%s' at (%.0f,%.0f) rot=%.0f behavior=%s%s" % [pose_name, x, y, rot, behavior, scale_str]
 
 		"clear":
 			var count: int = mgr.clear_all_splays()

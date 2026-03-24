@@ -7,9 +7,10 @@ extends CanvasLayer
 const SLIDE_SPEED := 1200.0
 const ROW_HEIGHT := 18.0
 const INDENT := 20.0
-const HEADER_HEIGHT := 120.0  # Entity filter + global toggle area
+const HEADER_HEIGHT := 160.0  # Entity filter + global toggle + scale control area
 const CHECKBOX_SIZE := 12.0
 const GROUP_ARROW_SIZE := 8.0
+var SCALE_PRESETS: Array[float] = [0.25, 0.5, 1.0, 2.0, 4.0]
 
 var _active := false
 var _panel_x: float = 0.0      # Current X offset (0 = fully visible)
@@ -26,6 +27,13 @@ var _cursor_blink: float = 0.0
 # Interaction state
 var _hover_row: int = -1
 var _visible_rows: Array[Dictionary] = []  # [{type, path, group, ...}]
+
+# Scale slider state
+var _scale_dragging: bool = false
+var _scale_area_y: float = 110.0  # Updated by _draw_panel each frame
+const SCALE_SLIDER_H := 28.0     # Height of scale control area
+const SCALE_MIN := 0.1
+const SCALE_MAX := 8.0
 
 
 func _ready() -> void:
@@ -110,6 +118,13 @@ func _input(event: InputEvent) -> void:
 			_scroll_offset += 10
 			get_viewport().set_input_as_handled()
 
+	# Mouse release — stop scale drag
+	if _active and event is InputEventMouseButton and not event.pressed:
+		if _scale_dragging:
+			_scale_dragging = false
+			get_viewport().set_input_as_handled()
+			return
+
 	# Mouse clicks
 	if _active and event is InputEventMouseButton and event.pressed:
 		var mx: float = event.position.x
@@ -132,9 +147,12 @@ func _input(event: InputEvent) -> void:
 				_scroll_offset += 3
 				get_viewport().set_input_as_handled()
 
-	# Mouse motion for hover
+	# Mouse motion for hover and scale drag
 	if _active and event is InputEventMouseMotion:
-		if event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
+		if _scale_dragging:
+			_handle_scale_drag(event.position.x)
+			get_viewport().set_input_as_handled()
+		elif event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
 			_update_hover(event.position.y)
 
 
@@ -236,6 +254,13 @@ func _handle_click(lx: float, my: float) -> void:
 		_id_filter_focused = false
 		return
 
+	# Check scale control area
+	if my >= _scale_area_y and my < _scale_area_y + SCALE_SLIDER_H:
+		_filter_focused = false
+		_id_filter_focused = false
+		_handle_scale_click(lx, my)
+		return
+
 	_filter_focused = false
 	_id_filter_focused = false
 
@@ -304,6 +329,74 @@ func _handle_type_filter_click(lx: float) -> void:
 			var t: String = types[i]
 			DebugOverlay.entity_type_filter[t] = not DebugOverlay.entity_type_filter.get(t, true)
 			return
+
+
+func _get_selected_monster() -> Node2D:
+	## Returns the TAB-selected enemy if it has creature_scale, else null.
+	var sel: Node2D = PlayerHUD.debug_selected_enemy
+	if is_instance_valid(sel) and "creature_scale" in sel:
+		return sel
+	return null
+
+
+func _handle_scale_click(lx: float, _my: float) -> void:
+	var monster: Node2D = _get_selected_monster()
+	if not monster:
+		return
+	var slider_x: float = 70.0
+	var slider_w: float = _panel_width - 90.0
+	# Check preset buttons (right side)
+	var presets_x: float = slider_x + slider_w + 6
+	# If clicking on the slider track, start drag or snap
+	if lx >= slider_x and lx <= slider_x + slider_w:
+		var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+		# Map [0,1] → [SCALE_MIN, SCALE_MAX] logarithmic
+		var new_scale: float = _slider_t_to_scale(t)
+		monster.creature_scale = new_scale
+		_scale_dragging = true
+		_reinit_monster(monster)
+
+
+func _handle_scale_drag(mx: float) -> void:
+	var monster: Node2D = _get_selected_monster()
+	if not monster:
+		_scale_dragging = false
+		return
+	var lx: float = mx - _panel_x
+	var slider_x: float = 70.0
+	var slider_w: float = _panel_width - 90.0
+	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+	var new_scale: float = _slider_t_to_scale(t)
+	monster.creature_scale = new_scale
+	_reinit_monster(monster)
+
+
+func _slider_t_to_scale(t: float) -> float:
+	## Map slider position [0,1] to scale value using log scale.
+	## 0.0 → SCALE_MIN, 0.5 → 1.0, 1.0 → SCALE_MAX
+	var log_min: float = log(SCALE_MIN)
+	var log_max: float = log(SCALE_MAX)
+	return exp(lerpf(log_min, log_max, t))
+
+
+func _scale_to_slider_t(scale: float) -> float:
+	## Map scale value to slider position [0,1] using log scale.
+	var log_min: float = log(SCALE_MIN)
+	var log_max: float = log(SCALE_MAX)
+	var log_s: float = log(clampf(scale, SCALE_MIN, SCALE_MAX))
+	return (log_s - log_min) / (log_max - log_min)
+
+
+func _reinit_monster(monster: Node2D) -> void:
+	## Re-initialize skeleton, collision, hitboxes at the new scale.
+	if monster.has_method("_init_skeleton"):
+		monster._init_skeleton()
+	if monster.has_method("_init_collision"):
+		# Remove old collision shape, re-create
+		if "_body_collision" in monster and is_instance_valid(monster._body_collision):
+			monster._body_collision.queue_free()
+		monster._init_collision()
+	# Hitboxes and attach points are positioned per-frame, no re-init needed
 
 
 func _cycle_text_mode(current: int) -> int:
@@ -385,6 +478,40 @@ func _draw_panel() -> void:
 	var save_hint: String = "Ctrl+S save" if _active else ""
 	_panel.draw_string(font, Vector2(_panel_x + pw - 90, y + 12), save_hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 	y += 20
+
+	# -- Scale control --
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.3, 0.3, 0.3), 1.0)
+	y += 4
+	_scale_area_y = y  # Track for click detection
+	var monster: Node2D = _get_selected_monster()
+	if monster:
+		var cur_scale: float = monster.creature_scale
+		var label_col := Color(0.5, 0.9, 0.5)
+		_panel.draw_string(font, Vector2(x, y + 12), "Scale:", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, label_col)
+		# Slider track
+		var slider_x: float = x + 62
+		var slider_w: float = pw - 90.0
+		var slider_y: float = y + 8
+		_panel.draw_rect(Rect2(slider_x, slider_y - 2, slider_w, 4), Color(0.2, 0.2, 0.25))
+		# Tick marks at preset values
+		for preset in SCALE_PRESETS:
+			var tick_t: float = _scale_to_slider_t(preset)
+			var tick_x: float = slider_x + tick_t * slider_w
+			_panel.draw_line(Vector2(tick_x, slider_y - 5), Vector2(tick_x, slider_y + 5), Color(0.35, 0.35, 0.4), 1.0)
+		# 1.0 tick highlighted
+		var one_t: float = _scale_to_slider_t(1.0)
+		var one_x: float = slider_x + one_t * slider_w
+		_panel.draw_line(Vector2(one_x, slider_y - 6), Vector2(one_x, slider_y + 6), Color(0.5, 0.7, 1.0, 0.6), 1.0)
+		# Thumb
+		var thumb_t: float = _scale_to_slider_t(cur_scale)
+		var thumb_x: float = slider_x + thumb_t * slider_w
+		var thumb_col := Color(0.3, 1.0, 0.5) if _scale_dragging else Color(0.5, 0.9, 0.5)
+		_panel.draw_circle(Vector2(thumb_x, slider_y), 6.0, thumb_col)
+		# Value text
+		_panel.draw_string(font, Vector2(_panel_x + pw - 48, y + 13), "%.2f" % cur_scale, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, label_col)
+	else:
+		_panel.draw_string(font, Vector2(x, y + 12), "Scale: (TAB-select a monster)", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.4, 0.4))
+	y += SCALE_SLIDER_H
 
 	# -- Column headers --
 	var v_col_x: float = _panel_x + pw - 60

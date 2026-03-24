@@ -6,6 +6,31 @@ extends CharacterBody2D
 
 signal died(global_pos: Vector2)
 
+# -- Scale ---------------------------------------------------------------------
+# Single source of truth for monster size. 1.0 = default. 4.0 = 4x larger.
+# All spatial dimensions derive from this via the sc() helper.
+var creature_scale: float = 1.0
+var speed_override: float = -1.0  # If >= 0, overrides auto-scaled speed tiers
+var pathing_radius: float = -1.0  # If >= 0, overrides sc(LEAP_BODY_RADIUS) for all clearance checks
+
+## Scale a base value by creature_scale. Use for all spatial constants.
+func sc(base: float) -> float:
+	return base * creature_scale
+
+## Get the effective body radius used for leap/pathing clearance.
+## Uses pathing_radius if set, otherwise sc(LEAP_BODY_RADIUS).
+func _body_clearance_radius() -> float:
+	if pathing_radius >= 0:
+		return pathing_radius
+	return sc(LEAP_BODY_RADIUS)
+
+## Get effective speed for a base speed tier. Scales with creature_scale
+## unless speed_override is set.
+func _effective_speed(base_speed: float) -> float:
+	if speed_override >= 0:
+		return speed_override
+	return base_speed * creature_scale
+
 # -- Constants -----------------------------------------------------------------
 
 const GRAVITY := 600.0
@@ -296,12 +321,18 @@ var _plan_attempts: int = 0        # How many times we've tried the current plan
 const MAX_PLAN_ATTEMPTS := 3      # Commit to a plan for this many attempts before changing
 var _state_lock_timer: float = 0.0 # Don't change state until this expires
 var entity_id: String = ""         # Unique ID for test zone tracking
+static var _next_entity_id: int = 0  # Auto-increment for default entity_id
 
 
 func _ready() -> void:
 	add_to_group("enemies")
 	collision_layer = 8
 	collision_mask = 1
+
+	# Guarantee every monster has an entity_id
+	if entity_id == "":
+		entity_id = "monster_%d" % _next_entity_id
+	_next_entity_id += 1
 
 	_init_skeleton()
 	_init_part_health()
@@ -312,27 +343,27 @@ func _ready() -> void:
 
 func _init_skeleton() -> void:
 	# Body height: spine elevated so feet rest at y=0 (floor contact)
-	var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)  # ~-50
+	var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))  # ~-50 at scale 1
 
 	# Spine: horizontal at body_y
 	_spine.resize(3)
 	_spine_rest.resize(3)
 	for i in range(3):
-		_spine[i] = Vector2((1 - i) * SPINE_SEG_LEN * _facing, body_y)
+		_spine[i] = Vector2((1 - i) * sc(SPINE_SEG_LEN) * _facing, body_y)
 	_spine_rest[0] = Vector2.ZERO  # spine[0] is the anchor
-	_spine_rest[1] = Vector2(-SPINE_SEG_LEN * _facing, 0)  # offset from spine[0]
-	_spine_rest[2] = Vector2(-SPINE_SEG_LEN * _facing, 0)  # offset from spine[1]
+	_spine_rest[1] = Vector2(-sc(SPINE_SEG_LEN) * _facing, 0)  # offset from spine[0]
+	_spine_rest[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, 0)  # offset from spine[1]
 
 	# Neck: extends forward-up from spine[0]
 	_neck.resize(2)
 	_neck[0] = _spine[0]
-	_neck_rest = Vector2(NECK_LEN * 0.8 * _facing, -NECK_LEN * 0.7)
+	_neck_rest = Vector2(sc(NECK_LEN) * 0.8 * _facing, -sc(NECK_LEN) * 0.7)
 	_neck[1] = _spine[0] + _neck_rest
 
 	# Head: skull connects directly to neck tip (no gap), 2x size
-	_skull_rest = Vector2(14 * _facing, -8)
+	_skull_rest = Vector2(sc(14) * _facing, -sc(8))
 	_skull = _neck[1] + _skull_rest
-	_jaw_rest = Vector2(8 * _facing, JAW_LEN * 0.6)
+	_jaw_rest = Vector2(sc(8) * _facing, sc(JAW_LEN) * 0.6)
 	_jaw = _skull + _jaw_rest
 
 	# Tail: extends backward from spine[2], slightly raised (rigid)
@@ -340,8 +371,8 @@ func _init_skeleton() -> void:
 	_tail_rest.resize(5)
 	for i in range(5):
 		# Tail goes backward and slightly up, rigid like a counterbalance
-		_tail_rest[i] = Vector2(-TAIL_SEG_LEN * _facing, -2.0)
-	var tail_anchor: Vector2 = _spine[2] + Vector2(-4 * _facing, -2)
+		_tail_rest[i] = Vector2(-sc(TAIL_SEG_LEN) * _facing, -sc(2.0))
+	var tail_anchor: Vector2 = _spine[2] + Vector2(-sc(4) * _facing, -sc(2))
 	for i in range(5):
 		if i == 0:
 			_tail[i] = tail_anchor + _tail_rest[i]
@@ -351,16 +382,16 @@ func _init_skeleton() -> void:
 	# Clavicles: short rigid bones from spine[0] outward to arm attachment points
 	_clavicles.resize(2)
 	_clavicle_rest.resize(2)
-	_clavicle_rest[0] = Vector2(-CLAVICLE_LEN * 0.5, CLAVICLE_LEN * 0.8)   # Left arm (toward front-left)
-	_clavicle_rest[1] = Vector2(CLAVICLE_LEN * 0.5, CLAVICLE_LEN * 0.8)    # Right arm (toward front-right)
+	_clavicle_rest[0] = Vector2(-sc(CLAVICLE_LEN) * 0.5, sc(CLAVICLE_LEN) * 0.8)   # Left arm (toward front-left)
+	_clavicle_rest[1] = Vector2(sc(CLAVICLE_LEN) * 0.5, sc(CLAVICLE_LEN) * 0.8)    # Right arm (toward front-right)
 	_clavicles[0] = _spine[0] + _clavicle_rest[0]
 	_clavicles[1] = _spine[0] + _clavicle_rest[1]
 
 	# Hip bones: short rigid bones from spine[2] outward to leg attachment points
 	_hip_bones.resize(2)
 	_hip_bone_rest.resize(2)
-	_hip_bone_rest[0] = Vector2(-HIP_BONE_LEN * 0.5, HIP_BONE_LEN * 0.8)   # Left leg
-	_hip_bone_rest[1] = Vector2(HIP_BONE_LEN * 0.5, HIP_BONE_LEN * 0.8)    # Right leg
+	_hip_bone_rest[0] = Vector2(-sc(HIP_BONE_LEN) * 0.5, sc(HIP_BONE_LEN) * 0.8)   # Left leg
+	_hip_bone_rest[1] = Vector2(sc(HIP_BONE_LEN) * 0.5, sc(HIP_BONE_LEN) * 0.8)    # Right leg
 	_hip_bones[0] = _spine[2] + _hip_bone_rest[0]
 	_hip_bones[1] = _spine[2] + _hip_bone_rest[1]
 
@@ -380,20 +411,20 @@ func _init_skeleton() -> void:
 			hip_anchor = _clavicles[li]  # Arms attach to clavicle endpoints
 		else:
 			hip_anchor = _hip_bones[li - 2]  # Legs attach to hip bone endpoints
-		var side_x: float = 3.0 if (li % 2 == 0) else -3.0
+		var side_x: float = sc(3.0) if (li % 2 == 0) else -sc(3.0)
 
 		var leg: Array[Vector2] = []
 		leg.resize(3)
 		leg[0] = hip_anchor
-		leg[1] = hip_anchor + Vector2(0, LEG_UPPER_LEN)
+		leg[1] = hip_anchor + Vector2(0, sc(LEG_UPPER_LEN))
 		leg[2] = Vector2(hip_anchor.x, 0)
 		_legs[li] = leg
 
 		var rest: Array[Vector2] = []
 		rest.resize(3)
-		rest[0] = Vector2(side_x, 6)
-		rest[1] = Vector2(0, LEG_UPPER_LEN)
-		rest[2] = Vector2(0, LEG_LOWER_LEN)
+		rest[0] = Vector2(side_x, sc(6))
+		rest[1] = Vector2(0, sc(LEG_UPPER_LEN))
+		rest[2] = Vector2(0, sc(LEG_LOWER_LEN))
 		_leg_rest[li] = rest
 
 		# Initialize foot world positions (will be set properly on first frame)
@@ -422,10 +453,10 @@ func _init_collision() -> void:
 	# Circle prevents corner-catching at odd angles.
 	# Position tracks spine[1] + downward offset each frame.
 	var shape := CircleShape2D.new()
-	shape.radius = 14.0  # Belly sphere — big enough for floor contact
+	shape.radius = sc(14.0)  # Belly sphere — big enough for floor contact
 	_body_collision = CollisionShape2D.new()
 	_body_collision.shape = shape
-	_body_collision.position = Vector2(0, -10.0)  # Initial; updated each frame
+	_body_collision.position = Vector2(0, -sc(10.0))  # Initial; updated each frame
 	add_child(_body_collision)
 
 
@@ -441,38 +472,38 @@ func _constrain_skeleton_to_world() -> void:
 	# Skull: must not go below the floor beneath it
 	var skull_world: Vector2 = global_position + _skull
 	var skull_floor_q := PhysicsRayQueryParameters2D.create(
-		skull_world + Vector2(0, -5), skull_world + Vector2(0, 15), 1)
+		skull_world + Vector2(0, -sc(5)), skull_world + Vector2(0, sc(15)), 1)
 	skull_floor_q.exclude = [get_rid()]
 	var skull_hit: Dictionary = space.intersect_ray(skull_floor_q)
 	if not skull_hit.is_empty():
 		var floor_local_y: float = skull_hit["position"].y - global_position.y
-		if _skull.y > floor_local_y - 8:
-			_skull.y = floor_local_y - 8
-			_jaw.y = minf(_jaw.y, floor_local_y - 4)
+		if _skull.y > floor_local_y - sc(8):
+			_skull.y = floor_local_y - sc(8)
+			_jaw.y = minf(_jaw.y, floor_local_y - sc(4))
 
 	# Tail tip: must not go below floor
 	if not _tail_severed and _tail.size() > 4:
 		var tail_world: Vector2 = global_position + _tail[4]
 		var tail_floor_q := PhysicsRayQueryParameters2D.create(
-			tail_world + Vector2(0, -5), tail_world + Vector2(0, 15), 1)
+			tail_world + Vector2(0, -sc(5)), tail_world + Vector2(0, sc(15)), 1)
 		tail_floor_q.exclude = [get_rid()]
 		var tail_hit: Dictionary = space.intersect_ray(tail_floor_q)
 		if not tail_hit.is_empty():
 			var floor_local_y: float = tail_hit["position"].y - global_position.y
-			if _tail[4].y > floor_local_y - 3:
-				_tail[4].y = floor_local_y - 3
+			if _tail[4].y > floor_local_y - sc(3):
+				_tail[4].y = floor_local_y - sc(3)
 
 	# Spine points: must not penetrate platforms from above
 	for i in range(3):
 		var sp_world: Vector2 = global_position + _spine[i]
 		var sp_floor_q := PhysicsRayQueryParameters2D.create(
-			sp_world + Vector2(0, -5), sp_world + Vector2(0, 15), 1)
+			sp_world + Vector2(0, -sc(5)), sp_world + Vector2(0, sc(15)), 1)
 		sp_floor_q.exclude = [get_rid()]
 		var sp_hit: Dictionary = space.intersect_ray(sp_floor_q)
 		if not sp_hit.is_empty():
 			var floor_local_y: float = sp_hit["position"].y - global_position.y
-			if _spine[i].y > floor_local_y - 10:
-				_spine[i].y = floor_local_y - 10
+			if _spine[i].y > floor_local_y - sc(10):
+				_spine[i].y = floor_local_y - sc(10)
 
 
 
@@ -487,7 +518,7 @@ func _init_hitboxes() -> void:
 		area.set_meta("part_name", part_name)
 		var shape := CollisionShape2D.new()
 		var circle := CircleShape2D.new()
-		circle.radius = 12.0 if part_name == "body" else 8.0
+		circle.radius = sc(12.0) if part_name == "body" else sc(8.0)
 		shape.shape = circle
 		area.add_child(shape)
 		add_child(area)
@@ -501,7 +532,7 @@ func _init_hitboxes() -> void:
 	eye_area.set_meta("part_name", "eye")
 	var eye_shape := CollisionShape2D.new()
 	var eye_circle := CircleShape2D.new()
-	eye_circle.radius = 4.0  # Roughly the size of the rendered eye
+	eye_circle.radius = sc(4.0)  # Roughly the size of the rendered eye
 	eye_shape.shape = eye_circle
 	eye_area.add_child(eye_shape)
 	add_child(eye_area)
@@ -529,7 +560,7 @@ func _init_attach_points() -> void:
 		area.set_meta("attach_point", point_name)
 		var shape := CollisionShape2D.new()
 		var circle := CircleShape2D.new()
-		circle.radius = points[point_name]
+		circle.radius = sc(points[point_name])
 		shape.shape = circle
 		area.add_child(shape)
 		add_child(area)
@@ -792,7 +823,7 @@ func _physics_process(delta: float) -> void:
 				# Try a direct leap toward the target if close enough
 				if is_instance_valid(_target) and _state == State.CHASE:
 					var to_target: Vector2 = _target.global_position - global_position
-					if to_target.length() < LEAP_RANGE and _leap_cooldown <= 0.0:
+					if to_target.length() < sc(LEAP_RANGE) and _leap_cooldown <= 0.0:
 						_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
 						_start_leap()
 		else:
@@ -834,16 +865,16 @@ func _physics_process(delta: float) -> void:
 				if _foot_planted[li]:
 					var foot_local: Vector2 = _foot_world[li] - global_position
 					var reach: float = _legs[li][0].distance_to(foot_local)
-					if reach > LEG_UPPER_LEN + LEG_LOWER_LEN * (1.0 + LIMB_FLEX):
+					if reach > sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX):
 						var floor_y: float = _raycast_floor(_legs[li][0])
 						_legs[li][2] = Vector2(_legs[li][0].x, floor_y)
 						_foot_world[li] = global_position + _legs[li][2]
 				var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 				if upper_dir.length() > 0.01:
-					_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+					_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
 				var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 				if lower_dir.length() > 0.01:
-					var clamped: float = clampf(lower_dir.length(), LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+					var clamped: float = clampf(lower_dir.length(), sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX), sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX))
 					_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 			_update_hitbox_positions()
 			_update_blood_particles(delta)
@@ -952,7 +983,7 @@ func _physics_process(delta: float) -> void:
 					var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
 				# Clamp distance (±5% flex)
-				var clamped_len: float = clampf(tail_dist, TAIL_SEG_LEN * (1.0 - TAIL_FLEX), TAIL_SEG_LEN * (1.0 + TAIL_FLEX))
+				var clamped_len: float = clampf(tail_dist, sc(TAIL_SEG_LEN) * (1.0 - TAIL_FLEX), sc(TAIL_SEG_LEN) * (1.0 + TAIL_FLEX))
 				_tail[ti] = tail_parent + current_dir * clamped_len
 				prev_dir = current_dir
 			tail_parent = _tail[ti]
@@ -972,7 +1003,7 @@ func _physics_process(delta: float) -> void:
 			var foot_local: Vector2 = _foot_world[li] - global_position
 			var hip: Vector2 = _legs[li][0]
 			var reach: float = hip.distance_to(foot_local)
-			var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN * (1.0 + LIMB_FLEX)
+			var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX)
 			if reach <= max_reach:
 				# Foot is reachable — use world position
 				_legs[li][2] = foot_local
@@ -984,22 +1015,22 @@ func _physics_process(delta: float) -> void:
 			# Enforce rigid upper limb from hip toward knee
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
 		else:
 			# Not planted or IK off: enforce from hip downward
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
 			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 			var lower_dist: float = lower_dir.length()
 			if lower_dist > 0.01:
-				var clamped: float = clampf(lower_dist, LEG_LOWER_LEN * (1.0 - LIMB_FLEX), LEG_LOWER_LEN * (1.0 + LIMB_FLEX))
+				var clamped: float = clampf(lower_dist, sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX), sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX))
 				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 
 	# Affix body collider to torso (skip during grab — grab controls collision)
 	if not in_grab:
 		if _body_collision:
-			_body_collision.position = Vector2(_spine[1].x, -14.0)
+			_body_collision.position = Vector2(_spine[1].x, -sc(14.0))
 		_constrain_skeleton_to_world()
 
 	_update_hitbox_positions()
@@ -1039,7 +1070,7 @@ func _solve_pose(delta: float) -> void:
 		var aim_dir: Vector2 = to_target.normalized()
 
 		# Place skull along the aim direction, at the right distance from spine[0]
-		var skull_dist: float = NECK_LEN + _skull_rest.length()
+		var skull_dist: float = sc(NECK_LEN) + _skull_rest.length()
 		var skull_aim: Vector2 = _spine[0] + aim_dir * skull_dist
 		skull_rest_target = skull_rest_target.lerp(skull_aim, 0.7)
 
@@ -1087,11 +1118,11 @@ func _solve_pose(delta: float) -> void:
 		for ci in range(2):
 			var side: float = -1.0 if ci == 0 else 1.0
 			var rest_dir: Vector2 = (spine_down + spine_fwd * side * 0.3).normalized()
-			var rest_target: Vector2 = _spine[0] + rest_dir * CLAVICLE_LEN
+			var rest_target: Vector2 = _spine[0] + rest_dir * sc(CLAVICLE_LEN)
 			_clavicles[ci] = _clavicles[ci].lerp(rest_target, s_clamp)
 			var dir: Vector2 = _clavicles[ci] - _spine[0]
 			if dir.length() > 0.01:
-				_clavicles[ci] = _spine[0] + dir.normalized() * CLAVICLE_LEN
+				_clavicles[ci] = _spine[0] + dir.normalized() * sc(CLAVICLE_LEN)
 
 		var spine_back: Vector2 = (_spine[2] - _spine[1]).normalized()
 		var spine_down2: Vector2 = Vector2(-spine_back.y, spine_back.x)
@@ -1100,14 +1131,14 @@ func _solve_pose(delta: float) -> void:
 		for hi in range(2):
 			var side: float = -1.0 if hi == 0 else 1.0
 			var rest_dir: Vector2 = (spine_down2 + spine_back * side * 0.3).normalized()
-			var rest_target: Vector2 = _spine[2] + rest_dir * HIP_BONE_LEN
+			var rest_target: Vector2 = _spine[2] + rest_dir * sc(HIP_BONE_LEN)
 			_hip_bones[hi] = _hip_bones[hi].lerp(rest_target, s_clamp)
 			var dir: Vector2 = _hip_bones[hi] - _spine[2]
 			if dir.length() > 0.01:
-				_hip_bones[hi] = _spine[2] + dir.normalized() * HIP_BONE_LEN
+				_hip_bones[hi] = _spine[2] + dir.normalized() * sc(HIP_BONE_LEN)
 
 	# -- Legs: 2-bone IK from hip to foot, knee solved --
-	var max_leg_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
+	var max_leg_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
 	for li in range(4):
 		if _leg_severed[li]:
 			for j in range(3):
@@ -1141,7 +1172,7 @@ func _solve_pose(delta: float) -> void:
 		bend_dir *= _facing
 		var knee_pos: Vector2 = _solve_leg_ik(
 			_legs[li][0], _legs[li][2],
-			LEG_UPPER_LEN, LEG_LOWER_LEN,
+			sc(LEG_UPPER_LEN), sc(LEG_LOWER_LEN),
 			bend_dir
 		)
 		# Snap knee to IK solution (fast lerp to prevent sticking)
@@ -1150,14 +1181,14 @@ func _solve_pose(delta: float) -> void:
 		# -- Rigid upper limb: enforce exact LEG_UPPER_LEN from hip to knee --
 		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 		if upper_dir.length() > 0.01:
-			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * LEG_UPPER_LEN
+			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
 
 		# -- Flex lower limb: enforce LEG_LOWER_LEN ±10% from knee to foot --
 		var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 		var lower_dist: float = lower_dir.length()
 		if lower_dist > 0.01:
-			var min_len: float = LEG_LOWER_LEN * (1.0 - LIMB_FLEX)
-			var max_len: float = LEG_LOWER_LEN * (1.0 + LIMB_FLEX)
+			var min_len: float = sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX)
+			var max_len: float = sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX)
 			var clamped_len: float = clampf(lower_dist, min_len, max_len)
 			_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped_len
 
@@ -1197,7 +1228,7 @@ func _score_ik_quality() -> void:
 	if Engine.get_frames_drawn() % 10 != 0:
 		return
 
-	var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
+	var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
 	var score: float = 0.0
 
 	for li in range(4):
@@ -1305,7 +1336,7 @@ func _enforce_spine_rigid() -> void:
 		for i in range(1, 3):
 			var dir: Vector2 = (_spine[i] - _spine[i - 1])
 			if dir.length() > 0.01:
-				_spine[i] = _spine[i - 1] + dir.normalized() * SPINE_SEG_LEN
+				_spine[i] = _spine[i - 1] + dir.normalized() * sc(SPINE_SEG_LEN)
 	else:
 		# Full enforcement: distances + max 30° bend angles
 		# Reference direction for spine[0]→[1]: facing direction (horizontal)
@@ -1318,7 +1349,7 @@ func _enforce_spine_rigid() -> void:
 				if absf(angle_diff) > SPINE_MAX_BEND:
 					var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-				_spine[i] = _spine[i - 1] + current_dir * SPINE_SEG_LEN
+				_spine[i] = _spine[i - 1] + current_dir * sc(SPINE_SEG_LEN)
 				spine_ref_dir = current_dir
 
 	# Neck: distance enforcement (+ angle constraints when not pose_locked)
@@ -1333,7 +1364,7 @@ func _enforce_spine_rigid() -> void:
 			if absf(angle_diff) > NECK_MAX_BEND:
 				var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
 				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-		_neck[1] = _spine[0] + current_dir * NECK_LEN
+		_neck[1] = _spine[0] + current_dir * sc(NECK_LEN)
 
 	# Skull: distance enforcement (+ angle constraints when not pose_locked)
 	var skull_dist: float = _skull_rest.length()
@@ -1352,13 +1383,13 @@ func _enforce_spine_rigid() -> void:
 	for ci in range(2):
 		var cdir: Vector2 = _clavicles[ci] - _spine[0]
 		if cdir.length() > 0.01:
-			_clavicles[ci] = _spine[0] + cdir.normalized() * CLAVICLE_LEN
+			_clavicles[ci] = _spine[0] + cdir.normalized() * sc(CLAVICLE_LEN)
 
 	# Hip bones: rigid from spine[2]
 	for hi in range(2):
 		var hdir: Vector2 = _hip_bones[hi] - _spine[2]
 		if hdir.length() > 0.01:
-			_hip_bones[hi] = _spine[2] + hdir.normalized() * HIP_BONE_LEN
+			_hip_bones[hi] = _spine[2] + hdir.normalized() * sc(HIP_BONE_LEN)
 
 
 # -- Spine & Posture ----------------------------------------------------------
@@ -1367,11 +1398,11 @@ func _update_spine() -> void:
 	# Spine height is relative to the real floor under the body.
 	# Raycast from body center to find the floor, then position spine above it.
 	var floor_y: float = _raycast_floor(Vector2(0, _spine[1].y if _spine.size() > 1 else -30))
-	var leg_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN - 4.0  # How high above floor
+	var leg_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(4.0)  # How high above floor
 	var body_y: float = floor_y - leg_reach
 	# In bipedal, front raises higher
-	var spine_y_front: float = lerpf(body_y, body_y - 30.0, _posture_blend)
-	_spine[0] = Vector2(SPINE_SEG_LEN * _facing, spine_y_front)
+	var spine_y_front: float = lerpf(body_y, body_y - sc(30.0), _posture_blend)
+	_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, spine_y_front)
 	# spine[1] and [2] follow via _solve_pose constraints
 
 
@@ -1395,7 +1426,7 @@ func _update_foot_push(delta: float) -> void:
 
 		# Each planted foot pushes the body in the desired direction.
 		# Force scales with desired speed.
-		push_x += _want_direction * FOOT_PUSH_FORCE * (_move_speed / SPEED_MEDIUM)
+		push_x += _want_direction * sc(FOOT_PUSH_FORCE) * (_move_speed / _effective_speed(SPEED_MEDIUM))
 
 	# More planted feet = more traction = more force
 	if planted_count > 0:
@@ -1416,12 +1447,12 @@ func _update_gait(delta: float) -> void:
 
 	# Idle breathing
 	_breathe_time += delta
-	var breathe_offset: float = sin(_breathe_time * 2.0) * 1.5
+	var breathe_offset: float = sin(_breathe_time * 2.0) * sc(1.5)
 	for i in range(3):
 		_spine[i].y += breathe_offset * delta * 4.0
 
 	# Convert planted feet from world space to local space for rendering/IK
-	var max_reach: float = LEG_UPPER_LEN + LEG_LOWER_LEN
+	var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
@@ -1443,7 +1474,7 @@ func _update_gait(delta: float) -> void:
 				_foot_planted[li] = false
 
 			# Clamp: foot must stay roughly under the body horizontally
-			var max_x_offset: float = 40.0  # Max horizontal distance from hip
+			var max_x_offset: float = sc(40.0)  # Max horizontal distance from hip
 			if absf(local_foot.x - hip.x) > max_x_offset:
 				local_foot.x = hip.x + signf(local_foot.x - hip.x) * max_x_offset
 				_foot_world[li] = global_position + local_foot
@@ -1495,9 +1526,9 @@ func _try_step_pair(a: int, b: int) -> void:
 		b_dist = _foot_world[b].distance_to(_ideal_foot_world(b))
 
 	# Only step the one that's furthest behind (and past threshold)
-	if a_dist >= b_dist and a_dist > STEP_THRESHOLD:
+	if a_dist >= b_dist and a_dist > sc(STEP_THRESHOLD):
 		_try_step(a)
-	elif b_dist > STEP_THRESHOLD:
+	elif b_dist > sc(STEP_THRESHOLD):
 		_try_step(b)
 
 
@@ -1507,7 +1538,7 @@ func _ideal_foot_world(li: int) -> Vector2:
 	var hip_local: Vector2 = _legs[li][0]
 	var hip_world: Vector2 = global_position + hip_local
 	# Small stride offset — keeps feet mostly under the body
-	var stride: float = _want_direction * minf(_move_speed * 0.1, 20.0)
+	var stride: float = _want_direction * minf(_move_speed * 0.1, sc(20.0))
 	if li >= 2:
 		# Rear legs: slightly behind
 		stride *= -0.3
@@ -1527,7 +1558,7 @@ func _try_step(li: int) -> void:
 	var ideal: Vector2 = _ideal_foot_world(li)
 	var dist: float = foot_pos.distance_to(ideal)
 
-	if dist > STEP_THRESHOLD:
+	if dist > sc(STEP_THRESHOLD):
 		# Start a step: foot lifts from current world position to new ideal
 		_foot_planted[li] = false
 		_step_timers[li] = STEP_DURATION
@@ -1542,7 +1573,7 @@ func _try_step(li: int) -> void:
 		_step_targets[li].y = target_floor_y
 
 		# Bezier midpoint: lifted arc between start and end
-		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -STEP_HEIGHT)
+		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -sc(STEP_HEIGHT))
 
 
 func _animate_step(li: int, delta: float) -> void:
@@ -1581,15 +1612,15 @@ func _raycast_floor(local_from: Vector2) -> float:
 	## Returns the floor y in local space, or a fallback if no hit.
 	var space := get_world_2d().direct_space_state
 	if not space:
-		return local_from.y + LEG_UPPER_LEN + LEG_LOWER_LEN
+		return local_from.y + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
 
 	var world_from: Vector2 = global_position + local_from
-	var world_to: Vector2 = world_from + Vector2(0, 200)  # Cast 200px down
+	var world_to: Vector2 = world_from + Vector2(0, sc(200))  # Cast 200px down (scaled)
 	var query := PhysicsRayQueryParameters2D.create(world_from, world_to, 1)  # Mask 1 = world
 	query.exclude = [get_rid()]
 	var result: Dictionary = space.intersect_ray(query)
 	if result.is_empty():
-		return local_from.y + LEG_UPPER_LEN + LEG_LOWER_LEN  # Fallback: dangle at full leg length
+		return local_from.y + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)  # Fallback: dangle at full leg length
 	return result["position"].y - global_position.y  # Convert back to local space
 
 
@@ -1627,7 +1658,7 @@ func _solve_leg_ik(hip: Vector2, foot: Vector2, upper_len: float, lower_len: flo
 # -- AI / State Machine -------------------------------------------------------
 
 func _do_patrol(_delta: float) -> void:
-	_move_speed = SPEED_SLOW
+	_move_speed = _effective_speed(SPEED_SLOW)
 	_want_direction = _facing
 
 	_pick_target()
@@ -1682,9 +1713,9 @@ func _do_chase(_delta: float) -> void:
 				waypoint_dist, str(_precog_waypoint_edge.is_empty())])
 		_facing = signf(to_waypoint.x) if absf(to_waypoint.x) > 5.0 else _facing
 		_want_direction = signf(to_waypoint.x)
-		_move_speed = SPEED_FAST
+		_move_speed = _effective_speed(SPEED_FAST)
 
-		var arrival_tolerance: float = 50.0 if _chained else 25.0
+		var arrival_tolerance: float = sc(50.0) if _chained else sc(25.0)
 		if waypoint_dist < arrival_tolerance:
 			_precog_has_waypoint = false
 			var has_vel: bool = _precog_waypoint_edge.has("launch_vel")
@@ -1735,13 +1766,13 @@ func _do_chase(_delta: float) -> void:
 	_want_direction = _facing
 	var dist: float = absf(to_target.x)
 
-	# Speed based on distance
-	if dist > 200.0:
-		_move_speed = SPEED_FAST
-	elif dist > 80.0:
-		_move_speed = SPEED_MEDIUM
+	# Speed based on distance (thresholds scale with body size)
+	if dist > sc(200.0):
+		_move_speed = _effective_speed(SPEED_FAST)
+	elif dist > sc(80.0):
+		_move_speed = _effective_speed(SPEED_MEDIUM)
 	else:
-		_move_speed = SPEED_SLOW
+		_move_speed = _effective_speed(SPEED_SLOW)
 
 	# Don't change strategy while locked (prevents thrashing)
 	if _state_lock_timer > 0.0:
@@ -1796,39 +1827,39 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var dist_2d: float = to_target.length()
 
 	# DEATH BALL GRAB: very close / overlapping — highest priority
-	if dist_2d < GRAB_RANGE and not _grab_disabled:
+	if dist_2d < sc(GRAB_RANGE) and not _grab_disabled:
 		_start_grab()
 		return
 
 	# Tail whip if target is behind and close
-	if target_behind and dist < TAIL_RANGE and _posture == Posture.QUADRUPED and not _tail_severed:
+	if target_behind and dist < sc(TAIL_RANGE) and _posture == Posture.QUADRUPED and not _tail_severed:
 		_start_attack(State.ATTACK_TAIL)
 		return
 
 	# CONNECTED HOP-UP: target is on a platform just above (short climb)
-	if height_diff < -20.0 and absf(height_diff) < HOP_UP_MAX_HEIGHT and absf(to_target.x) < 150.0:
+	if height_diff < -sc(20.0) and absf(height_diff) < sc(HOP_UP_MAX_HEIGHT) and absf(to_target.x) < sc(150.0):
 		_start_hop_up(to_target)
 		return
 
 	# SPRINT SLASH: same level, medium range — charge and slash
-	if absf(height_diff) < 30.0 and dist > BITE_RANGE and dist < 200.0 and _count_front_legs() >= 1:
+	if absf(height_diff) < sc(30.0) and dist > sc(BITE_RANGE) and dist < sc(200.0) and _count_front_legs() >= 1:
 		_start_sprint_slash()
 		return
 
 	# VERTICAL LEAP: significant distance — must face target horizontally
-	if dist > 80.0 and dist < LEAP_RANGE and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
-		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < 20.0
+	if dist > sc(80.0) and dist < sc(LEAP_RANGE) and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
+		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < sc(20.0)
 		if facing_target:
 			_start_leap()
 			return
 
 	# Lunge at medium distance
-	if dist_2d > 80.0 and dist_2d < 200.0 and randf() < 0.3:
+	if dist_2d > sc(80.0) and dist_2d < sc(200.0) and randf() < 0.3:
 		_start_attack(State.ATTACK_LUNGE)
 		return
 
 	# Close range: bite or standing swipe
-	if dist_2d < BITE_RANGE:
+	if dist_2d < sc(BITE_RANGE):
 		if randf() < 0.6 or _count_front_legs() == 0:
 			_start_attack(State.ATTACK_BITE)
 		else:
@@ -1943,7 +1974,7 @@ func _do_lunge(delta: float) -> void:
 		velocity.x = -_facing * 30.0
 	elif _attack_timer < 0.4:
 		# Launch
-		velocity.x = _facing * LUNGE_SPEED
+		velocity.x = _facing * sc(LUNGE_SPEED)
 		_check_lunge_hit()
 	elif _attack_timer < 0.7:
 		# Slide to stop
@@ -1998,7 +2029,7 @@ func _do_grab(delta: float) -> void:
 	# Center collision on the grabbed player — expand to cover the full ball + tail
 	if _body_collision:
 		_body_collision.position = target_local
-		var max_tail_r: float = ball_r + 5.0 * (TAIL_SEG_LEN * 0.6)
+		var max_tail_r: float = ball_r + 5.0 * (sc(TAIL_SEG_LEN) * 0.6)
 		if _body_collision.shape is CircleShape2D:
 			(_body_collision.shape as CircleShape2D).radius = max_tail_r
 
@@ -2069,7 +2100,7 @@ func _do_grab(delta: float) -> void:
 			# Continue from spine[2]'s angle, each segment steps further around
 			var tail_angle: float = spine2_angle - float(i + 1) * 0.5
 			# Radius grows proportionally: starts at spine[2] distance, grows by TAIL_SEG_LEN fraction
-			var tail_r: float = ball_r + float(i + 1) * (TAIL_SEG_LEN * 0.6)
+			var tail_r: float = ball_r + float(i + 1) * (sc(TAIL_SEG_LEN) * 0.6)
 			var tail_pos: Vector2 = center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
 			if curl >= 1.0:
 				_tail[i] = tail_pos
@@ -2124,10 +2155,10 @@ func _do_grab(delta: float) -> void:
 		_state = State.CHASE
 
 		# Reset skeleton to standing pose
-		var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)
-		_spine[0] = Vector2(SPINE_SEG_LEN * _facing, body_y)
+		var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))
+		_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, body_y)
 		_spine[1] = Vector2(0, body_y)
-		_spine[2] = Vector2(-SPINE_SEG_LEN * _facing, body_y)
+		_spine[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, body_y)
 
 		# Re-plant feet
 		for li in range(4):
@@ -2160,9 +2191,9 @@ func _do_sprint_slash(delta: float) -> void:
 	if _sprint_slash_count == 0:
 		# Phase 1: Sprint toward target
 		_want_direction = _facing
-		_move_speed = SPRINT_SPEED
+		_move_speed = _effective_speed(SPRINT_SPEED)
 
-		if dist < SPRINT_SLASH_RANGE:
+		if dist < sc(SPRINT_SLASH_RANGE):
 			# Close enough — start slashing
 			_sprint_slash_count = 1
 			_attack_timer = 0.0
@@ -2225,7 +2256,7 @@ func _do_hop_up(delta: float) -> void:
 
 	var height_to_climb: float = global_position.y - _hop_up_target_y
 	if height_to_climb < 10:
-		height_to_climb = HOP_UP_MAX_HEIGHT * 0.5
+		height_to_climb = sc(HOP_UP_MAX_HEIGHT) * 0.5
 
 	# Phase 1 (0-0.3): rear legs compress, body tilts up, front legs reach upward
 	# Phase 2 (0.3-0.7): rear legs push, body rises, front feet plant on upper surface
@@ -2354,27 +2385,27 @@ func _update_leap_pose(delta: float) -> void:
 	if _state == State.ATTACK_LEAP_WINDUP:
 		# During windup, gradually tilt from horizontal to aimed
 		var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
-		var rest_spine0 := Vector2(SPINE_SEG_LEN * _facing, -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN))
-		var aimed_spine0 := spine_center + aim_dir * SPINE_SEG_LEN
+		var rest_spine0 := Vector2(sc(SPINE_SEG_LEN) * _facing, -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)))
+		var aimed_spine0 := spine_center + aim_dir * sc(SPINE_SEG_LEN)
 		_spine[0] = _spine[0].lerp(rest_spine0.lerp(aimed_spine0, t), 6.0 * delta)
-		var rest_spine2 := Vector2(-SPINE_SEG_LEN * _facing, -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN))
-		var aimed_spine2 := spine_center - aim_dir * SPINE_SEG_LEN
+		var rest_spine2 := Vector2(-sc(SPINE_SEG_LEN) * _facing, -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)))
+		var aimed_spine2 := spine_center - aim_dir * sc(SPINE_SEG_LEN)
 		_spine[2] = _spine[2].lerp(rest_spine2.lerp(aimed_spine2, t), 6.0 * delta)
 		_spine[1] = (_spine[0] + _spine[2]) * 0.5
 	else:
 		# Airborne/strike/thrash: spine fully aimed
-		_spine[0] = _spine[0].lerp(spine_center + aim_dir * SPINE_SEG_LEN, 10.0 * delta)
-		_spine[2] = _spine[2].lerp(spine_center - aim_dir * SPINE_SEG_LEN, 10.0 * delta)
+		_spine[0] = _spine[0].lerp(spine_center + aim_dir * sc(SPINE_SEG_LEN), 10.0 * delta)
+		_spine[2] = _spine[2].lerp(spine_center - aim_dir * sc(SPINE_SEG_LEN), 10.0 * delta)
 		_spine[1] = (_spine[0] + _spine[2]) * 0.5
 
 	# -- Neck + Head: aim at target --
 	_neck[0] = _spine[0]
-	var neck_tip: Vector2 = _spine[0] + aim_dir * NECK_LEN
+	var neck_tip: Vector2 = _spine[0] + aim_dir * sc(NECK_LEN)
 	_neck[1] = _neck[1].lerp(neck_tip, 8.0 * delta)
-	var skull_pos: Vector2 = _neck[1] + aim_dir * 14.0
+	var skull_pos: Vector2 = _neck[1] + aim_dir * sc(14.0)
 	_skull = _skull.lerp(skull_pos, 8.0 * delta)
 	var jaw_down: Vector2 = -aim_perp  # Jaw opens away from "up"
-	_jaw = _jaw.lerp(_skull + jaw_down * (JAW_LEN * 0.3 + _jaw_open * JAW_LEN * 0.5), 8.0 * delta)
+	_jaw = _jaw.lerp(_skull + jaw_down * (sc(JAW_LEN) * 0.3 + _jaw_open * sc(JAW_LEN) * 0.5), 8.0 * delta)
 
 	# -- Tail: trails behind --
 	if not _tail_severed:
@@ -2385,7 +2416,7 @@ func _update_leap_pose(delta: float) -> void:
 		else:
 			# Airborne: tail streams straight behind
 			for i in range(5):
-				var tail_target: Vector2 = _spine[2] + tail_dir * TAIL_SEG_LEN * (i + 1)
+				var tail_target: Vector2 = _spine[2] + tail_dir * sc(TAIL_SEG_LEN) * (i + 1)
 				_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
 
 	# -- Front legs: tucked against chest --
@@ -2414,9 +2445,9 @@ func _update_leap_pose(delta: float) -> void:
 		else:
 			# Airborne: stretch fully behind
 			_foot_planted[li] = false
-			var stretched: Vector2 = _legs[li][0] - aim_dir * (LEG_UPPER_LEN + LEG_LOWER_LEN - 2)
+			var stretched: Vector2 = _legs[li][0] - aim_dir * (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(2))
 			_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
-			_legs[li][1] = _legs[li][0] - aim_dir * LEG_UPPER_LEN
+			_legs[li][1] = _legs[li][0] - aim_dir * sc(LEG_UPPER_LEN)
 
 	# -- Floor constraints OFF during airborne --
 	# (handled by skipping _solve_pose entirely)
@@ -2486,7 +2517,7 @@ func _do_leap_plan(delta: float) -> void:
 			# Walk toward launch position
 			_facing = signf(to_launch.x) if absf(to_launch.x) > 5.0 else _facing
 			_want_direction = signf(to_launch.x)
-			_move_speed = SPEED_MEDIUM
+			_move_speed = _effective_speed(SPEED_MEDIUM)
 	else:
 		# Both phases failed — abort after brief pause
 		if _attack_timer > 0.5:
@@ -2526,7 +2557,7 @@ func _simulate_leap_paths() -> void:
 	var arrival_points: Array[Vector2] = []
 	for ai in range(LEAP_ARRIVAL_SAMPLES):
 		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
-		var arrival: Vector2 = target_pos + Vector2(cos(angle), sin(angle)) * LEAP_STRIKE_REACH
+		var arrival: Vector2 = target_pos + Vector2(cos(angle), sin(angle)) * sc(LEAP_STRIKE_REACH)
 
 		# Must be in open air
 		if _is_point_in_solid(arrival):
@@ -2576,8 +2607,8 @@ func _simulate_leap_paths() -> void:
 			var arc_l: PackedVector2Array = PackedVector2Array()
 			var arc_r: PackedVector2Array = PackedVector2Array()
 			for pt: Vector2 in arc_c:
-				arc_l.append(Vector2(pt.x - LEAP_BODY_RADIUS, pt.y))
-				arc_r.append(Vector2(pt.x + LEAP_BODY_RADIUS, pt.y))
+				arc_l.append(Vector2(pt.x - _body_clearance_radius(), pt.y))
+				arc_r.append(Vector2(pt.x + _body_clearance_radius(), pt.y))
 
 			var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
@@ -2634,7 +2665,7 @@ func _has_lateral_clearance(world_pos: Vector2) -> bool:
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return true
-	var min_clearance: float = LEAP_BODY_RADIUS  # Full body radius clearance on each side
+	var min_clearance: float = _body_clearance_radius()  # Full body radius clearance on each side
 
 	# Check at 3 heights: surface, mid-body, and above (initial arc)
 	for check_y in [world_pos.y - 15.0, world_pos.y - 40.0]:
@@ -2657,7 +2688,7 @@ func _has_clear_airspace(world_pos: Vector2) -> bool:
 	if not space:
 		return true
 	var query := PhysicsRayQueryParameters2D.create(
-		world_pos, world_pos + Vector2(0, -LEAP_BODY_RADIUS * 2), 1)
+		world_pos, world_pos + Vector2(0, -_body_clearance_radius() * 2), 1)
 	query.exclude = [get_rid()]
 	var result: Dictionary = space.intersect_ray(query)
 	if not result.is_empty():
@@ -2700,9 +2731,9 @@ func _simulate_leap_paths_phase2() -> void:
 			var offset_x: float = (float(pi) / 4.0 - 0.5) * 80.0
 			var launch_pos: Vector2 = monster_pos + Vector2(offset_x, 0)
 
-			if launch_pos.x < bounds_left + LEAP_BODY_RADIUS * 2:
+			if launch_pos.x < bounds_left + _body_clearance_radius() * 2:
 				continue
-			if launch_pos.x > bounds_right - LEAP_BODY_RADIUS * 2:
+			if launch_pos.x > bounds_right - _body_clearance_radius() * 2:
 				continue
 
 			# 7 flight times, wider spread around candidate
@@ -2728,8 +2759,8 @@ func _simulate_leap_paths_phase2() -> void:
 					launch_perp = -launch_perp
 
 				var arc_c: PackedVector2Array = _simulate_arc(launch_pos, launch_vel)
-				var arc_l: PackedVector2Array = _simulate_arc(launch_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
-				var arc_r: PackedVector2Array = _simulate_arc(launch_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+				var arc_l: PackedVector2Array = _simulate_arc(launch_pos + launch_perp * _body_clearance_radius(), launch_vel)
+				var arc_r: PackedVector2Array = _simulate_arc(launch_pos - launch_perp * _body_clearance_radius(), launch_vel)
 
 				var clear: bool = _check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)
 
@@ -3328,7 +3359,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 	var _dbg_total: int = 0
 
 	# For down-jumps: smaller effective body radius (can curl up and drop)
-	var effective_radius: float = LEAP_BODY_RADIUS * 0.4 if down_jump else LEAP_BODY_RADIUS
+	var effective_radius: float = _body_clearance_radius() * 0.4 if down_jump else _body_clearance_radius()
 
 	var landing_y: float = plat_y - 5.0
 	# Sample landing points: evenly spaced + precise edge points
@@ -3380,8 +3411,8 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 
 			var launch_vel := Vector2(launch_vx, launch_vy)
 			var speed: float = launch_vel.length()
-			var min_speed: float = 50.0 if down_jump else 200.0  # Down-jumps can be gentle
-			if speed < min_speed or speed > LEAP_LAUNCH_SPEED * 1.5:
+			var min_speed: float = sc(50.0) if down_jump else sc(200.0)  # Down-jumps can be gentle
+			if speed < min_speed or speed > sc(LEAP_LAUNCH_SPEED) * 1.5:
 				_dbg_speed += 1
 				continue
 			if not down_jump and launch_vy > -50:
@@ -3558,7 +3589,7 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 	var arrivals: Array[Vector2] = []
 	for ai in range(LEAP_ARRIVAL_SAMPLES):
 		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
-		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * LEAP_STRIKE_REACH)
+		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * sc(LEAP_STRIKE_REACH))
 	arrivals.append(to_pos)
 	arrivals.append(to_pos + Vector2(-40, 0))
 	arrivals.append(to_pos + Vector2(40, 0))
@@ -3596,8 +3627,8 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 				launch_perp = -launch_perp
 
 			var arc_c: PackedVector2Array = _simulate_arc(from_pos, launch_vel)
-			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * LEAP_BODY_RADIUS, launch_vel)
-			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * LEAP_BODY_RADIUS, launch_vel)
+			var arc_l: PackedVector2Array = _simulate_arc(from_pos + launch_perp * _body_clearance_radius(), launch_vel)
+			var arc_r: PackedVector2Array = _simulate_arc(from_pos - launch_perp * _body_clearance_radius(), launch_vel)
 
 			if not (_check_arc_clear(arc_c) and _check_arc_clear(arc_l) and _check_arc_clear(arc_r)):
 				continue
@@ -4012,7 +4043,7 @@ func _do_leap_windup(delta: float) -> void:
 			if _leg_severed[li]:
 				continue
 			var hip: Vector2 = _legs[li][0]
-			var compressed_foot: Vector2 = hip + Vector2(0, (LEG_UPPER_LEN + LEG_LOWER_LEN) * (1.0 - compress * 0.4))
+			var compressed_foot: Vector2 = hip + Vector2(0, (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)) * (1.0 - compress * 0.4))
 			_legs[li][2] = _legs[li][2].lerp(compressed_foot, 4.0 * delta)
 
 	# LAUNCH at end of windup — check facing (skip for precog hops which
@@ -4082,8 +4113,8 @@ func _do_leap_airborne(delta: float) -> void:
 
 	# Position spine along the aim direction
 	var spine_center: Vector2 = (_spine[0] + _spine[2]) * 0.5
-	_spine[0] = _spine[0].lerp(spine_center + body_aim * SPINE_SEG_LEN, 8.0 * delta)
-	_spine[2] = _spine[2].lerp(spine_center - body_aim * SPINE_SEG_LEN, 8.0 * delta)
+	_spine[0] = _spine[0].lerp(spine_center + body_aim * sc(SPINE_SEG_LEN), 8.0 * delta)
+	_spine[2] = _spine[2].lerp(spine_center - body_aim * sc(SPINE_SEG_LEN), 8.0 * delta)
 
 	# Rear legs extend to full stretch behind (pushing off)
 	for li in [2, 3]:
@@ -4091,10 +4122,10 @@ func _do_leap_airborne(delta: float) -> void:
 			continue
 		var hip: Vector2 = _legs[li][0]
 		var stretch_dir: Vector2 = -body_aim  # Behind the body
-		var stretched: Vector2 = hip + stretch_dir * (LEG_UPPER_LEN + LEG_LOWER_LEN - 2)
+		var stretched: Vector2 = hip + stretch_dir * (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(2))
 		_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
 		# Knee midway along the stretch
-		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * LEG_UPPER_LEN, 8.0 * delta)
+		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * sc(LEG_UPPER_LEN), 8.0 * delta)
 
 	# Front legs stay tucked against chest
 	for li in [0, 1]:
@@ -4109,13 +4140,13 @@ func _do_leap_airborne(delta: float) -> void:
 	if not _tail_severed:
 		var tail_dir: Vector2 = -body_aim
 		for i in range(5):
-			var tail_target: Vector2 = _spine[2] + tail_dir * TAIL_SEG_LEN * (i + 1)
+			var tail_target: Vector2 = _spine[2] + tail_dir * sc(TAIL_SEG_LEN) * (i + 1)
 			_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
 
 	# Check if we've reached the target
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
-		if dist_to_target < LEAP_STRIKE_REACH:
+		if dist_to_target < sc(LEAP_STRIKE_REACH):
 			DebugOverlay.log("leap_attack/chosen_arc", self, "LEAP ARRIVED: monster at (%.0f,%.0f), target at (%.0f,%.0f), dist=%.0f", [
 					global_position.x, global_position.y,
 					_target.global_position.x, _target.global_position.y, dist_to_target])
@@ -4240,10 +4271,10 @@ func _end_leap() -> void:
 	# Collision circles reset via _update_collision_positions on next frame
 
 	# Reset skeleton to standing pose — spine horizontal, feet on the ground
-	var body_y: float = -(4.0 + LEG_UPPER_LEN + LEG_LOWER_LEN)
-	_spine[0] = Vector2(SPINE_SEG_LEN * _facing, body_y)
+	var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))
+	_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, body_y)
 	_spine[1] = Vector2(0, body_y)
-	_spine[2] = Vector2(-SPINE_SEG_LEN * _facing, body_y)
+	_spine[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, body_y)
 
 	# Plant feet at floor level below each hip
 	for li in range(4):
@@ -4270,7 +4301,7 @@ func _end_leap() -> void:
 		if is_instance_valid(_target):
 			var to_target: Vector2 = _target.global_position - global_position
 			var dist: float = to_target.length()
-			if dist < LEAP_RANGE and dist > GRAB_RANGE:
+			if dist < sc(LEAP_RANGE) and dist > sc(GRAB_RANGE):
 				# Raw launch: aim directly at the player
 				var flight_time: float = 0.6
 				var launch_vx: float = to_target.x / flight_time
@@ -4795,8 +4826,8 @@ func _draw() -> void:
 	if PlayerHUD.debug_selected_enemy == self and DebugOverlay.should_draw("state_info/selection_indicator", self):
 		var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
 		var sel_col := Color(0, 0.9, 1.0, pulse)
-		draw_arc(_spine[1], 30.0, 0, TAU, 24, sel_col, 2.0)
-		draw_string(ThemeDB.fallback_font, _spine[1] + Vector2(-20, -35), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, sel_col)
+		draw_arc(_spine[1], sc(30.0), 0, TAU, 24, sel_col, 2.0)
+		draw_string(ThemeDB.fallback_font, _spine[1] + Vector2(-sc(20), -sc(35)), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, sel_col)
 	if DebugOverlay.should_draw("state_info/sleep_standdown", self):
 		if _asleep:
 			var zzz_pos: Vector2 = _skull + Vector2(10, -20)
@@ -4817,31 +4848,31 @@ func _draw_body() -> void:
 	var body_inner := Color(0.4, 0.33, 0.28)
 	for i in range(_spine.size() - 1):
 		var t: float = float(i) / float(_spine.size() - 1)
-		var thickness: float = lerpf(10.0, 8.0, t)
+		var thickness: float = lerpf(sc(10.0), sc(8.0), t)
 		draw_line(_spine[i], _spine[i + 1], body_col, thickness, true)
 		draw_line(_spine[i], _spine[i + 1], body_inner, thickness * 0.4, true)
 	# Body mass circles at each spine point
 	for i in range(_spine.size()):
-		var r: float = lerpf(12.0, 10.0, float(i) / 2.0)
+		var r: float = lerpf(sc(12.0), sc(10.0), float(i) / 2.0)
 		draw_circle(_spine[i], r, body_col)
 
 
 func _draw_tail() -> void:
 	if _tail_severed:
 		# Draw stump
-		var stump: Vector2 = _spine[2] + Vector2(-4 * _facing, 2)
-		draw_circle(stump, 4.0, Color(0.5, 0.15, 0.1))
+		var stump: Vector2 = _spine[2] + Vector2(-sc(4) * _facing, sc(2))
+		draw_circle(stump, sc(4.0), Color(0.5, 0.15, 0.1))
 		return
 
 	var tail_col := Color(0.35, 0.28, 0.22)
 	var prev: Vector2 = _spine[2]
 	for i in range(_tail.size()):
 		var t: float = float(i) / float(_tail.size() - 1)
-		var thickness: float = lerpf(6.0, 2.0, t)
+		var thickness: float = lerpf(sc(6.0), sc(2.0), t)
 		draw_line(prev, _tail[i], tail_col, thickness, true)
 		prev = _tail[i]
 	# Tail tip
-	draw_circle(_tail[_tail.size() - 1], 2.5, tail_col)
+	draw_circle(_tail[_tail.size() - 1], sc(2.5), tail_col)
 
 
 func _draw_legs() -> void:
@@ -4849,19 +4880,19 @@ func _draw_legs() -> void:
 
 	# Draw clavicles (spine[0] to arm hips)
 	for ci in range(2):
-		draw_line(_spine[0], _clavicles[ci], bone_col, 4.0, true)
-		draw_circle(_clavicles[ci], 3.0, bone_col)
+		draw_line(_spine[0], _clavicles[ci], bone_col, sc(4.0), true)
+		draw_circle(_clavicles[ci], sc(3.0), bone_col)
 
 	# Draw hip bones (spine[2] to leg hips)
 	for hi in range(2):
-		draw_line(_spine[2], _hip_bones[hi], bone_col, 4.0, true)
-		draw_circle(_hip_bones[hi], 3.0, bone_col)
+		draw_line(_spine[2], _hip_bones[hi], bone_col, sc(4.0), true)
+		draw_circle(_hip_bones[hi], sc(3.0), bone_col)
 
 	for li in range(4):
 		if _leg_severed[li]:
 			# Draw stump at clavicle/hip bone endpoint
 			var stump: Vector2 = _clavicles[li] if li < 2 else _hip_bones[li - 2]
-			draw_circle(stump, 3.0, Color(0.5, 0.15, 0.1))
+			draw_circle(stump, sc(3.0), Color(0.5, 0.15, 0.1))
 			continue
 
 		var leg: Array = _legs[li]
@@ -4869,39 +4900,39 @@ func _draw_legs() -> void:
 		var claw_col := Color(0.25, 0.2, 0.18)
 
 		# Upper leg (rigid)
-		draw_line(leg[0], leg[1], leg_col, 5.0, true)
+		draw_line(leg[0], leg[1], leg_col, sc(5.0), true)
 		# Lower leg (±10% flex)
-		draw_line(leg[1], leg[2], leg_col, 4.0, true)
+		draw_line(leg[1], leg[2], leg_col, sc(4.0), true)
 		# Joint circles
-		draw_circle(leg[0], 4.0, leg_col)
-		draw_circle(leg[1], 3.5, leg_col)
+		draw_circle(leg[0], sc(4.0), leg_col)
+		draw_circle(leg[1], sc(3.5), leg_col)
 
 		# Foot / claw
 		var foot: Vector2 = leg[2]
 		var knee: Vector2 = leg[1]
 		var foot_dir: Vector2 = (foot - knee).normalized()
-		var claw_tip: Vector2 = foot + foot_dir * 6.0
+		var claw_tip: Vector2 = foot + foot_dir * sc(6.0)
 		var perp: Vector2 = Vector2(-foot_dir.y, foot_dir.x)
 		draw_polygon(PackedVector2Array([
-			foot + perp * 3.0,
-			foot - perp * 3.0,
+			foot + perp * sc(3.0),
+			foot - perp * sc(3.0),
 			claw_tip
 		]), PackedColorArray([claw_col, claw_col, claw_col]))
 
 
 func _draw_neck_head() -> void:
 	if _head_severed:
-		var stump: Vector2 = _spine[0] + Vector2(4 * _facing, -8)
-		draw_circle(stump, 4.0, Color(0.5, 0.15, 0.1))
+		var stump: Vector2 = _spine[0] + Vector2(sc(4) * _facing, -sc(8))
+		draw_circle(stump, sc(4.0), Color(0.5, 0.15, 0.1))
 		return
 
 	var neck_col := Color(0.33, 0.27, 0.22)
 
 	# Neck: thick line from spine[0] through neck tip to skull
-	draw_line(_neck[0], _neck[1], neck_col, 8.0, true)
-	draw_line(_neck[1], _skull, neck_col, 7.0, true)
-	draw_circle(_neck[0], 5.0, neck_col)
-	draw_circle(_neck[1], 4.5, neck_col)
+	draw_line(_neck[0], _neck[1], neck_col, sc(8.0), true)
+	draw_line(_neck[1], _skull, neck_col, sc(7.0), true)
+	draw_circle(_neck[0], sc(5.0), neck_col)
+	draw_circle(_neck[1], sc(4.5), neck_col)
 
 	# Head facing direction: derived from neck→skull vector
 	# All skull/jaw/eye points rotate to face this direction
@@ -4921,11 +4952,11 @@ func _draw_neck_head() -> void:
 	# Skull polygon (x=forward toward snout, y=upward toward top of skull)
 	var skull_col := Color(0.35, 0.28, 0.22)
 	var skull_local := [
-		Vector2(-12, 16),   # Back-top
-		Vector2(28, 12),    # Front-top
-		Vector2(32, -4),    # Front snout
-		Vector2(16, -12),   # Front-bottom
-		Vector2(-8, -8),    # Back-bottom
+		Vector2(-sc(12), sc(16)),   # Back-top
+		Vector2(sc(28), sc(12)),    # Front-top
+		Vector2(sc(32), -sc(4)),    # Front snout
+		Vector2(sc(16), -sc(12)),   # Front-bottom
+		Vector2(-sc(8), -sc(8)),    # Back-bottom
 	]
 	var skull_pts := PackedVector2Array()
 	for pt in skull_local:
@@ -4933,24 +4964,24 @@ func _draw_neck_head() -> void:
 	draw_polygon(skull_pts, PackedColorArray([skull_col, skull_col, skull_col, skull_col, skull_col]))
 
 	# Eye
-	var eye_local := Vector2(16, 5)
+	var eye_local := Vector2(sc(16), sc(5))
 	var eye_pos: Vector2 = _skull + eye_local.x * head_fwd + eye_local.y * head_up
 	if _asleep:
 		# Closed eye: horizontal line
-		draw_line(eye_pos - head_fwd * 3.0, eye_pos + head_fwd * 3.0, Color(0.4, 0.15, 0.1), 1.5)
+		draw_line(eye_pos - head_fwd * sc(3.0), eye_pos + head_fwd * sc(3.0), Color(0.4, 0.15, 0.1), sc(1.5))
 	else:
-		draw_circle(eye_pos, 4.0, Color(1.0, 0.2, 0.1))
-		draw_circle(eye_pos, 2.0, Color(1.0, 0.5, 0.2))
+		draw_circle(eye_pos, sc(4.0), Color(1.0, 0.2, 0.1))
+		draw_circle(eye_pos, sc(2.0), Color(1.0, 0.5, 0.2))
 
 	# Jaw (opens downward = negative head_up direction)
 	var jaw_col := Color(0.3, 0.24, 0.19)
-	var jaw_open_fwd: float = _jaw_open * 16.0
-	var jaw_open_down: float = _jaw_open * 8.0
+	var jaw_open_fwd: float = _jaw_open * sc(16.0)
+	var jaw_open_down: float = _jaw_open * sc(8.0)
 	var jaw_local := [
-		Vector2(-4, -8),                            # Back hinge
-		Vector2(28, -4 - jaw_open_fwd),             # Front tip
-		Vector2(20, -14 - jaw_open_fwd),            # Jaw tip far
-		Vector2(-4, -12 - jaw_open_down),           # Back bottom
+		Vector2(-sc(4), -sc(8)),                            # Back hinge
+		Vector2(sc(28), -sc(4) - jaw_open_fwd),             # Front tip
+		Vector2(sc(20), -sc(14) - jaw_open_fwd),            # Jaw tip far
+		Vector2(-sc(4), -sc(12) - jaw_open_down),           # Back bottom
 	]
 	var jaw_pts := PackedVector2Array()
 	for pt in jaw_local:
@@ -4961,11 +4992,11 @@ func _draw_neck_head() -> void:
 	var teeth_col := Color(0.9, 0.85, 0.7)
 	for i in range(4):
 		var t: float = float(i + 1) / 5.0
-		var base_local := Vector2(lerpf(4, 28, t), -4)
-		var tip_local := Vector2(base_local.x, base_local.y - 6 - _jaw_open * 5)
+		var base_local := Vector2(lerpf(sc(4), sc(28), t), -sc(4))
+		var tip_local := Vector2(base_local.x, base_local.y - sc(6) - _jaw_open * sc(5))
 		var base_pt: Vector2 = _skull + base_local.x * head_fwd + base_local.y * head_up
 		var tip_pt: Vector2 = _skull + tip_local.x * head_fwd + tip_local.y * head_up
-		draw_line(base_pt, tip_pt, teeth_col, 2.0)
+		draw_line(base_pt, tip_pt, teeth_col, sc(2.0))
 
 
 func _draw_debug() -> void:
@@ -4981,18 +5012,26 @@ func _draw_debug() -> void:
 		draw_line(Vector2(0, -20), Vector2(0, 20), red, 1.5)
 		draw_string(font, Vector2(4, -4), "ORIGIN(0,0)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, red)
 
+	# -- Scale info --
+	if creature_scale != 1.0 and DebugOverlay.should_draw("scaling/active_scale", self):
+		var scale_text := "SCALE: %.1fx" % creature_scale
+		draw_string(font, _spine[1] + Vector2(-sc(20), -sc(50)), scale_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 1.0, 0.5, 0.9))
+	if DebugOverlay.should_draw("scaling/effective_radii", self):
+		# Body clearance circle (what leap planning uses)
+		draw_arc(_spine[1], _body_clearance_radius(), 0, TAU, 32, Color(0.3, 1.0, 0.5, 0.3), 1.5)
+
 	# -- Floor line --
 	var floor_y: float = 0.0
 	if DebugOverlay.should_draw("body_mechanics/floor_line", self):
 		floor_y = _raycast_floor(Vector2(0, _spine[1].y))
-		draw_line(Vector2(-120, floor_y), Vector2(120, floor_y), yellow, 1.0)
-		draw_string(font, Vector2(-120, floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
+		draw_line(Vector2(-sc(120), floor_y), Vector2(sc(120), floor_y), yellow, 1.0)
+		draw_string(font, Vector2(-sc(120), floor_y - 4), "FLOOR y=%.0f" % floor_y, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, yellow)
 
 	# -- Body collision sphere (belly) --
 	if DebugOverlay.should_draw("body_mechanics/collision_shapes", self):
 		if _body_collision:
 			var col_col := Color(1, 0, 1, 0.3)
-			draw_arc(_body_collision.position, 14.0, 0, TAU, 16, col_col, 1.5)
+			draw_arc(_body_collision.position, sc(14.0), 0, TAU, 16, col_col, 1.5)
 			draw_string(font, _body_collision.position + Vector2(-12, -18), "BELLY", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col_col)
 
 	# -- Spine points --
@@ -5108,8 +5147,8 @@ func _draw_debug() -> void:
 	if is_instance_valid(_target) and (_state == State.ATTACK_LEAP_PLAN or not _leap_plan_results.is_empty()):
 		if DebugOverlay.should_draw("leap_attack/attack_zone", self):
 			var tgt_local: Vector2 = _leap_target_pos - global_position
-			draw_arc(tgt_local, LEAP_STRIKE_REACH, 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
-			draw_string(font, tgt_local + Vector2(LEAP_STRIKE_REACH + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
+			draw_arc(tgt_local, sc(LEAP_STRIKE_REACH), 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
+			draw_string(font, tgt_local + Vector2(sc(LEAP_STRIKE_REACH) + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
 
 		if DebugOverlay.should_draw("leap_attack/spots_considered", self):
 			for result in _leap_plan_results:

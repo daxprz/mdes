@@ -214,9 +214,20 @@ func _compute_rope_points(pos_a: Vector2, pos_b: Vector2, dist: float) -> void:
 		_rope_points.append(pt)
 
 
+func _get_creature_scale(anchor: Dictionary) -> float:
+	## Get creature_scale from the anchor's body, defaulting to 1.0.
+	var body: Node2D = anchor.get("body")
+	if is_instance_valid(body) and "creature_scale" in body:
+		return body.creature_scale
+	return 1.0
+
+
 func _draw() -> void:
 	if _rope_points.size() < 2:
 		return
+
+	# Rope thickness scales with creature size
+	var cs: float = maxf(_get_creature_scale(anchor_a), _get_creature_scale(anchor_b))
 
 	var tension: float = get_tension()
 	var hp_ratio: float = float(current_hp) / float(TETHER_MAX_HP)
@@ -231,17 +242,17 @@ func _draw() -> void:
 	if hp_ratio < 0.5:
 		rope_color = rope_color.lerp(Color(1.0, 0.2, 0.1, 0.9), 1.0 - hp_ratio * 2.0)
 
-	var width: float = 2.0 if tension < 0.3 else 2.5
+	var width: float = (2.0 if tension < 0.3 else 2.5) * cs
 
 	for i in range(_rope_points.size() - 1):
 		var a: Vector2 = _rope_points[i] - global_position
 		var b: Vector2 = _rope_points[i + 1] - global_position
 		if hp_ratio < 0.5:
-			var fray: float = (1.0 - hp_ratio * 2.0) * 3.0
+			var fray: float = (1.0 - hp_ratio * 2.0) * 3.0 * cs
 			a += Vector2(randf_range(-fray, fray), randf_range(-fray, fray))
 			b += Vector2(randf_range(-fray, fray), randf_range(-fray, fray))
 		draw_line(a, b, rope_color, width)
 
 	var hook_color := Color(0.6, 0.5, 0.35, 0.8)
-	draw_circle(_rope_points[0] - global_position, 3.0, hook_color)
-	draw_circle(_rope_points[_rope_points.size() - 1] - global_position, 3.0, hook_color)
+	draw_circle(_rope_points[0] - global_position, 3.0 * cs, hook_color)
+	draw_circle(_rope_points[_rope_points.size() - 1] - global_position, 3.0 * cs, hook_color)

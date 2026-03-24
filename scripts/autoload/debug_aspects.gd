@@ -74,3 +74,8 @@ func _register_all() -> void:
 	r.call("splay_poses/post_physics_pose", "Splay pose after physics solve")
 	r.call("splay_poses/chain_points", "On-body chain attachment points")
 	r.call("splay_poses/anchor_points", "On-wall anchor points")
+
+	# -- Scaling --
+	r.call("scaling/active_scale", "Current creature_scale factor overlay")
+	r.call("scaling/effective_radii", "Body radius circle, leap radius, hitbox extents")
+	r.call("scaling/speed_info", "Effective speed vs base speed tiers")

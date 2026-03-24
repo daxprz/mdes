@@ -39,9 +39,12 @@ Do NOT use tumu when:
 | `scripts/autoload/debug_overlay.gd` | Debug aspect system |
 | `scripts/autoload/debug_aspects.gd` | Registered debug aspects |
 | `scripts/systems/test_runner.gd` | Test execution engine |
-| `scripts/ui/debug_drawer.gd` | Debug config UI |
+| `scripts/ui/debug_drawer.gd` | Debug config UI + scale slider |
+| `scripts/ui/level_editor.gd` | Level editor with splay scale/rotate widget |
+| `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
+| `scripts/systems/chain.gd` | Chain physics + scaled rendering |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
-| `docs/epics/EPIC_quadruped_monster.md` | Monster system spec |
+| `docs/epics/EPIC_monster_scaling.md` | Monster scaling spec (COMPLETE) |
 
 ## Conventions
 

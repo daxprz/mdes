@@ -341,7 +341,8 @@ func _setup_splays_from_config(splays_config: Array) -> void:
 		var pos := Vector2(pos_arr[0], pos_arr[1])
 		var rot: float = splay_data.get("rotation", 0.0)
 		var behavior: String = splay_data.get("behavior", "asleep")
-		var result: Dictionary = mgr.spawn_splay(pose_name, pos, rot, behavior)
+		var splay_scale: float = splay_data.get("scale", 1.0)
+		var result: Dictionary = mgr.spawn_splay(pose_name, pos, rot, behavior, splay_scale)
 		# Store creature reference for the level editor drag system
 		if not result.is_empty() and not result.get("creatures", []).is_empty():
 			splay_data["_creature_ref"] = result["creatures"][0]

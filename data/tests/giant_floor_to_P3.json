@@ -1,0 +1,20 @@
+{
+	"name": "giant_floor_to_P3",
+	"description": "Two scaled monsters (0.5x and 2.0x) fight one target on upper-left platform P3",
+	"script": [
+		"var owait default=0",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn dummy 669 525",
+		"spawn monster 600 885 standdown scale=0.5",
+		"spawn monster 1300 885 standdown scale=2.0 pathing_radius=55",
+		"standdown off",
+		"wait 25 unless exit_circle 669 523 40 dummy*",
+		"standdown on",
+		"check hp extract:damage_taken > 0.0 label:damage",
+		"check fps extract:fps > 15.0",
+		"check ik extract:ik_peak < 3000.0 label:ik_peak",
+		"notify observations DONE [\"OK\"] {owait} editor"
+	]
+}

@@ -163,6 +163,25 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.1
+**Procedural Monster Scaling, Splay Scale Controls, Chain Scaling**
+
+- Single `creature_scale` float controls all monster dimensions (skeleton, collision, drawing, combat, pathing)
+- `sc()` helper scales 260+ spatial constants automatically; scale 1.0 is identical to pre-scaling behavior
+- Speed auto-scales with size; `speed_override` decouples speed from size
+- `pathing_radius` override lets large monsters path through standard-sized gaps
+- `spawn monster X Y [state] [scale=N] [pathing_radius=N]` RCON syntax
+- Splay manager spawns scaled creatures with scaled skeleton snapshots, connection offsets, and chain distances
+- Chain link width, shackles, wall pegs/rings scale with creature size
+- Tether rope width, hooks, and fray effect scale with creature size
+- Debug drawer: live scale slider on TAB-selected monster (Ctrl+D)
+- Level editor splay widget: draggable rotation handle (cyan circle) and scale handle (green diamond)
+- `splay spawn` RCON and level config support `scale=N`
+- All monsters auto-assign `entity_id` in `_ready()` via static counter
+- Level editor save dialog click detection fixed (screen-to-world coordinate conversion)
+- New test: `giant_floor_to_P3` (two scaled monsters, 0.5x and 2.0x, hunt one target)
+- Debug aspects: `scaling/active_scale`, `scaling/effective_radii`, `scaling/speed_info`
+
 ### v0.10.0
 **In-Game Test Editor, Arc Planning Fixes, Bounded Leap System — 25/26 tests pass (96%)**
 

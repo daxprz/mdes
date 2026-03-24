@@ -13,6 +13,9 @@ const MODE_COLORS := [
 	Color(0.4, 0.6, 1.0, 0.3),   # Platforms: blue
 	Color(0.9, 0.3, 0.9, 0.3),   # Portal: purple
 ]
+const SPLAY_ROT_HANDLE_DIST := 40.0   # Distance from center to rotation handle
+const SPLAY_SCALE_HANDLE_DIST := 60.0  # Distance from center to scale handle
+const SPLAY_HANDLE_RADIUS := 14.0       # Hit radius for handles
 
 signal config_changed(data: Dictionary)
 
@@ -214,6 +217,12 @@ func _input(event: InputEvent) -> void:
 			elif event.keycode == KEY_DOWN:
 				_splay_cycle_pose(-1)
 				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_BRACKETRIGHT:  # ] = scale up
+				_splay_adjust_scale(0.25)
+				get_viewport().set_input_as_handled()
+			elif event.keycode == KEY_BRACKETLEFT:   # [ = scale down
+				_splay_adjust_scale(-0.25)
+				get_viewport().set_input_as_handled()
 			elif event.keycode == KEY_B:
 				_splay_cycle_behavior()
 				get_viewport().set_input_as_handled()
@@ -323,7 +332,8 @@ func _input(event: InputEvent) -> void:
 		var vp2: Vector2 = get_viewport().get_visible_rect().size
 		var ldx: float = vp2.x / 2.0 - 160
 		var ldy: float = vp2.y / 2.0 - 40
-		var lmpos: Vector2 = event.position
+		# Dialog is drawn in world space on _overlay — convert click to world coords
+		var lmpos: Vector2 = _get_world_pos(event.position)
 		if Rect2(ldx + 20, ldy + 40, 120, 28).has_point(lmpos) and Version.is_source_mode():
 			_level_save_dialog_active = false
 			_save_original()
@@ -340,7 +350,8 @@ func _input(event: InputEvent) -> void:
 		var vp: Vector2 = get_viewport().get_visible_rect().size
 		var dx: float = vp.x / 2.0 - 160
 		var dy: float = vp.y / 2.0 - 40
-		var mpos: Vector2 = event.position
+		# Dialog is drawn in world space on _overlay — convert click to world coords
+		var mpos: Vector2 = _get_world_pos(event.position)
 		# Original button (left side)
 		var orig_rect := Rect2(dx + 20, dy + 40, 120, 28)
 		# Custom button (right side)
@@ -409,7 +420,9 @@ func _get_world_pos(screen_pos: Vector2) -> Vector2:
 
 func _start_drag(screen_pos: Vector2) -> void:
 	var world_pos: Vector2 = _get_world_pos(screen_pos)
-	_selected_idx = -1
+	# Preserve _selected_idx for splay handle checks (handles only exist on selected splay)
+	if _mode != Mode.SPLAY:
+		_selected_idx = -1
 	_dragging = false
 
 	match _mode:
@@ -438,9 +451,13 @@ func _stop_drag() -> void:
 		# Live refresh on drag release — skip for SPLAY modes (handled separately)
 		if _mode != Mode.SPLAY_EDIT and _mode != Mode.SPLAY:
 			config_changed.emit(_config)
+		# Splay rotation/scale drags: re-spawn to apply changes
+		if _mode == Mode.SPLAY and _drag_item_type in ["splay_rotate", "splay_scale"]:
+			config_changed.emit(_config)
 	_dragging = false
 	_drag_moved = false
 	_drag_handle = -1
+	_drag_item_type = ""
 	_splay_edit_dragging_endpoint = false
 	_splay_edit_rotating = false
 
@@ -1123,12 +1140,33 @@ func _get_splays() -> Array:
 
 func _try_select_splay(world_pos: Vector2) -> void:
 	var splays: Array = _get_splays()
+	# First: check handles on the currently selected splay (priority)
+	if _selected_idx >= 0 and _selected_idx < splays.size():
+		var s: Dictionary = splays[_selected_idx]
+		var p: Array = s.get("pos", [960, 500])
+		var pos := Vector2(p[0], p[1])
+		var rot_rad: float = deg_to_rad(s.get("rotation", 0))
+		var sc: float = s.get("scale", 1.0)
+		var rot_handle: Vector2 = pos + Vector2(cos(rot_rad), sin(rot_rad)) * SPLAY_ROT_HANDLE_DIST
+		var scale_handle: Vector2 = pos + Vector2(cos(rot_rad), sin(rot_rad)) * SPLAY_SCALE_HANDLE_DIST * sc
+		# Check scale handle first (it's farther out, overlaps less)
+		if world_pos.distance_to(scale_handle) < SPLAY_HANDLE_RADIUS:
+			_dragging = true
+			_drag_item_type = "splay_scale"
+			return
+		# Check rotation handle
+		if world_pos.distance_to(rot_handle) < SPLAY_HANDLE_RADIUS:
+			_dragging = true
+			_drag_item_type = "splay_rotate"
+			return
+	# Then: try selecting a splay by clicking its center
 	for i in range(splays.size()):
 		var p: Array = splays[i].get("pos", [960, 500])
 		var pos := Vector2(p[0], p[1])
 		if world_pos.distance_to(pos) < 40.0:
 			_selected_idx = i
 			_dragging = true
+			_drag_item_type = "splay_move"
 			return
 	_selected_idx = -1
 
@@ -1136,45 +1174,73 @@ func _try_select_splay(world_pos: Vector2) -> void:
 func _drag_splay(world_pos: Vector2) -> void:
 	if _selected_idx < 0:
 		return
+	var splays: Array = _get_splays()
+	if _selected_idx >= splays.size():
+		return
+
+	if _drag_item_type == "splay_rotate":
+		# Rotation: angle from center to mouse
+		var p: Array = splays[_selected_idx].get("pos", [960, 500])
+		var center := Vector2(p[0], p[1])
+		var angle: float = rad_to_deg((world_pos - center).angle())
+		splays[_selected_idx]["rotation"] = fmod(angle, 360.0)
+		_mark_changed("splays", _selected_idx)
+		_update_display()
+		return
+
+	if _drag_item_type == "splay_scale":
+		# Scale: distance from center / base handle distance = new scale
+		var p: Array = splays[_selected_idx].get("pos", [960, 500])
+		var center := Vector2(p[0], p[1])
+		var dist: float = world_pos.distance_to(center)
+		# At scale 1.0, the handle sits at SPLAY_SCALE_HANDLE_DIST (60px)
+		var new_scale: float = dist / SPLAY_SCALE_HANDLE_DIST
+		# Snap to nearest 0.25 for usability
+		new_scale = roundf(new_scale * 4.0) / 4.0
+		new_scale = clampf(new_scale, 0.25, 8.0)
+		splays[_selected_idx]["scale"] = new_scale
+		_mark_changed("splays", _selected_idx)
+		_update_display()
+		return
+
+	# Default: position drag
 	# Dragging = repositioning = cancel physics preview
 	if _splay_physics_preview:
 		_splay_cancel_physics_preview()
-	var splays: Array = _get_splays()
-	if _selected_idx < splays.size():
-		var old_pos_arr: Array = splays[_selected_idx].get("pos", [960, 500])
-		var old_pos := Vector2(old_pos_arr[0], old_pos_arr[1])
-		var delta_pos: Vector2 = world_pos - old_pos
-		splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
-		_mark_changed("splays", _selected_idx)
-		# Move the creature associated with this specific splay instance
-		# Only use stored reference — never guess by proximity (prevents moving wrong creature)
-		var target_enemy: Node2D = null
-		if splays[_selected_idx].has("_creature_ref"):
-			var ref: Node2D = splays[_selected_idx]["_creature_ref"] as Node2D
-			if is_instance_valid(ref):
-				target_enemy = ref
-		# Move the creature and its chains
-		if is_instance_valid(target_enemy):
-			target_enemy.global_position = world_pos
-			for tether in get_tree().get_nodes_in_group("tethers"):
-				if not is_instance_valid(tether):
-					continue
-				var ta: Dictionary = tether.anchor_a
-				var tb: Dictionary = tether.anchor_b
-				if ta.get("body") != target_enemy and tb.get("body") != target_enemy:
-					continue
-				# Move wall anchors
-				if ta.get("body") == target_enemy and tb.get("is_wall", false):
-					tb["pos"] = tb["pos"] + delta_pos
-				elif tb.get("body") == target_enemy and ta.get("is_wall", false):
-					ta["pos"] = ta["pos"] + delta_pos
-				# Shift chain Verlet points
-				if "_points" in tether:
-					for pi in range(tether._points.size()):
-						tether._points[pi] += delta_pos
-					if "_prev_points" in tether:
-						for pi in range(tether._prev_points.size()):
-							tether._prev_points[pi] += delta_pos
+	var old_pos_arr: Array = splays[_selected_idx].get("pos", [960, 500])
+	var old_pos := Vector2(old_pos_arr[0], old_pos_arr[1])
+	var delta_pos: Vector2 = world_pos - old_pos
+	splays[_selected_idx]["pos"] = [world_pos.x, world_pos.y]
+	_mark_changed("splays", _selected_idx)
+	# Move the creature associated with this specific splay instance
+	# Only use stored reference — never guess by proximity (prevents moving wrong creature)
+	var target_enemy: Node2D = null
+	if splays[_selected_idx].has("_creature_ref"):
+		var ref: Node2D = splays[_selected_idx]["_creature_ref"] as Node2D
+		if is_instance_valid(ref):
+			target_enemy = ref
+	# Move the creature and its chains
+	if is_instance_valid(target_enemy):
+		target_enemy.global_position = world_pos
+		for tether in get_tree().get_nodes_in_group("tethers"):
+			if not is_instance_valid(tether):
+				continue
+			var ta: Dictionary = tether.anchor_a
+			var tb: Dictionary = tether.anchor_b
+			if ta.get("body") != target_enemy and tb.get("body") != target_enemy:
+				continue
+			# Move wall anchors
+			if ta.get("body") == target_enemy and tb.get("is_wall", false):
+				tb["pos"] = tb["pos"] + delta_pos
+			elif tb.get("body") == target_enemy and ta.get("is_wall", false):
+				ta["pos"] = ta["pos"] + delta_pos
+			# Shift chain Verlet points
+			if "_points" in tether:
+				for pi in range(tether._points.size()):
+					tether._points[pi] += delta_pos
+				if "_prev_points" in tether:
+					for pi in range(tether._prev_points.size()):
+						tether._prev_points[pi] += delta_pos
 
 
 func _splay_toggle_physics_preview() -> void:
@@ -1320,6 +1386,20 @@ func _splay_cycle_behavior() -> void:
 	_update_display()
 
 
+func _splay_adjust_scale(delta: float) -> void:
+	if _selected_idx < 0:
+		return
+	var splays: Array = _get_splays()
+	if _selected_idx >= splays.size():
+		return
+	var current: float = splays[_selected_idx].get("scale", 1.0)
+	var new_scale: float = clampf(current + delta, 0.25, 8.0)
+	splays[_selected_idx]["scale"] = new_scale
+	_mark_changed("splays", _selected_idx)
+	config_changed.emit(_config)
+	_update_display()
+
+
 func _draw_splay_overlay() -> void:
 	var splays: Array = _get_splays()
 	var splay_col := Color(0.9, 0.4, 0.2, 0.7)
@@ -1357,13 +1437,40 @@ func _draw_splay_overlay() -> void:
 		if _changed_items.has("splays") and i in _changed_items["splays"]:
 			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(14, -14), "*", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color(1.0, 0.9, 0.2))
 
-		# Rotation arrow
 		var rot_rad: float = deg_to_rad(rot)
-		var arrow_end: Vector2 = pos + Vector2(cos(rot_rad), sin(rot_rad)) * 30.0
-		_overlay.draw_line(pos, arrow_end, col, 2.0)
-		var perp: Vector2 = Vector2(-sin(rot_rad), cos(rot_rad))
-		_overlay.draw_line(arrow_end, arrow_end - Vector2(cos(rot_rad), sin(rot_rad)) * 8 + perp * 5, col, 1.5)
-		_overlay.draw_line(arrow_end, arrow_end - Vector2(cos(rot_rad), sin(rot_rad)) * 8 - perp * 5, col, 1.5)
+		var rot_dir := Vector2(cos(rot_rad), sin(rot_rad))
+		var sc: float = s.get("scale", 1.0)
+
+		if is_selected:
+			# -- Rotation handle: circle at end of arm --
+			var rot_handle_pos: Vector2 = pos + rot_dir * SPLAY_ROT_HANDLE_DIST
+			_overlay.draw_line(pos, rot_handle_pos, Color(0.3, 0.8, 1.0, 0.6), 2.0)
+			var rot_handle_col := Color(0.3, 0.8, 1.0, 0.9) if _drag_item_type == "splay_rotate" else Color(0.3, 0.8, 1.0, 0.7)
+			_overlay.draw_circle(rot_handle_pos, 8.0, rot_handle_col)
+			_overlay.draw_string(ThemeDB.fallback_font, rot_handle_pos + Vector2(-12, -10), "%.0f°" % rot, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.3, 0.8, 1.0, 0.8))
+
+			# -- Scale handle: diamond at end of longer arm --
+			var scale_handle_pos: Vector2 = pos + rot_dir * SPLAY_SCALE_HANDLE_DIST * sc
+			_overlay.draw_line(rot_handle_pos, scale_handle_pos, Color(0.3, 1.0, 0.5, 0.4), 1.5)
+			var scale_handle_col := Color(0.3, 1.0, 0.5, 0.9) if _drag_item_type == "splay_scale" else Color(0.3, 1.0, 0.5, 0.7)
+			# Diamond shape
+			var dsize: float = 7.0
+			var perp := Vector2(-rot_dir.y, rot_dir.x)
+			var diamond := PackedVector2Array([
+				scale_handle_pos + rot_dir * dsize,
+				scale_handle_pos + perp * dsize,
+				scale_handle_pos - rot_dir * dsize,
+				scale_handle_pos - perp * dsize,
+			])
+			_overlay.draw_polygon(diamond, PackedColorArray([scale_handle_col, scale_handle_col, scale_handle_col, scale_handle_col]))
+			_overlay.draw_string(ThemeDB.fallback_font, scale_handle_pos + Vector2(-12, -10), "x%.2f" % sc, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.3, 1.0, 0.5, 0.8))
+		else:
+			# Non-selected: simple rotation arrow
+			var arrow_end: Vector2 = pos + rot_dir * 30.0
+			_overlay.draw_line(pos, arrow_end, col, 2.0)
+			var perp := Vector2(-rot_dir.y, rot_dir.x)
+			_overlay.draw_line(arrow_end, arrow_end - rot_dir * 8 + perp * 5, col, 1.5)
+			_overlay.draw_line(arrow_end, arrow_end - rot_dir * 8 - perp * 5, col, 1.5)
 
 		# Labels
 		var display_pose_name: String = s.get("pose", "?")
@@ -1373,12 +1480,11 @@ func _draw_splay_overlay() -> void:
 		else:
 			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -22), display_pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
 		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -10), behavior, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.7))
-		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, 26), "rot:%.0f" % rot, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.5))
 
 	# Help text
 	if _active:
 		var physics_str: String = " [PHYSICS ON]" if _splay_physics_preview else ""
-		var help := "SPLAY: N=add  P=library  `=physics%s  Del=delete  L/R=rotate  U/D=pose  B=behavior  E=edit  Drag=move" % physics_str
+		var help := "SPLAY: N=add  P=library  `=physics%s  Del=delete  U/D=pose  B=behavior  E=edit  Drag: body=move  ○=rotate  ◇=scale" % physics_str
 		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))
 
 

@@ -240,6 +240,32 @@ When TAB-selected in debug mode:
 - **Orange circle + "WAYPOINT"**: current walk destination
 - **Status line**: `PRECOG: GRAPH plats:5 edges:20 path:2 hop:1/1`
 
+## Procedural Scaling
+
+The monster's size is controlled by a single `creature_scale` float (default `1.0`). All spatial dimensions are derived via the `sc(base)` helper which returns `base * creature_scale`.
+
+### What Scales
+- **Skeleton geometry**: all bone lengths, rest poses, body height
+- **Collision**: body sphere, hitbox radii, attach point radii
+- **Locomotion**: step threshold/height, foot push force, stride, floor raycast distance
+- **Speed**: auto-scales with size (`base * creature_scale`) unless `speed_override >= 0`
+- **Combat ranges**: bite, tail, grab, sprint slash, lunge — all via `sc()`
+- **Leap planning**: body clearance radius, strike reach, launch speed cap, bounding arcs
+- **Drawing**: every line thickness, circle radius, polygon vertex, joint size
+- **Chains/tethers**: link width, shackle size, peg/ring, rope thickness, hook circles
+
+### Pathing Radius Override
+`pathing_radius` (default -1 = auto) overrides the body clearance radius for leap planning. Allows a visually large monster to path through gaps sized for a smaller one.
+
+### Entity ID
+Every monster is guaranteed a unique `entity_id`. Auto-assigned as `monster_N` in `_ready()` via static counter if not pre-set by the spawner.
+
+### RCON
+```
+spawn monster 960 885 standdown scale=2.0 pathing_radius=55
+splay spawn t-pose 960 500 0 asleep scale=2.0
+```
+
 ## RCON Server
 
 TCP server on port 9999 for external tool control. Enables automated testing without a controller.
@@ -250,7 +276,7 @@ TCP server on port 9999 for external tool control. Enables automated testing wit
 |---------|-------------|
 | `help` | List all commands |
 | `debug` | Toggle debug mode |
-| `spawn monster [x y]` | Spawn quadruped at position |
+| `spawn monster [x y] [state] [scale=N] [pathing_radius=N]` | Spawn quadruped at position |
 | `spawn dummy [x y]` | Spawn controllerless dummy player |
 | `tp <x> <y>` | Teleport first player to position |
 | `tab [n]` | Cycle debug selection n times |
