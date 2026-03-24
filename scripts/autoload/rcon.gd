@@ -401,18 +401,27 @@ func _execute(command: String) -> String:
 
 		"suite":
 			if parts.size() < 2:
-				return "ERR: usage: suite <suite_name> [key=value ...]"
+				return "ERR: usage: suite <suite_name> [key=value ...] [skip test1 test2 ...]"
 			var editor: Node = _ensure_test_editor()
 			if editor:
-				# Parse optional key=value args
+				# Parse optional key=value args and skip list
 				var override_vars: Dictionary = {"owait": "600"}  # Default for RCON
+				var skip_tests: Array[String] = []
+				var parsing_skip: bool = false
 				for pi in range(2, parts.size()):
-					var eq := parts[pi].find("=")
-					if eq > 0:
-						override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
+					if parts[pi] == "skip":
+						parsing_skip = true
+						continue
+					if parsing_skip:
+						skip_tests.append(parts[pi])
+					else:
+						var eq := parts[pi].find("=")
+						if eq > 0:
+							override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
 				editor._test_override_vars = override_vars
-				editor.run_suite(parts[1])
-				return "OK: running suite '%s' in editor (%s)" % [parts[1], str(override_vars)]
+				editor.run_suite(parts[1], skip_tests)
+				var skip_str: String = " skip=%s" % str(skip_tests) if not skip_tests.is_empty() else ""
+				return "OK: running suite '%s' in editor (%s)%s" % [parts[1], str(override_vars), skip_str]
 			return "ERR: failed to open test editor"
 
 		"tests":

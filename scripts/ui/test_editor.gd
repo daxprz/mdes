@@ -1409,8 +1409,9 @@ func _restart_test() -> void:
 	_run_test()
 
 
-func run_suite(suite_name: String) -> void:
+func run_suite(suite_name: String, skip_tests: Array[String] = []) -> void:
 	## Load a suite and run each test sequentially through the editor.
+	## skip_tests: test names to exclude from this run.
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if not rcon:
 		return
@@ -1425,10 +1426,16 @@ func run_suite(suite_name: String) -> void:
 	_suite_queue = []
 	_suite_results = []
 	_suite_current_idx = 0
+	var skipped: int = 0
 	for t in suite.get("tests", []):
-		_suite_all_tests.append(str(t))
-		_suite_queue.append(str(t))
-	_status_msg = "Suite '%s' — %d tests" % [_suite_name, _suite_all_tests.size()]
+		var tname: String = str(t)
+		_suite_all_tests.append(tname)
+		if tname in skip_tests:
+			skipped += 1
+			continue
+		_suite_queue.append(tname)
+	var skip_str: String = " (skipping %d)" % skipped if skipped > 0 else ""
+	_status_msg = "Suite '%s' — %d tests%s" % [_suite_name, _suite_queue.size(), skip_str]
 	_status_timer = 2.0
 	_suite_run_next()
 
@@ -1471,7 +1478,8 @@ func _suite_show_results() -> void:
 			passed += 1
 	_status_msg = "Suite '%s': %d/%d PASSED" % [_suite_name, passed, total]
 	_status_timer = 10.0
-	# Suite results shown in the editor status — no separate grid overlay
+	# Print to stdout so log polling can detect suite completion
+	print("SUITE_COMPLETE %s %d/%d" % [_suite_name, passed, total])
 	# Write suite output to file
 	_write_suite_output(passed, total)
 	_suite_name = ""

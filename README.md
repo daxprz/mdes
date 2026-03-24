@@ -163,6 +163,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.3
+**Suite skip support, suite completion logging, test-gate polling fix**
+
+- `suite` RCON command supports `skip test1 test2 ...` to exclude tests from a run
+- Suite completion prints `SUITE_COMPLETE <name> X/Y` to stdout for log-based polling
+- `/test-gate` command polls via separate 1-second Bash calls instead of blocking loops
+- All 4 gate suites pass: combat 14/14, chained 7/7, leaping 5/5, scaling 1/1
+
 ### v0.10.2
 **Test Gate System, Suite Partitioning, Release Workflow**
 

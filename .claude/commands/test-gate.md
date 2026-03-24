@@ -33,9 +33,7 @@ Source files can declare which suites they affect with trailing comments:
 func _plan_leap_to_surface(...):  # TEST ts:leaping ts:combat
 ```
 
-This means: changes near this code should trigger the `leaping` and `combat` suites.
-
-These annotations are OPTIONAL. Without them, the system falls back to "any .gd change = all gate suites stale."
+These are OPTIONAL. Without them, any `.gd` change = all gate suites stale.
 
 ## Steps
 
@@ -51,26 +49,21 @@ For each gate suite, check git tags:
 git tag -l "ts/<suite>/*"
 ```
 
-Determine state:
 - **No tag exists** → NEVER_TESTED → must run
 - **`ts/<suite>/pass` exists** → check if stale (step 3)
-- **`ts/<suite>/fail` exists** → KNOWN_BROKEN → should run (might be fixed now)
+- **`ts/<suite>/fail` exists** → KNOWN_BROKEN → should run
 
 ### 3. Check Staleness
 
-For suites with a `pass` tag, check if code changed since:
+For suites with a `pass` tag at HEAD → CLEAN, skip. Otherwise check if code changed:
 
 ```bash
 git log --oneline ts/<suite>/pass..HEAD -- "*.gd"
 ```
 
-If commits exist that touch `.gd` files → suite is STALE.
-
-**Refined check** (when `# TEST ts:<suite>` annotations exist in the codebase): only mark a suite stale if files that changed since its tag contain a `# TEST ts:<suite>` annotation for that specific suite. If no annotations exist anywhere, fall back to: any `.gd` change = all gate suites stale.
+If `.gd` files changed → STALE → must run.
 
 ### 4. Print Status Table
-
-Before running anything, print a table showing only gate suites:
 
 ```
 Suite       | Tag State      | Stale? | Action
@@ -81,26 +74,46 @@ leaping     | fail @ def456  | -      | RUN (known broken)
 scaling     | pass @ abc123  | YES    | RUN
 ```
 
-### 5. Run Stale/Needed Suites
+### 5. Run Suites
 
-For each gate suite that needs running:
+Run each stale/needed gate suite via RCON suite command and poll for completion.
+
+**IMPORTANT: Always use the suite API, never run tests individually.**
+
+For each suite:
 1. Verify Godot is running: `echo "status" | nc -w2 localhost 9999`
-2. If not running, warn and STOP — do NOT auto-launch
-3. Run: `echo "suite <name> owait=0" | nc -w2 localhost 9999`
-4. Wait: test count * 12s as baseline (suite runner handles sequencing)
-5. Collect results: `scripts/run_test.sh` or parse Godot log for `=== X/Y PASSED ===`
+2. If not running, warn and STOP
+3. Start the suite:
+```bash
+echo "suite <name> owait=0" | nc -w2 localhost 9999
+```
+4. Poll at 1-second intervals using SEPARATE Bash calls (never a blocking loop). Check the Godot log for the suite completion line:
+```bash
+# Each poll is a separate Bash tool call — never use while/loop
+grep "SUITE_COMPLETE <name>" /tmp/godot_debug.log | tail -1
+```
+The line format is: `SUITE_COMPLETE <suite_name> X/Y` where X=passed, Y=total.
+When this line appears for the current suite (that wasn't there before), the suite is done.
+5. Parse the result: extract X and Y from `SUITE_COMPLETE <name> X/Y`.
+
+The suite command also supports skipping tests:
+```bash
+echo "suite combat owait=0 skip leap_floor_to_P4" | nc -w2 localhost 9999
+```
+
+**IMPORTANT**: Never use `sleep` with values greater than 1.
 
 ### 6. Record Results
 
 After each suite completes:
 
-**If ALL tests passed:**
+**If ALL tests passed (X == Y):**
 ```bash
 git tag -f "ts/<suite>/pass" HEAD
 git tag -d "ts/<suite>/fail" 2>/dev/null
 ```
 
-**If any test failed:**
+**If any test failed (X < Y):**
 ```bash
 git tag -f "ts/<suite>/fail" HEAD
 git tag -d "ts/<suite>/pass" 2>/dev/null
@@ -108,10 +121,7 @@ git tag -d "ts/<suite>/pass" 2>/dev/null
 
 ### 7. Handle Failures
 
-If any gate suite failed:
-1. Create/update `.claude/agents/tumu/inbox/test_failures.md` with:
-   - Suite name, which tests failed, timestamp, commit hash
-2. Print failure summary
+If any gate suite failed, create/update `.claude/agents/tumu/inbox/test_failures.md` with suite name, score, timestamp, commit hash.
 
 ### 8. Final Report
 
@@ -125,12 +135,11 @@ leaping     | FAIL    | 4/5
 scaling     | PASS    | 1/1
 
 Tags updated: ts/chained/pass, ts/combat/pass, ts/leaping/fail, ts/scaling/pass
-Failures tracked in: .claude/agents/tumu/inbox/test_failures.md
 ```
 
 ## Notes
 
 - Tags are LOCAL only. Push with `git push origin --tags` if desired.
-- Non-gate suites (`all`, `todo`) are never auto-run. Use them manually: `suite all owait=0` or `suite todo owait=600`.
-- Gate suites must partition `all.json` — every test in exactly one gate suite.
-- Estimated run time: ~5 min for all 4 gate suites (27 tests total at owait=0).
+- Non-gate suites (`all`, `todo`) are never auto-run.
+- Gate suites must partition `all.json` — every test in exactly one gate suite, no overlaps.
+- Estimated run time: ~5 min for all 4 gate suites (27 tests at owait=0).
