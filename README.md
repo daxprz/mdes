@@ -163,6 +163,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.13
+**Momentum speed curves and head tracking fix**
+
+- **Asymmetric acceleration/deceleration**: Separate `accel_rate` (200, slow buildup) and `decel_rate` (600, hard braking) replace the single `speed_blend_rate`
+- **Speed-dependent stride**: Stride offset scales with current speed (0.15 * speed). Short choppy steps at low speed, long fluid strides at top speed
+- **Speed-dependent step height**: Foot lift scales with speed ratio — higher arcs during fast movement
+- **Head tracking fix**: Skull aim anchored from spine[0] (neck base, correct height) instead of spine[1] (body center, caused upward-looking head). Aim direction still computed from stable body center
+- Exaggerated tests updated: `exag_floor_sprint` and `exag_speed_transitions` use `accel_rate=80, decel_rate=300-400` for visible momentum
+- `accel_rate` and `decel_rate` added to `monster_defaults.json`
+- Exaggerated suite 4/4 passed
+
 ### v0.10.12
 **All monster constants routed through cfg() — fully runtime-configurable**
 

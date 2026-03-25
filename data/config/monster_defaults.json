@@ -23,6 +23,8 @@
 
 	"turn_speed": 5.0,
 	"speed_blend_rate": 400.0,
+	"accel_rate": 200.0,
+	"decel_rate": 600.0,
 	"landing_recovery_time": 0.25,
 	"landing_compress": 8.0,
 	"fall_threshold": 0.15,

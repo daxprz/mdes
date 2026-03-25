@@ -6,7 +6,7 @@
 		"clear",
 		"portal off",
 		"clearplayers",
-		"spawn monster 960 885 standdown scale=2.0 config={turn_speed=3.0,speed_blend_rate=100.0,stiffness=6.0}",
+		"spawn monster 960 885 standdown scale=2.0 config={turn_speed=3.0,accel_rate=80.0,decel_rate=300.0,stiffness=6.0}",
 		"spawn dummy 1100 885",
 		"debug on body_mechanics/spine_debug",
 		"debug on body_mechanics/leg_debug",

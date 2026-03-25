@@ -200,7 +200,9 @@ const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
 # Movement blending
 const TURN_SPEED := 5.0          # How fast _facing lerps to _facing_target (per second)
-const SPEED_BLEND_RATE := 400.0  # How fast _move_speed lerps to _target_move_speed (px/s²)
+const SPEED_BLEND_RATE := 400.0  # Legacy — replaced by ACCEL_RATE/DECEL_RATE but kept as fallback
+const ACCEL_RATE := 200.0        # How fast _move_speed increases (px/s²) — slow buildup
+const DECEL_RATE := 600.0        # How fast _move_speed decreases (px/s²) — hard braking
 const LANDING_RECOVERY_TIME := 0.25  # Seconds of landing compression after a fall
 const LANDING_COMPRESS := 8.0    # Extra spine dip in pixels during landing recovery
 const FALL_THRESHOLD := 0.15     # Seconds of airborne before landing recovery triggers
@@ -1233,13 +1235,14 @@ func _solve_pose(delta: float) -> void:
 		var to_target: Vector2 = _target.global_position - global_position
 		var aim_dir: Vector2 = to_target.normalized()
 
-		# Place skull along the aim direction, at the 2.5D projected distance.
-		# Anchor from spine[1] (body center, stable) not spine[0] (breathing-affected).
-		# This prevents idle breathing oscillation from flipping the skull.
+		# Place skull along the aim direction from the neck base (spine[0]).
+		# aim_dir is computed from global_position (stable center, no breathing
+		# oscillation) but the skull is ANCHORED from spine[0] so it stays
+		# at the correct height relative to the neck.
 		var skull_full_dist: float = sc(cfg("neck_len", NECK_LEN)) + _skull_rest.length()
 		var skull_aim_vec: Vector2 = aim_dir * skull_full_dist
 		var skull_proj_dist: float = _projected_len(skull_full_dist, skull_aim_vec)
-		var skull_aim: Vector2 = _spine[1] + aim_dir * skull_proj_dist
+		var skull_aim: Vector2 = _spine[0] + aim_dir * skull_proj_dist
 		# During turns, fully override the rest target to avoid snap from
 		# _get_facing_offset. When not turning, blend normally.
 		var turn_override: float = 1.0 - absf(_facing)  # 0 when facing ±1, 1 at mid-turn
@@ -1501,10 +1504,13 @@ func _update_movement_blend(delta: float) -> void:
 		DebugOverlay.log("monster/blend", self, "TURN: facing=%.2f target=%.0f", [
 			_facing, _facing_target])
 
-	# -- Speed blend --
-	# Lerp move speed toward target. Gait naturally transitions as stride ramps.
+	# -- Speed blend with asymmetric acceleration/deceleration --
+	# Heavy creature: slow to build speed, fast to brake. Gait naturally transitions
+	# as stride length and step frequency scale with current speed.
 	if _move_speed != _target_move_speed:
-		_move_speed = move_toward(_move_speed, _target_move_speed, cfg("speed_blend_rate", SPEED_BLEND_RATE) * delta)
+		var speeding_up: bool = absf(_target_move_speed) > absf(_move_speed)
+		var rate: float = cfg("accel_rate", ACCEL_RATE) if speeding_up else cfg("decel_rate", DECEL_RATE)
+		_move_speed = move_toward(_move_speed, _target_move_speed, rate * delta)
 
 	# -- Landing recovery --
 	# Track time airborne. When we land after a fall, apply brief spine compression.
@@ -1828,13 +1834,17 @@ func _try_step_pair(a: int, b: int) -> void:
 
 func _ideal_foot_world(li: int) -> Vector2:
 	## Where this foot SHOULD be in world space: directly below the hip
-	## with a small forward offset based on movement direction.
+	## with a forward offset that scales with current speed.
+	## At low speed: feet stay close under the body (short choppy steps).
+	## At high speed: feet reach further forward (long fluid strides).
 	var hip_local: Vector2 = _legs[li][0]
 	var hip_world: Vector2 = global_position + hip_local
-	# Small stride offset — keeps feet mostly under the body
-	var stride: float = _want_direction * minf(_move_speed * 0.1, sc(20.0))
+	# Stride scales with speed: 0.15 * speed gives more reach at high speed.
+	# At SPEED_SLOW (60): stride = 9px. At SPEED_FAST (240): stride = 36px.
+	var max_stride: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN) * 0.8)  # Don't exceed ~80% of leg reach
+	var stride: float = _want_direction * minf(_move_speed * 0.15, max_stride)
 	if li >= 2:
-		# Rear legs: slightly behind
+		# Rear legs: offset behind — provides push
 		stride *= -0.3
 	var target_x: float = hip_world.x + stride
 	var floor_y: float = _raycast_floor(Vector2(target_x - global_position.x, hip_local.y)) + global_position.y
@@ -1866,8 +1876,11 @@ func _try_step(li: int) -> void:
 		var target_floor_y: float = _raycast_floor(Vector2(target_local_x, _legs[li][0].y)) + global_position.y
 		_step_targets[li].y = target_floor_y
 
-		# Bezier midpoint: lifted arc between start and end
-		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -sc(cfg("step_height", STEP_HEIGHT)))
+		# Bezier midpoint: lifted arc between start and end.
+		# Step height scales with speed — higher lifts at faster movement.
+		var base_height: float = sc(cfg("step_height", STEP_HEIGHT))
+		var speed_ratio: float = clampf(_move_speed / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.3, 1.5)
+		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -base_height * speed_ratio)
 
 
 func _animate_step(li: int, delta: float) -> void:
