@@ -163,6 +163,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.11
+**Config provider stack — composable monster configuration**
+
+- **Stack-based config system**: Monster constants resolved via a priority stack of providers. First non-null wins, falls back to GDScript const
+- **Provider types**: `DictProvider` (JSON/dictionaries), `CallableProvider` (dynamic functions), `TimedProvider` (auto-expiring wrapper for buffs/debuffs)
+- **JSON defaults**: `data/config/monster_defaults.json` with 60+ configurable values (physics, movement, combat, leap, health, grab, sprint, precog)
+- **Timed buffs via RCON**: `buff <duration> <key=value> ...` applies temporary overrides to all monsters. Auto-pruned every 60 frames
+- `apply_timed_config()` convenience method for programmatic buff/debuff application
+- `push_config()` / `remove_config()` for direct stack manipulation (power-ups, state modifiers)
+- Spawn `config={}` overrides now use the stack (DictProvider) instead of a flat dictionary
+- All 27 tests pass, zero failures
+
 ### v0.10.10
 **Exaggerated animation test suite and animation roadmap**
 

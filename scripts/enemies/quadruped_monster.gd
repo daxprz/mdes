@@ -4,6 +4,8 @@ extends CharacterBody2D
 ## Verlet physics skeleton with 23 tracked points.
 ## All rendering via _draw(), no sprites.
 
+const MCP = preload("res://scripts/systems/monster_config.gd")
+
 signal died(global_pos: Vector2)
 
 # -- Scale ---------------------------------------------------------------------
@@ -17,23 +19,75 @@ var pathing_radius: float = -1.0  # If >= 0, overrides sc(LEAP_BODY_RADIUS) for 
 func sc(base: float) -> float:
 	return base * creature_scale
 
-## Runtime config overrides. Keys match const names (lowercase). Values override
-## the const at runtime. Applied via apply_config() from RCON spawn or test scripts.
-var _cfg: Dictionary = {}
+## Config stack: array of MonsterConfigProvider, checked in order (index 0 = highest
+## priority). First non-null result wins. Push/pop providers for temporary effects
+## (power-ups, debuffs, state modifiers). Base defaults loaded from JSON in _ready().
+var _config_stack: Array = []  # Array[MonsterConfigProvider]
 
-## Look up a configurable value. Returns the override if set, otherwise the default.
+## Look up a configurable value. Walks the config stack, returns first non-null.
+## Falls back to default_val (the GDScript const) if no provider has the key.
 func cfg(key: String, default_val: float) -> float:
-	if _cfg.has(key):
-		return float(_cfg[key])
+	for provider in _config_stack:
+		var val: Variant = provider.get_value(key)
+		if val != null:
+			return float(val)
 	return default_val
 
-## Apply a config dictionary. Keys are constant names (case-insensitive).
-## Called from RCON spawn command with config={k=v,k=v} syntax.
+## Push a config provider onto the top of the stack (highest priority).
+func push_config(provider: Variant) -> void:
+	_config_stack.insert(0, provider)
+	DebugOverlay.log("monster/state", self, "CONFIG PUSH: %s (stack depth=%d)" % [
+		str(provider), _config_stack.size()])
+
+## Remove a specific provider from the stack.
+func remove_config(provider: Variant) -> void:
+	_config_stack.erase(provider)
+	DebugOverlay.log("monster/state", self, "CONFIG POP: %s (stack depth=%d)" % [
+		str(provider), _config_stack.size()])
+
+## Remove all expired TimedProviders from the stack.
+func prune_expired_configs() -> void:
+	var before: int = _config_stack.size()
+	_config_stack = _config_stack.filter(func(p): return not p.is_expired())
+	if _config_stack.size() != before:
+		DebugOverlay.log("monster/state", self, "CONFIG PRUNE: %d expired (stack depth=%d)" % [
+			before - _config_stack.size(), _config_stack.size()])
+
+## Apply a config dictionary as a DictProvider at the top of the stack.
+## Convenience method for RCON spawn overrides and test scripts.
 func apply_config(overrides: Dictionary) -> void:
+	var normalized: Dictionary = {}
 	for key in overrides:
-		_cfg[key.to_lower()] = overrides[key]
-	DebugOverlay.log("monster/state", self, "CONFIG: applied %d overrides: %s" % [
-		overrides.size(), str(overrides)])
+		normalized[key.to_lower()] = overrides[key]
+	var provider := MCP.DictProvider.new(normalized, "spawn_override")
+	push_config(provider)
+
+## Apply a timed config override. Automatically expires after duration seconds.
+## Used for buffs/debuffs via RCON: buff <duration> <key=value> ...
+func apply_timed_config(overrides: Dictionary, duration: float, provider_name: String = "timed") -> void:
+	var normalized: Dictionary = {}
+	for key in overrides:
+		normalized[key.to_lower()] = overrides[key]
+	var dict_prov := MCP.DictProvider.new(normalized, provider_name)
+	var timed_prov := MCP.TimedProvider.new(dict_prov, duration, provider_name)
+	push_config(timed_prov)
+
+## Load base defaults from JSON. Called during _ready().
+func _load_config_defaults() -> void:
+	var path: String = "res://data/config/monster_defaults.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+		var data: Dictionary = json.data
+		data.erase("_comment")
+		var provider := MCP.DictProvider.new(data, "defaults")
+		_config_stack.append(provider)  # Append = lowest priority
+		DebugOverlay.log("monster/state", self, "CONFIG LOAD: %d defaults from %s" % [
+			data.size(), path])
 
 ## Get the effective body radius used for leap/pathing clearance.
 ## Uses pathing_radius if set, otherwise sc(LEAP_BODY_RADIUS).
@@ -427,6 +481,9 @@ func _ready() -> void:
 	add_to_group("enemies")
 	collision_layer = 8
 	collision_mask = 1
+
+	# Load base config defaults from JSON (lowest priority in stack)
+	_load_config_defaults()
 
 	# Guarantee every monster has an entity_id
 	if entity_id == "":
@@ -893,6 +950,9 @@ func _physics_process(delta: float) -> void:
 			get_tree().create_timer(0.1).timeout.connect(_precache_platforms)
 
 	_timer += delta
+	# Prune expired timed config providers every 60 frames
+	if Engine.get_frames_drawn() % 60 == 0:
+		prune_expired_configs()
 	if _attack_cooldown > 0.0:
 		_attack_cooldown -= delta
 	if _leap_cooldown > 0.0:

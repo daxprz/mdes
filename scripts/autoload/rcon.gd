@@ -388,6 +388,27 @@ func _execute(command: String) -> String:
 		"standdown":
 			return _cmd_standdown(parts)
 
+		"buff":
+			# Apply a timed config override to all monsters
+			# Usage: buff <duration> <key=value> [key=value ...]
+			# Example: buff 5 speed_slow=200 bite_damage=50
+			if parts.size() < 3:
+				return "ERR: usage: buff <duration_seconds> <key=value> [key=value ...]"
+			var buff_duration: float = float(parts[1])
+			var buff_overrides: Dictionary = {}
+			for pi in range(2, parts.size()):
+				var eq: int = parts[pi].find("=")
+				if eq > 0:
+					buff_overrides[parts[pi].substr(0, eq).to_lower()] = parts[pi].substr(eq + 1)
+			if buff_overrides.is_empty():
+				return "ERR: no key=value pairs provided"
+			var buff_count: int = 0
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if e.has_method("apply_timed_config"):
+					e.apply_timed_config(buff_overrides, buff_duration, "buff_%.0fs" % buff_duration)
+					buff_count += 1
+			return "OK: applied %d overrides for %.0fs to %d monsters" % [buff_overrides.size(), buff_duration, buff_count]
+
 		"attacker":
 			return _cmd_attacker(parts)
 

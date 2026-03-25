@@ -190,9 +190,26 @@ Instead of instant state snaps, movement properties blend smoothly:
 - **Speed blend**: `_move_speed` lerps toward `_target_move_speed` at `SPEED_BLEND_RATE` (400 px/s²). Gait (stride, step frequency) transitions smoothly as speed ramps.
 - **Landing recovery**: After `FALL_THRESHOLD` (0.15s) of airborne time, landing triggers a `LANDING_RECOVERY_TIME` (0.25s) compression. Spine dips by `LANDING_COMPRESS` (8px, scaled), foot push force is reduced up to 70%, then eases back to normal. Debug aspect: `monster/blend`.
 
-### Runtime Config (`cfg()`)
+### Runtime Config Stack (`cfg()`)
 
-All meaningful constants can be overridden at spawn time via `config={k=v,k=v}` on the RCON spawn command. The monster stores overrides in `_cfg` dictionary, and `cfg(key, default)` returns the override if set, otherwise the const default. Currently configurable: `turn_speed`, `speed_blend_rate`, `landing_recovery_time`, `landing_compress`, `fall_threshold`, `stiffness`, `head_track_speed`, `step_threshold`, `step_duration`, `step_height`, `foot_push_force`, `foot_grip`, `shoulder_z_depth`. Test scripts can use this to exaggerate parameters for visual verification (see `exaggerated_animations` suite).
+All monster constants are configurable via a stack of config providers (`scripts/systems/monster_config.gd`). When `cfg(key, default)` is called, providers are checked in priority order (index 0 = highest). First non-null result wins. GDScript `const` values are the absolute fallback.
+
+**Provider types:**
+- `DictProvider` — wraps a Dictionary (JSON files, spawn overrides)
+- `CallableProvider` — calls a function per lookup (dynamic state-based values)
+- `TimedProvider` — wraps any provider with an expiry (buffs/debuffs, auto-pruned)
+
+**Stack layers (typical order):**
+1. Timed buffs/debuffs (highest priority, expire automatically)
+2. Spawn overrides (`config={k=v}` from RCON)
+3. Base defaults (`data/config/monster_defaults.json`, 60+ values)
+4. GDScript `const` (absolute fallback)
+
+**RCON commands:**
+- `spawn monster X Y config={turn_speed=2.0,stiffness=6.0}` — permanent overrides
+- `buff <duration> <key=value> ...` — timed overrides on all monsters
+
+See `exaggerated_animations` suite for test scripts using config overrides.
 
 ## Debug Inspector
 
