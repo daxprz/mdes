@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.12
+**All monster constants routed through cfg() — fully runtime-configurable**
+
+- All 60+ monster constants now use `cfg(key, DEFAULT)` instead of bare const references
+- Covers: gravity, mass, all segment lengths, stiffness, speed tiers, all combat damage/ranges/cooldowns, leap planning params, health values, grab/sprint/hop-up/precog tuning
+- Every value can be overridden at spawn time (`config={}`), via timed buffs (`buff` command), or programmatically via the config provider stack
+- GDScript `const` declarations preserved as absolute fallbacks
+- `monster_defaults.json` serves as the single source of truth for default values
+- All 27 tests pass, zero failures
+
 ### v0.10.11
 **Config provider stack — composable monster configuration**
 

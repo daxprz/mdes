@@ -209,7 +209,7 @@ All monster constants are configurable via a stack of config providers (`scripts
 - `spawn monster X Y config={turn_speed=2.0,stiffness=6.0}` — permanent overrides
 - `buff <duration> <key=value> ...` — timed overrides on all monsters
 
-See `exaggerated_animations` suite for test scripts using config overrides.
+All 60+ monster constants are now routed through `cfg()` — every physics, movement, combat, leap, health, grab, sprint, hop-up, and precog value is runtime-configurable. See `exaggerated_animations` suite for test scripts using config overrides.
 
 ## Debug Inspector
 

@@ -13,7 +13,7 @@ signal died(global_pos: Vector2)
 # All spatial dimensions derive from this via the sc() helper.
 var creature_scale: float = 1.0
 var speed_override: float = -1.0  # If >= 0, overrides auto-scaled speed tiers
-var pathing_radius: float = -1.0  # If >= 0, overrides sc(LEAP_BODY_RADIUS) for all clearance checks
+var pathing_radius: float = -1.0  # If >= 0, overrides sc(cfg("leap_body_radius", LEAP_BODY_RADIUS)) for all clearance checks
 
 ## Scale a base value by creature_scale. Use for all spatial constants.
 func sc(base: float) -> float:
@@ -90,11 +90,11 @@ func _load_config_defaults() -> void:
 			data.size(), path])
 
 ## Get the effective body radius used for leap/pathing clearance.
-## Uses pathing_radius if set, otherwise sc(LEAP_BODY_RADIUS).
+## Uses pathing_radius if set, otherwise sc(cfg("leap_body_radius", LEAP_BODY_RADIUS)).
 func _body_clearance_radius() -> float:
 	if pathing_radius >= 0:
 		return pathing_radius
-	return sc(LEAP_BODY_RADIUS)
+	return sc(cfg("leap_body_radius", LEAP_BODY_RADIUS))
 
 ## Get effective speed for a base speed tier. Scales with creature_scale
 ## unless speed_override is set.
@@ -164,7 +164,7 @@ func _enter_state(new_state: State, _old_state: State) -> void:
 	if new_state in [State.ATTACK_BITE, State.ATTACK_SWIPE, State.ATTACK_TAIL,
 		State.ATTACK_LUNGE, State.ATTACK_SPRINT_SLASH, State.ATTACK_HOP_UP,
 		State.ATTACK_GRAB, State.ATTACK_LEAP_PLAN]:
-		_attack_cooldown = ATTACK_COOLDOWN
+		_attack_cooldown = cfg("attack_cooldown", ATTACK_COOLDOWN)
 
 	match new_state:
 		State.STANDDOWN:
@@ -341,8 +341,8 @@ var _step_center: Array[Vector2] = []    # Bezier control point (world)
 
 # -- State ---------------------------------------------------------------------
 
-var health: int = MAX_HEALTH
-var mass: float = MASS
+var health: int = int(cfg("max_health", MAX_HEALTH))  # Overridden in _ready() via cfg()
+var mass: float = MASS  # Overridden in _ready() via cfg()
 var _dead := false
 var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
@@ -499,27 +499,27 @@ func _ready() -> void:
 
 func _init_skeleton() -> void:
 	# Body height: spine elevated so feet rest at y=0 (floor contact)
-	var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))  # ~-50 at scale 1
+	var body_y: float = -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)))  # ~-50 at scale 1
 
 	# Spine: horizontal at body_y
 	_spine.resize(3)
 	_spine_rest.resize(3)
 	for i in range(3):
-		_spine[i] = Vector2((1 - i) * sc(SPINE_SEG_LEN) * _facing, body_y)
+		_spine[i] = Vector2((1 - i) * sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
 	_spine_rest[0] = Vector2.ZERO  # spine[0] is the anchor
-	_spine_rest[1] = Vector2(-sc(SPINE_SEG_LEN) * _facing, 0)  # offset from spine[0]
-	_spine_rest[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, 0)  # offset from spine[1]
+	_spine_rest[1] = Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, 0)  # offset from spine[0]
+	_spine_rest[2] = Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, 0)  # offset from spine[1]
 
 	# Neck: extends forward-up from spine[0]
 	_neck.resize(2)
 	_neck[0] = _spine[0]
-	_neck_rest = Vector2(sc(NECK_LEN) * 0.8 * _facing, -sc(NECK_LEN) * 0.7)
+	_neck_rest = Vector2(sc(cfg("neck_len", NECK_LEN)) * 0.8 * _facing, -sc(cfg("neck_len", NECK_LEN)) * 0.7)
 	_neck[1] = _spine[0] + _neck_rest
 
 	# Head: skull connects directly to neck tip (no gap), 2x size
 	_skull_rest = Vector2(sc(14) * _facing, -sc(8))
 	_skull = _neck[1] + _skull_rest
-	_jaw_rest = Vector2(sc(8) * _facing, sc(JAW_LEN) * 0.6)
+	_jaw_rest = Vector2(sc(8) * _facing, sc(cfg("jaw_len", JAW_LEN)) * 0.6)
 	_jaw = _skull + _jaw_rest
 
 	# Tail: extends backward from spine[2], slightly raised (rigid)
@@ -527,7 +527,7 @@ func _init_skeleton() -> void:
 	_tail_rest.resize(5)
 	for i in range(5):
 		# Tail goes backward and slightly up, rigid like a counterbalance
-		_tail_rest[i] = Vector2(-sc(TAIL_SEG_LEN) * _facing, -sc(2.0))
+		_tail_rest[i] = Vector2(-sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * _facing, -sc(2.0))
 	var tail_anchor: Vector2 = _spine[2] + Vector2(-sc(4) * _facing, -sc(2))
 	for i in range(5):
 		if i == 0:
@@ -538,16 +538,16 @@ func _init_skeleton() -> void:
 	# Clavicles: short rigid bones from spine[0] outward to arm attachment points
 	_clavicles.resize(2)
 	_clavicle_rest.resize(2)
-	_clavicle_rest[0] = Vector2(-sc(CLAVICLE_LEN) * 0.5, sc(CLAVICLE_LEN) * 0.8)   # Left arm (toward front-left)
-	_clavicle_rest[1] = Vector2(sc(CLAVICLE_LEN) * 0.5, sc(CLAVICLE_LEN) * 0.8)    # Right arm (toward front-right)
+	_clavicle_rest[0] = Vector2(-sc(cfg("clavicle_len", CLAVICLE_LEN)) * 0.5, sc(cfg("clavicle_len", CLAVICLE_LEN)) * 0.8)   # Left arm (toward front-left)
+	_clavicle_rest[1] = Vector2(sc(cfg("clavicle_len", CLAVICLE_LEN)) * 0.5, sc(cfg("clavicle_len", CLAVICLE_LEN)) * 0.8)    # Right arm (toward front-right)
 	_clavicles[0] = _spine[0] + _clavicle_rest[0]
 	_clavicles[1] = _spine[0] + _clavicle_rest[1]
 
 	# Hip bones: short rigid bones from spine[2] outward to leg attachment points
 	_hip_bones.resize(2)
 	_hip_bone_rest.resize(2)
-	_hip_bone_rest[0] = Vector2(-sc(HIP_BONE_LEN) * 0.5, sc(HIP_BONE_LEN) * 0.8)   # Left leg
-	_hip_bone_rest[1] = Vector2(sc(HIP_BONE_LEN) * 0.5, sc(HIP_BONE_LEN) * 0.8)    # Right leg
+	_hip_bone_rest[0] = Vector2(-sc(cfg("hip_bone_len", HIP_BONE_LEN)) * 0.5, sc(cfg("hip_bone_len", HIP_BONE_LEN)) * 0.8)   # Left leg
+	_hip_bone_rest[1] = Vector2(sc(cfg("hip_bone_len", HIP_BONE_LEN)) * 0.5, sc(cfg("hip_bone_len", HIP_BONE_LEN)) * 0.8)    # Right leg
 	_hip_bones[0] = _spine[2] + _hip_bone_rest[0]
 	_hip_bones[1] = _spine[2] + _hip_bone_rest[1]
 
@@ -572,15 +572,15 @@ func _init_skeleton() -> void:
 		var leg: Array[Vector2] = []
 		leg.resize(3)
 		leg[0] = hip_anchor
-		leg[1] = hip_anchor + Vector2(0, sc(LEG_UPPER_LEN))
+		leg[1] = hip_anchor + Vector2(0, sc(cfg("leg_upper_len", LEG_UPPER_LEN)))
 		leg[2] = Vector2(hip_anchor.x, 0)
 		_legs[li] = leg
 
 		var rest: Array[Vector2] = []
 		rest.resize(3)
 		rest[0] = Vector2(side_x, sc(6))
-		rest[1] = Vector2(0, sc(LEG_UPPER_LEN))
-		rest[2] = Vector2(0, sc(LEG_LOWER_LEN))
+		rest[1] = Vector2(0, sc(cfg("leg_upper_len", LEG_UPPER_LEN)))
+		rest[2] = Vector2(0, sc(cfg("leg_lower_len", LEG_LOWER_LEN)))
 		_leg_rest[li] = rest
 
 		# Initialize foot world positions (will be set properly on first frame)
@@ -594,13 +594,13 @@ func _init_skeleton() -> void:
 
 func _init_part_health() -> void:
 	_part_health = {
-		"body": { "max_hp": MAX_HEALTH, "current_hp": MAX_HEALTH, "damage_state": DamageState.NONE },
-		"head": { "max_hp": HEAD_HEALTH, "current_hp": HEAD_HEALTH, "damage_state": DamageState.NONE },
-		"tail": { "max_hp": TAIL_HEALTH, "current_hp": TAIL_HEALTH, "damage_state": DamageState.NONE },
-		"leg0": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
-		"leg1": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
-		"leg2": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
-		"leg3": { "max_hp": LEG_HEALTH, "current_hp": LEG_HEALTH, "damage_state": DamageState.NONE },
+		"body": { "max_hp": int(cfg("max_health", MAX_HEALTH)), "current_hp": int(cfg("max_health", MAX_HEALTH)), "damage_state": DamageState.NONE },
+		"head": { "max_hp": int(cfg("head_health", HEAD_HEALTH)), "current_hp": int(cfg("head_health", HEAD_HEALTH)), "damage_state": DamageState.NONE },
+		"tail": { "max_hp": int(cfg("tail_health", TAIL_HEALTH)), "current_hp": int(cfg("tail_health", TAIL_HEALTH)), "damage_state": DamageState.NONE },
+		"leg0": { "max_hp": int(cfg("leg_health", LEG_HEALTH)), "current_hp": int(cfg("leg_health", LEG_HEALTH)), "damage_state": DamageState.NONE },
+		"leg1": { "max_hp": int(cfg("leg_health", LEG_HEALTH)), "current_hp": int(cfg("leg_health", LEG_HEALTH)), "damage_state": DamageState.NONE },
+		"leg2": { "max_hp": int(cfg("leg_health", LEG_HEALTH)), "current_hp": int(cfg("leg_health", LEG_HEALTH)), "damage_state": DamageState.NONE },
+		"leg3": { "max_hp": int(cfg("leg_health", LEG_HEALTH)), "current_hp": int(cfg("leg_health", LEG_HEALTH)), "damage_state": DamageState.NONE },
 	}
 
 
@@ -898,7 +898,7 @@ func _apply_attach_forces(delta: float) -> void:
 	# If net force is upward and strong enough, counteract gravity
 	if total_force.y < 0:
 		var lift_ratio: float = clampf(absf(total_force.y) / body_weight, 0.0, 2.0)
-		velocity.y -= GRAVITY * delta * lift_ratio * 0.8
+		velocity.y -= cfg("gravity", GRAVITY) * delta * lift_ratio * 0.8
 		# Cap upward speed
 		if velocity.y < -120.0:
 			velocity.y = -120.0
@@ -978,7 +978,7 @@ func _physics_process(delta: float) -> void:
 				# Try a direct leap toward the target if close enough
 				if is_instance_valid(_target) and _state == State.CHASE:
 					var to_target: Vector2 = _target.global_position - global_position
-					if to_target.length() < sc(LEAP_RANGE) and _leap_cooldown <= 0.0:
+					if to_target.length() < sc(cfg("leap_range", LEAP_RANGE)) and _leap_cooldown <= 0.0:
 						_facing_target = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing_target
 						_start_leap()
 		else:
@@ -998,7 +998,7 @@ func _physics_process(delta: float) -> void:
 		elif not chained_on_floor and _state != State.ATTACK_LEAP_AIRBORNE and _state != State.ATTACK_LEAP_WINDUP:
 			# AWAKE but SUSPENDED (dangling): apply gravity, constrain by chain
 			# Skip during leap flight — let the leap physics run freely
-			velocity.y += GRAVITY * delta
+			velocity.y += cfg("gravity", GRAVITY) * delta
 			_apply_chain_constraints()
 			move_and_slide()
 			_apply_chain_constraints()
@@ -1007,7 +1007,7 @@ func _physics_process(delta: float) -> void:
 				for li in range(4):
 					if _leg_severed[li]:
 						continue
-					_legs[li][2].y += GRAVITY * delta * 0.1
+					_legs[li][2].y += cfg("gravity", GRAVITY) * delta * 0.1
 			_enforce_spine_rigid()
 			# Enforce limb rigidity + replant unreachable feet
 			for li in range(4):
@@ -1020,16 +1020,16 @@ func _physics_process(delta: float) -> void:
 				if _foot_planted[li]:
 					var foot_local: Vector2 = _foot_world[li] - global_position
 					var reach: float = _legs[li][0].distance_to(foot_local)
-					if reach > sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX):
+					if reach > sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 + cfg("limb_flex", LIMB_FLEX)):
 						var floor_y: float = _raycast_floor(_legs[li][0])
 						_legs[li][2] = Vector2(_legs[li][0].x, floor_y)
 						_foot_world[li] = global_position + _legs[li][2]
 				var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 				if upper_dir.length() > 0.01:
-					_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
+					_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(cfg("leg_upper_len", LEG_UPPER_LEN))
 				var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 				if lower_dir.length() > 0.01:
-					var clamped: float = clampf(lower_dir.length(), sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX), sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX))
+					var clamped: float = clampf(lower_dir.length(), sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 - cfg("limb_flex", LIMB_FLEX)), sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 + cfg("limb_flex", LIMB_FLEX)))
 					_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 			_update_hitbox_positions()
 			_update_blood_particles(delta)
@@ -1043,7 +1043,7 @@ func _physics_process(delta: float) -> void:
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
-		velocity.y += GRAVITY * delta
+		velocity.y += cfg("gravity", GRAVITY) * delta
 
 	# State machine (sets _want_direction and _target_move_speed)
 	_want_direction = 0.0
@@ -1137,13 +1137,13 @@ func _physics_process(delta: float) -> void:
 				var current_dir: Vector2 = tail_dir.normalized()
 				# Clamp angle relative to previous segment direction
 				var angle_diff: float = prev_dir.angle_to(current_dir)
-				if absf(angle_diff) > TAIL_MAX_BEND:
-					var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
+				if absf(angle_diff) > cfg("tail_max_bend", TAIL_MAX_BEND):
+					var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -cfg("tail_max_bend", TAIL_MAX_BEND), cfg("tail_max_bend", TAIL_MAX_BEND))
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
 				# Clamp distance (±5% flex) with 2.5D projection during turns
 				# Use rest direction (horizontal) not current direction
-				var proj_len: float = _projected_len(sc(TAIL_SEG_LEN), _tail_rest[ti] if ti < _tail_rest.size() else Vector2(sc(TAIL_SEG_LEN), 0))
-				var clamped_len: float = clampf(tail_dist, proj_len * (1.0 - TAIL_FLEX), proj_len * (1.0 + TAIL_FLEX))
+				var proj_len: float = _projected_len(sc(cfg("tail_seg_len", TAIL_SEG_LEN)), _tail_rest[ti] if ti < _tail_rest.size() else Vector2(sc(cfg("tail_seg_len", TAIL_SEG_LEN)), 0))
+				var clamped_len: float = clampf(tail_dist, proj_len * (1.0 - cfg("tail_flex", TAIL_FLEX)), proj_len * (1.0 + cfg("tail_flex", TAIL_FLEX)))
 				_tail[ti] = tail_parent + current_dir * clamped_len
 				prev_dir = current_dir
 			tail_parent = _tail[ti]
@@ -1163,7 +1163,7 @@ func _physics_process(delta: float) -> void:
 			var foot_local: Vector2 = _foot_world[li] - global_position
 			var hip: Vector2 = _legs[li][0]
 			var reach: float = hip.distance_to(foot_local)
-			var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX)
+			var max_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 + cfg("limb_flex", LIMB_FLEX))
 			if reach <= max_reach:
 				# Foot is reachable — use world position
 				_legs[li][2] = foot_local
@@ -1175,17 +1175,17 @@ func _physics_process(delta: float) -> void:
 			# Enforce rigid upper limb from hip toward knee (2.5D projected)
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(LEG_UPPER_LEN), upper_dir)
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(cfg("leg_upper_len", LEG_UPPER_LEN)), upper_dir)
 		else:
 			# Not planted or IK off: enforce from hip downward (2.5D projected)
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(LEG_UPPER_LEN), upper_dir)
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(cfg("leg_upper_len", LEG_UPPER_LEN)), upper_dir)
 			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 			var lower_dist: float = lower_dir.length()
 			if lower_dist > 0.01:
-				var proj_lower: float = _projected_len(sc(LEG_LOWER_LEN), lower_dir)
-				var clamped: float = clampf(lower_dist, proj_lower * (1.0 - LIMB_FLEX), proj_lower * (1.0 + LIMB_FLEX))
+				var proj_lower: float = _projected_len(sc(cfg("leg_lower_len", LEG_LOWER_LEN)), lower_dir)
+				var clamped: float = clampf(lower_dist, proj_lower * (1.0 - cfg("limb_flex", LIMB_FLEX)), proj_lower * (1.0 + cfg("limb_flex", LIMB_FLEX)))
 				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 
 	# Affix body collider to torso (skip during grab — grab controls collision)
@@ -1236,7 +1236,7 @@ func _solve_pose(delta: float) -> void:
 		# Place skull along the aim direction, at the 2.5D projected distance.
 		# Anchor from spine[1] (body center, stable) not spine[0] (breathing-affected).
 		# This prevents idle breathing oscillation from flipping the skull.
-		var skull_full_dist: float = sc(NECK_LEN) + _skull_rest.length()
+		var skull_full_dist: float = sc(cfg("neck_len", NECK_LEN)) + _skull_rest.length()
 		var skull_aim_vec: Vector2 = aim_dir * skull_full_dist
 		var skull_proj_dist: float = _projected_len(skull_full_dist, skull_aim_vec)
 		var skull_aim: Vector2 = _spine[1] + aim_dir * skull_proj_dist
@@ -1248,7 +1248,7 @@ func _solve_pose(delta: float) -> void:
 
 		# Neck tip bends toward skull
 		var neck_toward_skull: Vector2 = (skull_rest_target - _spine[0]).normalized()
-		var neck_proj: float = _projected_len(sc(NECK_LEN), neck_toward_skull * sc(NECK_LEN))
+		var neck_proj: float = _projected_len(sc(cfg("neck_len", NECK_LEN)), neck_toward_skull * sc(cfg("neck_len", NECK_LEN)))
 		var neck_aim: Vector2 = _spine[0] + neck_toward_skull * neck_proj
 		neck_rest_target = neck_rest_target.lerp(neck_aim, aim_blend)
 
@@ -1257,12 +1257,12 @@ func _solve_pose(delta: float) -> void:
 
 	# -- Jaw: springs from skull, opens for bite --
 	var jaw_offset: Vector2 = _get_facing_offset(_jaw_rest)
-	jaw_offset.y += _jaw_open * JAW_LEN * 0.5  # Open jaw
+	jaw_offset.y += _jaw_open * cfg("jaw_len", JAW_LEN) * 0.5  # Open jaw
 	_jaw = _jaw.lerp(_skull + jaw_offset, s_clamp)
 
 	# -- Tail: rigid by default, loose only during whip --
 	if not _tail_severed:
-		var tail_s: float = (TAIL_WHIP_STIFFNESS if _tail_whipping else TAIL_STIFFNESS) * delta
+		var tail_s: float = (cfg("tail_whip_stiffness", TAIL_WHIP_STIFFNESS) if _tail_whipping else cfg("tail_stiffness", TAIL_STIFFNESS)) * delta
 		tail_s = minf(tail_s, 1.0)
 		var parent: Vector2 = _spine[2] + Vector2(-4 * _facing, -2)
 		for i in range(5):
@@ -1290,11 +1290,11 @@ func _solve_pose(delta: float) -> void:
 		for ci in range(2):
 			var side: float = -1.0 if ci == 0 else 1.0
 			var rest_dir: Vector2 = (spine_down + spine_fwd * side * 0.3).normalized()
-			var rest_target: Vector2 = _spine[0] + rest_dir * sc(CLAVICLE_LEN)
+			var rest_target: Vector2 = _spine[0] + rest_dir * sc(cfg("clavicle_len", CLAVICLE_LEN))
 			_clavicles[ci] = _clavicles[ci].lerp(rest_target, s_clamp)
 			var dir: Vector2 = _clavicles[ci] - _spine[0]
 			if dir.length() > 0.01:
-				_clavicles[ci] = _spine[0] + dir.normalized() * sc(CLAVICLE_LEN)
+				_clavicles[ci] = _spine[0] + dir.normalized() * sc(cfg("clavicle_len", CLAVICLE_LEN))
 
 		var spine_back: Vector2 = (_spine[2] - _spine[1]).normalized()
 		var spine_down2: Vector2 = Vector2(-spine_back.y, spine_back.x)
@@ -1303,18 +1303,18 @@ func _solve_pose(delta: float) -> void:
 		for hi in range(2):
 			var side: float = -1.0 if hi == 0 else 1.0
 			var rest_dir: Vector2 = (spine_down2 + spine_back * side * 0.3).normalized()
-			var rest_target: Vector2 = _spine[2] + rest_dir * sc(HIP_BONE_LEN)
+			var rest_target: Vector2 = _spine[2] + rest_dir * sc(cfg("hip_bone_len", HIP_BONE_LEN))
 			_hip_bones[hi] = _hip_bones[hi].lerp(rest_target, s_clamp)
 			var dir: Vector2 = _hip_bones[hi] - _spine[2]
 			if dir.length() > 0.01:
-				_hip_bones[hi] = _spine[2] + dir.normalized() * sc(HIP_BONE_LEN)
+				_hip_bones[hi] = _spine[2] + dir.normalized() * sc(cfg("hip_bone_len", HIP_BONE_LEN))
 
 	# -- Legs: 2-bone IK from hip to foot, knee solved --
-	var max_leg_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
+	var max_leg_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 	for li in range(4):
 		if _leg_severed[li]:
 			for j in range(3):
-				_legs[li][j].y += GRAVITY * delta * 0.3
+				_legs[li][j].y += cfg("gravity", GRAVITY) * delta * 0.3
 			continue
 
 		# Hip: pinned to clavicle endpoint (arms) or hip bone endpoint (legs)
@@ -1344,7 +1344,7 @@ func _solve_pose(delta: float) -> void:
 		bend_dir *= _facing
 		var knee_pos: Vector2 = _solve_leg_ik(
 			_legs[li][0], _legs[li][2],
-			sc(LEG_UPPER_LEN), sc(LEG_LOWER_LEN),
+			sc(cfg("leg_upper_len", LEG_UPPER_LEN)), sc(cfg("leg_lower_len", LEG_LOWER_LEN)),
 			bend_dir
 		)
 		# Snap knee to IK solution (fast lerp to prevent sticking)
@@ -1353,14 +1353,14 @@ func _solve_pose(delta: float) -> void:
 		# -- Rigid upper limb: enforce exact LEG_UPPER_LEN from hip to knee --
 		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 		if upper_dir.length() > 0.01:
-			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
+			_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(cfg("leg_upper_len", LEG_UPPER_LEN))
 
 		# -- Flex lower limb: enforce LEG_LOWER_LEN ±10% from knee to foot --
 		var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 		var lower_dist: float = lower_dir.length()
 		if lower_dist > 0.01:
-			var min_len: float = sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX)
-			var max_len: float = sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX)
+			var min_len: float = sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 - cfg("limb_flex", LIMB_FLEX))
+			var max_len: float = sc(cfg("leg_lower_len", LEG_LOWER_LEN)) * (1.0 + cfg("limb_flex", LIMB_FLEX))
 			var clamped_len: float = clampf(lower_dist, min_len, max_len)
 			_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped_len
 
@@ -1400,7 +1400,7 @@ func _score_ik_quality() -> void:
 	if Engine.get_frames_drawn() % 10 != 0:
 		return
 
-	var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
+	var max_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 	var score: float = 0.0
 
 	for li in range(4):
@@ -1614,13 +1614,13 @@ func _enforce_spine_rigid() -> void:
 	# Spine chain: spine[0] is the anchor.
 	# Use REST-POSE direction (horizontal) for _projected_len, not current direction,
 	# because during a turn the current direction becomes vertical as X collapses.
-	var spine_rest_dir := Vector2(sc(SPINE_SEG_LEN), 0)  # Spine is horizontal in rest
+	var spine_rest_dir := Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)), 0)  # Spine is horizontal in rest
 	if _pose_locked:
 		# Distance-only enforcement — preserve the current angles
 		for i in range(1, 3):
 			var dir: Vector2 = (_spine[i] - _spine[i - 1])
 			if dir.length() > 0.01:
-				_spine[i] = _spine[i - 1] + dir.normalized() * _projected_len(sc(SPINE_SEG_LEN), spine_rest_dir)
+				_spine[i] = _spine[i - 1] + dir.normalized() * _projected_len(sc(cfg("spine_seg_len", SPINE_SEG_LEN)), spine_rest_dir)
 	else:
 		# Full enforcement: distances + max 30° bend angles
 		# Reference direction for spine[0]→[1]: facing direction (horizontal)
@@ -1630,10 +1630,10 @@ func _enforce_spine_rigid() -> void:
 			if dir.length() > 0.01:
 				var current_dir: Vector2 = dir.normalized()
 				var angle_diff: float = spine_ref_dir.angle_to(current_dir)
-				if absf(angle_diff) > SPINE_MAX_BEND:
-					var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
+				if absf(angle_diff) > cfg("spine_max_bend", SPINE_MAX_BEND):
+					var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -cfg("spine_max_bend", SPINE_MAX_BEND), cfg("spine_max_bend", SPINE_MAX_BEND))
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-				_spine[i] = _spine[i - 1] + current_dir * _projected_len(sc(SPINE_SEG_LEN), spine_rest_dir)
+				_spine[i] = _spine[i - 1] + current_dir * _projected_len(sc(cfg("spine_seg_len", SPINE_SEG_LEN)), spine_rest_dir)
 				spine_ref_dir = current_dir
 
 	# Neck: distance enforcement (+ angle constraints when not pose_locked)
@@ -1645,10 +1645,10 @@ func _enforce_spine_rigid() -> void:
 			# Angle constraint: 45° max bend from spine forward direction
 			var neck_ref_dir: Vector2 = (_spine[0] - _spine[1]).normalized()
 			var angle_diff: float = neck_ref_dir.angle_to(current_dir)
-			if absf(angle_diff) > NECK_MAX_BEND:
-				var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+			if absf(angle_diff) > cfg("neck_max_bend", NECK_MAX_BEND):
+				var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -cfg("neck_max_bend", NECK_MAX_BEND), cfg("neck_max_bend", NECK_MAX_BEND))
 				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-		_neck[1] = _spine[0] + current_dir * _projected_len(sc(NECK_LEN), _neck_rest)
+		_neck[1] = _spine[0] + current_dir * _projected_len(sc(cfg("neck_len", NECK_LEN)), _neck_rest)
 
 	# Skull: distance enforcement (+ angle constraints when not pose_locked)
 	var skull_dist: float = _skull_rest.length()
@@ -1658,8 +1658,8 @@ func _enforce_spine_rigid() -> void:
 		if not _pose_locked:
 			var skull_ref_dir: Vector2 = (_neck[1] - _spine[0]).normalized()
 			var angle_diff: float = skull_ref_dir.angle_to(current_dir)
-			if absf(angle_diff) > NECK_MAX_BEND:
-				var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
+			if absf(angle_diff) > cfg("neck_max_bend", NECK_MAX_BEND):
+				var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -cfg("neck_max_bend", NECK_MAX_BEND), cfg("neck_max_bend", NECK_MAX_BEND))
 				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
 		_skull = _neck[1] + current_dir * _projected_len(skull_dist, _skull_rest)
 
@@ -1667,10 +1667,10 @@ func _enforce_spine_rigid() -> void:
 	# Each clavicle has a Z-depth (perpendicular to the body plane). During turns,
 	# the near-side shoulder sweeps inward and the far-side shoulder sweeps outward,
 	# creating a realistic 3D rotation effect projected to 2D.
-	_enforce_shoulder_3d(_spine[0], _clavicles, _clavicle_rest, sc(CLAVICLE_LEN))
+	_enforce_shoulder_3d(_spine[0], _clavicles, _clavicle_rest, sc(cfg("clavicle_len", CLAVICLE_LEN)))
 
 	# Hip bones: same 2.5D rotation around spine[2]
-	_enforce_shoulder_3d(_spine[2], _hip_bones, _hip_bone_rest, sc(HIP_BONE_LEN))
+	_enforce_shoulder_3d(_spine[2], _hip_bones, _hip_bone_rest, sc(cfg("hip_bone_len", HIP_BONE_LEN)))
 
 
 # -- Spine & Posture ----------------------------------------------------------
@@ -1679,7 +1679,7 @@ func _update_spine() -> void:
 	# Spine height is relative to the real floor under the body.
 	# Raycast from body center to find the floor, then position spine above it.
 	var floor_y: float = _raycast_floor(Vector2(0, _spine[1].y if _spine.size() > 1 else -30))
-	var leg_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(4.0)  # How high above floor
+	var leg_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)) - sc(4.0)  # How high above floor
 	var body_y: float = floor_y - leg_reach
 
 	# Landing recovery: compress spine downward briefly after a fall
@@ -1691,7 +1691,7 @@ func _update_spine() -> void:
 
 	# In bipedal, front raises higher
 	var spine_y_front: float = lerpf(body_y, body_y - sc(30.0), _posture_blend)
-	_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, spine_y_front)
+	_spine[0] = Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, spine_y_front)
 	# spine[1] and [2] follow via _solve_pose constraints
 
 
@@ -1715,7 +1715,7 @@ func _update_foot_push(delta: float) -> void:
 
 		# Each planted foot pushes the body in the desired direction.
 		# Force scales with desired speed.
-		push_x += _want_direction * sc(cfg("foot_push_force", FOOT_PUSH_FORCE)) * (_move_speed / _effective_speed(SPEED_MEDIUM))
+		push_x += _want_direction * sc(cfg("foot_push_force", FOOT_PUSH_FORCE)) * (_move_speed / _effective_speed(cfg("speed_medium", SPEED_MEDIUM)))
 
 	# Landing recovery: reduce push force while absorbing impact
 	if _landing_timer > 0.0:
@@ -1746,7 +1746,7 @@ func _update_gait(delta: float) -> void:
 		_spine[i].y += breathe_offset * delta * 4.0
 
 	# Convert planted feet from world space to local space for rendering/IK
-	var max_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
+	var max_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 	for li in range(4):
 		if _leg_severed[li]:
 			continue
@@ -1860,7 +1860,7 @@ func _try_step(li: int) -> void:
 
 		# Overshoot past the ideal position
 		var toward_ideal: Vector2 = ideal - foot_pos
-		_step_targets[li] = ideal + toward_ideal.normalized() * toward_ideal.length() * STEP_OVERSHOOT
+		_step_targets[li] = ideal + toward_ideal.normalized() * toward_ideal.length() * cfg("step_overshoot", STEP_OVERSHOOT)
 		# Raycast the target to make sure it lands on actual floor
 		var target_local_x: float = _step_targets[li].x - global_position.x
 		var target_floor_y: float = _raycast_floor(Vector2(target_local_x, _legs[li][0].y)) + global_position.y
@@ -1906,7 +1906,7 @@ func _raycast_floor(local_from: Vector2) -> float:
 	## Returns the floor y in local space, or a fallback if no hit.
 	var space := get_world_2d().direct_space_state
 	if not space:
-		return local_from.y + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)
+		return local_from.y + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 
 	var world_from: Vector2 = global_position + local_from
 	var world_to: Vector2 = world_from + Vector2(0, sc(200))  # Cast 200px down (scaled)
@@ -1914,7 +1914,7 @@ func _raycast_floor(local_from: Vector2) -> float:
 	query.exclude = [get_rid()]
 	var result: Dictionary = space.intersect_ray(query)
 	if result.is_empty():
-		return local_from.y + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)  # Fallback: dangle at full leg length
+		return local_from.y + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))  # Fallback: dangle at full leg length
 	return result["position"].y - global_position.y  # Convert back to local space
 
 
@@ -1952,7 +1952,7 @@ func _solve_leg_ik(hip: Vector2, foot: Vector2, upper_len: float, lower_len: flo
 # -- AI / State Machine -------------------------------------------------------
 
 func _do_patrol(_delta: float) -> void:
-	_target_move_speed = _effective_speed(SPEED_SLOW)
+	_target_move_speed = _effective_speed(cfg("speed_slow", SPEED_SLOW))
 	_want_direction = _facing_target
 
 	_pick_target()
@@ -2007,7 +2007,7 @@ func _do_chase(_delta: float) -> void:
 				waypoint_dist, str(_precog_waypoint_edge.is_empty())])
 		_facing_target = signf(to_waypoint.x) if absf(to_waypoint.x) > 5.0 else _facing_target
 		_want_direction = signf(to_waypoint.x)
-		_target_move_speed = _effective_speed(SPEED_FAST)
+		_target_move_speed = _effective_speed(cfg("speed_fast", SPEED_FAST))
 
 		var arrival_tolerance: float = sc(50.0) if _chained else sc(25.0)
 		if waypoint_dist < arrival_tolerance:
@@ -2049,7 +2049,7 @@ func _do_chase(_delta: float) -> void:
 				set_meta("_precog_leap", true)  # Flag: don't adjust velocity in windup
 				_change_state(State.ATTACK_LEAP_WINDUP)
 				_leap_ik_off = true
-				_leap_cooldown = LEAP_COOLDOWN
+				_leap_cooldown = cfg("leap_cooldown", LEAP_COOLDOWN)
 				velocity.x = 0
 			else:
 				_leap_cooldown = 0.0
@@ -2062,11 +2062,11 @@ func _do_chase(_delta: float) -> void:
 
 	# Speed based on distance (thresholds scale with body size)
 	if dist > sc(200.0):
-		_target_move_speed = _effective_speed(SPEED_FAST)
+		_target_move_speed = _effective_speed(cfg("speed_fast", SPEED_FAST))
 	elif dist > sc(80.0):
-		_target_move_speed = _effective_speed(SPEED_MEDIUM)
+		_target_move_speed = _effective_speed(cfg("speed_medium", SPEED_MEDIUM))
 	else:
-		_target_move_speed = _effective_speed(SPEED_SLOW)
+		_target_move_speed = _effective_speed(cfg("speed_slow", SPEED_SLOW))
 
 	# Don't change strategy while locked (prevents thrashing)
 	if _state_lock_timer > 0.0:
@@ -2106,7 +2106,7 @@ func _do_chase(_delta: float) -> void:
 
 	# Fallback: if we haven't hit anything for a while, also use precog
 	_time_since_strike_range += _delta
-	if _time_since_strike_range >= PRECOG_TRIGGER_TIME:
+	if _time_since_strike_range >= cfg("precog_trigger_time", PRECOG_TRIGGER_TIME):
 		_start_precognition()
 		return
 
@@ -2121,27 +2121,27 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 	var dist_2d: float = to_target.length()
 
 	# DEATH BALL GRAB: very close / overlapping — highest priority
-	if dist_2d < sc(GRAB_RANGE) and not _grab_disabled:
+	if dist_2d < sc(cfg("grab_range", GRAB_RANGE)) and not _grab_disabled:
 		_start_grab()
 		return
 
 	# Tail whip if target is behind and close
-	if target_behind and dist < sc(TAIL_RANGE) and _posture == Posture.QUADRUPED and not _tail_severed:
+	if target_behind and dist < sc(cfg("tail_range", TAIL_RANGE)) and _posture == Posture.QUADRUPED and not _tail_severed:
 		_start_attack(State.ATTACK_TAIL)
 		return
 
 	# CONNECTED HOP-UP: target is on a platform just above (short climb)
-	if height_diff < -sc(20.0) and absf(height_diff) < sc(HOP_UP_MAX_HEIGHT) and absf(to_target.x) < sc(150.0):
+	if height_diff < -sc(20.0) and absf(height_diff) < sc(cfg("hop_up_max_height", HOP_UP_MAX_HEIGHT)) and absf(to_target.x) < sc(150.0):
 		_start_hop_up(to_target)
 		return
 
 	# SPRINT SLASH: same level, medium range — charge and slash
-	if absf(height_diff) < sc(30.0) and dist > sc(BITE_RANGE) and dist < sc(200.0) and _count_front_legs() >= 1:
+	if absf(height_diff) < sc(30.0) and dist > sc(cfg("bite_range", BITE_RANGE)) and dist < sc(200.0) and _count_front_legs() >= 1:
 		_start_sprint_slash()
 		return
 
 	# VERTICAL LEAP: significant distance — must face target horizontally
-	if dist > sc(80.0) and dist < sc(LEAP_RANGE) and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
+	if dist > sc(80.0) and dist < sc(cfg("leap_range", LEAP_RANGE)) and _leap_cooldown <= 0.0 and _count_active_legs() >= 2:
 		var facing_target: bool = (to_target.x > 0 and _facing > 0) or (to_target.x < 0 and _facing < 0) or absf(to_target.x) < sc(20.0)
 		if facing_target:
 			_start_leap()
@@ -2153,7 +2153,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		return
 
 	# Close range: bite or standing swipe
-	if dist_2d < sc(BITE_RANGE):
+	if dist_2d < sc(cfg("bite_range", BITE_RANGE)):
 		if randf() < 0.6 or _count_front_legs() == 0:
 			_start_attack(State.ATTACK_BITE)
 		else:
@@ -2262,7 +2262,7 @@ func _do_lunge(delta: float) -> void:
 		velocity.x = -_facing * 30.0
 	elif _attack_timer < 0.4:
 		# Launch
-		velocity.x = _facing * sc(LUNGE_SPEED)
+		velocity.x = _facing * sc(cfg("lunge_speed", LUNGE_SPEED))
 		_check_lunge_hit()
 	elif _attack_timer < 0.7:
 		# Slide to stop
@@ -2284,7 +2284,7 @@ func _start_grab() -> void:
 	_change_state(State.ATTACK_GRAB)
 	_grab_kick_count = 0
 	_grab_target_node = _target
-	_state_lock_timer = GRAB_DURATION + 1.0
+	_state_lock_timer = cfg("grab_duration", GRAB_DURATION) + 1.0
 	velocity = Vector2.ZERO
 	# Enlarge body collision to trap the player
 	if _body_collision and _body_collision.shape is CircleShape2D:
@@ -2301,7 +2301,7 @@ func _do_grab(delta: float) -> void:
 		return
 
 	var target_local: Vector2 = _grab_target_node.global_position - global_position
-	var t: float = clampf(_attack_timer / GRAB_DURATION, 0.0, 1.0)
+	var t: float = clampf(_attack_timer / cfg("grab_duration", GRAB_DURATION), 0.0, 1.0)
 
 	# Phase 1 (0-0.2): curl into ball around the target
 	# Phase 2 (0.2-0.8): kick rapidly + bite
@@ -2315,7 +2315,7 @@ func _do_grab(delta: float) -> void:
 	# Center collision on the grabbed player — expand to cover the full ball + tail
 	if _body_collision:
 		_body_collision.position = target_local
-		var max_tail_r: float = ball_r + 5.0 * (sc(TAIL_SEG_LEN) * 0.6)
+		var max_tail_r: float = ball_r + 5.0 * (sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * 0.6)
 		if _body_collision.shape is CircleShape2D:
 			(_body_collision.shape as CircleShape2D).radius = max_tail_r
 
@@ -2386,7 +2386,7 @@ func _do_grab(delta: float) -> void:
 			# Continue from spine[2]'s angle, each segment steps further around
 			var tail_angle: float = spine2_angle - float(i + 1) * 0.5
 			# Radius grows proportionally: starts at spine[2] distance, grows by TAIL_SEG_LEN fraction
-			var tail_r: float = ball_r + float(i + 1) * (sc(TAIL_SEG_LEN) * 0.6)
+			var tail_r: float = ball_r + float(i + 1) * (sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * 0.6)
 			var tail_pos: Vector2 = center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
 			if curl >= 1.0:
 				_tail[i] = tail_pos
@@ -2399,17 +2399,17 @@ func _do_grab(delta: float) -> void:
 
 	# Phase 2: damage ticks
 	if t > 0.2 and t < 0.8:
-		var expected_kicks: int = int((_attack_timer - GRAB_DURATION * 0.2) / GRAB_KICK_INTERVAL)
+		var expected_kicks: int = int((_attack_timer - cfg("grab_duration", GRAB_DURATION) * 0.2) / cfg("grab_kick_interval", GRAB_KICK_INTERVAL))
 		while _grab_kick_count < expected_kicks:
 			_grab_kick_count += 1
 			var dmg_pos: Vector2 = _grab_target_node.global_position
 			# Alternate kicks and bites
 			if _grab_kick_count % 3 == 0:
-				_damage_players_in_range(dmg_pos, 30.0, GRAB_BITE_DAMAGE)
+				_damage_players_in_range(dmg_pos, 30.0, int(cfg("grab_bite_damage", GRAB_BITE_DAMAGE)))
 				_spawn_blood_spatter(center)
 				_spawn_slash_effect(center)  # Slash visual in center of ball
 			else:
-				_damage_players_in_range(dmg_pos, 30.0, GRAB_KICK_DAMAGE)
+				_damage_players_in_range(dmg_pos, 30.0, int(cfg("grab_kick_damage", GRAB_KICK_DAMAGE)))
 				if _grab_kick_count % 2 == 0:
 					_spawn_slash_effect(center)  # Periodic slashes
 
@@ -2418,7 +2418,7 @@ func _do_grab(delta: float) -> void:
 		# Fling the player in a random direction (before _exit_state nulls _grab_target_node)
 		if is_instance_valid(_grab_target_node):
 			var eject_angle: float = randf() * TAU
-			_grab_target_node.velocity = Vector2(cos(eject_angle), sin(eject_angle)) * GRAB_EJECT_SPEED
+			_grab_target_node.velocity = Vector2(cos(eject_angle), sin(eject_angle)) * cfg("grab_eject_speed", GRAB_EJECT_SPEED)
 			_grab_target_node.velocity.y = minf(_grab_target_node.velocity.y, -150.0)  # Some upward
 
 		# Teleport to where the grab happened (near the player), not pre-grab position
@@ -2433,10 +2433,10 @@ func _do_grab(delta: float) -> void:
 		_change_state(State.CHASE)
 
 		# Reset skeleton to standing pose
-		var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))
-		_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, body_y)
+		var body_y: float = -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)))
+		_spine[0] = Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
 		_spine[1] = Vector2(0, body_y)
-		_spine[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, body_y)
+		_spine[2] = Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
 
 		# Re-plant feet
 		for li in range(4):
@@ -2467,9 +2467,9 @@ func _do_sprint_slash(delta: float) -> void:
 	if _sprint_slash_count == 0:
 		# Phase 1: Sprint toward target
 		_want_direction = _facing_target
-		_target_move_speed = _effective_speed(SPRINT_SPEED)
+		_target_move_speed = _effective_speed(cfg("sprint_speed", SPRINT_SPEED))
 
-		if dist < sc(SPRINT_SLASH_RANGE):
+		if dist < sc(cfg("sprint_slash_range", SPRINT_SLASH_RANGE)):
 			# Close enough — start slashing
 			_sprint_slash_count = 1
 			_attack_timer = 0.0
@@ -2480,7 +2480,7 @@ func _do_sprint_slash(delta: float) -> void:
 		_want_direction = 0.0
 
 		var slash_time: float = _attack_timer
-		var expected: int = mini(int(slash_time / SPRINT_SLASH_INTERVAL) + 1, 3)
+		var expected: int = mini(int(slash_time / cfg("sprint_slash_interval", SPRINT_SLASH_INTERVAL)) + 1, 3)
 
 		while _sprint_slash_count <= expected and _sprint_slash_count <= 3:
 			var slash_leg: int = 0 if _sprint_slash_count % 2 == 1 else 1
@@ -2495,7 +2495,7 @@ func _do_sprint_slash(delta: float) -> void:
 
 				# Damage (reduced by arm damage)
 				var claw_world: Vector2 = global_position + _legs[slash_leg][2]
-				_damage_players_in_range(claw_world, 35.0, int(SPRINT_SLASH_DAMAGE * get_slash_damage_multiplier()))
+				_damage_players_in_range(claw_world, 35.0, int(cfg("sprint_slash_damage", SPRINT_SLASH_DAMAGE) * get_slash_damage_multiplier()))
 
 				# Visual slash lines
 				_spawn_slash_effect(_legs[slash_leg][2])
@@ -2503,7 +2503,7 @@ func _do_sprint_slash(delta: float) -> void:
 			_sprint_slash_count += 1
 
 		# Done after 3 slashes + recovery
-		if _attack_timer > 3 * SPRINT_SLASH_INTERVAL + 0.2:
+		if _attack_timer > 3 * cfg("sprint_slash_interval", SPRINT_SLASH_INTERVAL) + 0.2:
 			_change_state(State.CHASE)
 
 	# Timeout safety
@@ -2525,12 +2525,12 @@ func _do_hop_up(delta: float) -> void:
 	## Connected hop: rear legs push, body rises, front legs reach up and grab
 	## the platform edge. Feet stay connected to surfaces throughout.
 	_attack_timer += delta
-	var t: float = clampf(_attack_timer / HOP_UP_DURATION, 0.0, 1.0)
+	var t: float = clampf(_attack_timer / cfg("hop_up_duration", HOP_UP_DURATION), 0.0, 1.0)
 	velocity.x = 0
 
 	var height_to_climb: float = global_position.y - _hop_up_target_y
 	if height_to_climb < 10:
-		height_to_climb = sc(HOP_UP_MAX_HEIGHT) * 0.5
+		height_to_climb = sc(cfg("hop_up_max_height", HOP_UP_MAX_HEIGHT)) * 0.5
 
 	# Phase 1 (0-0.3): rear legs compress, body tilts up, front legs reach upward
 	# Phase 2 (0.3-0.7): rear legs push, body rises, front feet plant on upper surface
@@ -2594,7 +2594,7 @@ func _do_hop_up(delta: float) -> void:
 				_foot_planted[li] = true
 				_foot_world[li] = global_position + _legs[li][2]
 		# Impact damage in small radius
-		_damage_players_in_range(global_position, 40.0, HOP_UP_DAMAGE)
+		_damage_players_in_range(global_position, 40.0, int(cfg("hop_up_damage", HOP_UP_DAMAGE)))
 		_change_state(State.CHASE)
 		_attack_timer = 0.0
 
@@ -2654,28 +2654,28 @@ func _update_leap_pose(delta: float) -> void:
 	var spine_center := Vector2.ZERO  # Local center
 	if _state == State.ATTACK_LEAP_WINDUP:
 		# During windup, gradually tilt from horizontal to aimed
-		var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
-		var rest_spine0 := Vector2(sc(SPINE_SEG_LEN) * _facing, -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)))
-		var aimed_spine0 := spine_center + aim_dir * sc(SPINE_SEG_LEN)
+		var t: float = clampf(_attack_timer / cfg("leap_windup_time", LEAP_WINDUP_TIME), 0.0, 1.0)
+		var rest_spine0 := Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))))
+		var aimed_spine0 := spine_center + aim_dir * sc(cfg("spine_seg_len", SPINE_SEG_LEN))
 		_spine[0] = _spine[0].lerp(rest_spine0.lerp(aimed_spine0, t), 6.0 * delta)
-		var rest_spine2 := Vector2(-sc(SPINE_SEG_LEN) * _facing, -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)))
-		var aimed_spine2 := spine_center - aim_dir * sc(SPINE_SEG_LEN)
+		var rest_spine2 := Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))))
+		var aimed_spine2 := spine_center - aim_dir * sc(cfg("spine_seg_len", SPINE_SEG_LEN))
 		_spine[2] = _spine[2].lerp(rest_spine2.lerp(aimed_spine2, t), 6.0 * delta)
 		_spine[1] = (_spine[0] + _spine[2]) * 0.5
 	else:
 		# Airborne/strike/thrash: spine fully aimed
-		_spine[0] = _spine[0].lerp(spine_center + aim_dir * sc(SPINE_SEG_LEN), 10.0 * delta)
-		_spine[2] = _spine[2].lerp(spine_center - aim_dir * sc(SPINE_SEG_LEN), 10.0 * delta)
+		_spine[0] = _spine[0].lerp(spine_center + aim_dir * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), 10.0 * delta)
+		_spine[2] = _spine[2].lerp(spine_center - aim_dir * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), 10.0 * delta)
 		_spine[1] = (_spine[0] + _spine[2]) * 0.5
 
 	# -- Neck + Head: aim at target --
 	_neck[0] = _spine[0]
-	var neck_tip: Vector2 = _spine[0] + aim_dir * sc(NECK_LEN)
+	var neck_tip: Vector2 = _spine[0] + aim_dir * sc(cfg("neck_len", NECK_LEN))
 	_neck[1] = _neck[1].lerp(neck_tip, 8.0 * delta)
 	var skull_pos: Vector2 = _neck[1] + aim_dir * sc(14.0)
 	_skull = _skull.lerp(skull_pos, 8.0 * delta)
 	var jaw_down: Vector2 = -aim_perp  # Jaw opens away from "up"
-	_jaw = _jaw.lerp(_skull + jaw_down * (sc(JAW_LEN) * 0.3 + _jaw_open * sc(JAW_LEN) * 0.5), 8.0 * delta)
+	_jaw = _jaw.lerp(_skull + jaw_down * (sc(cfg("jaw_len", JAW_LEN)) * 0.3 + _jaw_open * sc(cfg("jaw_len", JAW_LEN)) * 0.5), 8.0 * delta)
 
 	# -- Tail: trails behind --
 	if not _tail_severed:
@@ -2686,7 +2686,7 @@ func _update_leap_pose(delta: float) -> void:
 		else:
 			# Airborne: tail streams straight behind
 			for i in range(5):
-				var tail_target: Vector2 = _spine[2] + tail_dir * sc(TAIL_SEG_LEN) * (i + 1)
+				var tail_target: Vector2 = _spine[2] + tail_dir * sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * (i + 1)
 				_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
 
 	# -- Front legs: tucked against chest --
@@ -2706,7 +2706,7 @@ func _update_leap_pose(delta: float) -> void:
 		_legs[li][0] = _spine[2] + aim_perp * (3.0 if li == 2 else -3.0)
 		if _state == State.ATTACK_LEAP_WINDUP:
 			# Compress: feet close to hips
-			var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
+			var t: float = clampf(_attack_timer / cfg("leap_windup_time", LEAP_WINDUP_TIME), 0.0, 1.0)
 			if t > 0.5:
 				_foot_planted[li] = false
 				var compressed: Vector2 = _legs[li][0] + aim_perp * -10.0
@@ -2715,9 +2715,9 @@ func _update_leap_pose(delta: float) -> void:
 		else:
 			# Airborne: stretch fully behind
 			_foot_planted[li] = false
-			var stretched: Vector2 = _legs[li][0] - aim_dir * (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(2))
+			var stretched: Vector2 = _legs[li][0] - aim_dir * (sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)) - sc(2))
 			_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
-			_legs[li][1] = _legs[li][0] - aim_dir * sc(LEG_UPPER_LEN)
+			_legs[li][1] = _legs[li][0] - aim_dir * sc(cfg("leg_upper_len", LEG_UPPER_LEN))
 
 	# -- Floor constraints OFF during airborne --
 	# (handled by skipping _solve_pose entirely)
@@ -2729,7 +2729,7 @@ func _start_leap() -> void:
 		_target.global_position.x if is_instance_valid(_target) else 0,
 		_target.global_position.y if is_instance_valid(_target) else 0])
 	_change_state(State.ATTACK_LEAP_PLAN)
-	_leap_cooldown = LEAP_COOLDOWN
+	_leap_cooldown = cfg("leap_cooldown", LEAP_COOLDOWN)
 	_leap_phase = 0.0
 	_leap_slash_count = 0
 	_leap_thrash_count = 0
@@ -2784,7 +2784,7 @@ func _do_leap_plan(delta: float) -> void:
 			# Walk toward launch position
 			_facing_target = signf(to_launch.x) if absf(to_launch.x) > 5.0 else _facing_target
 			_want_direction = signf(to_launch.x)
-			_target_move_speed = _effective_speed(SPEED_MEDIUM)
+			_target_move_speed = _effective_speed(cfg("speed_medium", SPEED_MEDIUM))
 	else:
 		# Both phases failed — abort after brief pause
 		if _attack_timer > 0.5:
@@ -2822,9 +2822,9 @@ func _simulate_leap_paths() -> void:
 
 	# Step 2: find valid arrival points (open air, ABOVE the target's platform)
 	var arrival_points: Array[Vector2] = []
-	for ai in range(LEAP_ARRIVAL_SAMPLES):
-		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
-		var arrival: Vector2 = target_pos + Vector2(cos(angle), sin(angle)) * sc(LEAP_STRIKE_REACH)
+	for ai in range(int(cfg("leap_arrival_samples", LEAP_ARRIVAL_SAMPLES))):
+		var angle: float = float(ai) / float(int(cfg("leap_arrival_samples", LEAP_ARRIVAL_SAMPLES))) * TAU
+		var arrival: Vector2 = target_pos + Vector2(cos(angle), sin(angle)) * sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH))
 
 		# Must be in open air
 		if _is_point_in_solid(arrival):
@@ -2846,19 +2846,19 @@ func _simulate_leap_paths() -> void:
 
 	# Step 2: for each valid arrival point, reverse-solve launch velocities
 	for arrival in arrival_points:
-		for fi in range(LEAP_FLIGHT_TIMES):
-			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
-				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+		for fi in range(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES))):
+			var t_flight: float = lerpf(cfg("leap_flight_time_min", LEAP_FLIGHT_TIME_MIN), cfg("leap_flight_time_max", LEAP_FLIGHT_TIME_MAX),
+				float(fi) / float(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) - 1) if int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) > 1 else 0.5)
 
 			# Reverse-solve: Vx = dx/t, Vy = (dy - 0.5*g*t^2) / t
 			var dx: float = arrival.x - monster_pos.x
 			var dy: float = arrival.y - monster_pos.y
 			var launch_vx: float = dx / t_flight
-			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+			var launch_vy: float = (dy - 0.5 * cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * t_flight * t_flight) / t_flight
 
 			var launch_vel := Vector2(launch_vx, launch_vy)
 			var speed: float = launch_vel.length()
-			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+			if speed < 200 or speed > cfg("leap_launch_speed", LEAP_LAUNCH_SPEED) * 1.5:
 				continue
 			if launch_vy > -50:
 				continue
@@ -3011,11 +3011,11 @@ func _simulate_leap_paths_phase2() -> void:
 				var dx: float = arrival.x - launch_pos.x
 				var dy: float = arrival.y - launch_pos.y
 				var launch_vx: float = dx / t_flight
-				var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+				var launch_vy: float = (dy - 0.5 * cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * t_flight * t_flight) / t_flight
 
 				var launch_vel := Vector2(launch_vx, launch_vy)
 				var speed: float = launch_vel.length()
-				if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+				if speed < 200 or speed > cfg("leap_launch_speed", LEAP_LAUNCH_SPEED) * 1.5:
 					continue
 				if launch_vy > -50:
 					continue
@@ -3211,8 +3211,8 @@ func _precog_drop_and_detect() -> void:
 					var result: Dictionary = space.intersect_ray(query)
 					if not result.is_empty():
 						_precog_ball_lands.append(result["position"])
-				x += PRECOG_GRID_SPACING
-			y += PRECOG_GRID_SPACING
+				x += cfg("precog_grid_spacing", PRECOG_GRID_SPACING)
+			y += cfg("precog_grid_spacing", PRECOG_GRID_SPACING)
 
 		_precog_detect_platforms()
 		_precog_refine_platform_edges()
@@ -3238,7 +3238,7 @@ func _precog_detect_platforms() -> void:
 		return
 
 	var y_snap: float = 15.0
-	var x_snap: float = PRECOG_GRID_SPACING
+	var x_snap: float = cfg("precog_grid_spacing", PRECOG_GRID_SPACING)
 
 	# Snap Y, deduplicate
 	var seen: Dictionary = {}
@@ -3271,27 +3271,27 @@ func _precog_detect_platforms() -> void:
 		var run_end: float = x_vals[0]
 
 		for i in range(1, x_vals.size()):
-			if x_vals[i] - run_end <= PRECOG_GRID_SPACING * 1.5:
+			if x_vals[i] - run_end <= cfg("precog_grid_spacing", PRECOG_GRID_SPACING) * 1.5:
 				run_end = x_vals[i]
 			else:
 				# Only emit platforms wider than a single point
-				if run_end - run_start >= PRECOG_GRID_SPACING:
+				if run_end - run_start >= cfg("precog_grid_spacing", PRECOG_GRID_SPACING):
 					_precog_platforms.append({
 						"pos": Vector2((run_start + run_end) * 0.5, y_val),
 						"min_x": run_start,
 						"max_x": run_end,
-						"weight": int((run_end - run_start) / PRECOG_GRID_SPACING) + 1,
+						"weight": int((run_end - run_start) / cfg("precog_grid_spacing", PRECOG_GRID_SPACING)) + 1,
 						"label": "",
 					})
 				run_start = x_vals[i]
 				run_end = x_vals[i]
 
-		if run_end - run_start >= PRECOG_GRID_SPACING:
+		if run_end - run_start >= cfg("precog_grid_spacing", PRECOG_GRID_SPACING):
 			_precog_platforms.append({
 				"pos": Vector2((run_start + run_end) * 0.5, y_val),
 				"min_x": run_start,
 				"max_x": run_end,
-				"weight": int((run_end - run_start) / PRECOG_GRID_SPACING) + 1,
+				"weight": int((run_end - run_start) / cfg("precog_grid_spacing", PRECOG_GRID_SPACING)) + 1,
 				"label": "",
 			})
 
@@ -3323,7 +3323,7 @@ func _find_platform_edge(space: PhysicsDirectSpaceState2D, start_x: float, plat_
 	## Binary-search for the exact platform edge by dropping balls.
 	## direction: -1 = search left, +1 = search right
 	var edge_x: float = start_x
-	var step: float = PRECOG_GRID_SPACING
+	var step: float = cfg("precog_grid_spacing", PRECOG_GRID_SPACING)
 
 	# First: extend outward while surface exists
 	for _i in range(3):
@@ -3440,7 +3440,7 @@ func _precog_build_one_edge(pi: int, pj: int) -> void:
 		var seen_x: Dictionary = {}
 		var unique_launches: Array[Vector2] = []
 		for pos in launch_points:
-			var kx: int = int(pos.x / PRECOG_GRID_SPACING)
+			var kx: int = int(pos.x / cfg("precog_grid_spacing", PRECOG_GRID_SPACING))
 			if not seen_x.has(kx):
 				seen_x[kx] = true
 				unique_launches.append(pos)
@@ -3629,7 +3629,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 
 	var landing_y: float = plat_y - 5.0
 	# Sample landing points: evenly spaced + precise edge points
-	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / PRECOG_GRID_SPACING) + 1)
+	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / cfg("precog_grid_spacing", PRECOG_GRID_SPACING)) + 1)
 	sample_count = mini(sample_count, 5)
 	# Add edge landing points (just inside each edge with body clearance)
 	var edge_landings: Array[float] = [
@@ -3665,20 +3665,20 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			if from_pos.x >= plat_min_x - edge_margin and from_pos.x <= plat_max_x + edge_margin:
 				continue
 
-		for fi in range(LEAP_FLIGHT_TIMES):
+		for fi in range(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES))):
 			_dbg_total += 1
-			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
-				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+			var t_flight: float = lerpf(cfg("leap_flight_time_min", LEAP_FLIGHT_TIME_MIN), cfg("leap_flight_time_max", LEAP_FLIGHT_TIME_MAX),
+				float(fi) / float(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) - 1) if int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) > 1 else 0.5)
 
 			var dx: float = arrival.x - from_pos.x
 			var dy: float = arrival.y - from_pos.y
 			var launch_vx: float = dx / t_flight
-			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+			var launch_vy: float = (dy - 0.5 * cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * t_flight * t_flight) / t_flight
 
 			var launch_vel := Vector2(launch_vx, launch_vy)
 			var speed: float = launch_vel.length()
 			var min_speed: float = sc(50.0) if down_jump else sc(200.0)  # Down-jumps can be gentle
-			if speed < min_speed or speed > sc(LEAP_LAUNCH_SPEED) * 1.5:
+			if speed < min_speed or speed > sc(cfg("leap_launch_speed", LEAP_LAUNCH_SPEED)) * 1.5:
 				_dbg_speed += 1
 				continue
 			if not down_jump and launch_vy > -50:
@@ -3686,7 +3686,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 				continue  # Up-jumps must launch upward
 			# Reject if arrival velocity is still ascending — the arc hasn't
 			# peaked yet and would pass through the platform from below.
-			var arrival_vy: float = launch_vy + LEAP_PLAN_GRAVITY * t_flight
+			var arrival_vy: float = launch_vy + cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * t_flight
 			if not down_jump and arrival_vy < 0:
 				_dbg_vy += 1
 				continue  # Still going up at arrival — through-floor
@@ -3853,9 +3853,9 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 
 	# Sample arrival points: circle around target + direct landing
 	var arrivals: Array[Vector2] = []
-	for ai in range(LEAP_ARRIVAL_SAMPLES):
-		var angle: float = float(ai) / float(LEAP_ARRIVAL_SAMPLES) * TAU
-		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * sc(LEAP_STRIKE_REACH))
+	for ai in range(int(cfg("leap_arrival_samples", LEAP_ARRIVAL_SAMPLES))):
+		var angle: float = float(ai) / float(int(cfg("leap_arrival_samples", LEAP_ARRIVAL_SAMPLES))) * TAU
+		arrivals.append(to_pos + Vector2(cos(angle), sin(angle)) * sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH)))
 	arrivals.append(to_pos)
 	arrivals.append(to_pos + Vector2(-40, 0))
 	arrivals.append(to_pos + Vector2(40, 0))
@@ -3871,18 +3871,18 @@ func _plan_leap_from_to(from_pos: Vector2, to_pos: Vector2) -> Dictionary:
 		if not is_direct_landing and not _has_clear_airspace(arrival):
 			continue
 
-		for fi in range(LEAP_FLIGHT_TIMES):
-			var t_flight: float = lerpf(LEAP_FLIGHT_TIME_MIN, LEAP_FLIGHT_TIME_MAX,
-				float(fi) / float(LEAP_FLIGHT_TIMES - 1) if LEAP_FLIGHT_TIMES > 1 else 0.5)
+		for fi in range(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES))):
+			var t_flight: float = lerpf(cfg("leap_flight_time_min", LEAP_FLIGHT_TIME_MIN), cfg("leap_flight_time_max", LEAP_FLIGHT_TIME_MAX),
+				float(fi) / float(int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) - 1) if int(cfg("leap_flight_times", LEAP_FLIGHT_TIMES)) > 1 else 0.5)
 
 			var dx: float = arrival.x - from_pos.x
 			var dy: float = arrival.y - from_pos.y
 			var launch_vx: float = dx / t_flight
-			var launch_vy: float = (dy - 0.5 * LEAP_PLAN_GRAVITY * t_flight * t_flight) / t_flight
+			var launch_vy: float = (dy - 0.5 * cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * t_flight * t_flight) / t_flight
 
 			var launch_vel := Vector2(launch_vx, launch_vy)
 			var speed: float = launch_vel.length()
-			if speed < 200 or speed > LEAP_LAUNCH_SPEED * 1.5:
+			if speed < 200 or speed > cfg("leap_launch_speed", LEAP_LAUNCH_SPEED) * 1.5:
 				continue
 			if launch_vy > -50:
 				continue
@@ -3987,9 +3987,9 @@ func _simulate_arc(start: Vector2, launch_vel: Vector2) -> PackedVector2Array:
 
 	points.append(pos)
 	var past_peak: bool = false
-	for _i in range(LEAP_ARC_STEPS):
-		vel.y += LEAP_PLAN_GRAVITY * LEAP_ARC_DT
-		pos += vel * LEAP_ARC_DT
+	for _i in range(int(cfg("leap_arc_steps", LEAP_ARC_STEPS))):
+		vel.y += cfg("leap_plan_gravity", LEAP_PLAN_GRAVITY) * cfg("leap_arc_dt", LEAP_ARC_DT)
+		pos += vel * cfg("leap_arc_dt", LEAP_ARC_DT)
 		points.append(pos)
 		# Track if we've gone past the peak
 		if vel.y > 0:
@@ -4269,7 +4269,7 @@ func _do_leap_windup(delta: float) -> void:
 	## Coiling phase: body tilts up, front legs retract, tail plants, rear compresses.
 	_attack_timer += delta
 	velocity.x = 0
-	var t: float = clampf(_attack_timer / LEAP_WINDUP_TIME, 0.0, 1.0)
+	var t: float = clampf(_attack_timer / cfg("leap_windup_time", LEAP_WINDUP_TIME), 0.0, 1.0)
 
 	# Update target tracking during windup
 	if is_instance_valid(_target):
@@ -4309,12 +4309,12 @@ func _do_leap_windup(delta: float) -> void:
 			if _leg_severed[li]:
 				continue
 			var hip: Vector2 = _legs[li][0]
-			var compressed_foot: Vector2 = hip + Vector2(0, (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN)) * (1.0 - compress * 0.4))
+			var compressed_foot: Vector2 = hip + Vector2(0, (sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))) * (1.0 - compress * 0.4))
 			_legs[li][2] = _legs[li][2].lerp(compressed_foot, 4.0 * delta)
 
 	# LAUNCH at end of windup — check facing (skip for precog hops which
 	# may face away from the target to reach an intermediate platform).
-	if _attack_timer >= LEAP_WINDUP_TIME:
+	if _attack_timer >= cfg("leap_windup_time", LEAP_WINDUP_TIME):
 		if is_instance_valid(_target) and not get_meta("_precog_leap", false):
 			var to_target_x: float = _target.global_position.x - global_position.x
 			if (to_target_x > 20.0 and _facing < 0) or (to_target_x < -20.0 and _facing > 0):
@@ -4346,8 +4346,8 @@ func _do_leap_windup(delta: float) -> void:
 		else:
 			# Fallback if no plan data
 			var to_target: Vector2 = _leap_target_pos - global_position
-			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7 * leap_mult
-			velocity.y = -LEAP_LAUNCH_SPEED * 0.5 * leap_mult
+			velocity.x = signf(to_target.x) * cfg("leap_launch_speed", LEAP_LAUNCH_SPEED) * 0.7 * leap_mult
+			velocity.y = -cfg("leap_launch_speed", LEAP_LAUNCH_SPEED) * 0.5 * leap_mult
 		# Force facing to match launch direction (instant — mid-launch)
 		if absf(velocity.x) > 10.0:
 			_facing_target = signf(velocity.x)
@@ -4364,7 +4364,7 @@ func _do_leap_airborne(delta: float) -> void:
 	_attack_timer += delta
 
 	# Apply gravity for parabolic arc
-	velocity.y += GRAVITY * delta
+	velocity.y += cfg("gravity", GRAVITY) * delta
 
 
 # Force facing to match horizontal velocity — no backwards flight (instant)
@@ -4381,8 +4381,8 @@ func _do_leap_airborne(delta: float) -> void:
 
 	# Position spine along the aim direction
 	var spine_center: Vector2 = (_spine[0] + _spine[2]) * 0.5
-	_spine[0] = _spine[0].lerp(spine_center + body_aim * sc(SPINE_SEG_LEN), 8.0 * delta)
-	_spine[2] = _spine[2].lerp(spine_center - body_aim * sc(SPINE_SEG_LEN), 8.0 * delta)
+	_spine[0] = _spine[0].lerp(spine_center + body_aim * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), 8.0 * delta)
+	_spine[2] = _spine[2].lerp(spine_center - body_aim * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), 8.0 * delta)
 
 	# Rear legs extend to full stretch behind (pushing off)
 	for li in [2, 3]:
@@ -4390,10 +4390,10 @@ func _do_leap_airborne(delta: float) -> void:
 			continue
 		var hip: Vector2 = _legs[li][0]
 		var stretch_dir: Vector2 = -body_aim  # Behind the body
-		var stretched: Vector2 = hip + stretch_dir * (sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(2))
+		var stretched: Vector2 = hip + stretch_dir * (sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)) - sc(2))
 		_legs[li][2] = _legs[li][2].lerp(stretched, 8.0 * delta)
 		# Knee midway along the stretch
-		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * sc(LEG_UPPER_LEN), 8.0 * delta)
+		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * sc(cfg("leg_upper_len", LEG_UPPER_LEN)), 8.0 * delta)
 
 	# Front legs stay tucked against chest
 	for li in [0, 1]:
@@ -4408,13 +4408,13 @@ func _do_leap_airborne(delta: float) -> void:
 	if not _tail_severed:
 		var tail_dir: Vector2 = -body_aim
 		for i in range(5):
-			var tail_target: Vector2 = _spine[2] + tail_dir * sc(TAIL_SEG_LEN) * (i + 1)
+			var tail_target: Vector2 = _spine[2] + tail_dir * sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * (i + 1)
 			_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
 
 	# Check if we've reached the target
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
-		if dist_to_target < sc(LEAP_STRIKE_REACH):
+		if dist_to_target < sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH)):
 			DebugOverlay.log("leap_attack/chosen_arc", self, "LEAP ARRIVED: monster at (%.0f,%.0f), target at (%.0f,%.0f), dist=%.0f", [
 					global_position.x, global_position.y,
 					_target.global_position.x, _target.global_position.y, dist_to_target])
@@ -4458,7 +4458,7 @@ func _do_leap_strike(delta: float) -> void:
 
 			# Damage check (reduced by arm damage)
 			var claw_world: Vector2 = global_position + swipe_end
-			_damage_players_in_range(claw_world, 35.0, int(LEAP_SLASH_DAMAGE * get_slash_damage_multiplier()))
+			_damage_players_in_range(claw_world, 35.0, int(cfg("leap_slash_damage", LEAP_SLASH_DAMAGE) * get_slash_damage_multiplier()))
 
 			# Spawn slash effect
 			_spawn_slash_effect(swipe_end)
@@ -4483,19 +4483,19 @@ func _do_leap_thrash(delta: float) -> void:
 	# Bite damage on first frame
 	if _leap_thrash_count == 0 and _attack_timer < delta * 2:
 		var bite_world: Vector2 = global_position + _skull
-		_damage_players_in_range(bite_world, 35.0, LEAP_BITE_DAMAGE)
+		_damage_players_in_range(bite_world, 35.0, int(cfg("leap_bite_damage", LEAP_BITE_DAMAGE)))
 		_spawn_blood_spatter(_skull)
 
 	# Thrash: shake the skull side-to-side, dragging the player
 	var thrash_interval: float = 0.2
-	var expected_thrashes: int = mini(int(_attack_timer / thrash_interval), LEAP_THRASH_COUNT)
+	var expected_thrashes: int = mini(int(_attack_timer / thrash_interval), int(cfg("leap_thrash_count", LEAP_THRASH_COUNT)))
 
 	if expected_thrashes > _leap_thrash_count:
 		_leap_thrash_count = expected_thrashes
 		_leap_slash_side *= -1
 		# Damage each thrash
 		var bite_world: Vector2 = global_position + _skull
-		_damage_players_in_range(bite_world, 35.0, LEAP_BITE_DAMAGE / 2)
+		_damage_players_in_range(bite_world, 35.0, int(cfg("leap_bite_damage", LEAP_BITE_DAMAGE)) / 2)
 		_spawn_blood_spatter(_skull)
 		# Knock target sideways
 		if is_instance_valid(_target):
@@ -4510,7 +4510,7 @@ func _do_leap_thrash(delta: float) -> void:
 	_jaw_open = 0.1
 
 	# After 3 thrashes: fling player and end
-	if _leap_thrash_count >= LEAP_THRASH_COUNT and _attack_timer > LEAP_THRASH_COUNT * thrash_interval + 0.15:
+	if _leap_thrash_count >= int(cfg("leap_thrash_count", LEAP_THRASH_COUNT)) and _attack_timer > int(cfg("leap_thrash_count", LEAP_THRASH_COUNT)) * thrash_interval + 0.15:
 		# Fling the target
 		if is_instance_valid(_target):
 			var fling_dir: Vector2 = Vector2(_facing * _leap_slash_side, -0.6).normalized()
@@ -4533,10 +4533,10 @@ func _end_leap() -> void:
 	# Collision circles reset via _update_collision_positions on next frame
 
 	# Reset skeleton to standing pose — spine horizontal, feet on the ground
-	var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))
-	_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, body_y)
+	var body_y: float = -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)))
+	_spine[0] = Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
 	_spine[1] = Vector2(0, body_y)
-	_spine[2] = Vector2(-sc(SPINE_SEG_LEN) * _facing, body_y)
+	_spine[2] = Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
 
 	# Plant feet at floor level below each hip
 	for li in range(4):
@@ -4563,11 +4563,11 @@ func _end_leap() -> void:
 		if is_instance_valid(_target):
 			var to_target: Vector2 = _target.global_position - global_position
 			var dist: float = to_target.length()
-			if dist < sc(LEAP_RANGE) and dist > sc(GRAB_RANGE):
+			if dist < sc(cfg("leap_range", LEAP_RANGE)) and dist > sc(cfg("grab_range", GRAB_RANGE)):
 				# Raw launch: aim directly at the player
 				var flight_time: float = 0.6
 				var launch_vx: float = to_target.x / flight_time
-				var launch_vy: float = (to_target.y - 0.5 * GRAVITY * flight_time * flight_time) / flight_time
+				var launch_vy: float = (to_target.y - 0.5 * cfg("gravity", GRAVITY) * flight_time * flight_time) / flight_time
 				velocity = Vector2(launch_vx, launch_vy)
 				_leap_target_pos = _target.global_position
 				set_meta("_leap_chosen_vel", velocity)
@@ -4575,7 +4575,7 @@ func _end_leap() -> void:
 				_leap_found_path = true
 				_change_state(State.ATTACK_LEAP_AIRBORNE)
 				_leap_ik_off = true
-				_leap_cooldown = LEAP_COOLDOWN
+				_leap_cooldown = cfg("leap_cooldown", LEAP_COOLDOWN)
 				DebugOverlay.log("leap_attack/attack_zone", self, "PRECOG: RAW AERIAL STRIKE at (%.0f,%.0f) vel=(%.0f,%.0f)", [
 					_target.global_position.x, _target.global_position.y, velocity.x, velocity.y])
 				return
@@ -4631,23 +4631,23 @@ func _spawn_blood_spatter(local_pos: Vector2) -> void:
 
 func _check_bite_hit() -> void:
 	var bite_pos: Vector2 = global_position + _skull
-	_damage_players_in_range(bite_pos, 50.0, BITE_DAMAGE)
+	_damage_players_in_range(bite_pos, 50.0, int(cfg("bite_damage", BITE_DAMAGE)))
 
 
 func _check_swipe_hit(leg_idx: int) -> void:
 	var claw_pos: Vector2 = global_position + _legs[leg_idx][2]
-	_damage_players_in_range(claw_pos, 25.0, int(SWIPE_DAMAGE * get_slash_damage_multiplier()))
+	_damage_players_in_range(claw_pos, 25.0, int(cfg("swipe_damage", SWIPE_DAMAGE) * get_slash_damage_multiplier()))
 
 
 func _check_tail_hit() -> void:
 	# Check last 2 tail segments
 	for i in range(3, _tail.size()):
 		var tail_pos: Vector2 = global_position + _tail[i]
-		_damage_players_in_range(tail_pos, 20.0, TAIL_DAMAGE)
+		_damage_players_in_range(tail_pos, 20.0, int(cfg("tail_damage", TAIL_DAMAGE)))
 
 
 func _check_lunge_hit() -> void:
-	_damage_players_in_range(global_position, 35.0, LUNGE_DAMAGE)
+	_damage_players_in_range(global_position, 35.0, int(cfg("lunge_damage", LUNGE_DAMAGE)))
 
 
 func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) -> void:
@@ -4684,7 +4684,7 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 func _pick_target() -> void:
 	# Check aggro switch
 	for pi in _hit_tracker:
-		if pi != _target_player_index and _hit_tracker.get(pi, 0) >= AGGRO_SWITCH_HITS:
+		if pi != _target_player_index and _hit_tracker.get(pi, 0) >= int(cfg("aggro_switch_hits", AGGRO_SWITCH_HITS)):
 			var new_target: Node2D = _find_player_by_index(pi)
 			if new_target:
 				_target = new_target
@@ -5408,8 +5408,8 @@ func _draw_debug() -> void:
 	if is_instance_valid(_target) and (_state == State.ATTACK_LEAP_PLAN or not _leap_plan_results.is_empty()):
 		if DebugOverlay.should_draw("leap_attack/attack_zone", self):
 			var tgt_local: Vector2 = _leap_target_pos - global_position
-			draw_arc(tgt_local, sc(LEAP_STRIKE_REACH), 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
-			draw_string(font, tgt_local + Vector2(sc(LEAP_STRIKE_REACH) + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
+			draw_arc(tgt_local, sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH)), 0, TAU, 24, Color(1, 0.8, 0, 0.4), 1.5)
+			draw_string(font, tgt_local + Vector2(sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH)) + 4, -4), "STRIKE ZONE", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0, 0.5))
 
 		if DebugOverlay.should_draw("leap_attack/spots_considered", self):
 			for result in _leap_plan_results:
@@ -5427,7 +5427,7 @@ func _draw_debug() -> void:
 				if r["clear"]:
 					clear_count += 1
 			var phase_str: String = "P1" if _leap_plan_phase <= 1 else "P1+P2"
-			draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), LEAP_ARRIVAL_SAMPLES], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
+			draw_string(font, plan_info, "LEAP %s: %d/%d clear  arrivals:%d" % [phase_str, clear_count, _leap_plan_results.size(), int(cfg("leap_arrival_samples", LEAP_ARRIVAL_SAMPLES))], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0, 1, 0.5))
 
 		# All arcs (heavy)
 		if DebugOverlay.should_draw("leap_attack/arc_trajectories", self):
