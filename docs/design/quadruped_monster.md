@@ -182,13 +182,17 @@ Severed limbs fall under gravity. Stumps are drawn as red circles at the attachm
 
 Instead of instant state snaps, movement properties blend smoothly:
 
-- **Facing blend**: `_facing` lerps toward `_facing_target` at `TURN_SPEED` (5.0/s). During turns, `_get_facing_offset()` uses the intermediate value, causing the skeleton rest-pose targets to sweep through the turn — spine curls, tail trails, head leads. Leap launches set facing instantly (no mid-flight turns).
+- **Facing blend**: `_facing` lerps toward `_facing_target` at `TURN_SPEED` (5.0/s). During turns, `_get_facing_offset()` applies cosine easing — the body stays near full width and snaps through the compressed midpoint quickly (symmetric in and out). Leap launches set facing instantly (no mid-flight turns).
+- **2.5D projection**: All segment rigidity enforcement uses `_projected_len()` which computes the 2D projection of a 3D segment rotated by the facing angle. Horizontal segments (spine, tail) compress during turns while vertical segments (legs) maintain length. Uses REST-POSE direction (not current direction) to avoid feedback where collapsed segments appear vertical and resist compression.
+- **3D shoulder rotation**: Clavicles and hip bones rotate around the spine in 3D via `_enforce_shoulder_3d()`. Each bone pair has a Z-depth (`SHOULDER_Z_DEPTH=8`). The near-side shoulder sweeps inward during a turn while the far-side sweeps outward, crossing at the midpoint — creating the visual of a body rotating in depth.
+- **Turn commitment**: Once a turn is underway (`|_facing| < 0.9`), `_facing_target` reversals are blocked until the current turn completes. Prevents oscillation when the target is nearly overhead.
+- **Head tracking**: Skull aims from body center (stable anchor, no breathing feedback) with aim blend increasing to 100% during turns to override rest-pose snap. Head tracking distances are 2.5D projected.
 - **Speed blend**: `_move_speed` lerps toward `_target_move_speed` at `SPEED_BLEND_RATE` (400 px/s²). Gait (stride, step frequency) transitions smoothly as speed ramps.
 - **Landing recovery**: After `FALL_THRESHOLD` (0.15s) of airborne time, landing triggers a `LANDING_RECOVERY_TIME` (0.25s) compression. Spine dips by `LANDING_COMPRESS` (8px, scaled), foot push force is reduced up to 70%, then eases back to normal. Debug aspect: `monster/blend`.
 
 ### Runtime Config (`cfg()`)
 
-All meaningful constants can be overridden at spawn time via `config={k=v,k=v}` on the RCON spawn command. The monster stores overrides in `_cfg` dictionary, and `cfg(key, default)` returns the override if set, otherwise the const default. Currently configurable: `turn_speed`, `speed_blend_rate`, `landing_recovery_time`, `landing_compress`, `fall_threshold`, `stiffness`, `head_track_speed`, `step_threshold`, `step_duration`, `step_height`, `foot_push_force`, `foot_grip`. Test scripts can use this to exaggerate parameters for visual verification.
+All meaningful constants can be overridden at spawn time via `config={k=v,k=v}` on the RCON spawn command. The monster stores overrides in `_cfg` dictionary, and `cfg(key, default)` returns the override if set, otherwise the const default. Currently configurable: `turn_speed`, `speed_blend_rate`, `landing_recovery_time`, `landing_compress`, `fall_threshold`, `stiffness`, `head_track_speed`, `step_threshold`, `step_duration`, `step_height`, `foot_push_force`, `foot_grip`, `shoulder_z_depth`. Test scripts can use this to exaggerate parameters for visual verification (see `exaggerated_animations` suite).
 
 ## Debug Inspector
 

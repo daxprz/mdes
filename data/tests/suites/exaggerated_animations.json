@@ -1,0 +1,8 @@
+{
+	"name": "exaggerated_animations",
+	"description": "Visual verification tests with exaggerated animation parameters",
+	"gate": false,
+	"tests": [
+		"chained_above_slow_turn"
+	]
+}

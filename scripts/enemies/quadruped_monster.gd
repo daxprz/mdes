@@ -150,6 +150,7 @@ const SPEED_BLEND_RATE := 400.0  # How fast _move_speed lerps to _target_move_sp
 const LANDING_RECOVERY_TIME := 0.25  # Seconds of landing compression after a fall
 const LANDING_COMPRESS := 8.0    # Extra spine dip in pixels during landing recovery
 const FALL_THRESHOLD := 0.15     # Seconds of airborne before landing recovery triggers
+const SHOULDER_Z_DEPTH := 8.0    # How far clavicles/hips extend into Z (perpendicular to body)
 
 # Foot-driven locomotion
 const STEP_THRESHOLD := 25.0   # How far behind a foot gets before it steps
@@ -306,6 +307,7 @@ var _state: State = State.PATROL
 var _posture: Posture = Posture.QUADRUPED
 var _facing: float = 1.0  # 1=right, -1=left (blends smoothly toward _facing_target)
 var _facing_target: float = 1.0  # Desired facing direction (instant AI intent)
+var _facing_prev_target: float = 1.0  # Previous frame's facing_target (for turn commitment)
 var _timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _attack_timer: float = 0.0  # Time within current attack
@@ -1078,8 +1080,10 @@ func _physics_process(delta: float) -> void:
 				if absf(angle_diff) > TAIL_MAX_BEND:
 					var clamped_angle: float = prev_dir.angle() + clampf(angle_diff, -TAIL_MAX_BEND, TAIL_MAX_BEND)
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-				# Clamp distance (±5% flex)
-				var clamped_len: float = clampf(tail_dist, sc(TAIL_SEG_LEN) * (1.0 - TAIL_FLEX), sc(TAIL_SEG_LEN) * (1.0 + TAIL_FLEX))
+				# Clamp distance (±5% flex) with 2.5D projection during turns
+				# Use rest direction (horizontal) not current direction
+				var proj_len: float = _projected_len(sc(TAIL_SEG_LEN), _tail_rest[ti] if ti < _tail_rest.size() else Vector2(sc(TAIL_SEG_LEN), 0))
+				var clamped_len: float = clampf(tail_dist, proj_len * (1.0 - TAIL_FLEX), proj_len * (1.0 + TAIL_FLEX))
 				_tail[ti] = tail_parent + current_dir * clamped_len
 				prev_dir = current_dir
 			tail_parent = _tail[ti]
@@ -1108,19 +1112,20 @@ func _physics_process(delta: float) -> void:
 				var floor_y: float = _raycast_floor(hip)
 				_legs[li][2] = Vector2(hip.x, floor_y)
 				_foot_world[li] = global_position + _legs[li][2]
-			# Enforce rigid upper limb from hip toward knee
+			# Enforce rigid upper limb from hip toward knee (2.5D projected)
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(LEG_UPPER_LEN), upper_dir)
 		else:
-			# Not planted or IK off: enforce from hip downward
+			# Not planted or IK off: enforce from hip downward (2.5D projected)
 			var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
 			if upper_dir.length() > 0.01:
-				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * sc(LEG_UPPER_LEN)
+				_legs[li][1] = _legs[li][0] + upper_dir.normalized() * _projected_len(sc(LEG_UPPER_LEN), upper_dir)
 			var lower_dir: Vector2 = _legs[li][2] - _legs[li][1]
 			var lower_dist: float = lower_dir.length()
 			if lower_dist > 0.01:
-				var clamped: float = clampf(lower_dist, sc(LEG_LOWER_LEN) * (1.0 - LIMB_FLEX), sc(LEG_LOWER_LEN) * (1.0 + LIMB_FLEX))
+				var proj_lower: float = _projected_len(sc(LEG_LOWER_LEN), lower_dir)
+				var clamped: float = clampf(lower_dist, proj_lower * (1.0 - LIMB_FLEX), proj_lower * (1.0 + LIMB_FLEX))
 				_legs[li][2] = _legs[li][1] + lower_dir.normalized() * clamped
 
 	# Affix body collider to torso (skip during grab — grab controls collision)
@@ -1161,20 +1166,31 @@ func _solve_pose(delta: float) -> void:
 	var skull_rest_target: Vector2 = neck_rest_target + _get_facing_offset(_skull_rest)
 
 	if is_instance_valid(_target) and not _head_severed:
-		# Skull aims directly at target
+		# Skull aims at target. During turns, the neck/skull rest targets jump
+		# (via _get_facing_offset), so we override them entirely with aim-driven
+		# positions when tracking. The aim direction is from body center (stable,
+		# no feedback loop from skull oscillation).
 		var to_target: Vector2 = _target.global_position - global_position
 		var aim_dir: Vector2 = to_target.normalized()
 
-		# Place skull along the aim direction, at the right distance from spine[0]
-		var skull_dist: float = sc(NECK_LEN) + _skull_rest.length()
-		var skull_aim: Vector2 = _spine[0] + aim_dir * skull_dist
-		skull_rest_target = skull_rest_target.lerp(skull_aim, 0.7)
+		# Place skull along the aim direction, at the 2.5D projected distance.
+		# Anchor from spine[1] (body center, stable) not spine[0] (breathing-affected).
+		# This prevents idle breathing oscillation from flipping the skull.
+		var skull_full_dist: float = sc(NECK_LEN) + _skull_rest.length()
+		var skull_aim_vec: Vector2 = aim_dir * skull_full_dist
+		var skull_proj_dist: float = _projected_len(skull_full_dist, skull_aim_vec)
+		var skull_aim: Vector2 = _spine[1] + aim_dir * skull_proj_dist
+		# During turns, fully override the rest target to avoid snap from
+		# _get_facing_offset. When not turning, blend normally.
+		var turn_override: float = 1.0 - absf(_facing)  # 0 when facing ±1, 1 at mid-turn
+		var aim_blend: float = lerpf(0.7, 1.0, turn_override)
+		skull_rest_target = skull_rest_target.lerp(skull_aim, aim_blend)
 
-		# Neck tip bends toward skull — positioned between spine[0] and skull
+		# Neck tip bends toward skull
 		var neck_toward_skull: Vector2 = (skull_rest_target - _spine[0]).normalized()
-		var neck_aim: Vector2 = _spine[0] + neck_toward_skull * NECK_LEN
-		# Blend with rest pose so neck doesn't fully collapse
-		neck_rest_target = neck_rest_target.lerp(neck_aim, 0.6)
+		var neck_proj: float = _projected_len(sc(NECK_LEN), neck_toward_skull * sc(NECK_LEN))
+		var neck_aim: Vector2 = _spine[0] + neck_toward_skull * neck_proj
+		neck_rest_target = neck_rest_target.lerp(neck_aim, aim_blend)
 
 	_neck[1] = _neck[1].lerp(neck_rest_target, minf(cfg("head_track_speed", HEAD_TRACK_SPEED) * delta, 1.0))
 	_skull = _skull.lerp(skull_rest_target, minf(cfg("head_track_speed", HEAD_TRACK_SPEED) * delta, 1.0))
@@ -1407,9 +1423,16 @@ func _update_movement_blend(delta: float) -> void:
 	## Smoothly blend _facing toward _facing_target and _move_speed toward
 	## _target_move_speed. Also track airborne time for landing recovery.
 
-	# -- Facing blend --
-	# Lerp toward target facing. During mid-turn (_facing near 0), the skeleton
-	# rest-pose targets sweep through, creating a visible body curl.
+	# -- Facing blend with turn commitment --
+	# Once a turn is actively in progress (facing is between -1 and 1), don't let
+	# the AI reverse _facing_target until facing has reached the current target.
+	# This prevents oscillation when the target is nearly overhead.
+	var turning: bool = absf(_facing) < 0.9 and absf(_facing - _facing_target) > 0.1
+	if turning and signf(_facing_target) != signf(_facing_prev_target):
+		# AI wants to reverse mid-turn — keep the committed direction
+		_facing_target = _facing_prev_target
+	_facing_prev_target = _facing_target
+
 	if _facing != _facing_target:
 		_facing = move_toward(_facing, _facing_target, cfg("turn_speed", TURN_SPEED) * delta)
 		# Snap when close enough to avoid lingering float drift
@@ -1444,10 +1467,16 @@ func _update_movement_blend(delta: float) -> void:
 
 
 func _get_facing_offset(offset: Vector2) -> Vector2:
-	## Scale x component by facing direction. _facing blends smoothly between
-	## -1 and 1 during turns, so the rest-pose targets sweep through the turn
-	## rather than snapping. Rest offsets are stored for _facing=1.
-	return Vector2(offset.x * _facing, offset.y)
+	## Scale x component by facing direction with cosine easing.
+	## _facing blends linearly from 1 to -1 during turns. A raw linear scale
+	## collapses the body to zero width at the midpoint, then snaps outward.
+	## Cosine easing keeps the body near full width longer and snaps through
+	## the compressed midpoint quickly — symmetric compression in and out.
+	## facing=1 → scale=1, facing=0 → scale=0, facing=-1 → scale=-1
+	## but the cosine curve spends ~70% of the time above 0.7 magnitude.
+	var t: float = (1.0 - _facing) * 0.5  # 0 at facing=1, 0.5 at facing=0, 1 at facing=-1
+	var visual_scale: float = cos(t * PI)
+	return Vector2(offset.x * visual_scale, offset.y)
 
 
 func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float) -> void:
@@ -1458,16 +1487,80 @@ func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float
 	pass
 
 
+func _projected_len(base_len: float, rest_dir: Vector2) -> float:
+	## Compute 2.5D projected segment length during turns. The 3D segment has
+	## length base_len. During a turn, the X component rotates into Z (not rendered),
+	## so the 2D projected distance is shorter for horizontal segments.
+	## IMPORTANT: rest_dir should be the REST-POSE direction of the segment (not the
+	## current direction), because during a turn the current direction becomes vertical
+	## as X collapses — using it would defeat the compression.
+	## At facing=±1 (no turn): returns base_len. At facing=0 (mid-turn):
+	## returns base_len * sqrt(1 - horiz²) where horiz is how horizontal the rest pose is.
+	if absf(_facing) > 0.99:
+		return base_len  # No turn — full length
+	var len: float = rest_dir.length()
+	if len < 0.01:
+		return base_len
+	var horiz_ratio: float = absf(rest_dir.x) / len  # 0=vertical, 1=horizontal
+	# The facing angle: 0=right, PI=left. _facing = cos(angle).
+	# sin²(angle) = 1 - _facing². This is the fraction of X that's in Z.
+	var sin2: float = 1.0 - _facing * _facing
+	# Projected length: only the X part compresses. Y stays.
+	# projected = base_len * sqrt(1 - sin²(angle) * horiz_ratio²)
+	return base_len * sqrt(1.0 - sin2 * horiz_ratio * horiz_ratio)
+
+
+func _enforce_shoulder_3d(anchor: Vector2, bones: Array, rest_offsets: Array, bone_len: float) -> void:
+	## Project clavicles/hip bones as if they rotate around the spine in 3D.
+	## Each bone pair (index 0 and 1) sits on opposite sides of the body in Z.
+	## During a turn, the near-side bone sweeps inward and the far-side sweeps
+	## outward, creating the visual of a body rotating in depth.
+	##
+	## 3D model: bone_pos = (rest_x * cos(θ) + z_depth * sin(θ), rest_y)
+	## where θ is the facing angle (0=right, π=left) and z_depth is ± for each side.
+	var z_depth: float = sc(cfg("shoulder_z_depth", SHOULDER_Z_DEPTH))
+	# sin(θ) from facing: _facing = cos(θ), so sin²(θ) = 1 - _facing²
+	# We need signed sin — positive during the first half of the turn.
+	# Since we lerp _facing linearly, we can derive sin from the geometry.
+	var sin_facing: float = sqrt(maxf(0.0, 1.0 - _facing * _facing))
+
+	for bi in range(2):
+		var rest: Vector2 = rest_offsets[bi]
+		# Bone 0 has z = -z_depth (far side when facing right)
+		# Bone 1 has z = +z_depth (near side when facing right)
+		var z_sign: float = -1.0 if bi == 0 else 1.0
+		var bone_z: float = z_depth * z_sign
+
+		# Project 3D position to 2D:
+		# x_projected = rest.x * cos(θ) + bone_z * sin(θ)
+		# y stays the same
+		var cos_facing: float = _facing  # _facing IS cos(θ)
+		var x_proj: float = rest.x * cos_facing + bone_z * sin_facing
+		var y_proj: float = rest.y
+
+		# Apply as offset from anchor, maintaining the bone length in the
+		# projected direction
+		var proj_offset := Vector2(x_proj, y_proj)
+		if proj_offset.length() > 0.01:
+			bones[bi] = anchor + proj_offset.normalized() * bone_len
+		else:
+			bones[bi] = anchor + Vector2(0, bone_len)
+
+
 func _enforce_spine_rigid() -> void:
 	## Enforce rigid distances + max bend angles between all connected segments.
+	## Uses _projected_len for 2.5D-aware distances during turns.
 	## When _pose_locked: only enforce distances (skip angle constraints — pose may be non-standard orientation).
-	# Spine chain: spine[0] is the anchor
+	# Spine chain: spine[0] is the anchor.
+	# Use REST-POSE direction (horizontal) for _projected_len, not current direction,
+	# because during a turn the current direction becomes vertical as X collapses.
+	var spine_rest_dir := Vector2(sc(SPINE_SEG_LEN), 0)  # Spine is horizontal in rest
 	if _pose_locked:
 		# Distance-only enforcement — preserve the current angles
 		for i in range(1, 3):
 			var dir: Vector2 = (_spine[i] - _spine[i - 1])
 			if dir.length() > 0.01:
-				_spine[i] = _spine[i - 1] + dir.normalized() * sc(SPINE_SEG_LEN)
+				_spine[i] = _spine[i - 1] + dir.normalized() * _projected_len(sc(SPINE_SEG_LEN), spine_rest_dir)
 	else:
 		# Full enforcement: distances + max 30° bend angles
 		# Reference direction for spine[0]→[1]: facing direction (horizontal)
@@ -1480,7 +1573,7 @@ func _enforce_spine_rigid() -> void:
 				if absf(angle_diff) > SPINE_MAX_BEND:
 					var clamped_angle: float = spine_ref_dir.angle() + clampf(angle_diff, -SPINE_MAX_BEND, SPINE_MAX_BEND)
 					current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-				_spine[i] = _spine[i - 1] + current_dir * sc(SPINE_SEG_LEN)
+				_spine[i] = _spine[i - 1] + current_dir * _projected_len(sc(SPINE_SEG_LEN), spine_rest_dir)
 				spine_ref_dir = current_dir
 
 	# Neck: distance enforcement (+ angle constraints when not pose_locked)
@@ -1495,7 +1588,7 @@ func _enforce_spine_rigid() -> void:
 			if absf(angle_diff) > NECK_MAX_BEND:
 				var clamped_angle: float = neck_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
 				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-		_neck[1] = _spine[0] + current_dir * sc(NECK_LEN)
+		_neck[1] = _spine[0] + current_dir * _projected_len(sc(NECK_LEN), _neck_rest)
 
 	# Skull: distance enforcement (+ angle constraints when not pose_locked)
 	var skull_dist: float = _skull_rest.length()
@@ -1508,19 +1601,16 @@ func _enforce_spine_rigid() -> void:
 			if absf(angle_diff) > NECK_MAX_BEND:
 				var clamped_angle: float = skull_ref_dir.angle() + clampf(angle_diff, -NECK_MAX_BEND, NECK_MAX_BEND)
 				current_dir = Vector2(cos(clamped_angle), sin(clamped_angle))
-		_skull = _neck[1] + current_dir * skull_dist
+		_skull = _neck[1] + current_dir * _projected_len(skull_dist, _skull_rest)
 
-	# Clavicles: rigid from spine[0]
-	for ci in range(2):
-		var cdir: Vector2 = _clavicles[ci] - _spine[0]
-		if cdir.length() > 0.01:
-			_clavicles[ci] = _spine[0] + cdir.normalized() * sc(CLAVICLE_LEN)
+	# Clavicles: 2.5D rotation around spine[0].
+	# Each clavicle has a Z-depth (perpendicular to the body plane). During turns,
+	# the near-side shoulder sweeps inward and the far-side shoulder sweeps outward,
+	# creating a realistic 3D rotation effect projected to 2D.
+	_enforce_shoulder_3d(_spine[0], _clavicles, _clavicle_rest, sc(CLAVICLE_LEN))
 
-	# Hip bones: rigid from spine[2]
-	for hi in range(2):
-		var hdir: Vector2 = _hip_bones[hi] - _spine[2]
-		if hdir.length() > 0.01:
-			_hip_bones[hi] = _spine[2] + hdir.normalized() * sc(HIP_BONE_LEN)
+	# Hip bones: same 2.5D rotation around spine[2]
+	_enforce_shoulder_3d(_spine[2], _hip_bones, _hip_bone_rest, sc(HIP_BONE_LEN))
 
 
 # -- Spine & Posture ----------------------------------------------------------

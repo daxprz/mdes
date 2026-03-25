@@ -163,6 +163,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.9
+**2.5D skeleton projection for smooth turns**
+
+- **2.5D projection system**: Segment rigidity uses `_projected_len()` to compute physically correct 2D distances during turns. Horizontal segments compress as if rotating into Z. Uses rest-pose directions to avoid feedback where collapsed segments resist compression
+- **3D shoulder/hip rotation**: Clavicles and hip bones rotate around the spine via `_enforce_shoulder_3d()` with configurable `SHOULDER_Z_DEPTH`. Near-side sweeps inward, far-side sweeps outward, crossing at midpoint
+- **Turn commitment**: Blocks facing reversals while mid-turn (`|_facing| < 0.9`) to prevent oscillation when target is nearly overhead
+- **Head tracking fix**: Skull aims from spine[1] (stable body center) instead of breathing-affected spine[0]. Aim blend goes to 100% during turns to override rest-pose snap
+- **Cosine easing**: `_get_facing_offset()` applies cosine curve so body stays near full width longer and snaps through compressed midpoint symmetrically
+- New `chained_above_slow_turn` test with exaggerated turn/stiffness config (scale=2.0, turn_speed=2.0, stiffness=6.0)
+- New `exaggerated_animations` test suite for visual verification
+- All 27 tests pass (all suite), zero failures
+
 ### v0.10.8
 **Runtime config system for monster constants**
 
