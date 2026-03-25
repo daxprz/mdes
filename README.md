@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.5
+**Enter/exit hooks for monster state machine**
+
+- `_change_state()` now calls `_exit_state(old, new)` and `_enter_state(new, old)` hooks
+- Exit hooks consolidate per-state cleanup: tail whip flag, grab collision restore, leap IK/floor-snap reset, posture finalization
+- Enter hooks handle per-state defaults (standdown zeroes velocity/direction)
+- Leap sub-state transitions (windup/airborne/strike/thrash) skip full leap cleanup — only applied when leaving the leap group entirely
+- Removed duplicated cleanup from `_do_tail_whip`, `_do_grab`, `_do_transition_*`, `_end_leap`, and standdown entry
+- All 27 tests pass (1 flaky `ik_peak` near-threshold on `hunt_P2` — unrelated to state changes)
+
 ### v0.10.4
 **Centralized monster state machine transitions, debug logging for state changes**
 

@@ -32,16 +32,59 @@ func _effective_speed(base_speed: float) -> float:
 	return base_speed * creature_scale
 
 ## Centralized state transition — all state changes route through here.
-## Logs transitions via the debug overlay and tracks strategy-change counts.
+## Calls _exit_state / _enter_state hooks, logs via debug overlay, tracks strategy counts.
 func _change_state(new_state: State) -> void:
 	if new_state == _state:
 		return
 	var old_state := _state
+	_exit_state(old_state, new_state)
 	_state = new_state
+	_enter_state(new_state, old_state)
 	_strategy_changes += 1
 	_last_state = old_state
 	DebugOverlay.log("monster/state", self, "STATE: %s -> %s" % [
 		State.keys()[old_state], State.keys()[new_state]])
+
+
+## Cleanup when leaving a state. Resets transient flags that the old state owned.
+func _exit_state(old_state: State, new_state: State) -> void:
+	match old_state:
+		State.ATTACK_TAIL:
+			_tail_whipping = false
+		State.ATTACK_GRAB:
+			_jaw_open = 0.0
+			_tail_whipping = false
+			_grab_target_node = null
+			# Restore normal body collision
+			if _body_collision and _body_collision.shape is CircleShape2D:
+				(_body_collision.shape as CircleShape2D).radius = 14.0
+				_body_collision.position = Vector2(0, -14.0)
+		State.ATTACK_LEAP_WINDUP, State.ATTACK_LEAP_AIRBORNE, \
+		State.ATTACK_LEAP_STRIKE, State.ATTACK_LEAP_THRASH:
+			_tail_whipping = false
+			# Only do full leap cleanup when leaving leap states entirely
+			# (not when transitioning between leap sub-states)
+			if new_state != State.ATTACK_LEAP_WINDUP \
+				and new_state != State.ATTACK_LEAP_AIRBORNE \
+				and new_state != State.ATTACK_LEAP_STRIKE \
+				and new_state != State.ATTACK_LEAP_THRASH:
+				_leap_ik_off = false
+				_leap_body_angle = 0.0
+				_posture_blend = 0.0
+				floor_snap_length = 1.0
+		State.TRANSITION_QUADRUPED:
+			_posture = Posture.QUADRUPED
+			_posture_blend = 0.0
+		State.TRANSITION_BIPEDAL:
+			_posture = Posture.BIPEDAL
+
+
+## Setup when entering a state. Initializes per-state defaults.
+func _enter_state(new_state: State, _old_state: State) -> void:
+	match new_state:
+		State.STANDDOWN:
+			_want_direction = 0.0
+			velocity.x = 0.0
 
 # -- Constants -----------------------------------------------------------------
 
@@ -776,14 +819,10 @@ func _physics_process(delta: float) -> void:
 	# Stand-down mode: force STANDDOWN state, override any transition
 	if _standdown and _state != State.STANDDOWN:
 		_change_state(State.STANDDOWN)
-		_want_direction = 0.0
-		velocity.x = 0.0
 
 	# Asleep mode: same as standdown but wakes on damage
 	if _asleep and _state != State.STANDDOWN:
 		_change_state(State.STANDDOWN)
-		_want_direction = 0.0
-		velocity.x = 0.0
 
 	# Breakaway invincibility timer
 	if _breakaway_immune > 0:
@@ -1948,7 +1987,6 @@ func _do_tail_whip(delta: float) -> void:
 	velocity.x = 0
 
 	if _tail_severed:
-		_tail_whipping = false
 		_change_state(State.CHASE)
 		return
 
@@ -1970,7 +2008,6 @@ func _do_tail_whip(delta: float) -> void:
 		# Recovery — tail springs back to rest pose via _solve_pose
 		pass
 	else:
-		_tail_whipping = false
 		_change_state(State.CHASE)
 
 
@@ -2137,19 +2174,11 @@ func _do_grab(delta: float) -> void:
 
 	# Phase 3: eject
 	if t >= 1.0:
-		# Fling the player in a random direction
+		# Fling the player in a random direction (before _exit_state nulls _grab_target_node)
 		if is_instance_valid(_grab_target_node):
 			var eject_angle: float = randf() * TAU
 			_grab_target_node.velocity = Vector2(cos(eject_angle), sin(eject_angle)) * GRAB_EJECT_SPEED
 			_grab_target_node.velocity.y = minf(_grab_target_node.velocity.y, -150.0)  # Some upward
-
-		_jaw_open = 0.0
-		_tail_whipping = false
-		_grab_target_node = null
-		# Restore normal body collision
-		if _body_collision and _body_collision.shape is CircleShape2D:
-			(_body_collision.shape as CircleShape2D).radius = 14.0
-			_body_collision.position = Vector2(0, -14.0)  # Reset belly position
 
 		# Teleport to where the grab happened (near the player), not pre-grab position
 		if is_instance_valid(_target):
@@ -2338,7 +2367,6 @@ func _do_transition_bipedal(delta: float) -> void:
 	velocity.x = 0
 	_posture_blend = clampf(_attack_timer / 0.4, 0.0, 1.0)
 	if _attack_timer >= 0.4:
-		_posture = Posture.BIPEDAL
 		_change_state(State.ATTACK_SWIPE)
 		_attack_timer = 0.0
 
@@ -2348,8 +2376,6 @@ func _do_transition_quadruped(delta: float) -> void:
 	velocity.x = 0
 	_posture_blend = 1.0 - clampf(_attack_timer / 0.4, 0.0, 1.0)
 	if _attack_timer >= 0.4:
-		_posture = Posture.QUADRUPED
-		_posture_blend = 0.0
 		_change_state(State.CHASE)
 
 
@@ -4167,7 +4193,6 @@ func _do_leap_airborne(delta: float) -> void:
 				_leap_slash_count = 0
 				_leap_slash_side = 1
 			velocity = Vector2.ZERO
-			_tail_whipping = false
 			return
 
 	# Timeout / hit ground fallback
@@ -4263,14 +4288,12 @@ func _do_leap_thrash(delta: float) -> void:
 
 
 func _end_leap() -> void:
+	## Clean up leap-specific data. Flag resets (_tail_whipping, _leap_ik_off,
+	## _leap_body_angle, _posture_blend, floor_snap_length) are handled by
+	## _exit_state when the state actually changes.
 	DebugOverlay.log("pathing/platform_leap_path", self, "LEAP END: at (%.0f,%.0f) on_floor=%s timer=%.2f", [
 		global_position.x, global_position.y, str(is_on_floor()), _attack_timer])
-	floor_snap_length = 1.0  # Re-enable floor snapping
 	_jaw_open = 0.0
-	_posture_blend = 0.0
-	_tail_whipping = false
-	_leap_ik_off = false
-	_leap_body_angle = 0.0
 	_leap_plan_results.clear()
 	_leap_chosen_arc_l.clear()
 	_leap_chosen_arc_r.clear()

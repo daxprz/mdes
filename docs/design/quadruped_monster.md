@@ -176,6 +176,7 @@ Severed limbs fall under gravity. Stumps are drawn as red circles at the attachm
 - **Speed tiers**: Slow (30, patrol), Medium (80, chase), Fast (160, charge) — based on distance to target.
 - **Attack selection**: Tail whip if target behind, vertical leap at 80-500px (8s cooldown), lunge at 80-200px, bite or swipe at close range.
 - **Centralized state transitions**: All state changes route through `_change_state()`, which logs transitions via `DebugOverlay.log("monster/state", ...)` and tracks strategy-change counts. Enable with `debug log monster/state`.
+- **Enter/exit hooks**: `_change_state()` calls `_exit_state(old, new)` and `_enter_state(new, old)`. Exit hooks handle per-state cleanup (tail whip flag, grab collision restore, leap IK/snap reset, posture finalization). Enter hooks handle per-state defaults (standdown zeroes velocity). Leap sub-state transitions skip full cleanup — only applied when leaving the leap state group entirely.
 
 ## Debug Inspector
 
