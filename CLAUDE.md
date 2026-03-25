@@ -45,6 +45,7 @@ Do NOT use tumu when:
 | `scripts/systems/chain.gd` | Chain physics + scaled rendering |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
 | `docs/epics/EPIC_monster_scaling.md` | Monster scaling spec (COMPLETE) |
+| `docs/design/animation_roadmap.md` | Procedural animation roadmap (momentum, attacks, walls) |
 
 ## Conventions
 

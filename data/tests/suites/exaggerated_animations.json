@@ -3,6 +3,9 @@
 	"description": "Visual verification tests with exaggerated animation parameters",
 	"gate": false,
 	"tests": [
-		"chained_above_slow_turn"
+		"chained_above_slow_turn",
+		"exag_floor_sprint",
+		"exag_landing_recovery",
+		"exag_speed_transitions"
 	]
 }

@@ -1,0 +1,29 @@
+{
+	"name": "exag_floor_sprint",
+	"description": "Monster sprints back and forth across floor chasing teleporting dummy. Exercises speed blend ramp-up/ramp-down and turn transitions at full speed.",
+	"script": [
+		"var owait default=0",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn monster 960 885 standdown scale=2.0 config={turn_speed=2.5,speed_blend_rate=150.0,stiffness=6.0}",
+		"spawn dummy 200 885",
+		"debug on body_mechanics/spine_debug",
+		"debug on body_mechanics/leg_debug",
+		"debug log monster/blend",
+		"standdown off",
+		"wait 5",
+		"tp 1700 885",
+		"wait 5",
+		"tp 200 885",
+		"wait 5",
+		"tp 1700 885",
+		"wait 5",
+		"standdown on",
+		"debug off body_mechanics/spine_debug",
+		"debug off body_mechanics/leg_debug",
+		"debug nolog monster/blend",
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] {owait} editor"
+	]
+}

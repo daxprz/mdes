@@ -1,0 +1,33 @@
+{
+	"name": "exag_speed_transitions",
+	"description": "Dummy alternates between close and far positions. Monster transitions between speed tiers (slow/medium/fast) repeatedly. Exercises speed blend ramping and gait transitions.",
+	"script": [
+		"var owait default=0",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn monster 960 885 standdown scale=2.0 config={turn_speed=3.0,speed_blend_rate=100.0,stiffness=6.0}",
+		"spawn dummy 1100 885",
+		"debug on body_mechanics/spine_debug",
+		"debug on body_mechanics/leg_debug",
+		"debug log monster/blend",
+		"standdown off",
+		"wait 3",
+		"tp 1700 885",
+		"wait 3",
+		"tp 1050 885",
+		"wait 3",
+		"tp 200 885",
+		"wait 3",
+		"tp 900 885",
+		"wait 3",
+		"tp 1800 885",
+		"wait 3",
+		"standdown on",
+		"debug off body_mechanics/spine_debug",
+		"debug off body_mechanics/leg_debug",
+		"debug nolog monster/blend",
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] {owait} editor"
+	]
+}

@@ -1,0 +1,25 @@
+{
+	"name": "exag_landing_recovery",
+	"description": "Monster on P1 leaps to floor target. Exercises landing recovery compression and speed blend after impact.",
+	"script": [
+		"var owait default=0",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn monster 540 740 standdown scale=2.0 config={turn_speed=2.5,landing_compress=20.0,landing_recovery_time=0.5,stiffness=6.0}",
+		"spawn dummy 960 885",
+		"debug on body_mechanics/spine_debug",
+		"debug on body_mechanics/leg_debug",
+		"debug log monster/blend",
+		"standdown off",
+		"wait 10",
+		"tp 400 885",
+		"wait 10",
+		"standdown on",
+		"debug off body_mechanics/spine_debug",
+		"debug off body_mechanics/leg_debug",
+		"debug nolog monster/blend",
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] {owait} editor"
+	]
+}

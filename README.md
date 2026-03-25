@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.10
+**Exaggerated animation test suite and animation roadmap**
+
+- New `exag_floor_sprint` test: monster sprints back and forth chasing teleporting dummy (speed blend + turns at full speed)
+- New `exag_landing_recovery` test: monster on P1 leaps to floor (landing compression + post-impact speed blend)
+- New `exag_speed_transitions` test: dummy alternates close/far positions (speed tier ramping between slow/medium/fast)
+- All exaggerated tests use `scale=2.0` with tuned `cfg()` params for visible animation quality
+- `exaggerated_animations` suite expanded to 4 tests (4/4 passing)
+- New `docs/design/animation_roadmap.md` capturing upcoming work: momentum/speed curves, attack wind-up/follow-through, wall climbing, wall jumping
+
 ### v0.10.9
 **2.5D skeleton projection for smooth turns**
 
