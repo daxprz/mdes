@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.4
+**Centralized monster state machine transitions, debug logging for state changes**
+
+- All 42 monster state assignments now route through `_change_state()` instead of raw `_state = State.XXX`
+- New `monster/state` debug aspect logs every state transition (e.g., `STATE: CHASE -> ATTACK_LEAP_PLAN`)
+- Enable via RCON: `debug log monster/state`
+- Removed redundant state-change tracking from `_score_strategy_thrash()` (now handled by `_change_state()`)
+- RCON `run` and `suite` commands default to `owait=0` instead of `owait=600` for faster automated test runs
+- All 27 tests in `all` suite pass with zero regressions
+
 ### v0.10.3
 **Suite skip support, suite completion logging, test-gate polling fix**
 

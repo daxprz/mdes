@@ -58,6 +58,9 @@ func _register_all() -> void:
 	r.call("body_mechanics/origin_marker", "Origin crosshair at (0,0)")
 	r.call("body_mechanics/floor_line", "Floor raycast line and label")
 
+	# -- Monster State Machine --
+	r.call("monster/state", "State transition log (old → new)")
+
 	# -- State Info --
 	r.call("state_info/state_text_panel", "State, HP, velocity, IK metrics text")
 	r.call("state_info/selection_indicator", "TAB-selected entity pulsing ring")

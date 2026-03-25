@@ -388,7 +388,7 @@ func _execute(command: String) -> String:
 				return "ERR: usage: run <test_name> [key=value ...]"
 			var editor: Node = _ensure_test_editor()
 			if editor:
-				var override_vars: Dictionary = {"owait": "600"}
+				var override_vars: Dictionary = {"owait": "0"}
 				for pi in range(2, parts.size()):
 					var eq := parts[pi].find("=")
 					if eq > 0:
@@ -405,7 +405,7 @@ func _execute(command: String) -> String:
 			var editor: Node = _ensure_test_editor()
 			if editor:
 				# Parse optional key=value args and skip list
-				var override_vars: Dictionary = {"owait": "600"}  # Default for RCON
+				var override_vars: Dictionary = {"owait": "0"}  # Default for RCON
 				var skip_tests: Array[String] = []
 				var parsing_skip: bool = false
 				for pi in range(2, parts.size()):

@@ -31,6 +31,18 @@ func _effective_speed(base_speed: float) -> float:
 		return speed_override
 	return base_speed * creature_scale
 
+## Centralized state transition — all state changes route through here.
+## Logs transitions via the debug overlay and tracks strategy-change counts.
+func _change_state(new_state: State) -> void:
+	if new_state == _state:
+		return
+	var old_state := _state
+	_state = new_state
+	_strategy_changes += 1
+	_last_state = old_state
+	DebugOverlay.log("monster/state", self, "STATE: %s -> %s" % [
+		State.keys()[old_state], State.keys()[new_state]])
+
 # -- Constants -----------------------------------------------------------------
 
 const GRAVITY := 600.0
@@ -763,13 +775,13 @@ func _physics_process(delta: float) -> void:
 
 	# Stand-down mode: force STANDDOWN state, override any transition
 	if _standdown and _state != State.STANDDOWN:
-		_state = State.STANDDOWN
+		_change_state(State.STANDDOWN)
 		_want_direction = 0.0
 		velocity.x = 0.0
 
 	# Asleep mode: same as standdown but wakes on damage
 	if _asleep and _state != State.STANDDOWN:
-		_state = State.STANDDOWN
+		_change_state(State.STANDDOWN)
 		_want_direction = 0.0
 		velocity.x = 0.0
 
@@ -783,7 +795,7 @@ func _physics_process(delta: float) -> void:
 		global_position = Vector2(960, 850)
 		velocity = Vector2.ZERO
 		_end_leap()
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 	# First-frame: plant feet. Precache runs after a short delay (2 frames)
 	# to ensure the physics space has all StaticBody2D nodes registered.
@@ -1299,16 +1311,12 @@ func _score_ball_quality(center: Vector2, radius: float) -> void:
 
 func _score_strategy_thrash() -> void:
 	## Track strategy changes. Reset when the target moves significantly.
+	## Note: _strategy_changes and _last_state are updated by _change_state().
 	if is_instance_valid(_target):
 		var target_moved: float = _target.global_position.distance_to(_last_target_pos)
 		if target_moved > 30.0:
 			_strategy_changes = 0
 			_last_target_pos = _target.global_position
-
-	var current: int = _state
-	if current != _last_state:
-		_strategy_changes += 1
-		_last_state = current
 
 
 func _get_facing_offset(offset: Vector2) -> Vector2:
@@ -1663,12 +1671,12 @@ func _do_patrol(_delta: float) -> void:
 
 	_pick_target()
 	if _target and is_instance_valid(_target):
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 func _do_chase(_delta: float) -> void:
 	if not is_instance_valid(_target):
-		_state = State.PATROL
+		_change_state(State.PATROL)
 		return
 
 	_pick_target()  # Check aggro switch
@@ -1752,7 +1760,7 @@ func _do_chase(_delta: float) -> void:
 				if absf(launch_vel.x) > 5.0:
 					_facing = signf(launch_vel.x)
 				set_meta("_precog_leap", true)  # Flag: don't adjust velocity in windup
-				_state = State.ATTACK_LEAP_WINDUP
+				_change_state(State.ATTACK_LEAP_WINDUP)
 				_attack_timer = 0.0
 				_leap_ik_off = true
 				_leap_cooldown = LEAP_COOLDOWN
@@ -1863,13 +1871,13 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		if randf() < 0.6 or _count_front_legs() == 0:
 			_start_attack(State.ATTACK_BITE)
 		else:
-			_state = State.TRANSITION_BIPEDAL
+			_change_state(State.TRANSITION_BIPEDAL)
 			_attack_timer = 0.0
 		return
 
 
 func _start_attack(attack_state: State) -> void:
-	_state = attack_state
+	_change_state(attack_state)
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_state_lock_timer = 1.5  # Commit to this attack
@@ -1909,7 +1917,7 @@ func _do_bite(delta: float) -> void:
 		_jaw_open = 0.0
 	else:
 		_jaw_open = 0.0
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 func _do_swipe(delta: float) -> void:
@@ -1931,7 +1939,7 @@ func _do_swipe(delta: float) -> void:
 		# Recovery
 		pass
 	else:
-		_state = State.TRANSITION_QUADRUPED
+		_change_state(State.TRANSITION_QUADRUPED)
 		_attack_timer = 0.0
 
 
@@ -1941,7 +1949,7 @@ func _do_tail_whip(delta: float) -> void:
 
 	if _tail_severed:
 		_tail_whipping = false
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 
 	_tail_whipping = true  # Loosen tail stiffness during whip
@@ -1963,7 +1971,7 @@ func _do_tail_whip(delta: float) -> void:
 		pass
 	else:
 		_tail_whipping = false
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 func _do_lunge(delta: float) -> void:
@@ -1981,7 +1989,7 @@ func _do_lunge(delta: float) -> void:
 		velocity.x = lerpf(velocity.x, 0, 0.1)
 	else:
 		velocity.x = 0
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 # -- Sprint Slash (same-plane charge + triple swipe) ---------------------------
@@ -1993,7 +2001,7 @@ func _start_grab() -> void:
 		DebugOverlay.log("leap_attack/attack_zone", self, "GRAB START: monster at (%.0f,%.0f), target at (%.0f,%.0f)", [
 			global_position.x, global_position.y,
 			_target.global_position.x, _target.global_position.y])
-	_state = State.ATTACK_GRAB
+	_change_state(State.ATTACK_GRAB)
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_grab_kick_count = 0
@@ -2011,7 +2019,7 @@ func _do_grab(delta: float) -> void:
 	velocity.x = 0
 
 	if not is_instance_valid(_grab_target_node):
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 
 	var target_local: Vector2 = _grab_target_node.global_position - global_position
@@ -2152,7 +2160,7 @@ func _do_grab(delta: float) -> void:
 			global_position.y = global_position.y + safe_floor - 14.0
 		velocity = Vector2.ZERO
 
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 		# Reset skeleton to standing pose
 		var body_y: float = -(sc(4.0) + sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN))
@@ -2170,7 +2178,7 @@ func _do_grab(delta: float) -> void:
 
 
 func _start_sprint_slash() -> void:
-	_state = State.ATTACK_SPRINT_SLASH
+	_change_state(State.ATTACK_SPRINT_SLASH)
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_sprint_slash_count = 0
@@ -2181,7 +2189,7 @@ func _do_sprint_slash(delta: float) -> void:
 	_attack_timer += delta
 
 	if not is_instance_valid(_target):
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 
 	var to_target: Vector2 = _target.global_position - global_position
@@ -2228,17 +2236,17 @@ func _do_sprint_slash(delta: float) -> void:
 
 		# Done after 3 slashes + recovery
 		if _attack_timer > 3 * SPRINT_SLASH_INTERVAL + 0.2:
-			_state = State.CHASE
+			_change_state(State.CHASE)
 
 	# Timeout safety
 	if _attack_timer > 3.0:
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 # -- Connected Hop-Up (short platform climb) -----------------------------------
 
 func _start_hop_up(to_target: Vector2) -> void:
-	_state = State.ATTACK_HOP_UP
+	_change_state(State.ATTACK_HOP_UP)
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_hop_up_start_pos = global_position
@@ -2321,7 +2329,7 @@ func _do_hop_up(delta: float) -> void:
 				_foot_world[li] = global_position + _legs[li][2]
 		# Impact damage in small radius
 		_damage_players_in_range(global_position, 40.0, HOP_UP_DAMAGE)
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		_attack_timer = 0.0
 
 
@@ -2331,7 +2339,7 @@ func _do_transition_bipedal(delta: float) -> void:
 	_posture_blend = clampf(_attack_timer / 0.4, 0.0, 1.0)
 	if _attack_timer >= 0.4:
 		_posture = Posture.BIPEDAL
-		_state = State.ATTACK_SWIPE
+		_change_state(State.ATTACK_SWIPE)
 		_attack_timer = 0.0
 
 
@@ -2342,7 +2350,7 @@ func _do_transition_quadruped(delta: float) -> void:
 	if _attack_timer >= 0.4:
 		_posture = Posture.QUADRUPED
 		_posture_blend = 0.0
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 # -- Vertical Leap Attack ------------------------------------------------------
@@ -2458,7 +2466,7 @@ func _start_leap() -> void:
 		global_position.x, global_position.y,
 		_target.global_position.x if is_instance_valid(_target) else 0,
 		_target.global_position.y if is_instance_valid(_target) else 0])
-	_state = State.ATTACK_LEAP_PLAN
+	_change_state(State.ATTACK_LEAP_PLAN)
 	_attack_timer = 0.0
 	_attack_cooldown = ATTACK_COOLDOWN
 	_leap_cooldown = LEAP_COOLDOWN
@@ -2487,7 +2495,7 @@ func _do_leap_plan(delta: float) -> void:
 	_attack_timer += delta
 
 	if not is_instance_valid(_target):
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 
 	_leap_target_pos = _target.global_position
@@ -2509,7 +2517,7 @@ func _do_leap_plan(delta: float) -> void:
 
 		if dist_to_launch < 10.0:
 			# Arrived at launch position — commit to the leap
-			_state = State.ATTACK_LEAP_WINDUP
+			_change_state(State.ATTACK_LEAP_WINDUP)
 			_attack_timer = 0.0
 			_leap_ik_off = true
 			velocity.x = 0
@@ -2521,7 +2529,7 @@ func _do_leap_plan(delta: float) -> void:
 	else:
 		# Both phases failed — abort after brief pause
 		if _attack_timer > 0.5:
-			_state = State.CHASE
+			_change_state(State.CHASE)
 			_leap_cooldown = 2.0
 
 
@@ -2853,17 +2861,17 @@ var _precog_cooldown: float = 0.0  # Prevent precog spam
 
 func _start_precognition() -> void:
 	if _precog_cooldown > 0.0:
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 	_plan_attempts += 1
 	if _plan_attempts < MAX_PLAN_ATTEMPTS and _precog_has_waypoint:
 		# Still committed to current plan — don't re-plan yet
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		return
 	_plan_attempts = 0
 	_precog_cooldown = 2.0
 	_state_lock_timer = 3.0  # Commit to precog for at least 3 seconds
-	_state = State.PRECOGNITION
+	_change_state(State.PRECOGNITION)
 	_attack_timer = 0.0
 	_precog_phase = 0
 	_precog_ball_lands.clear()
@@ -3311,7 +3319,7 @@ func _precog_start_execution() -> void:
 	DebugOverlay.log("precog/current_path", self, "PRECOG EXEC: path=%s edges=%d", [str(_precog_path), _precog_path_edges.size()])
 	if _precog_path.size() < 2 or _precog_path_edges.is_empty():
 		DebugOverlay.log("precog/current_path", self, "PRECOG EXEC: ABORT — path too short or no edges")
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		_time_since_strike_range = 0.0
 		return
 	# Reset stuck timer so execution isn't immediately cancelled
@@ -3327,7 +3335,7 @@ func _precog_start_next_hop() -> void:
 	if _precog_current_hop >= _precog_path_edges.size():
 		# All hops complete — chase the target normally
 		_precog_has_waypoint = false
-		_state = State.CHASE
+		_change_state(State.CHASE)
 		_time_since_strike_range = 0.0
 		return
 
@@ -3335,7 +3343,7 @@ func _precog_start_next_hop() -> void:
 	_precog_waypoint = edge.get("from_pos", _precog_platforms[_precog_path[_precog_current_hop]]["pos"])
 	_precog_waypoint_edge = edge
 	_precog_has_waypoint = true
-	_state = State.CHASE
+	_change_state(State.CHASE)
 	_time_since_strike_range = 0.0
 
 	DebugOverlay.log("pathing/waypoints", self, "PRECOG: hop %d/%d → walk to (%.0f,%.0f) then leap", [
@@ -4054,10 +4062,10 @@ func _do_leap_windup(delta: float) -> void:
 			if (to_target_x > 20.0 and _facing < 0) or (to_target_x < -20.0 and _facing > 0):
 				_facing = signf(to_target_x)
 				_end_leap()
-				_state = State.CHASE
+				_change_state(State.CHASE)
 				return
 
-		_state = State.ATTACK_LEAP_AIRBORNE
+		_change_state(State.ATTACK_LEAP_AIRBORNE)
 		_attack_timer = 0.0
 		_leap_ik_off = true
 		# Disable floor snap so the monster actually leaves the ground
@@ -4154,7 +4162,7 @@ func _do_leap_airborne(delta: float) -> void:
 			if randf() < 0.25 and not _grab_disabled:
 				_start_grab()
 			else:
-				_state = State.ATTACK_LEAP_STRIKE
+				_change_state(State.ATTACK_LEAP_STRIKE)
 				_attack_timer = 0.0
 				_leap_slash_count = 0
 				_leap_slash_side = 1
@@ -4199,7 +4207,7 @@ func _do_leap_strike(delta: float) -> void:
 
 	# After all 6 slashes: transition to bite+thrash
 	if _leap_slash_count >= 6 and _attack_timer > 6 * slash_interval + 0.1:
-		_state = State.ATTACK_LEAP_THRASH
+		_change_state(State.ATTACK_LEAP_THRASH)
 		_attack_timer = 0.0
 		_leap_thrash_count = 0
 		# Open jaw for bite
@@ -4311,7 +4319,7 @@ func _end_leap() -> void:
 				set_meta("_leap_chosen_vel", velocity)
 				_leap_launch_pos = global_position
 				_leap_found_path = true
-				_state = State.ATTACK_LEAP_AIRBORNE
+				_change_state(State.ATTACK_LEAP_AIRBORNE)
 				_attack_timer = 0.0
 				_leap_ik_off = true
 				_leap_cooldown = LEAP_COOLDOWN
@@ -4319,7 +4327,7 @@ func _end_leap() -> void:
 					_target.global_position.x, _target.global_position.y, velocity.x, velocity.y])
 				return
 
-		_state = State.CHASE
+		_change_state(State.CHASE)
 
 
 func _spawn_slash_effect(local_pos: Vector2) -> void:
@@ -4672,7 +4680,7 @@ func _sever_part(part_name: String) -> void:
 
 func _die() -> void:
 	_dead = true
-	_state = State.DEAD
+	_change_state(State.DEAD)
 	velocity = Vector2.ZERO
 	died.emit(global_position)
 
