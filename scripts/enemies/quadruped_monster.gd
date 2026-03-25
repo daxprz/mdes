@@ -17,6 +17,24 @@ var pathing_radius: float = -1.0  # If >= 0, overrides sc(LEAP_BODY_RADIUS) for 
 func sc(base: float) -> float:
 	return base * creature_scale
 
+## Runtime config overrides. Keys match const names (lowercase). Values override
+## the const at runtime. Applied via apply_config() from RCON spawn or test scripts.
+var _cfg: Dictionary = {}
+
+## Look up a configurable value. Returns the override if set, otherwise the default.
+func cfg(key: String, default_val: float) -> float:
+	if _cfg.has(key):
+		return float(_cfg[key])
+	return default_val
+
+## Apply a config dictionary. Keys are constant names (case-insensitive).
+## Called from RCON spawn command with config={k=v,k=v} syntax.
+func apply_config(overrides: Dictionary) -> void:
+	for key in overrides:
+		_cfg[key.to_lower()] = overrides[key]
+	DebugOverlay.log("monster/state", self, "CONFIG: applied %d overrides: %s" % [
+		overrides.size(), str(overrides)])
+
 ## Get the effective body radius used for leap/pathing clearance.
 ## Uses pathing_radius if set, otherwise sc(LEAP_BODY_RADIUS).
 func _body_clearance_radius() -> float:
@@ -1128,7 +1146,7 @@ func _physics_process(delta: float) -> void:
 func _solve_pose(delta: float) -> void:
 	## Pose-driven skeleton: every segment springs toward its rest position
 	## relative to its parent. Nothing is floppy. The creature holds itself up.
-	var s: float = STIFFNESS * delta  # Spring factor this frame
+	var s: float = cfg("stiffness", STIFFNESS) * delta  # Spring factor this frame
 	var s_clamp: float = minf(s, 1.0)  # Don't overshoot
 
 	# -- Spine: spine[0] is the anchor (set by _update_spine) --
@@ -1158,8 +1176,8 @@ func _solve_pose(delta: float) -> void:
 		# Blend with rest pose so neck doesn't fully collapse
 		neck_rest_target = neck_rest_target.lerp(neck_aim, 0.6)
 
-	_neck[1] = _neck[1].lerp(neck_rest_target, minf(HEAD_TRACK_SPEED * delta, 1.0))
-	_skull = _skull.lerp(skull_rest_target, minf(HEAD_TRACK_SPEED * delta, 1.0))
+	_neck[1] = _neck[1].lerp(neck_rest_target, minf(cfg("head_track_speed", HEAD_TRACK_SPEED) * delta, 1.0))
+	_skull = _skull.lerp(skull_rest_target, minf(cfg("head_track_speed", HEAD_TRACK_SPEED) * delta, 1.0))
 
 	# -- Jaw: springs from skull, opens for bite --
 	var jaw_offset: Vector2 = _get_facing_offset(_jaw_rest)
@@ -1393,7 +1411,7 @@ func _update_movement_blend(delta: float) -> void:
 	# Lerp toward target facing. During mid-turn (_facing near 0), the skeleton
 	# rest-pose targets sweep through, creating a visible body curl.
 	if _facing != _facing_target:
-		_facing = move_toward(_facing, _facing_target, TURN_SPEED * delta)
+		_facing = move_toward(_facing, _facing_target, cfg("turn_speed", TURN_SPEED) * delta)
 		# Snap when close enough to avoid lingering float drift
 		if absf(_facing - _facing_target) < 0.05:
 			_facing = _facing_target
@@ -1403,17 +1421,17 @@ func _update_movement_blend(delta: float) -> void:
 	# -- Speed blend --
 	# Lerp move speed toward target. Gait naturally transitions as stride ramps.
 	if _move_speed != _target_move_speed:
-		_move_speed = move_toward(_move_speed, _target_move_speed, SPEED_BLEND_RATE * delta)
+		_move_speed = move_toward(_move_speed, _target_move_speed, cfg("speed_blend_rate", SPEED_BLEND_RATE) * delta)
 
 	# -- Landing recovery --
 	# Track time airborne. When we land after a fall, apply brief spine compression.
 	if not is_on_floor():
 		_airborne_timer += delta
-	elif _airborne_timer > FALL_THRESHOLD:
+	elif _airborne_timer > cfg("fall_threshold", FALL_THRESHOLD):
 		# Just landed after being airborne — start recovery
-		_landing_timer = LANDING_RECOVERY_TIME
+		_landing_timer = cfg("landing_recovery_time", LANDING_RECOVERY_TIME)
 		DebugOverlay.log("monster/blend", self, "LANDING: airborne=%.2fs recovery=%.2fs", [
-			_airborne_timer, LANDING_RECOVERY_TIME])
+			_airborne_timer, cfg("landing_recovery_time", LANDING_RECOVERY_TIME)])
 		_airborne_timer = 0.0
 	else:
 		_airborne_timer = 0.0
@@ -1516,9 +1534,9 @@ func _update_spine() -> void:
 
 	# Landing recovery: compress spine downward briefly after a fall
 	if _landing_timer > 0.0:
-		var t: float = _landing_timer / LANDING_RECOVERY_TIME  # 1.0 at start, 0.0 at end
+		var t: float = _landing_timer / cfg("landing_recovery_time", LANDING_RECOVERY_TIME)  # 1.0 at start, 0.0 at end
 		# Smooth ease-out: strong compression initially, eases back up
-		var compress: float = sc(LANDING_COMPRESS) * t * t
+		var compress: float = sc(cfg("landing_compress", LANDING_COMPRESS)) * t * t
 		body_y += compress
 
 	# In bipedal, front raises higher
@@ -1547,18 +1565,18 @@ func _update_foot_push(delta: float) -> void:
 
 		# Each planted foot pushes the body in the desired direction.
 		# Force scales with desired speed.
-		push_x += _want_direction * sc(FOOT_PUSH_FORCE) * (_move_speed / _effective_speed(SPEED_MEDIUM))
+		push_x += _want_direction * sc(cfg("foot_push_force", FOOT_PUSH_FORCE)) * (_move_speed / _effective_speed(SPEED_MEDIUM))
 
 	# Landing recovery: reduce push force while absorbing impact
 	if _landing_timer > 0.0:
-		var recovery_t: float = _landing_timer / LANDING_RECOVERY_TIME
+		var recovery_t: float = _landing_timer / cfg("landing_recovery_time", LANDING_RECOVERY_TIME)
 		push_x *= (1.0 - recovery_t * 0.7)  # Up to 70% force reduction at landing start
 
 	# More planted feet = more traction = more force
 	if planted_count > 0:
 		velocity.x += push_x * delta
 		# Friction/grip: dampen velocity when feet are planted (prevents sliding)
-		velocity.x *= FOOT_GRIP
+		velocity.x *= cfg("foot_grip", FOOT_GRIP)
 	else:
 		# No feet planted = no traction, body slides freely
 		velocity.x *= 0.98
@@ -1652,9 +1670,9 @@ func _try_step_pair(a: int, b: int) -> void:
 		b_dist = _foot_world[b].distance_to(_ideal_foot_world(b))
 
 	# Only step the one that's furthest behind (and past threshold)
-	if a_dist >= b_dist and a_dist > sc(STEP_THRESHOLD):
+	if a_dist >= b_dist and a_dist > sc(cfg("step_threshold", STEP_THRESHOLD)):
 		_try_step(a)
-	elif b_dist > sc(STEP_THRESHOLD):
+	elif b_dist > sc(cfg("step_threshold", STEP_THRESHOLD)):
 		_try_step(b)
 
 
@@ -1684,10 +1702,10 @@ func _try_step(li: int) -> void:
 	var ideal: Vector2 = _ideal_foot_world(li)
 	var dist: float = foot_pos.distance_to(ideal)
 
-	if dist > sc(STEP_THRESHOLD):
+	if dist > sc(cfg("step_threshold", STEP_THRESHOLD)):
 		# Start a step: foot lifts from current world position to new ideal
 		_foot_planted[li] = false
-		_step_timers[li] = STEP_DURATION
+		_step_timers[li] = cfg("step_duration", STEP_DURATION)
 		_step_origins[li] = foot_pos
 
 		# Overshoot past the ideal position
@@ -1699,7 +1717,7 @@ func _try_step(li: int) -> void:
 		_step_targets[li].y = target_floor_y
 
 		# Bezier midpoint: lifted arc between start and end
-		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -sc(STEP_HEIGHT))
+		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -sc(cfg("step_height", STEP_HEIGHT)))
 
 
 func _animate_step(li: int, delta: float) -> void:
@@ -1708,7 +1726,7 @@ func _animate_step(li: int, delta: float) -> void:
 		return
 
 	_step_timers[li] -= delta
-	var t: float = 1.0 - clampf(_step_timers[li] / STEP_DURATION, 0.0, 1.0)
+	var t: float = 1.0 - clampf(_step_timers[li] / cfg("step_duration", STEP_DURATION), 0.0, 1.0)
 
 	# Quadratic bezier in world space
 	var p0: Vector2 = _step_origins[li]

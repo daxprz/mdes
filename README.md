@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.8
+**Runtime config system for monster constants**
+
+- New `cfg(key, default)` helper reads from `_cfg` dictionary, falling back to const defaults
+- `apply_config(dict)` method accepts arbitrary key=value overrides at runtime
+- RCON spawn syntax: `spawn monster X Y [state] config={turn_speed=2.0,stiffness=6.0}`
+- 12 constants now configurable: `turn_speed`, `speed_blend_rate`, `landing_recovery_time`, `landing_compress`, `fall_threshold`, `stiffness`, `head_track_speed`, `step_threshold`, `step_duration`, `step_height`, `foot_push_force`, `foot_grip`
+- Test scripts can use config to exaggerate parameters for visual verification
+- All 27 tests pass
+
 ### v0.10.7
 **Movement blending: smooth turns, speed ramps, landing recovery**
 

@@ -186,6 +186,10 @@ Instead of instant state snaps, movement properties blend smoothly:
 - **Speed blend**: `_move_speed` lerps toward `_target_move_speed` at `SPEED_BLEND_RATE` (400 px/s²). Gait (stride, step frequency) transitions smoothly as speed ramps.
 - **Landing recovery**: After `FALL_THRESHOLD` (0.15s) of airborne time, landing triggers a `LANDING_RECOVERY_TIME` (0.25s) compression. Spine dips by `LANDING_COMPRESS` (8px, scaled), foot push force is reduced up to 70%, then eases back to normal. Debug aspect: `monster/blend`.
 
+### Runtime Config (`cfg()`)
+
+All meaningful constants can be overridden at spawn time via `config={k=v,k=v}` on the RCON spawn command. The monster stores overrides in `_cfg` dictionary, and `cfg(key, default)` returns the override if set, otherwise the const default. Currently configurable: `turn_speed`, `speed_blend_rate`, `landing_recovery_time`, `landing_compress`, `fall_threshold`, `stiffness`, `head_track_speed`, `step_threshold`, `step_duration`, `step_height`, `foot_push_force`, `foot_grip`. Test scripts can use this to exaggerate parameters for visual verification.
+
 ## Debug Inspector
 
 When the quadruped is TAB-selected in debug mode (Ctrl+D):
@@ -286,7 +290,7 @@ TCP server on port 9999 for external tool control. Enables automated testing wit
 |---------|-------------|
 | `help` | List all commands |
 | `debug` | Toggle debug mode |
-| `spawn monster [x y] [state] [scale=N] [pathing_radius=N]` | Spawn quadruped at position |
+| `spawn monster [x y] [state] [scale=N] [pathing_radius=N] [config={k=v,...}]` | Spawn quadruped at position with optional config overrides |
 | `spawn dummy [x y]` | Spawn controllerless dummy player |
 | `tp <x> <y>` | Teleport first player to position |
 | `tab [n]` | Cycle debug selection n times |

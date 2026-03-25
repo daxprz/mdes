@@ -114,10 +114,18 @@ func _execute(command: String) -> String:
 			var state: String = ""
 			var spawn_scale: float = 1.0
 			var spawn_pathing_radius: float = -1.0
+			var spawn_config: Dictionary = {}
 			# Parse remaining args: positional state OR key=value pairs
 			for pi in range(4, parts.size()):
 				var arg: String = parts[pi]
-				if arg.contains("="):
+				if arg.begins_with("config={") and arg.ends_with("}"):
+					# Parse config={k=v,k=v} syntax
+					var inner: String = arg.substr(8, arg.length() - 9)  # Strip "config={" and "}"
+					for pair in inner.split(","):
+						var eq: int = pair.find("=")
+						if eq > 0:
+							spawn_config[pair.substr(0, eq).strip_edges()] = pair.substr(eq + 1).strip_edges()
+				elif arg.contains("="):
 					var kv: PackedStringArray = arg.split("=", true, 1)
 					if kv[0] == "scale":
 						spawn_scale = float(kv[1])
@@ -125,7 +133,7 @@ func _execute(command: String) -> String:
 						spawn_pathing_radius = float(kv[1])
 				elif state.is_empty():
 					state = arg.to_lower()
-			return _cmd_spawn(what, x, y, state, spawn_scale, spawn_pathing_radius)
+			return _cmd_spawn(what, x, y, state, spawn_scale, spawn_pathing_radius, spawn_config)
 
 		"tab":
 			var count: int = int(parts[1]) if parts.size() > 1 else 1
@@ -644,7 +652,7 @@ func _cmd_test(what: String) -> String:
 			return "ERR: unknown test '%s'" % what
 
 
-func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "", spawn_scale: float = 1.0, spawn_pathing_radius: float = -1.0) -> String:
+func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "", spawn_scale: float = 1.0, spawn_pathing_radius: float = -1.0, spawn_config: Dictionary = {}) -> String:
 	var scene_root := get_tree().current_scene
 	if not scene_root:
 		return "ERR: no current scene"
@@ -668,9 +676,13 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			# Apply optional initial state
 			if state == "standdown":
 				monster._standdown = true
+			# Apply runtime config overrides
+			if not spawn_config.is_empty():
+				monster.apply_config(spawn_config)
 			var scale_str: String = " scale=%.1f" % spawn_scale if spawn_scale != 1.0 else ""
 			var state_str: String = " (%s)" % state if not state.is_empty() else ""
-			return "OK: spawned monster '%s' at (%.0f, %.0f)%s%s" % [monster.entity_id, x, y, state_str, scale_str]
+			var config_str: String = " config=%s" % str(spawn_config) if not spawn_config.is_empty() else ""
+			return "OK: spawned monster '%s' at (%.0f, %.0f)%s%s%s" % [monster.entity_id, x, y, state_str, scale_str, config_str]
 
 		"dummy":
 			# Fake player — a simple CharacterBody2D in the "players" group
