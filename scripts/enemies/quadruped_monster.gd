@@ -80,7 +80,20 @@ func _exit_state(old_state: State, new_state: State) -> void:
 
 
 ## Setup when entering a state. Initializes per-state defaults.
+## Timer/cooldown resets that every attack shares live here so _start_* functions
+## only need to set up state-specific data (targets, counters, skeleton poses).
 func _enter_state(new_state: State, _old_state: State) -> void:
+	# Reset attack timer for any state that ticks it
+	if new_state != State.PATROL and new_state != State.CHASE \
+		and new_state != State.STANDDOWN and new_state != State.DEAD:
+		_attack_timer = 0.0
+
+	# Set attack cooldown when starting a new attack sequence (not mid-leap sub-states)
+	if new_state in [State.ATTACK_BITE, State.ATTACK_SWIPE, State.ATTACK_TAIL,
+		State.ATTACK_LUNGE, State.ATTACK_SPRINT_SLASH, State.ATTACK_HOP_UP,
+		State.ATTACK_GRAB, State.ATTACK_LEAP_PLAN]:
+		_attack_cooldown = ATTACK_COOLDOWN
+
 	match new_state:
 		State.STANDDOWN:
 			_want_direction = 0.0
@@ -1800,7 +1813,6 @@ func _do_chase(_delta: float) -> void:
 					_facing = signf(launch_vel.x)
 				set_meta("_precog_leap", true)  # Flag: don't adjust velocity in windup
 				_change_state(State.ATTACK_LEAP_WINDUP)
-				_attack_timer = 0.0
 				_leap_ik_off = true
 				_leap_cooldown = LEAP_COOLDOWN
 				velocity.x = 0
@@ -1911,14 +1923,11 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 			_start_attack(State.ATTACK_BITE)
 		else:
 			_change_state(State.TRANSITION_BIPEDAL)
-			_attack_timer = 0.0
 		return
 
 
 func _start_attack(attack_state: State) -> void:
 	_change_state(attack_state)
-	_attack_timer = 0.0
-	_attack_cooldown = ATTACK_COOLDOWN
 	_state_lock_timer = 1.5  # Commit to this attack
 
 
@@ -1979,7 +1988,6 @@ func _do_swipe(delta: float) -> void:
 		pass
 	else:
 		_change_state(State.TRANSITION_QUADRUPED)
-		_attack_timer = 0.0
 
 
 func _do_tail_whip(delta: float) -> void:
@@ -2039,8 +2047,6 @@ func _start_grab() -> void:
 			global_position.x, global_position.y,
 			_target.global_position.x, _target.global_position.y])
 	_change_state(State.ATTACK_GRAB)
-	_attack_timer = 0.0
-	_attack_cooldown = ATTACK_COOLDOWN
 	_grab_kick_count = 0
 	_grab_target_node = _target
 	_state_lock_timer = GRAB_DURATION + 1.0
@@ -2208,8 +2214,6 @@ func _do_grab(delta: float) -> void:
 
 func _start_sprint_slash() -> void:
 	_change_state(State.ATTACK_SPRINT_SLASH)
-	_attack_timer = 0.0
-	_attack_cooldown = ATTACK_COOLDOWN
 	_sprint_slash_count = 0
 
 
@@ -2276,8 +2280,6 @@ func _do_sprint_slash(delta: float) -> void:
 
 func _start_hop_up(to_target: Vector2) -> void:
 	_change_state(State.ATTACK_HOP_UP)
-	_attack_timer = 0.0
-	_attack_cooldown = ATTACK_COOLDOWN
 	_hop_up_start_pos = global_position
 	# Find the platform surface above by raycasting
 	var check_pos: Vector2 = Vector2(global_position.x + to_target.x * 0.5, global_position.y + to_target.y)
@@ -2368,7 +2370,6 @@ func _do_transition_bipedal(delta: float) -> void:
 	_posture_blend = clampf(_attack_timer / 0.4, 0.0, 1.0)
 	if _attack_timer >= 0.4:
 		_change_state(State.ATTACK_SWIPE)
-		_attack_timer = 0.0
 
 
 func _do_transition_quadruped(delta: float) -> void:
@@ -2493,8 +2494,6 @@ func _start_leap() -> void:
 		_target.global_position.x if is_instance_valid(_target) else 0,
 		_target.global_position.y if is_instance_valid(_target) else 0])
 	_change_state(State.ATTACK_LEAP_PLAN)
-	_attack_timer = 0.0
-	_attack_cooldown = ATTACK_COOLDOWN
 	_leap_cooldown = LEAP_COOLDOWN
 	_leap_phase = 0.0
 	_leap_slash_count = 0
@@ -2544,7 +2543,6 @@ func _do_leap_plan(delta: float) -> void:
 		if dist_to_launch < 10.0:
 			# Arrived at launch position — commit to the leap
 			_change_state(State.ATTACK_LEAP_WINDUP)
-			_attack_timer = 0.0
 			_leap_ik_off = true
 			velocity.x = 0
 		else:
@@ -2898,7 +2896,6 @@ func _start_precognition() -> void:
 	_precog_cooldown = 2.0
 	_state_lock_timer = 3.0  # Commit to precog for at least 3 seconds
 	_change_state(State.PRECOGNITION)
-	_attack_timer = 0.0
 	_precog_phase = 0
 	_precog_ball_lands.clear()
 	_precog_platforms.clear()
@@ -4092,7 +4089,6 @@ func _do_leap_windup(delta: float) -> void:
 				return
 
 		_change_state(State.ATTACK_LEAP_AIRBORNE)
-		_attack_timer = 0.0
 		_leap_ik_off = true
 		# Disable floor snap so the monster actually leaves the ground
 		floor_snap_length = 0.0
@@ -4189,7 +4185,6 @@ func _do_leap_airborne(delta: float) -> void:
 				_start_grab()
 			else:
 				_change_state(State.ATTACK_LEAP_STRIKE)
-				_attack_timer = 0.0
 				_leap_slash_count = 0
 				_leap_slash_side = 1
 			velocity = Vector2.ZERO
@@ -4233,7 +4228,6 @@ func _do_leap_strike(delta: float) -> void:
 	# After all 6 slashes: transition to bite+thrash
 	if _leap_slash_count >= 6 and _attack_timer > 6 * slash_interval + 0.1:
 		_change_state(State.ATTACK_LEAP_THRASH)
-		_attack_timer = 0.0
 		_leap_thrash_count = 0
 		# Open jaw for bite
 		_jaw_open = 1.0
@@ -4297,7 +4291,6 @@ func _end_leap() -> void:
 	_leap_plan_results.clear()
 	_leap_chosen_arc_l.clear()
 	_leap_chosen_arc_r.clear()
-	_attack_timer = 0.0
 	velocity = Vector2.ZERO  # Kill all momentum on landing
 	# Collision circles reset via _update_collision_positions on next frame
 
@@ -4343,7 +4336,6 @@ func _end_leap() -> void:
 				_leap_launch_pos = global_position
 				_leap_found_path = true
 				_change_state(State.ATTACK_LEAP_AIRBORNE)
-				_attack_timer = 0.0
 				_leap_ik_off = true
 				_leap_cooldown = LEAP_COOLDOWN
 				DebugOverlay.log("leap_attack/attack_zone", self, "PRECOG: RAW AERIAL STRIKE at (%.0f,%.0f) vel=(%.0f,%.0f)", [

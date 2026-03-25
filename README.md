@@ -163,6 +163,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.6
+**Consolidate attack timer/cooldown resets into enter hook**
+
+- `_enter_state()` now resets `_attack_timer` for all combat, transition, and precog states
+- `_enter_state()` sets `_attack_cooldown` for attack-entry states (not mid-leap sub-states)
+- Removed 16 duplicated `_attack_timer = 0.0` / `_attack_cooldown = ATTACK_COOLDOWN` lines from `_start_attack`, `_start_grab`, `_start_sprint_slash`, `_start_hop_up`, `_start_leap`, `_start_precognition`, and inline transition sites
+- `_start_*` functions now only contain state-specific setup (targets, counters, skeleton poses)
+- All 27 tests pass (1 flaky `hunt_P2` ik_peak — pre-existing, unrelated)
+
 ### v0.10.5
 **Enter/exit hooks for monster state machine**
 
