@@ -6,6 +6,7 @@
 		"chained_above_slow_turn",
 		"exag_floor_sprint",
 		"exag_landing_recovery",
-		"exag_speed_transitions"
+		"exag_speed_transitions",
+		"exag_attack_showcase"
 	]
 }

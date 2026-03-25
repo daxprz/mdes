@@ -1,0 +1,27 @@
+{
+	"name": "exag_attack_showcase",
+	"description": "Monster attacks a close dummy repeatedly. Exercises bite, swipe, tail whip, and lunge wind-up/follow-through animations with exaggerated timings.",
+	"script": [
+		"var owait default=0",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn monster 800 885 standdown scale=1.5 config={bite_windup=0.7,bite_strike=0.2,bite_recover=0.6,swipe_coil=0.6,swipe_raise=0.4,swipe_strike=0.25,swipe_recover=0.5,tail_coil=0.8,tail_whip=0.25,tail_recover=0.6,lunge_coil=0.6,lunge_launch=0.4,lunge_slide=0.5,stiffness=4.0,turn_speed=2.0,attack_cooldown=0.2,accel_rate=60.0,decel_rate=300.0}",
+		"spawn dummy 960 885",
+		"debug on body_mechanics/spine_debug",
+		"debug on body_mechanics/leg_debug",
+		"debug on body_mechanics/tail_segments",
+		"debug on state_info/state_text_panel",
+		"debug log monster/state",
+		"tab",
+		"standdown off",
+		"wait 20",
+		"standdown on",
+		"debug off body_mechanics/spine_debug",
+		"debug off body_mechanics/leg_debug",
+		"debug off body_mechanics/tail_segments",
+		"debug nolog monster/state",
+		"check fps extract:fps > 20.0",
+		"notify observations DONE [\"OK\"] {owait} editor"
+	]
+}

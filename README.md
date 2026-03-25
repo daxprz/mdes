@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.14
+**Attack wind-up and follow-through animations**
+
+- **Bite**: head rears back (coil), pauses, snaps forward fast with slash effect, follow-through past target, recovery
+- **Swipe**: body leans away (coil), claw pulls back, raises high, fast downward arc (3x faster than before) with slash effect, follow-through, recovery
+- **Tail whip**: spine compresses (crouch), tail curls wide S-curve with cascading segments, fast crack release (base-first tip-last), follow-through, recovery
+- **Lunge**: rear legs visibly compress, body rocks back, explosive head-first launch with jaw opening, slide deceleration, recovery
+- Slash visual effects now fire during bite strike and swipe strike (previously only on grab/sprint/leap)
+- Strike phases move 3x faster than wind-up for visible snap contrast
+- **Debug state info**: shows current attack phase (COIL/RAISE/STRIKE/FOLLOW/RECOVER) with timer, highlighted yellow during STRIKE
+- **Config stack display**: state info panel shows active providers and override count
+- 13 new configurable timing values: `bite_windup/strike/recover`, `swipe_coil/raise/strike/recover`, `tail_coil/whip/recover`, `lunge_coil/launch/slide`
+- New `exag_attack_showcase` test with heavily exaggerated timings (scale 1.5, stiffness 4.0, 3x slower windups)
+- `exaggerated_animations` suite expanded to 5 tests
+
 ### v0.10.13
 **Momentum speed curves and head tracking fix**
 

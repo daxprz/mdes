@@ -94,6 +94,17 @@ Sinusoidal vertical offset on all spine points: `sin(time * 2.0) * 1.5`. Always 
 | Lunge         | ATTACK_LUNGE           | Quadruped | Mid    | 20            |
 | Vertical Leap | ATTACK_LEAP_* (5 states)| Special  | 80-500 | 90+30+thrash  |
 
+### Attack Wind-up / Follow-through
+
+All melee attacks have multi-phase animations with visible anticipation and recovery:
+
+- **Bite**: WINDUP (head rears back, jaw opens, weight shifts backward) → STRIKE (head snaps forward fast, jaw closes, slash effect) → FOLLOW (head continues past) → RECOVER
+- **Swipe**: COIL (body leans away, shoulder pulls back) → RAISE (leg lifts high) → STRIKE (fast downward arc, slash effect, body pushes forward) → FOLLOW → RECOVER
+- **Tail Whip**: COIL (spine compresses, tail curls wide S-curve, hips rotate) → STRIKE (cascading crack, base-first tip-last release) → FOLLOW → RECOVER
+- **Lunge**: COIL (rear legs compress, body rocks back, front dips) → STRIKE (explosive forward, head-first, jaw opens) → SLIDE → RECOVER
+
+All phase timings are configurable via `cfg()` (e.g., `bite_windup`, `swipe_coil`, `tail_whip`, `lunge_launch`). The debug state info panel shows the current phase name and timer in real-time.
+
 ### Vertical Leap (5-Phase Attack)
 
 The most complex attack. Uses reverse trajectory planning to find a clear flight path.

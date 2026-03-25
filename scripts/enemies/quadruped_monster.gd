@@ -1532,6 +1532,44 @@ func _update_movement_blend(delta: float) -> void:
 			_landing_timer = 0.0
 
 
+func _get_attack_phase_name() -> String:
+	## Return a human-readable name for the current attack sub-phase based on timer.
+	match _state:
+		State.ATTACK_BITE:
+			var w: float = cfg("bite_windup", 0.25)
+			var s: float = w + cfg("bite_strike", 0.12)
+			if _attack_timer < w: return "WINDUP"
+			elif _attack_timer < s: return "STRIKE"
+			elif _attack_timer < s + 0.1: return "FOLLOW"
+			else: return "RECOVER"
+		State.ATTACK_SWIPE:
+			var c: float = cfg("swipe_coil", 0.2)
+			var r: float = c + cfg("swipe_raise", 0.15)
+			var s: float = r + cfg("swipe_strike", 0.15)
+			if _attack_timer < c: return "COIL"
+			elif _attack_timer < r: return "RAISE"
+			elif _attack_timer < s: return "STRIKE"
+			elif _attack_timer < s + 0.1: return "FOLLOW"
+			else: return "RECOVER"
+		State.ATTACK_TAIL:
+			var c: float = cfg("tail_coil", 0.35)
+			var w: float = c + cfg("tail_whip", 0.15)
+			if _attack_timer < c: return "COIL"
+			elif _attack_timer < w: return "STRIKE"
+			elif _attack_timer < w + 0.15: return "FOLLOW"
+			else: return "RECOVER"
+		State.ATTACK_LUNGE:
+			var c: float = cfg("lunge_coil", 0.2)
+			var l: float = c + cfg("lunge_launch", 0.25)
+			if _attack_timer < c: return "COIL"
+			elif _attack_timer < l: return "STRIKE"
+			else: return "SLIDE"
+		State.ATTACK_SPRINT_SLASH:
+			if _sprint_slash_count == 0: return "SPRINT"
+			else: return "SLASH %d/3" % mini(_sprint_slash_count, 3)
+	return "?"
+
+
 func _get_facing_offset(offset: Vector2) -> Vector2:
 	## Scale x component by facing direction with cosine easing.
 	## _facing blends linearly from 1 to -1 during turns. A raw linear scale
@@ -2200,16 +2238,35 @@ func _do_bite(delta: float) -> void:
 	_attack_timer += delta
 	velocity.x = 0
 
-	if _attack_timer < 0.2:
-		# Telegraph: open jaw, extend neck
-		_jaw_open = _attack_timer / 0.2
-		_neck[1] += Vector2(_facing * 120.0 * delta, -40.0 * delta)
-	elif _attack_timer < 0.35:
-		# Snap: close jaw
-		_jaw_open = 1.0 - (_attack_timer - 0.2) / 0.15
+	# Phase timings (configurable)
+	var windup_t: float = cfg("bite_windup", 0.25)   # Rear back + jaw open
+	var strike_t: float = windup_t + cfg("bite_strike", 0.12)  # Snap forward
+	var follow_t: float = strike_t + 0.1              # Follow-through
+	var recover_t: float = follow_t + cfg("bite_recover", 0.25) # Return to neutral
+
+	if _attack_timer < windup_t:
+		# WINDUP: head rears back, jaw opens wide, body weight shifts backward.
+		# Creates visible anticipation — the creature coils before striking.
+		var t: float = _attack_timer / windup_t
+		_jaw_open = t
+		# Head pulls back and up (away from target) — the "coil"
+		_neck[1] += Vector2(-_facing * 60.0 * delta, -30.0 * delta)
+		# Body shifts weight backward slightly
+		velocity.x = -_facing * 20.0 * t
+	elif _attack_timer < strike_t:
+		# STRIKE: head snaps forward FAST toward target, jaw closes on contact.
+		var t: float = (_attack_timer - windup_t) / (strike_t - windup_t)
+		_jaw_open = 1.0 - t * 0.8  # Jaw closes during strike
+		# Neck extends rapidly forward and slightly down — much faster than windup
+		_neck[1] += Vector2(_facing * 500.0 * delta, 30.0 * delta)
 		_check_bite_hit()
-	elif _attack_timer < 0.6:
-		# Recovery
+		_spawn_slash_effect(_skull)
+	elif _attack_timer < follow_t:
+		# FOLLOW-THROUGH: head continues past, jaw snaps shut
+		_jaw_open = maxf(0.0, _jaw_open - 4.0 * delta)
+		_neck[1] += Vector2(_facing * 60.0 * delta, 10.0 * delta)
+	elif _attack_timer < recover_t:
+		# RECOVERY: head retracts, springs back to rest pose via _solve_pose
 		_jaw_open = 0.0
 	else:
 		_jaw_open = 0.0
@@ -2219,20 +2276,42 @@ func _do_bite(delta: float) -> void:
 func _do_swipe(delta: float) -> void:
 	_attack_timer += delta
 	velocity.x = 0
+	var swipe_leg: int = 0 if not _leg_severed[0] else 1
 
-	if _attack_timer < 0.3:
-		# Raise front leg
-		var swipe_leg: int = 0 if not _leg_severed[0] else 1
+	# Phase timings (configurable)
+	var coil_t: float = cfg("swipe_coil", 0.2)       # Shoulder coil — body leans away
+	var raise_t: float = coil_t + cfg("swipe_raise", 0.15)  # Leg raises high
+	var strike_t: float = raise_t + cfg("swipe_strike", 0.15) # Claw arcs down
+	var follow_t: float = strike_t + 0.1               # Follow-through
+	var recover_t: float = follow_t + cfg("swipe_recover", 0.2)
+
+	if _attack_timer < coil_t:
+		# COIL: body leans away from swipe side, shoulder pulls back.
+		# Weight shifts opposite to the swipe for a visible wind-up.
+		var t: float = _attack_timer / coil_t
+		velocity.x = -_facing * 15.0 * t  # Lean back
+		# Spine tilts slightly — front drops, back rises
+		_spine[0].y += 8.0 * delta * t
 		if not _leg_severed[swipe_leg]:
-			_legs[swipe_leg][2] += Vector2(_facing * 100.0 * delta, -200.0 * delta)
-	elif _attack_timer < 0.5:
-		# Arc downward
-		var swipe_leg: int = 0 if not _leg_severed[0] else 1
+			# Claw pulls back toward body (coiling)
+			_legs[swipe_leg][2] += Vector2(-_facing * 40.0 * delta, -60.0 * delta)
+	elif _attack_timer < raise_t:
+		# RAISE: front leg lifts high, body shifts weight forward.
 		if not _leg_severed[swipe_leg]:
-			_legs[swipe_leg][2] += Vector2(_facing * 200.0 * delta, 300.0 * delta)
+			_legs[swipe_leg][2] += Vector2(_facing * 80.0 * delta, -250.0 * delta)
+	elif _attack_timer < strike_t:
+		# STRIKE: claw arcs downward FAST. Much faster than windup — the snap.
+		if not _leg_severed[swipe_leg]:
+			_legs[swipe_leg][2] += Vector2(_facing * 800.0 * delta, 900.0 * delta)
 			_check_swipe_hit(swipe_leg)
-	elif _attack_timer < 0.8:
-		# Recovery
+			_spawn_slash_effect(_legs[swipe_leg][2])
+		velocity.x = _facing * 50.0  # Body pushes into the swipe
+	elif _attack_timer < follow_t:
+		# FOLLOW-THROUGH: claw continues past, body momentum carries
+		if not _leg_severed[swipe_leg]:
+			_legs[swipe_leg][2] += Vector2(_facing * 200.0 * delta, 150.0 * delta)
+	elif _attack_timer < recover_t:
+		# RECOVERY: springs back to rest pose
 		pass
 	else:
 		_change_state(State.TRANSITION_QUADRUPED)
@@ -2248,20 +2327,46 @@ func _do_tail_whip(delta: float) -> void:
 
 	_tail_whipping = true  # Loosen tail stiffness during whip
 
-	if _attack_timer < 0.3:
-		# Wind up: curl tail to one side
+	# Phase timings (configurable)
+	var coil_t: float = cfg("tail_coil", 0.35)        # Spine compresses, tail curls wide
+	var whip_t: float = coil_t + cfg("tail_whip", 0.15) # Fast whip through
+	var follow_t: float = whip_t + 0.15                # Follow-through
+	var recover_t: float = follow_t + cfg("tail_recover", 0.25)
+
+	if _attack_timer < coil_t:
+		# COIL: spine compresses (body crouches), tail curls wide in the opposite
+		# direction of the whip. Each tail segment curls more than the last for
+		# a dramatic S-curve wind-up. Hips rotate toward the curl.
+		var t: float = _attack_timer / coil_t
 		var curl_dir: float = -_facing
 		for i in range(_tail.size()):
-			_tail[i] += Vector2(curl_dir * 80.0 * delta, 0)
-	elif _attack_timer < 0.5:
-		# Whip through
+			var segment_factor: float = float(i + 1) / _tail.size()  # Tip curls more
+			_tail[i] += Vector2(curl_dir * 100.0 * segment_factor * delta, -20.0 * delta * (1.0 - segment_factor))
+		# Spine compresses — body crouches into the coil
+		_spine[0].y += 4.0 * delta * t
+		_spine[2].y += 6.0 * delta * t
+	elif _attack_timer < whip_t:
+		# WHIP: fast release. Tail segments accelerate in sequence (base first,
+		# tip last) creating a cascading crack effect.
+		var t: float = (_attack_timer - coil_t) / (whip_t - coil_t)
 		var whip_dir: float = _facing
 		for i in range(_tail.size()):
-			var force: float = 400.0 * (float(i + 1) / _tail.size())
-			_tail[i] += Vector2(whip_dir * force * delta, -100.0 * delta * (1.0 - float(i) / _tail.size()))
+			# Cascade: each segment gets a delayed, stronger force
+			var delay: float = float(i) / _tail.size() * 0.5  # Stagger
+			var segment_t: float = clampf((t - delay) / (1.0 - delay), 0.0, 1.0)
+			var force: float = 600.0 * segment_t * (float(i + 1) / _tail.size())
+			_tail[i] += Vector2(whip_dir * force * delta, -120.0 * delta * (1.0 - float(i) / _tail.size()))
 		_check_tail_hit()
-	elif _attack_timer < 0.8:
-		# Recovery — tail springs back to rest pose via _solve_pose
+		# Hips counter-rotate — body pushes into the whip
+		velocity.x = whip_dir * 20.0
+	elif _attack_timer < follow_t:
+		# FOLLOW-THROUGH: tail continues past, momentum carries
+		var whip_dir: float = _facing
+		for i in range(_tail.size()):
+			var force: float = 150.0 * (float(i + 1) / _tail.size())
+			_tail[i] += Vector2(whip_dir * force * delta, 30.0 * delta)
+	elif _attack_timer < recover_t:
+		# RECOVERY — tail springs back to rest pose via _solve_pose
 		pass
 	else:
 		_change_state(State.CHASE)
@@ -2270,18 +2375,43 @@ func _do_tail_whip(delta: float) -> void:
 func _do_lunge(delta: float) -> void:
 	_attack_timer += delta
 
-	if _attack_timer < 0.15:
-		# Windup: compress legs
-		velocity.x = -_facing * 30.0
-	elif _attack_timer < 0.4:
-		# Launch
+	# Phase timings (configurable)
+	var coil_t: float = cfg("lunge_coil", 0.2)         # Compress + tilt back
+	var launch_t: float = coil_t + cfg("lunge_launch", 0.25)  # Explosive forward
+	var slide_t: float = launch_t + cfg("lunge_slide", 0.3)   # Decelerate
+	var recover_t: float = slide_t + 0.15
+
+	if _attack_timer < coil_t:
+		# COIL: rear legs compress, body rocks back, head dips toward target.
+		# The deeper the coil, the more explosive the launch looks.
+		var t: float = _attack_timer / coil_t
+		velocity.x = -_facing * 40.0 * t  # Rock backward
+		# Compress rear legs — push feet closer to hips
+		for li in [2, 3]:
+			if not _leg_severed[li]:
+				var hip: Vector2 = _legs[li][0]
+				_legs[li][2] = _legs[li][2].lerp(hip + Vector2(0, sc(cfg("leg_upper_len", LEG_UPPER_LEN)) * 0.5), 3.0 * delta)
+		# Spine tilts — front dips, rear rises (coiling posture)
+		_spine[0].y += 6.0 * delta * t
+	elif _attack_timer < launch_t:
+		# LAUNCH: explosive forward. Spine tilts forward (head-first),
+		# rear legs extend fully, jaw opens for the strike.
+		var t: float = (_attack_timer - coil_t) / (launch_t - coil_t)
 		velocity.x = _facing * sc(cfg("lunge_speed", LUNGE_SPEED))
+		_jaw_open = t * 0.6  # Jaw opens during lunge
+		# Spine tilts forward — head leads
+		_spine[0].y -= 4.0 * delta
 		_check_lunge_hit()
-	elif _attack_timer < 0.7:
-		# Slide to stop
-		velocity.x = lerpf(velocity.x, 0, 0.1)
+	elif _attack_timer < slide_t:
+		# SLIDE: decelerate, jaw snaps shut, body settles
+		velocity.x = lerpf(velocity.x, 0, 0.15)
+		_jaw_open = maxf(0.0, _jaw_open - 3.0 * delta)
+	elif _attack_timer < recover_t:
+		velocity.x = lerpf(velocity.x, 0, 0.3)
+		_jaw_open = 0.0
 	else:
 		velocity.x = 0
+		_jaw_open = 0.0
 		_change_state(State.CHASE)
 
 
@@ -5396,6 +5526,22 @@ func _draw_debug() -> void:
 			dy += 12
 			var ball_col: Color = Color(0, 1, 0) if _ball_score < 10 else (Color(1, 1, 0) if _ball_score < 50 else Color(1, 0, 0))
 			draw_string(font, info_pos + Vector2(0, dy), "Ball: %.0f pk:%.0f" % [_ball_score, _ball_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ball_col)
+
+		# Attack phase display — shows current attack sub-phase and timer
+		if _state in [State.ATTACK_BITE, State.ATTACK_SWIPE, State.ATTACK_TAIL,
+			State.ATTACK_LUNGE, State.ATTACK_SPRINT_SLASH]:
+			dy += 12
+			var phase_name: String = _get_attack_phase_name()
+			var phase_col: Color = Color(1, 0.8, 0.2) if "STRIKE" in phase_name else Color(0.6, 0.9, 1.0)
+			draw_string(font, info_pos + Vector2(0, dy), "Phase: %s  t=%.2f" % [phase_name, _attack_timer], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, phase_col)
+
+		# Config overrides — show non-default values
+		if not _config_stack.is_empty():
+			dy += 14
+			draw_string(font, info_pos + Vector2(0, dy), "Config stack: %d providers" % _config_stack.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.5, 1.0))
+			for provider in _config_stack:
+				dy += 10
+				draw_string(font, info_pos + Vector2(0, dy), "  %s" % str(provider), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 0.4, 0.9))
 
 	# -- Waypoint marker --
 	if _precog_has_waypoint and DebugOverlay.should_draw("pathing/waypoints", self):
