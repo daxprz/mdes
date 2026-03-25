@@ -178,6 +178,14 @@ Severed limbs fall under gravity. Stumps are drawn as red circles at the attachm
 - **Centralized state transitions**: All state changes route through `_change_state()`, which logs transitions via `DebugOverlay.log("monster/state", ...)` and tracks strategy-change counts. Enable with `debug log monster/state`.
 - **Enter/exit hooks**: `_change_state()` calls `_exit_state(old, new)` and `_enter_state(new, old)`. Exit hooks handle per-state cleanup (tail whip flag, grab collision restore, leap IK/snap reset, posture finalization). Enter hooks reset `_attack_timer` for all combat/transition/precog states, and set `_attack_cooldown` for attack-entry states (bite, swipe, tail, lunge, sprint slash, hop up, grab, leap plan). `_start_*` functions now only set state-specific data (targets, counters, skeleton poses). Leap sub-state transitions skip full cleanup — only applied when leaving the leap state group entirely.
 
+### Movement Blending
+
+Instead of instant state snaps, movement properties blend smoothly:
+
+- **Facing blend**: `_facing` lerps toward `_facing_target` at `TURN_SPEED` (5.0/s). During turns, `_get_facing_offset()` uses the intermediate value, causing the skeleton rest-pose targets to sweep through the turn — spine curls, tail trails, head leads. Leap launches set facing instantly (no mid-flight turns).
+- **Speed blend**: `_move_speed` lerps toward `_target_move_speed` at `SPEED_BLEND_RATE` (400 px/s²). Gait (stride, step frequency) transitions smoothly as speed ramps.
+- **Landing recovery**: After `FALL_THRESHOLD` (0.15s) of airborne time, landing triggers a `LANDING_RECOVERY_TIME` (0.25s) compression. Spine dips by `LANDING_COMPRESS` (8px, scaled), foot push force is reduced up to 70%, then eases back to normal. Debug aspect: `monster/blend`.
+
 ## Debug Inspector
 
 When the quadruped is TAB-selected in debug mode (Ctrl+D):

@@ -126,6 +126,13 @@ const TAIL_STIFFNESS := 14.0  # Tail is rigid by default
 const TAIL_WHIP_STIFFNESS := 2.0  # Loose only during whip
 const HEAD_TRACK_SPEED := 6.0  # How fast head turns toward target
 
+# Movement blending
+const TURN_SPEED := 5.0          # How fast _facing lerps to _facing_target (per second)
+const SPEED_BLEND_RATE := 400.0  # How fast _move_speed lerps to _target_move_speed (px/s²)
+const LANDING_RECOVERY_TIME := 0.25  # Seconds of landing compression after a fall
+const LANDING_COMPRESS := 8.0    # Extra spine dip in pixels during landing recovery
+const FALL_THRESHOLD := 0.15     # Seconds of airborne before landing recovery triggers
+
 # Foot-driven locomotion
 const STEP_THRESHOLD := 25.0   # How far behind a foot gets before it steps
 const STEP_DURATION := 0.12    # Seconds to complete a step (quick feet)
@@ -279,11 +286,15 @@ var _pose_overrides: Dictionary = {}
 const POSE_OVERRIDE_BLEND := 0.8  # 0.0 = natural, 1.0 = fully overridden
 var _state: State = State.PATROL
 var _posture: Posture = Posture.QUADRUPED
-var _facing: float = 1.0  # 1=right, -1=left
+var _facing: float = 1.0  # 1=right, -1=left (blends smoothly toward _facing_target)
+var _facing_target: float = 1.0  # Desired facing direction (instant AI intent)
 var _timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _attack_timer: float = 0.0  # Time within current attack
 var _move_speed: float = SPEED_SLOW
+var _target_move_speed: float = SPEED_SLOW  # Desired speed (blends toward this)
+var _airborne_timer: float = 0.0  # How long we've been off the ground
+var _landing_timer: float = 0.0  # Recovery timer after landing (counts down)
 var _posture_blend: float = 0.0  # 0=quadruped, 1=bipedal
 var _breathe_time: float = 0.0  # Idle breathing phase
 var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
@@ -888,7 +899,7 @@ func _physics_process(delta: float) -> void:
 				if is_instance_valid(_target) and _state == State.CHASE:
 					var to_target: Vector2 = _target.global_position - global_position
 					if to_target.length() < sc(LEAP_RANGE) and _leap_cooldown <= 0.0:
-						_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
+						_facing_target = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing_target
 						_start_leap()
 		else:
 			_chained_stuck_timer = 0.0
@@ -947,11 +958,14 @@ func _physics_process(delta: float) -> void:
 		# AWAKE + ON FLOOR: fall through to normal AI below,
 		# chain constraints applied after move_and_slide
 
+	# -- Movement blending (facing, speed, landing recovery) --
+	_update_movement_blend(delta)
+
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
 		velocity.y += GRAVITY * delta
 
-	# State machine (sets _want_direction and _move_speed)
+	# State machine (sets _want_direction and _target_move_speed)
 	_want_direction = 0.0
 	match _state:
 		State.PATROL:
@@ -1371,12 +1385,51 @@ func _score_strategy_thrash() -> void:
 			_last_target_pos = _target.global_position
 
 
+func _update_movement_blend(delta: float) -> void:
+	## Smoothly blend _facing toward _facing_target and _move_speed toward
+	## _target_move_speed. Also track airborne time for landing recovery.
+
+	# -- Facing blend --
+	# Lerp toward target facing. During mid-turn (_facing near 0), the skeleton
+	# rest-pose targets sweep through, creating a visible body curl.
+	if _facing != _facing_target:
+		_facing = move_toward(_facing, _facing_target, TURN_SPEED * delta)
+		# Snap when close enough to avoid lingering float drift
+		if absf(_facing - _facing_target) < 0.05:
+			_facing = _facing_target
+		DebugOverlay.log("monster/blend", self, "TURN: facing=%.2f target=%.0f", [
+			_facing, _facing_target])
+
+	# -- Speed blend --
+	# Lerp move speed toward target. Gait naturally transitions as stride ramps.
+	if _move_speed != _target_move_speed:
+		_move_speed = move_toward(_move_speed, _target_move_speed, SPEED_BLEND_RATE * delta)
+
+	# -- Landing recovery --
+	# Track time airborne. When we land after a fall, apply brief spine compression.
+	if not is_on_floor():
+		_airborne_timer += delta
+	elif _airborne_timer > FALL_THRESHOLD:
+		# Just landed after being airborne — start recovery
+		_landing_timer = LANDING_RECOVERY_TIME
+		DebugOverlay.log("monster/blend", self, "LANDING: airborne=%.2fs recovery=%.2fs", [
+			_airborne_timer, LANDING_RECOVERY_TIME])
+		_airborne_timer = 0.0
+	else:
+		_airborne_timer = 0.0
+
+	# Tick down landing recovery
+	if _landing_timer > 0.0:
+		_landing_timer -= delta
+		if _landing_timer < 0.0:
+			_landing_timer = 0.0
+
+
 func _get_facing_offset(offset: Vector2) -> Vector2:
-	## Flip x component based on facing direction.
-	## Rest offsets are stored for _facing=1. Flip x if facing left.
-	if _facing < 0:
-		return Vector2(-offset.x, offset.y)
-	return offset
+	## Scale x component by facing direction. _facing blends smoothly between
+	## -1 and 1 during turns, so the rest-pose targets sweep through the turn
+	## rather than snapping. Rest offsets are stored for _facing=1.
+	return Vector2(offset.x * _facing, offset.y)
 
 
 func _enforce_rigid_distance(anchor: Vector2, point: Vector2, target_dist: float) -> void:
@@ -1460,6 +1513,14 @@ func _update_spine() -> void:
 	var floor_y: float = _raycast_floor(Vector2(0, _spine[1].y if _spine.size() > 1 else -30))
 	var leg_reach: float = sc(LEG_UPPER_LEN) + sc(LEG_LOWER_LEN) - sc(4.0)  # How high above floor
 	var body_y: float = floor_y - leg_reach
+
+	# Landing recovery: compress spine downward briefly after a fall
+	if _landing_timer > 0.0:
+		var t: float = _landing_timer / LANDING_RECOVERY_TIME  # 1.0 at start, 0.0 at end
+		# Smooth ease-out: strong compression initially, eases back up
+		var compress: float = sc(LANDING_COMPRESS) * t * t
+		body_y += compress
+
 	# In bipedal, front raises higher
 	var spine_y_front: float = lerpf(body_y, body_y - sc(30.0), _posture_blend)
 	_spine[0] = Vector2(sc(SPINE_SEG_LEN) * _facing, spine_y_front)
@@ -1487,6 +1548,11 @@ func _update_foot_push(delta: float) -> void:
 		# Each planted foot pushes the body in the desired direction.
 		# Force scales with desired speed.
 		push_x += _want_direction * sc(FOOT_PUSH_FORCE) * (_move_speed / _effective_speed(SPEED_MEDIUM))
+
+	# Landing recovery: reduce push force while absorbing impact
+	if _landing_timer > 0.0:
+		var recovery_t: float = _landing_timer / LANDING_RECOVERY_TIME
+		push_x *= (1.0 - recovery_t * 0.7)  # Up to 70% force reduction at landing start
 
 	# More planted feet = more traction = more force
 	if planted_count > 0:
@@ -1718,8 +1784,8 @@ func _solve_leg_ik(hip: Vector2, foot: Vector2, upper_len: float, lower_len: flo
 # -- AI / State Machine -------------------------------------------------------
 
 func _do_patrol(_delta: float) -> void:
-	_move_speed = _effective_speed(SPEED_SLOW)
-	_want_direction = _facing
+	_target_move_speed = _effective_speed(SPEED_SLOW)
+	_want_direction = _facing_target
 
 	_pick_target()
 	if _target and is_instance_valid(_target):
@@ -1771,9 +1837,9 @@ func _do_chase(_delta: float) -> void:
 				_precog_waypoint.x, _precog_waypoint.y,
 				global_position.x, global_position.y,
 				waypoint_dist, str(_precog_waypoint_edge.is_empty())])
-		_facing = signf(to_waypoint.x) if absf(to_waypoint.x) > 5.0 else _facing
+		_facing_target = signf(to_waypoint.x) if absf(to_waypoint.x) > 5.0 else _facing_target
 		_want_direction = signf(to_waypoint.x)
-		_move_speed = _effective_speed(SPEED_FAST)
+		_target_move_speed = _effective_speed(SPEED_FAST)
 
 		var arrival_tolerance: float = sc(50.0) if _chained else sc(25.0)
 		if waypoint_dist < arrival_tolerance:
@@ -1810,7 +1876,8 @@ func _do_chase(_delta: float) -> void:
 				# Force facing to match launch direction, then enter windup
 				var launch_vel: Vector2 = edge.get("launch_vel", Vector2.ZERO)
 				if absf(launch_vel.x) > 5.0:
-					_facing = signf(launch_vel.x)
+					_facing_target = signf(launch_vel.x)
+					_facing = _facing_target  # Instant — committed to leap arc
 				set_meta("_precog_leap", true)  # Flag: don't adjust velocity in windup
 				_change_state(State.ATTACK_LEAP_WINDUP)
 				_leap_ik_off = true
@@ -1821,17 +1888,17 @@ func _do_chase(_delta: float) -> void:
 		return
 
 	var to_target: Vector2 = _target.global_position - global_position
-	_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
-	_want_direction = _facing
+	_facing_target = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing_target
+	_want_direction = _facing_target
 	var dist: float = absf(to_target.x)
 
 	# Speed based on distance (thresholds scale with body size)
 	if dist > sc(200.0):
-		_move_speed = _effective_speed(SPEED_FAST)
+		_target_move_speed = _effective_speed(SPEED_FAST)
 	elif dist > sc(80.0):
-		_move_speed = _effective_speed(SPEED_MEDIUM)
+		_target_move_speed = _effective_speed(SPEED_MEDIUM)
 	else:
-		_move_speed = _effective_speed(SPEED_SLOW)
+		_target_move_speed = _effective_speed(SPEED_SLOW)
 
 	# Don't change strategy while locked (prevents thrashing)
 	if _state_lock_timer > 0.0:
@@ -2227,12 +2294,12 @@ func _do_sprint_slash(delta: float) -> void:
 
 	var to_target: Vector2 = _target.global_position - global_position
 	var dist: float = to_target.length()
-	_facing = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing
+	_facing_target = signf(to_target.x) if absf(to_target.x) > 5.0 else _facing_target
 
 	if _sprint_slash_count == 0:
 		# Phase 1: Sprint toward target
-		_want_direction = _facing
-		_move_speed = _effective_speed(SPRINT_SPEED)
+		_want_direction = _facing_target
+		_target_move_speed = _effective_speed(SPRINT_SPEED)
 
 		if dist < sc(SPRINT_SLASH_RANGE):
 			# Close enough — start slashing
@@ -2547,9 +2614,9 @@ func _do_leap_plan(delta: float) -> void:
 			velocity.x = 0
 		else:
 			# Walk toward launch position
-			_facing = signf(to_launch.x) if absf(to_launch.x) > 5.0 else _facing
+			_facing_target = signf(to_launch.x) if absf(to_launch.x) > 5.0 else _facing_target
 			_want_direction = signf(to_launch.x)
-			_move_speed = _effective_speed(SPEED_MEDIUM)
+			_target_move_speed = _effective_speed(SPEED_MEDIUM)
 	else:
 		# Both phases failed — abort after brief pause
 		if _attack_timer > 0.5:
@@ -4083,7 +4150,8 @@ func _do_leap_windup(delta: float) -> void:
 		if is_instance_valid(_target) and not get_meta("_precog_leap", false):
 			var to_target_x: float = _target.global_position.x - global_position.x
 			if (to_target_x > 20.0 and _facing < 0) or (to_target_x < -20.0 and _facing > 0):
-				_facing = signf(to_target_x)
+				_facing_target = signf(to_target_x)
+				_facing = _facing_target  # Instant — mid-leap course correction
 				_end_leap()
 				_change_state(State.CHASE)
 				return
@@ -4112,9 +4180,10 @@ func _do_leap_windup(delta: float) -> void:
 			var to_target: Vector2 = _leap_target_pos - global_position
 			velocity.x = signf(to_target.x) * LEAP_LAUNCH_SPEED * 0.7 * leap_mult
 			velocity.y = -LEAP_LAUNCH_SPEED * 0.5 * leap_mult
-		# Force facing to match launch direction
+		# Force facing to match launch direction (instant — mid-launch)
 		if absf(velocity.x) > 10.0:
-			_facing = signf(velocity.x)
+			_facing_target = signf(velocity.x)
+			_facing = _facing_target
 		# Unplant all feet
 		for li in range(4):
 			_foot_planted[li] = false
@@ -4130,9 +4199,10 @@ func _do_leap_airborne(delta: float) -> void:
 	velocity.y += GRAVITY * delta
 
 
-# Force facing to match horizontal velocity — no backwards flight
+# Force facing to match horizontal velocity — no backwards flight (instant)
 	if absf(velocity.x) > 10.0:
-		_facing = signf(velocity.x)
+		_facing_target = signf(velocity.x)
+		_facing = _facing_target
 
 	# Align spine toward target (body aims like a missile)
 	var fly_dir: Vector2 = velocity.normalized() if velocity.length() > 10 else Vector2(_facing, 0)

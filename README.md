@@ -163,6 +163,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.7
+**Movement blending: smooth turns, speed ramps, landing recovery**
+
+- **Facing blend**: `_facing` lerps toward `_facing_target` at configurable `TURN_SPEED` instead of flipping instantly. Skeleton rest-pose targets sweep through the turn, creating visible body curl during direction changes
+- **Speed blend**: `_move_speed` lerps toward `_target_move_speed` at `SPEED_BLEND_RATE`. Gait transitions smoothly as stride and step frequency ramp
+- **Landing recovery**: After 0.15s+ airborne, landing triggers 0.25s spine compression + 70% force reduction. Monster visibly absorbs impact before resuming movement
+- `_get_facing_offset()` now multiplies x by facing float (supports intermediate values during blend) instead of binary flip
+- Leap launches, mid-flight facing, and course corrections still use instant facing (no slow turns mid-air)
+- New `monster/blend` debug aspect for turn/speed/landing diagnostics
+- All 27 tests pass (1 pre-existing flaky `hunt_P2` ik_peak)
+
 ### v0.10.6
 **Consolidate attack timer/cooldown resets into enter hook**
 

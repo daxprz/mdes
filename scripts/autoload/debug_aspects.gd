@@ -60,6 +60,7 @@ func _register_all() -> void:
 
 	# -- Monster State Machine --
 	r.call("monster/state", "State transition log (old → new)")
+	r.call("monster/blend", "Movement blend: facing turns, speed ramps, landing recovery")
 
 	# -- State Info --
 	r.call("state_info/state_text_panel", "State, HP, velocity, IK metrics text")
