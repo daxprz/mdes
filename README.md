@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.15
+**Predatory leap: arms-forward flight, dramatic 3-slash with blood spray**
+
+- **Arms reach forward during flight**: Front legs extend toward a point above the target instead of tucking against the chest. The monster looks like a hawk diving at prey
+- **3 dramatic downward slashes** replace the old 6-slash rapid-fire. Each has a visible RAISE → fast STRIKE → PAUSE cycle with alternating sides
+- **Momentum carries through strikes**: Half-gravity and gradual deceleration during slashing instead of freezing mid-air
+- **Enhanced leap slash effects**: Bright sweeping arc (arm-sized, flashes in ~4 frames), 3 lingering claw marks that slowly fade, 12 blood droplets that spray downward and stretch into drips as they fall
+- `leap_slash_raise`, `leap_slash_strike`, `leap_slash_pause` timing values added to config
+- All 27 tests pass, zero failures
+
 ### v0.10.14
 **Attack wind-up and follow-through animations**
 

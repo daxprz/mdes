@@ -4538,14 +4538,31 @@ func _do_leap_airborne(delta: float) -> void:
 		# Knee midway along the stretch
 		_legs[li][1] = _legs[li][1].lerp(hip + stretch_dir * sc(cfg("leg_upper_len", LEG_UPPER_LEN)), 8.0 * delta)
 
-	# Front legs stay tucked against chest
+	# Front legs reach FORWARD toward the target — the creature is trying to catch.
+	# Aim point is above the target by an amount relative to body size (the monster
+	# descends onto the prey from above).
+	var arm_reach: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 	for li in [0, 1]:
 		if _leg_severed[li]:
 			continue
 		var hip: Vector2 = _legs[li][0]
-		var tuck: Vector2 = hip + Vector2(body_aim.y * 5, -body_aim.x * 5)  # Tucked perpendicular
-		_legs[li][2] = _legs[li][2].lerp(tuck, 10.0 * delta)
-		_legs[li][1] = _legs[li][1].lerp((hip + tuck) * 0.5, 10.0 * delta)
+		if is_instance_valid(_target):
+			# Aim above the target — arms reach toward this point
+			var aim_above: float = sc(30.0)  # How far above the target to aim (scaled with size)
+			var target_local: Vector2 = _target.global_position - global_position
+			var aim_point: Vector2 = target_local + Vector2(0, -aim_above)
+			# Extend arm toward the aim point, up to full reach
+			var to_aim: Vector2 = aim_point - hip
+			var reach_dir: Vector2 = to_aim.normalized()
+			var reach_len: float = minf(to_aim.length(), arm_reach * 0.9)
+			var claw_target: Vector2 = hip + reach_dir * reach_len
+			_legs[li][2] = _legs[li][2].lerp(claw_target, 8.0 * delta)
+			_legs[li][1] = _legs[li][1].lerp(hip + reach_dir * sc(cfg("leg_upper_len", LEG_UPPER_LEN)), 8.0 * delta)
+		else:
+			# No target — tuck against chest
+			var tuck: Vector2 = hip + Vector2(body_aim.y * 5, -body_aim.x * 5)
+			_legs[li][2] = _legs[li][2].lerp(tuck, 10.0 * delta)
+			_legs[li][1] = _legs[li][1].lerp((hip + tuck) * 0.5, 10.0 * delta)
 
 	# Tail straightens behind (release energy)
 	if not _tail_severed:
@@ -4554,11 +4571,12 @@ func _do_leap_airborne(delta: float) -> void:
 			var tail_target: Vector2 = _spine[2] + tail_dir * sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * (i + 1)
 			_tail[i] = _tail[i].lerp(tail_target, 6.0 * delta)
 
-	# Check if we've reached the target
+	# Check if we've reached the target. Arms reach forward visually but the
+	# strike trigger uses the tuned body distance — not claw reach.
 	if is_instance_valid(_target):
 		var dist_to_target: float = global_position.distance_to(_target.global_position)
 		if dist_to_target < sc(cfg("leap_strike_reach", LEAP_STRIKE_REACH)):
-			DebugOverlay.log("leap_attack/chosen_arc", self, "LEAP ARRIVED: monster at (%.0f,%.0f), target at (%.0f,%.0f), dist=%.0f", [
+			DebugOverlay.log("leap_attack/chosen_arc", self, "LEAP STRIKE: monster=(%.0f,%.0f) target=(%.0f,%.0f) dist=%.0f", [
 					global_position.x, global_position.y,
 					_target.global_position.x, _target.global_position.y, dist_to_target])
 			# 25% chance: transition to grab-ball instead of normal slash
@@ -4568,7 +4586,8 @@ func _do_leap_airborne(delta: float) -> void:
 				_change_state(State.ATTACK_LEAP_STRIKE)
 				_leap_slash_count = 0
 				_leap_slash_side = 1
-			velocity = Vector2.ZERO
+			# Don't zero velocity — momentum carries through the strikes
+			velocity *= 0.5  # Reduce but don't kill
 			return
 
 	# Timeout / hit ground fallback
@@ -4577,40 +4596,68 @@ func _do_leap_airborne(delta: float) -> void:
 
 
 func _do_leap_strike(delta: float) -> void:
-	## Double-time slash attack: 2 groups of 3 slashes (6 total).
+	## 3 dramatic downward claw slashes. Each slash: arm raises high, then FAST
+	## downward swipe with slash arc + blood spray on contact. The arm alternates
+	## sides. Much slower than the old 6-slash rapid-fire — each hit is weighty.
 	_attack_timer += delta
-	velocity.x = 0
-	velocity.y = 0
+	# Don't kill velocity — momentum carries through the strikes.
+	# Apply gravity so the monster arcs naturally during slashing.
+	velocity.y += cfg("gravity", GRAVITY) * delta * 0.5  # Half gravity — hangs in air slightly
+	velocity.x *= 0.92  # Gradual horizontal deceleration
 
-	# Slash timing: 6 slashes at ~0.08s intervals (double-time)
-	var slash_interval: float = 0.08
-	var expected_slashes: int = mini(int(_attack_timer / slash_interval), 6)
+	# 3 slashes, each with a raise phase and a strike phase
+	var raise_time: float = cfg("leap_slash_raise", 0.12)  # Arm lifts
+	var strike_time: float = cfg("leap_slash_strike", 0.06)  # Fast downward swipe
+	var pause_time: float = cfg("leap_slash_pause", 0.08)    # Brief hold after impact
+	var slash_cycle: float = raise_time + strike_time + pause_time
+	var total_slashes: int = 3
 
-	while _leap_slash_count < expected_slashes:
+	var current_slash: int = mini(int(_attack_timer / slash_cycle), total_slashes)
+	var cycle_t: float = fmod(_attack_timer, slash_cycle)
+
+	# Process new slashes
+	while _leap_slash_count < current_slash:
 		_leap_slash_count += 1
 		_leap_slash_side *= -1
 
-		# Swing the appropriate front leg
+	# Animate current slash (if still slashing)
+	if _leap_slash_count < total_slashes:
 		var slash_leg: int = 0 if _leap_slash_side > 0 else 1
 		if _leg_severed[slash_leg]:
 			slash_leg = 1 - slash_leg
+
 		if not _leg_severed[slash_leg]:
-			# Claw swipe arc
-			var swipe_end: Vector2 = _skull + Vector2(_facing * 30, _leap_slash_side * 25)
-			_legs[slash_leg][2] = swipe_end
+			var hip: Vector2 = _legs[slash_leg][0]
+			var arm_len: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
 
-			# Damage check (reduced by arm damage)
-			var claw_world: Vector2 = global_position + swipe_end
-			_damage_players_in_range(claw_world, 35.0, int(cfg("leap_slash_damage", LEAP_SLASH_DAMAGE) * get_slash_damage_multiplier()))
+			if cycle_t < raise_time:
+				# RAISE: arm lifts high and back, preparing to swipe down
+				var t: float = cycle_t / raise_time
+				var raise_pos: Vector2 = hip + Vector2(_facing * arm_len * 0.3, -arm_len * 0.8 * t)
+				_legs[slash_leg][2] = _legs[slash_leg][2].lerp(raise_pos, 12.0 * delta)
+				_legs[slash_leg][1] = _legs[slash_leg][1].lerp(hip + Vector2(_facing * 10, -arm_len * 0.5 * t), 12.0 * delta)
+			elif cycle_t < raise_time + strike_time:
+				# STRIKE: fast downward arc — the snap.
+				var t: float = (cycle_t - raise_time) / strike_time
+				var strike_end: Vector2 = hip + Vector2(_facing * arm_len * 0.6, arm_len * 0.3)
+				var strike_pos: Vector2 = _legs[slash_leg][2].lerp(strike_end, minf(t * 3.0, 1.0))
+				_legs[slash_leg][2] = strike_pos
 
-			# Spawn slash effect
-			_spawn_slash_effect(swipe_end)
+				# Damage + effects — apply every frame during strike for reliable hit detection.
+				# Effects only spawn once via the timer window.
+				var claw_world: Vector2 = global_position + strike_pos
+				_damage_players_in_range(claw_world, 40.0, int(cfg("leap_slash_damage", LEAP_SLASH_DAMAGE) * get_slash_damage_multiplier()))
+				# Spawn visual effects once at mid-strike
+				if t > 0.3 and t < 0.5:
+					_spawn_leap_slash_effect(strike_pos, slash_leg)
+			else:
+				# PAUSE: hold position briefly after impact — the weight of the hit
+				pass
 
-	# After all 6 slashes: transition to bite+thrash
-	if _leap_slash_count >= 6 and _attack_timer > 6 * slash_interval + 0.1:
+	# After all 3 slashes: transition to bite+thrash
+	if _attack_timer > total_slashes * slash_cycle + 0.05:
 		_change_state(State.ATTACK_LEAP_THRASH)
 		_leap_thrash_count = 0
-		# Open jaw for bite
 		_jaw_open = 1.0
 
 
@@ -4724,6 +4771,69 @@ func _end_leap() -> void:
 				return
 
 		_change_state(State.CHASE)
+
+
+func _spawn_leap_slash_effect(local_pos: Vector2, leg_idx: int) -> void:
+	## Dramatic leap slash: 3 claw marks that linger, a sweeping arc that flashes
+	## and fades in a few frames, and blood spray from each contact point.
+	var parent: Node = get_parent()
+	if not parent:
+		return
+	var world_pos: Vector2 = global_position + local_pos
+	var arm_len: float = sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN))
+
+	# -- Sweeping arc: a wide curved line the size of the arm, flashes bright then fades --
+	var arc_sweep := Line2D.new()
+	arc_sweep.width = sc(6.0)
+	arc_sweep.default_color = Color(1, 0.95, 0.85, 1.0)
+	arc_sweep.z_index = 11
+	# Arc curves from above to below the contact point
+	var arc_radius: float = arm_len * 0.7
+	for ai in range(9):
+		var angle: float = -PI * 0.4 + float(ai) / 8.0 * PI * 0.8  # ~144° arc
+		arc_sweep.add_point(world_pos + Vector2(cos(angle) * _facing, sin(angle)) * arc_radius)
+	parent.add_child(arc_sweep)
+	var arc_tween := arc_sweep.create_tween()
+	arc_tween.tween_property(arc_sweep, "modulate:a", 0.0, 0.12)  # Flash and fade in ~4 frames
+	arc_tween.tween_callback(arc_sweep.queue_free)
+
+	# -- 3 claw slash marks: diagonal lines that linger --
+	for i in range(3):
+		var slash := ColorRect.new()
+		slash.color = Color(1, 0.85, 0.7, 0.95)
+		slash.size = Vector2(sc(20.0) + i * sc(5.0), sc(2.5))
+		slash.rotation = _facing * (0.3 + i * 0.35)
+		slash.z_index = 10
+		var offset_y: float = -sc(12.0) + i * sc(12.0)
+		slash.position = world_pos + Vector2(randf_range(-sc(4), sc(4)), offset_y)
+		parent.add_child(slash)
+		# Linger longer than normal slashes
+		var slash_tween := slash.create_tween()
+		slash_tween.tween_property(slash, "modulate:a", 0.3, 0.2)  # Quick dim
+		slash_tween.tween_property(slash, "modulate:a", 0.0, 0.4)  # Slow fade
+		slash_tween.tween_callback(slash.queue_free)
+
+	# -- Blood spray: directional burst from each claw mark --
+	for i in range(12):
+		var drop := ColorRect.new()
+		drop.color = Color(0.75, 0.02, 0.02, 0.9)
+		drop.size = Vector2(sc(3.0) + randf() * sc(3.0), sc(3.0) + randf() * sc(2.0))
+		drop.z_index = 10
+		drop.position = world_pos + Vector2(randf_range(-sc(6), sc(6)), randf_range(-sc(6), sc(6)))
+		parent.add_child(drop)
+		# Spray direction: mostly downward and outward from the slash direction
+		var spray_angle: float = PI * 0.3 + randf() * PI * 0.4  # 54°–126° (mostly down)
+		spray_angle *= _facing
+		var spray_dist: float = sc(20.0) + randf() * sc(50.0)
+		var spray_target: Vector2 = drop.position + Vector2(cos(spray_angle), sin(spray_angle)) * spray_dist
+		# Add gravity to blood (falls)
+		spray_target.y += sc(30.0)
+		var drop_tween := drop.create_tween()
+		drop_tween.set_parallel(true)
+		drop_tween.tween_property(drop, "position", spray_target, 0.3 + randf() * 0.2)
+		drop_tween.tween_property(drop, "modulate:a", 0.0, 0.6 + randf() * 0.3)
+		drop_tween.tween_property(drop, "scale", Vector2(0.2, 0.5), 0.4)  # Stretches into drips
+		drop_tween.chain().tween_callback(drop.queue_free)
 
 
 func _spawn_slash_effect(local_pos: Vector2) -> void:

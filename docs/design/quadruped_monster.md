@@ -139,11 +139,11 @@ At the end of windup, the pre-computed launch velocity from the PLAN phase is ap
 
 #### Phase 3: AIRBORNE (`ATTACK_LEAP_AIRBORNE`)
 
-Parabolic flight with full body alignment:
+Parabolic flight with predatory posture:
 - **Body aims like a missile**: Spine rotates to align with a blend of velocity direction (60%) and target direction (40%)
 - **Collision shape rotates** to match body angle
 - **Rear legs fully stretched behind** (pushing-off pose)
-- **Front legs tucked against chest**
+- **Front arms reach FORWARD** toward a point above the target (scaled with body size). The creature extends its claws toward the prey like a hawk diving — not tucked.
 - **Tail streams straight behind**
 - Gravity applies normally for parabolic arc
 
@@ -151,11 +151,14 @@ Transitions to STRIKE when within `LEAP_STRIKE_REACH` of target. Times out after
 
 #### Phase 4: STRIKE (`ATTACK_LEAP_STRIKE`)
 
-Double-time slash barrage:
-- **6 slashes** at 0.08s intervals (alternating front legs)
-- Each slash spawns **3 diagonal slash lines** that fade (visual effect)
-- `LEAP_SLASH_DAMAGE` = 15 per slash (90 total if all connect)
-- Body velocity zeroed (hovering during strike)
+3 dramatic downward claw slashes with momentum:
+- **3 slashes** alternating sides, each with RAISE → STRIKE → PAUSE phases
+- RAISE: arm lifts high (configurable `leap_slash_raise` = 0.12s)
+- STRIKE: fast downward snap (configurable `leap_slash_strike` = 0.06s)
+- PAUSE: brief hold for impact weight (configurable `leap_slash_pause` = 0.08s)
+- **Momentum carries through**: half-gravity during strikes, velocity decays gradually (no freeze)
+- **Enhanced slash effects** on contact: bright sweeping arc (~arm size, flashes and fades in ~4 frames), 3 claw marks that linger and slowly fade, 12 blood droplets that spray downward and stretch into drips
+- `LEAP_SLASH_DAMAGE` = 15 per slash (45 total if all 3 connect)
 
 #### Phase 5: THRASH (`ATTACK_LEAP_THRASH`)
 
