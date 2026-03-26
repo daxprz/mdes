@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.16
+**Gait system, level loading, while loops, peaceful mode**
+
+- **Leg depth ordering**: Far-side legs render behind body, near-side in front. Switches with facing.
+- **Gait oscillation**: Clavicles/hip bones swing forward/backward with diagonal gait pattern. Knees swing 1.2x more (cascading). Speed-dependent amplitude.
+- **Bipedal arms**: Upper arms dangle, claws aim at eyeball. Shoulder oscillation at 50%.
+- **`peaceful` config**: Monster pathfinds to target but never attacks or leaps. `config={peaceful=1}`
+- **`while`/`endwhile`** in test scripts: Variable-driven loops with `set` command for control flow
+- **`level` RCON command**: Loads a level by name, tears down and rebuilds world geometry. `level flat_floor`
+- **`flat_floor` level**: Empty floor, no platforms/bats/portal/scenery — clean canvas for animation tuning
+- **`gait_tuning_loop` test**: Peaceful monster walks back and forth forever on flat floor
+- Portal setup skips creation on empty config (no phantom doors)
+- Bat spawner disabled (`_bat_max=0`) when level has no spawn zones
+- `gait_stride_rate` and `gait_knee_swing` added to config defaults
+
 ### v0.10.15
 **Predatory leap: arms-forward flight, dramatic 3-slash with blood spray**
 

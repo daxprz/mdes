@@ -223,7 +223,16 @@ All monster constants are configurable via a stack of config providers (`scripts
 - `spawn monster X Y config={turn_speed=2.0,stiffness=6.0}` — permanent overrides
 - `buff <duration> <key=value> ...` — timed overrides on all monsters
 
-All 60+ monster constants are now routed through `cfg()` — every physics, movement, combat, leap, health, grab, sprint, hop-up, and precog value is runtime-configurable. See `exaggerated_animations` suite for test scripts using config overrides.
+All 60+ monster constants are now routed through `cfg()` — every physics, movement, combat, leap, health, grab, sprint, hop-up, and precog value is runtime-configurable. Includes `peaceful` mode (pathfinds but never attacks). See `exaggerated_animations` suite for test scripts using config overrides.
+
+### Gait System
+
+Quadruped diagonal gait with cascading oscillation from spine outward:
+- **Clavicles/hip bones** (1st segment) swing forward/backward with gait phase. Diagonal pairs: FL+RR, FR+RL. Rear pair offset ~20° for natural flow.
+- **Knees** (2nd segment) swing 1.2x more than shoulders — cascading amplitude.
+- **Leg depth ordering**: Far-side legs render behind the body, near-side in front. Switches with facing direction.
+- **Bipedal arms**: When standing on 2 legs, upper arms dangle downward, claws aim toward the monster's eyeball. Shoulder oscillation at 50%.
+- Configurable: `gait_stride_rate`, `gait_knee_swing`.
 
 ## Debug Inspector
 

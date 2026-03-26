@@ -7,6 +7,8 @@
 		"exag_floor_sprint",
 		"exag_landing_recovery",
 		"exag_speed_transitions",
-		"exag_attack_showcase"
+		"exag_attack_showcase",
+		"exag_gait_oscillation",
+		"gait_tuning_loop"
 	]
 }

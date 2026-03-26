@@ -57,6 +57,9 @@ const COMMANDS := [
 	"debug log", "debug console", "debug both", "debug nolog",
 	"debug save", "debug load", "debug filter type", "debug filter id",
 	"debug reset", "debug profile", "debug clear_transient",
+	"level", "level flat_floor", "level title_screen",
+	"buff",
+	"notify_dismiss",
 ]
 
 var _panel: Control = null

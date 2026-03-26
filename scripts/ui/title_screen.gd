@@ -247,6 +247,7 @@ func _setup_fireflies_from_config(ff_zone_configs: Array) -> void:
 
 func _setup_bats_from_config(bat_zone_configs: Array) -> void:
 	if bat_zone_configs.is_empty():
+		_bat_max = 0  # Disable bat respawn timer
 		return
 	var cfg: Dictionary = bat_zone_configs[0]
 	var r: Array = cfg.get("rect", [100, 350, 1720, 500])
@@ -273,6 +274,8 @@ func _spawn_bat() -> void:
 
 
 func _setup_portal_from_config(portal_config: Dictionary) -> void:
+	if portal_config.is_empty():
+		return
 	var doorway_script := load("res://scripts/ui/portal_doorway.gd")
 	var doorway := Node2D.new()
 	doorway.set_script(doorway_script)

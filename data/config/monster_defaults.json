@@ -1,6 +1,8 @@
 {
 	"_comment": "Default values for all configurable monster constants. These are loaded as the lowest-priority config provider. GDScript const values are the absolute fallback if this file is missing.",
 
+	"peaceful": 0,
+
 	"gravity": 600.0,
 	"mass": 200.0,
 
@@ -29,6 +31,8 @@
 	"landing_compress": 8.0,
 	"fall_threshold": 0.15,
 	"shoulder_z_depth": 8.0,
+	"gait_stride_rate": 0.08,
+	"gait_knee_swing": 12.0,
 
 	"step_threshold": 25.0,
 	"step_duration": 0.12,

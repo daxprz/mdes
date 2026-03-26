@@ -11,6 +11,7 @@ const TASK_CHECK := "check"     # Run checks and record results
 const TASK_RESULTS := "results" # Show aggregated results
 const TASK_DEBUG_PROFILE := "debug_profile"  # Apply/clear debug profile
 const TASK_NOTIFY := "notify"   # Show notification and wait for dismiss
+const TASK_WHILE := "while"     # Loop: re-queue body while variable is truthy
 
 var _task_queue: Array = []   # Array of {type, data}
 var _running: bool = false
@@ -135,6 +136,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 			_line_states[li] = "pending"
 
 	var line_idx: int = -1
+	var while_stack: Array = []  # Stack of {var_name, body_lines, body_indices}
 	for line in script:
 		line_idx += 1
 		var l: String = str(line).strip_edges()
@@ -155,6 +157,67 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 						if vp.begins_with("default="):
 							default_val = vp.substr(8)
 					_test_vars[var_name] = default_val
+			continue
+
+		# Set variable: "set <name> = <value>"
+		if l.begins_with("set "):
+			var set_parts := l.split(" ", false)
+			if set_parts.size() >= 3:
+				var set_name: String = set_parts[1]
+				# Everything after "=" is the value
+				var eq_idx: int = l.find("=")
+				if eq_idx >= 0:
+					var set_val: String = l.substr(eq_idx + 1).strip_edges()
+					if not while_stack.is_empty():
+						while_stack[-1]["body_lines"].append(l)
+						while_stack[-1]["body_indices"].append(line_idx)
+					else:
+						_test_vars[set_name] = set_val
+			continue
+
+		# While loop: "while {var_name}" — collect body until "endwhile"
+		if l.begins_with("while "):
+			var while_var: String = l.substr(6).strip_edges()
+			# Strip braces if present: {var_name} → var_name
+			if while_var.begins_with("{") and while_var.ends_with("}"):
+				while_var = while_var.substr(1, while_var.length() - 2)
+			while_stack.append({"var_name": while_var, "body_lines": [], "body_indices": []})
+			continue
+
+		if l == "endwhile":
+			if not while_stack.is_empty():
+				var loop: Dictionary = while_stack.pop_back()
+				if while_stack.is_empty():
+					# Top-level while: flush current batch then enqueue the loop task
+					if not current_batch.is_empty():
+						_task_queue.append({
+							"type": TASK_RCON,
+							"test_name": test_name if first_batch else "",
+							"commands": current_batch.duplicate(),
+							"lines": current_batch_lines.duplicate(),
+						})
+						first_batch = false
+						current_batch = []
+						current_batch_lines = []
+					_task_queue.append({
+						"type": TASK_WHILE,
+						"test_name": test_name,
+						"var_name": loop["var_name"],
+						"body_lines": loop["body_lines"],
+						"body_indices": loop["body_indices"],
+					})
+				else:
+					# Nested while: flatten into parent (not supported yet — just add lines)
+					for bl in loop["body_lines"]:
+						while_stack[-1]["body_lines"].append(bl)
+					for bi in loop["body_indices"]:
+						while_stack[-1]["body_indices"].append(bi)
+			continue
+
+		# If inside a while block, collect lines instead of processing
+		if not while_stack.is_empty():
+			while_stack[-1]["body_lines"].append(l)
+			while_stack[-1]["body_indices"].append(line_idx)
 			continue
 
 		# Substitute {var_name} with variable values
@@ -518,6 +581,49 @@ func _advance_queue() -> void:
 			_set_test_state("COMPLETE")
 			_show_results()
 			_wait_timer = 0.1
+		TASK_WHILE:
+			# Evaluate loop variable. If truthy, enqueue ALL body tasks in order,
+			# then re-enqueue this while task at the end to re-evaluate.
+			var var_name: String = task["var_name"]
+			var var_val: String = _test_vars.get(var_name, "0")
+			var is_truthy: bool = var_val != "0" and var_val != "false" and var_val != "False" and not var_val.is_empty()
+			if is_truthy:
+				var body: Array = task["body_lines"]
+				var rcon_w: Node = get_node_or_null("/root/Rcon")
+				# Build a list of tasks for the entire body, then insert them
+				# all at the front of the queue (in order), followed by the
+				# while task itself for re-evaluation.
+				var body_tasks: Array = []
+				var rcon_batch: Array = []
+				for bl: String in body:
+					var resolved: String = bl
+					for vn: String in _test_vars:
+						resolved = resolved.replace("{%s}" % vn, _test_vars[vn])
+					if resolved.begins_with("wait "):
+						# Flush pending RCON batch before the wait
+						if not rcon_batch.is_empty():
+							body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": []})
+							rcon_batch.clear()
+						body_tasks.append(_parse_wait_line(resolved))
+					elif resolved.begins_with("set "):
+						# Set commands execute immediately when encountered
+						var sp := resolved.split(" ", false)
+						if sp.size() >= 3:
+							var eq_i: int = resolved.find("=")
+							if eq_i >= 0:
+								rcon_batch.append("_SET_VAR_%s=%s" % [sp[1], resolved.substr(eq_i + 1).strip_edges()])
+					else:
+						rcon_batch.append(resolved)
+				# Flush final RCON batch
+				if not rcon_batch.is_empty():
+					body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": []})
+				# Insert: body tasks first, then while re-evaluation at the end
+				var while_task: Dictionary = {"type": TASK_WHILE, "test_name": task["test_name"], "var_name": var_name, "body_lines": body, "body_indices": task["body_indices"]}
+				# Push in reverse order to front so they execute in correct order
+				_task_queue.push_front(while_task)
+				for i in range(body_tasks.size() - 1, -1, -1):
+					_task_queue.push_front(body_tasks[i])
+			_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
@@ -577,6 +683,13 @@ func _execute_rcon_task(task: Dictionary) -> void:
 		_log("  ERR: RCON not available", Color(1.0, 0.3, 0.3))
 		return
 	for cmd in task.get("commands", []):
+		# Handle set variable pseudo-commands from while loop bodies
+		if cmd.begins_with("_SET_VAR_"):
+			var kv: String = cmd.substr(9)  # Strip "_SET_VAR_"
+			var eq: int = kv.find("=")
+			if eq > 0:
+				_test_vars[kv.substr(0, eq)] = kv.substr(eq + 1)
+			continue
 		var result: String = rcon._execute(cmd)
 		_log("  %s → %s" % [cmd, result.substr(0, 60)], Color(0.5, 0.5, 0.5))
 

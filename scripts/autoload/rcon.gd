@@ -107,6 +107,42 @@ func _execute(command: String) -> String:
 		"debug":
 			return _cmd_debug(parts)
 
+		"level":
+			# Load a level by name: level <name>
+			# Tears down the current world and rebuilds from the new level config.
+			# Also hides/shows baked scene nodes (platforms, etc.) based on the config.
+			if parts.size() < 2:
+				return "ERR: usage: level <name>"
+			var level_name: String = parts[1]
+			var data: Dictionary = LevelConfig.load_level(level_name)
+			if data.is_empty():
+				return "ERR: level '%s' not found" % level_name
+			var scene: Node = get_tree().current_scene
+			if scene and scene.has_method("_rebuild_from_config"):
+				scene._rebuild_from_config(data)
+				# Hide/show baked platform nodes based on whether the level has platforms
+				var has_platforms: bool = not data.get("platforms", []).is_empty()
+				var baked_plats: Array[String] = ["PlatLeft", "PlatRight", "PlatTopLeft", "PlatTopRight"]
+				for pname in baked_plats:
+					var plat: Node = scene.get_node_or_null(pname)
+					if plat:
+						plat.visible = has_platforms
+						# Disable collision when hidden
+						plat.set_deferred("process_mode", Node.PROCESS_MODE_INHERIT if has_platforms else Node.PROCESS_MODE_DISABLED)
+						for child in plat.get_children():
+							if child is CollisionShape2D:
+								child.set_deferred("disabled", not has_platforms)
+				# Hide title UI when loading a non-title level
+				var ui_node: Node = scene.get_node_or_null("UI")
+				if ui_node:
+					ui_node.visible = (level_name == "title_screen")
+				# Kill any remaining bats/enemies that survived teardown
+				for enemy in get_tree().get_nodes_in_group("enemies"):
+					if is_instance_valid(enemy):
+						enemy.queue_free()
+				return "OK: loaded level '%s'" % level_name
+			return "ERR: current scene doesn't support level loading"
+
 		"spawn":
 			var what: String = parts[1] if parts.size() > 1 else "monster"
 			var x: float = float(parts[2]) if parts.size() > 2 else 960.0

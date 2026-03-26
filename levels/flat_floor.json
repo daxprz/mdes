@@ -1,0 +1,28 @@
+{
+	"level_name": "flat_floor",
+	"version": 1.0,
+	"background": {
+		"color": [0.08, 0.06, 0.12, 1.0]
+	},
+	"camera": {
+		"fixed": true,
+		"position": [960.0, 495.0]
+	},
+	"cave_walls": {},
+	"floor": {
+		"color": [0.35, 0.25, 0.18, 1.0],
+		"pos": [960.0, 900.0],
+		"width": 1920.0
+	},
+	"platforms": [],
+	"spawn_positions": [],
+	"spawn_zones": {},
+	"migration_patterns": [],
+	"splays": [],
+	"scenery": {},
+	"walls": {
+		"ceiling": -10.0,
+		"left": -10.0,
+		"right": 1930.0
+	}
+}

@@ -207,6 +207,8 @@ const LANDING_RECOVERY_TIME := 0.25  # Seconds of landing compression after a fa
 const LANDING_COMPRESS := 8.0    # Extra spine dip in pixels during landing recovery
 const FALL_THRESHOLD := 0.15     # Seconds of airborne before landing recovery triggers
 const SHOULDER_Z_DEPTH := 8.0    # How far clavicles/hips extend into Z (perpendicular to body)
+const GAIT_STRIDE_RATE := 0.08   # Gait phase advance per pixel of horizontal movement
+const GAIT_KNEE_SWING := 12.0    # Max knee forward/backward offset in pixels (scaled)
 
 # Foot-driven locomotion
 const STEP_THRESHOLD := 25.0   # How far behind a foot gets before it steps
@@ -371,6 +373,7 @@ var _move_speed: float = SPEED_SLOW
 var _target_move_speed: float = SPEED_SLOW  # Desired speed (blends toward this)
 var _airborne_timer: float = 0.0  # How long we've been off the ground
 var _landing_timer: float = 0.0  # Recovery timer after landing (counts down)
+var _gait_phase: float = 0.0     # Oscillation phase for walking gait (radians, advances with movement)
 var _posture_blend: float = 0.0  # 0=quadruped, 1=bipedal
 var _breathe_time: float = 0.0  # Idle breathing phase
 var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
@@ -1331,6 +1334,22 @@ func _solve_pose(delta: float) -> void:
 		if _leap_ik_off:
 			continue
 
+		# -- Bipedal front arms: dangle with claws aiming at eye --
+		# When standing on 2 legs, the front legs (0,1) become arms:
+		# - Clavicles still oscillate but at 50% amplitude (handled in _enforce_shoulder_3d)
+		# - Upper arm (knee) dangles downward from shoulder
+		# - Lower arm/claw aims toward the monster's eyeball
+		if _posture == Posture.BIPEDAL and li < 2:
+			var shoulder: Vector2 = _legs[li][0]
+			# Elbow dangles straight down
+			var elbow_target: Vector2 = shoulder + Vector2(0, sc(cfg("leg_upper_len", LEG_UPPER_LEN)))
+			_legs[li][1] = _legs[li][1].lerp(elbow_target, s * 2.0)
+			# Claw aims toward the eyeball (skull) without pulling elbow up
+			var to_eye: Vector2 = (_skull - _legs[li][1]).normalized()
+			var claw_target: Vector2 = _legs[li][1] + to_eye * sc(cfg("leg_lower_len", LEG_LOWER_LEN))
+			_legs[li][2] = _legs[li][2].lerp(claw_target, s * 1.5)
+			continue  # Skip normal IK for bipedal arms
+
 		# Sanity check: if foot is too far from hip, force replant below hip
 		var hip: Vector2 = _legs[li][0]
 		var foot: Vector2 = _legs[li][2]
@@ -1352,6 +1371,23 @@ func _solve_pose(delta: float) -> void:
 		)
 		# Snap knee to IK solution (fast lerp to prevent sticking)
 		_legs[li][1] = _legs[li][1].lerp(knee_pos, minf(s * 2.0, 1.0))
+
+		# -- Gait oscillation: swing knees forward/backward during walking --
+		# The knee swings slightly MORE than the shoulder (1.2x) to create a
+		# cascading oscillation: spine → shoulder → knee → foot.
+		# Applies whether planted or stepping — the whole upper leg oscillates.
+		if absf(velocity.x) > 10.0 and not _leap_ik_off:
+			var leg_phase_offset: float
+			match li:
+				0: leg_phase_offset = 0.0           # FL: base phase
+				1: leg_phase_offset = PI             # FR: opposite FL
+				2: leg_phase_offset = PI + 0.35      # RL: opposite FL, slightly delayed
+				3: leg_phase_offset = 0.35           # RR: same as FL, slightly delayed
+				_: leg_phase_offset = 0.0
+			var swing: float = sin(_gait_phase + leg_phase_offset)
+			var swing_amount: float = sc(cfg("gait_knee_swing", GAIT_KNEE_SWING)) * 1.2  # More than shoulder
+			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.2, 1.0)
+			_legs[li][1].x += swing * swing_amount * speed_factor * _facing
 
 		# -- Rigid upper limb: enforce exact LEG_UPPER_LEN from hip to knee --
 		var upper_dir: Vector2 = _legs[li][1] - _legs[li][0]
@@ -1614,36 +1650,49 @@ func _projected_len(base_len: float, rest_dir: Vector2) -> float:
 	return base_len * sqrt(1.0 - sin2 * horiz_ratio * horiz_ratio)
 
 
-func _enforce_shoulder_3d(anchor: Vector2, bones: Array, rest_offsets: Array, bone_len: float) -> void:
+func _enforce_shoulder_3d(anchor: Vector2, bones: Array, rest_offsets: Array, bone_len: float, is_front: bool = true) -> void:
 	## Project clavicles/hip bones as if they rotate around the spine in 3D.
 	## Each bone pair (index 0 and 1) sits on opposite sides of the body in Z.
 	## During a turn, the near-side bone sweeps inward and the far-side sweeps
 	## outward, creating the visual of a body rotating in depth.
 	##
-	## 3D model: bone_pos = (rest_x * cos(θ) + z_depth * sin(θ), rest_y)
-	## where θ is the facing angle (0=right, π=left) and z_depth is ± for each side.
+	## GAIT OSCILLATION: When walking, the clavicles/hips swing forward and backward
+	## along the spine direction. This is the 1st segment of the gait chain — the
+	## knee and foot follow from this.
 	var z_depth: float = sc(cfg("shoulder_z_depth", SHOULDER_Z_DEPTH))
-	# sin(θ) from facing: _facing = cos(θ), so sin²(θ) = 1 - _facing²
-	# We need signed sin — positive during the first half of the turn.
-	# Since we lerp _facing linearly, we can derive sin from the geometry.
 	var sin_facing: float = sqrt(maxf(0.0, 1.0 - _facing * _facing))
+
+	# Gait: compute forward/backward swing for each bone in this pair
+	var gait_swing: float = 0.0
+	var gait_active: bool = absf(velocity.x) > 10.0 and not _leap_ik_off
+	# Shoulder swing: slightly less than knees in quadruped, 50% in bipedal (arms dangle)
+	var bipedal_factor: float = 0.5 if (_posture == Posture.BIPEDAL and is_front) else 1.0
+	var swing_amount: float = sc(cfg("gait_knee_swing", GAIT_KNEE_SWING)) * 0.8 * bipedal_factor
 
 	for bi in range(2):
 		var rest: Vector2 = rest_offsets[bi]
-		# Bone 0 has z = -z_depth (far side when facing right)
-		# Bone 1 has z = +z_depth (near side when facing right)
 		var z_sign: float = -1.0 if bi == 0 else 1.0
 		var bone_z: float = z_depth * z_sign
 
-		# Project 3D position to 2D:
-		# x_projected = rest.x * cos(θ) + bone_z * sin(θ)
-		# y stays the same
-		var cos_facing: float = _facing  # _facing IS cos(θ)
+		var cos_facing: float = _facing
 		var x_proj: float = rest.x * cos_facing + bone_z * sin_facing
 		var y_proj: float = rest.y
 
-		# Apply as offset from anchor, maintaining the bone length in the
-		# projected direction
+		# Add gait oscillation to the x projection (forward/backward swing)
+		if gait_active:
+			# Determine leg index for this bone: front pair = 0,1; rear pair = 2,3
+			var leg_idx: int = bi if is_front else bi + 2
+			var leg_phase_offset: float
+			match leg_idx:
+				0: leg_phase_offset = 0.0           # FL
+				1: leg_phase_offset = PI             # FR
+				2: leg_phase_offset = PI + 0.35      # RL
+				3: leg_phase_offset = 0.35           # RR
+				_: leg_phase_offset = 0.0
+			gait_swing = sin(_gait_phase + leg_phase_offset)
+			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.2, 1.0)
+			x_proj += gait_swing * swing_amount * speed_factor * _facing
+
 		var proj_offset := Vector2(x_proj, y_proj)
 		if proj_offset.length() > 0.01:
 			bones[bi] = anchor + proj_offset.normalized() * bone_len
@@ -1711,10 +1760,10 @@ func _enforce_spine_rigid() -> void:
 	# Each clavicle has a Z-depth (perpendicular to the body plane). During turns,
 	# the near-side shoulder sweeps inward and the far-side shoulder sweeps outward,
 	# creating a realistic 3D rotation effect projected to 2D.
-	_enforce_shoulder_3d(_spine[0], _clavicles, _clavicle_rest, sc(cfg("clavicle_len", CLAVICLE_LEN)))
+	_enforce_shoulder_3d(_spine[0], _clavicles, _clavicle_rest, sc(cfg("clavicle_len", CLAVICLE_LEN)), true)
 
 	# Hip bones: same 2.5D rotation around spine[2]
-	_enforce_shoulder_3d(_spine[2], _hip_bones, _hip_bone_rest, sc(cfg("hip_bone_len", HIP_BONE_LEN)))
+	_enforce_shoulder_3d(_spine[2], _hip_bones, _hip_bone_rest, sc(cfg("hip_bone_len", HIP_BONE_LEN)), false)
 
 
 # -- Spine & Posture ----------------------------------------------------------
@@ -1782,6 +1831,11 @@ func _update_foot_push(delta: float) -> void:
 func _update_gait(delta: float) -> void:
 	if _state == State.DEAD:
 		return
+
+	# Advance gait phase based on horizontal movement speed.
+	# Phase advances faster at higher speeds → more frequent steps.
+	_gait_phase += absf(velocity.x) * cfg("gait_stride_rate", GAIT_STRIDE_RATE) * delta
+	_gait_phase = fmod(_gait_phase, TAU)
 
 	# Idle breathing
 	_breathe_time += delta
@@ -2161,8 +2215,8 @@ func _do_chase(_delta: float) -> void:
 		_start_precognition()
 		return
 
-	# Choose attack when in range (same level / close enough)
-	if _attack_cooldown <= 0.0:
+	# Choose attack when in range (peaceful mode skips all attacks but still pathfinds)
+	if _attack_cooldown <= 0.0 and cfg("peaceful", 0.0) < 0.5:
 		_choose_attack(dist, to_target)
 
 
@@ -3262,7 +3316,7 @@ func _precog_build_graph_tick() -> void:
 var _precog_cooldown: float = 0.0  # Prevent precog spam
 
 func _start_precognition() -> void:
-	if _precog_cooldown > 0.0:
+	if _precog_cooldown > 0.0 or cfg("peaceful", 0.0) >= 0.5:
 		_change_state(State.CHASE)
 		return
 	_plan_attempts += 1
@@ -5318,9 +5372,15 @@ func _draw_blood_particles() -> void:
 func _draw() -> void:
 	if _dead and modulate.a < 0.05:
 		return
+	# Depth ordering: far-side legs render behind body, near-side in front.
+	# When facing right (>0): left legs (0,2) are far, right legs (1,3) near.
+	# When facing left (<0): right legs (1,3) are far, left legs (0,2) near.
+	var far_legs: Array = [0, 2] if _facing >= 0 else [1, 3]
+	var near_legs: Array = [1, 3] if _facing >= 0 else [0, 2]
+	_draw_legs_subset(far_legs)
 	_draw_body()
 	_draw_tail()
-	_draw_legs()
+	_draw_legs_subset(near_legs)
 	_draw_neck_head()
 	_draw_blood_particles()
 	# Chain barrier visualization: candy-striped red circle showing reach limit
@@ -5389,22 +5449,21 @@ func _draw_tail() -> void:
 	draw_circle(_tail[_tail.size() - 1], sc(2.5), tail_col)
 
 
-func _draw_legs() -> void:
+func _draw_legs_subset(leg_indices: Array) -> void:
+	## Draw a subset of legs (for depth ordering: far legs behind body, near in front).
 	var bone_col := Color(0.35, 0.28, 0.22)
 
-	# Draw clavicles (spine[0] to arm hips)
-	for ci in range(2):
-		draw_line(_spine[0], _clavicles[ci], bone_col, sc(4.0), true)
-		draw_circle(_clavicles[ci], sc(3.0), bone_col)
+	# Draw clavicles and hip bones for the specified legs
+	for li in leg_indices:
+		if li < 2:
+			draw_line(_spine[0], _clavicles[li], bone_col, sc(4.0), true)
+			draw_circle(_clavicles[li], sc(3.0), bone_col)
+		else:
+			draw_line(_spine[2], _hip_bones[li - 2], bone_col, sc(4.0), true)
+			draw_circle(_hip_bones[li - 2], sc(3.0), bone_col)
 
-	# Draw hip bones (spine[2] to leg hips)
-	for hi in range(2):
-		draw_line(_spine[2], _hip_bones[hi], bone_col, sc(4.0), true)
-		draw_circle(_hip_bones[hi], sc(3.0), bone_col)
-
-	for li in range(4):
+	for li in leg_indices:
 		if _leg_severed[li]:
-			# Draw stump at clavicle/hip bone endpoint
 			var stump: Vector2 = _clavicles[li] if li < 2 else _hip_bones[li - 2]
 			draw_circle(stump, sc(3.0), Color(0.5, 0.15, 0.1))
 			continue
