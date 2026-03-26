@@ -5,6 +5,8 @@
 		"debug on chain/tether_arc",
 		"debug on chain/chain_barrier",
 		"debug log precog/current_path",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

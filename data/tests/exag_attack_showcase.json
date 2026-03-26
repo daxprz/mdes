@@ -3,6 +3,8 @@
 	"description": "Monster attacks a close dummy repeatedly. Exercises bite, swipe, tail whip, and lunge wind-up/follow-through animations with exaggerated timings.",
 	"script": [
 		"var owait default=0",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

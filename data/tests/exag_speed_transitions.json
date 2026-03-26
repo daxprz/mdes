@@ -3,6 +3,8 @@
 	"description": "Dummy alternates between close and far positions. Monster transitions between speed tiers (slow/medium/fast) repeatedly. Exercises speed blend ramping and gait transitions.",
 	"script": [
 		"var owait default=0",
+		"level flat_floor",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

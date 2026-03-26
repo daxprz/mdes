@@ -8,6 +8,8 @@
 		"debug on testing/bounded_leap_checks",
 		"debug on testing/etz_daz_zones",
 		"debug log precog/current_path",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

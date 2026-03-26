@@ -11,6 +11,8 @@
 		"debug log precog/current_path",
 		"debug log pathing/waypoints",
 		"debug log leap_attack/rays_cast",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

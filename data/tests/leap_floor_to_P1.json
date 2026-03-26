@@ -12,6 +12,8 @@
 		"debug log leap_attack/rays_cast",
 		"debug log leap_attack/lateral_clearance",
 		"debug log pathing/platform_leap_path",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

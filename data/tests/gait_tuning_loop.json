@@ -4,6 +4,8 @@
 	"script": [
 		"var owait default=0",
 		"var looping default=true",
+		"level flat_floor",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

@@ -7,6 +7,8 @@
 		"debug on testing/planned_leaps",
 		"debug on testing/bounded_leap_checks",
 		"debug log precog/current_path",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

@@ -2,6 +2,8 @@
 	"name": "hunt_P2",
 	"script": [
 		"var owait default=0",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

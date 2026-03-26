@@ -3,6 +3,8 @@
 	"description": "Monster on P1 leaps to floor target. Exercises landing recovery compression and speed blend after impact.",
 	"script": [
 		"var owait default=0",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

@@ -6,6 +6,8 @@
 		"debug on precog/graph_edges",
 		"debug on testing/planned_leaps",
 		"debug log precog/current_path",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

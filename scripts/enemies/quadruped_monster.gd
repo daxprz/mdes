@@ -24,14 +24,98 @@ func sc(base: float) -> float:
 ## (power-ups, debuffs, state modifiers). Base defaults loaded from JSON in _ready().
 var _config_stack: Array = []  # Array[MonsterConfigProvider]
 
+## Min/max bounds for all configurable values. Enforced by cfg().
+## Format: {key: Vector2(min, max)}. Keys not listed are unbounded.
+const CONFIG_BOUNDS: Dictionary = {
+	"peaceful": Vector2(0, 1),
+	"gravity": Vector2(0, 2000),
+	"mass": Vector2(1, 1000),
+	"spine_seg_len": Vector2(1, 200),
+	"neck_len": Vector2(1, 200),
+	"leg_upper_len": Vector2(1, 200),
+	"leg_lower_len": Vector2(1, 200),
+	"leg_foot_len": Vector2(0, 100),
+	"tail_seg_len": Vector2(1, 200),
+	"jaw_len": Vector2(1, 100),
+	"clavicle_len": Vector2(1, 100),
+	"hip_bone_len": Vector2(1, 100),
+	"limb_flex": Vector2(0, 0.5),
+	"tail_flex": Vector2(0, 0.5),
+	"stiffness": Vector2(0.1, 50),
+	"tail_stiffness": Vector2(0.1, 50),
+	"tail_whip_stiffness": Vector2(0.1, 50),
+	"head_track_speed": Vector2(0.1, 30),
+	"turn_speed": Vector2(0.1, 20),
+	"accel_rate": Vector2(1, 2000),
+	"decel_rate": Vector2(1, 2000),
+	"speed_slow": Vector2(1, 500),
+	"speed_medium": Vector2(1, 1000),
+	"speed_fast": Vector2(1, 2000),
+	"sprint_speed": Vector2(1, 2000),
+	"landing_recovery_time": Vector2(0, 2),
+	"landing_compress": Vector2(0, 50),
+	"fall_threshold": Vector2(0, 2),
+	"shoulder_z_depth": Vector2(0, 50),
+	"gait_stride_rate": Vector2(0, 1),
+	"gait_knee_swing": Vector2(0, 80),
+	"step_threshold": Vector2(1, 200),
+	"step_duration": Vector2(0.01, 1),
+	"step_height": Vector2(0, 100),
+	"step_overshoot": Vector2(0, 1),
+	"foot_push_force": Vector2(1, 2000),
+	"foot_grip": Vector2(0, 1),
+	"attack_cooldown": Vector2(0, 10),
+	"bite_damage": Vector2(0, 500),
+	"swipe_damage": Vector2(0, 500),
+	"tail_damage": Vector2(0, 500),
+	"lunge_damage": Vector2(0, 500),
+	"lunge_speed": Vector2(0, 2000),
+	"bite_range": Vector2(1, 500),
+	"tail_range": Vector2(1, 500),
+	"leap_range": Vector2(1, 2000),
+	"leap_windup_time": Vector2(0.01, 3),
+	"leap_launch_speed": Vector2(1, 5000),
+	"leap_cooldown": Vector2(0, 30),
+	"leap_slash_damage": Vector2(0, 500),
+	"leap_bite_damage": Vector2(0, 500),
+	"leap_thrash_count": Vector2(0, 20),
+	"leap_strike_reach": Vector2(1, 500),
+	"leap_body_radius": Vector2(1, 300),
+	"grab_range": Vector2(1, 300),
+	"grab_duration": Vector2(0.1, 10),
+	"grab_kick_damage": Vector2(0, 500),
+	"grab_bite_damage": Vector2(0, 500),
+	"grab_eject_speed": Vector2(0, 2000),
+	"grab_kick_interval": Vector2(0.01, 5),
+	"sprint_slash_damage": Vector2(0, 500),
+	"sprint_slash_range": Vector2(1, 500),
+	"sprint_slash_interval": Vector2(0.01, 5),
+	"hop_up_max_height": Vector2(1, 500),
+	"hop_up_duration": Vector2(0.01, 3),
+	"hop_up_damage": Vector2(0, 500),
+	"max_health": Vector2(1, 50000),
+	"head_health": Vector2(1, 10000),
+	"tail_health": Vector2(1, 10000),
+	"leg_health": Vector2(1, 10000),
+	"precog_trigger_time": Vector2(0.1, 30),
+	"precog_grid_spacing": Vector2(5, 200),
+	"aggro_switch_hits": Vector2(1, 50),
+}
+
 ## Look up a configurable value. Walks the config stack, returns first non-null.
 ## Falls back to default_val (the GDScript const) if no provider has the key.
+## Result is clamped to CONFIG_BOUNDS if the key has defined bounds.
 func cfg(key: String, default_val: float) -> float:
+	var val: float = default_val
 	for provider in _config_stack:
-		var val: Variant = provider.get_value(key)
-		if val != null:
-			return float(val)
-	return default_val
+		var pval: Variant = provider.get_value(key)
+		if pval != null:
+			val = float(pval)
+			break
+	if CONFIG_BOUNDS.has(key):
+		var bounds: Vector2 = CONFIG_BOUNDS[key]
+		val = clampf(val, bounds.x, bounds.y)
+	return val
 
 ## Push a config provider onto the top of the stack (highest priority).
 func push_config(provider: Variant) -> void:
@@ -1386,7 +1470,7 @@ func _solve_pose(delta: float) -> void:
 				_: leg_phase_offset = 0.0
 			var swing: float = sin(_gait_phase + leg_phase_offset)
 			var swing_amount: float = sc(cfg("gait_knee_swing", GAIT_KNEE_SWING)) * 1.2  # More than shoulder
-			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.2, 1.0)
+			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(SPEED_FAST), 0.2, 1.0)
 			_legs[li][1].x += swing * swing_amount * speed_factor * _facing
 
 		# -- Rigid upper limb: enforce exact LEG_UPPER_LEN from hip to knee --
@@ -1690,7 +1774,7 @@ func _enforce_shoulder_3d(anchor: Vector2, bones: Array, rest_offsets: Array, bo
 				3: leg_phase_offset = 0.35           # RR
 				_: leg_phase_offset = 0.0
 			gait_swing = sin(_gait_phase + leg_phase_offset)
-			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.2, 1.0)
+			var speed_factor: float = clampf(absf(velocity.x) / _effective_speed(SPEED_FAST), 0.2, 1.0)
 			x_proj += gait_swing * swing_amount * speed_factor * _facing
 
 		var proj_offset := Vector2(x_proj, y_proj)
@@ -1808,7 +1892,9 @@ func _update_foot_push(delta: float) -> void:
 
 		# Each planted foot pushes the body in the desired direction.
 		# Force scales with desired speed.
-		push_x += _want_direction * sc(cfg("foot_push_force", FOOT_PUSH_FORCE)) * (_move_speed / _effective_speed(cfg("speed_medium", SPEED_MEDIUM)))
+		# Force normalization uses the fixed SPEED_MEDIUM const (not cfg) so that
+		# changing the speed_medium config doesn't inversely affect push force.
+		push_x += _want_direction * sc(cfg("foot_push_force", FOOT_PUSH_FORCE)) * (_move_speed / _effective_speed(SPEED_MEDIUM))
 
 	# Landing recovery: reduce push force while absorbing impact
 	if _landing_timer > 0.0:
@@ -1971,7 +2057,7 @@ func _try_step(li: int) -> void:
 		# Bezier midpoint: lifted arc between start and end.
 		# Step height scales with speed — higher lifts at faster movement.
 		var base_height: float = sc(cfg("step_height", STEP_HEIGHT))
-		var speed_ratio: float = clampf(_move_speed / _effective_speed(cfg("speed_fast", SPEED_FAST)), 0.3, 1.5)
+		var speed_ratio: float = clampf(_move_speed / _effective_speed(SPEED_FAST), 0.3, 1.5)
 		_step_center[li] = (foot_pos + _step_targets[li]) * 0.5 + Vector2(0, -base_height * speed_ratio)
 
 

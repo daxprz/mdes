@@ -163,6 +163,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.17
+**Multi-section debug panel, config sliders, test runner UI, bounds enforcement**
+
+- **Multi-section icon bar**: Debug (magnifying glass), Test Runner (play), Config (gear) — click icons to switch sections
+- **Config sliders**: 60+ configurable values with grouped categories (Mode, Physics, Skeleton, Pose, Movement, Gait, Blend, Combat, Leap, Grab, Health, Precog). Drag to adjust live. Single persistent provider (no stack spam)
+- **CONFIG_BOUNDS**: Every configurable value has enforced min/max bounds in `cfg()`. No more division-by-zero or monster disappearing from extreme values
+- **Test Runner UI**: Lists all suites and tests with click-to-run. Hover highlights. Shows running test status
+- **Viewport scaling**: Game canvas shifts right and scales when drawer opens, resets when closed
+- **Level per test**: All 34 tests now declare their level (`level title_screen` or `level flat_floor`) with a wait for deferred rebuild before `clear`
+- **Force normalization fix**: `speed_medium` no longer inversely affects push force when changed via config
+- **Debug panel spec**: Full spec for docked test editor with collapsible sub-sections captured in `docs/design/debug_panel_spec.md`
+
 ### v0.10.16
 **Gait system, level loading, while loops, peaceful mode**
 

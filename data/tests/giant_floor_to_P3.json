@@ -3,6 +3,8 @@
 	"description": "Two scaled monsters (0.5x and 2.0x) fight one target on upper-left platform P3",
 	"script": [
 		"var owait default=0",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

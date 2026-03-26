@@ -3,6 +3,8 @@
 	"description": "Monster chases dummy back and forth at floor level. Exercises leg gait oscillation and depth ordering.",
 	"script": [
 		"var owait default=0",
+		"level flat_floor",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

@@ -2,6 +2,8 @@
 	"name": "corner_right",
 	"script": [
 		"var owait default=0",
+		"level title_screen",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",

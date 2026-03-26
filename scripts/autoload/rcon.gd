@@ -136,10 +136,6 @@ func _execute(command: String) -> String:
 				var ui_node: Node = scene.get_node_or_null("UI")
 				if ui_node:
 					ui_node.visible = (level_name == "title_screen")
-				# Kill any remaining bats/enemies that survived teardown
-				for enemy in get_tree().get_nodes_in_group("enemies"):
-					if is_instance_valid(enemy):
-						enemy.queue_free()
 				return "OK: loaded level '%s'" % level_name
 			return "ERR: current scene doesn't support level loading"
 

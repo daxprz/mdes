@@ -3,6 +3,8 @@
 	"description": "Monster sprints back and forth across floor chasing teleporting dummy. Exercises speed blend ramp-up/ramp-down and turn transitions at full speed.",
 	"script": [
 		"var owait default=0",
+		"level flat_floor",
+		"wait 0.2",
 		"clear",
 		"portal off",
 		"clearplayers",
