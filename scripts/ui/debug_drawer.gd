@@ -1854,11 +1854,16 @@ func _draw_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary
 		"editor":
 			if te and "_test_name" in te and not te._test_name.is_empty():
 				ctx_text = te._test_name
-				# Save button (💾) — only when dirty, right after the name
-				if te._dirty:
+				var is_modified: bool = te.has_method("is_modified_from_disk") and te.is_modified_from_disk()
+				if is_modified:
+					# Show modified indicator + save button
 					ctx_text += " ●"
+					ctx_col = Color(1.0, 0.8, 0.3)  # Yellow-orange to indicate unsaved changes
 					var save_x: float = x + 78 + font.get_string_size(ctx_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9).x + 6
-					_panel.draw_string(font, Vector2(save_x, y + 14), "💾", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.8, 0.8, 0.4, 0.9))
+					_panel.draw_string(font, Vector2(save_x, y + 14), "💾", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.9, 0.3, 1.0))
+				elif te._dirty:
+					# Dirty but not different from disk (e.g., editing in progress)
+					ctx_text += " ·"
 			# Approve-all-deletes button (✕) — just left of grip, only when pending deletes exist
 			if not _editor_pending_deletes.is_empty():
 				_panel.draw_string(font, Vector2(x + pw - 38, y + 14), "✕", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.3, 0.3, 1.0))

@@ -32,6 +32,7 @@ var _mode: Mode = Mode.EDIT
 var _test_name: String = ""
 var _script: Array[String] = []
 var _dirty: bool = false
+var _disk_hash: String = ""  # Hash of the script as it exists on disk (for diff detection)
 
 # Window position and drag state (retained for compatibility with helper functions)
 var _window_pos := Vector2(20.0, 60.0)
@@ -938,6 +939,9 @@ func _load_test(test_name: String) -> void:
 	_test_name = test_name
 	_script = rcon._test_script.duplicate()
 	_dirty = false
+	# Store the hash of the on-disk version for diff detection
+	var TestRunner: GDScript = load("res://scripts/systems/test_runner.gd")
+	_disk_hash = TestRunner._compute_script_hash(_script)
 	_selected_row = -1
 	_handles = []
 	_edit_focused = false
@@ -1003,6 +1007,14 @@ func _try_load_cached_results() -> void:
 	print("EDITOR: auto-loaded results for '%s' (hash match, %d/%d)" % [_test_name, passed, total])
 
 
+func is_modified_from_disk() -> bool:
+	## Returns true if the current editor content differs from the on-disk version.
+	if _disk_hash.is_empty():
+		return false
+	var TestRunner: GDScript = load("res://scripts/systems/test_runner.gd")
+	return TestRunner._compute_script_hash(_script) != _disk_hash
+
+
 func _save_test() -> void:
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if not rcon:
@@ -1015,6 +1027,9 @@ func _save_test() -> void:
 	rcon._test_script_name = _test_name
 	var save_result: String = rcon._execute("testsave")
 	_dirty = false
+	# Update disk hash to match the saved version
+	var TestRunner: GDScript = load("res://scripts/systems/test_runner.gd")
+	_disk_hash = TestRunner._compute_script_hash(_script)
 	_status_msg = save_result
 	_status_timer = 3.0
 

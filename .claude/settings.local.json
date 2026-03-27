@@ -84,7 +84,11 @@
       "Bash(scripts/run_test.sh chained_upper_platform 20)",
       "Bash(scripts/run_test.sh chained_upper_platform_etz 20)",
       "Bash(scripts/run_test.sh chained_floor 25)",
-      "Read(//private/tmp/**)"
+      "Read(//private/tmp/**)",
+      "Bash(curl -sL \"http://upload.wikimedia.org/wikipedia/en/e/ec/Soccer_ball.svg\" -o /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.svg)",
+      "Bash(rsvg-convert -w 64 -h 64 /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.svg -o /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.png)",
+      "Bash(for suite:*)",
+      "Bash(nc -w3 localhost 9999)"
     ]
   }
 }

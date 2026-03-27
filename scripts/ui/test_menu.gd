@@ -12,26 +12,21 @@ var _output_lines: Array[String] = []
 var _overlay: Control = null
 
 const MENU_ITEMS := [
-	{ "label": "Tests...", "cmd": "open_editor" },
-	{ "label": "--- TESTING ---", "cmd": "" },
-	{ "label": "Quick Sanity Check", "cmd": "quick" },
-	{ "label": "Full Suite (18 scenarios)", "cmd": "all" },
-	{ "label": "Baseline (10 scenarios)", "cmd": "baseline" },
-	{ "label": "Edge Cases (8 scenarios)", "cmd": "edge" },
-	{ "label": "Damage & Weak Spots", "cmd": "damage" },
-	{ "label": "Attachments", "cmd": "attachments" },
-	{ "label": "Tether", "cmd": "tether" },
-	{ "label": "Attack Dummy", "cmd": "attack_dummy" },
-	{ "label": "--- ACTIONS ---", "cmd": "" },
+	{ "label": "Test Runner (Ctrl+D)", "cmd": "open_editor" },
+	{ "label": "--- SPAWN ---", "cmd": "" },
 	{ "label": "Spawn Monster (standdown)", "cmd": "spawn_standdown" },
 	{ "label": "Spawn Monster (active)", "cmd": "spawn_active" },
+	{ "label": "Spawn Dummy (soccer ball)", "cmd": "spawn_dummy" },
 	{ "label": "Monster Fight! (2 territorial)", "cmd": "monster_fight" },
-	{ "label": "Toggle Territorial Mode", "cmd": "territorial" },
+	{ "label": "--- ACTIONS ---", "cmd": "" },
+	{ "label": "Kill All Enemies", "cmd": "kill" },
 	{ "label": "Clear All Enemies", "cmd": "clear" },
+	{ "label": "Toggle Territorial Mode", "cmd": "territorial" },
+	{ "label": "Revive All Players", "cmd": "revive" },
+	{ "label": "Enable Player Joins", "cmd": "enable_joins" },
+	{ "label": "--- LEVEL ---", "cmd": "" },
 	{ "label": "Clear Level", "cmd": "clear_level" },
 	{ "label": "Restart Level", "cmd": "restart_level" },
-	{ "label": "Enable Player Joins", "cmd": "enable_joins" },
-	{ "label": "Revive All Players", "cmd": "revive" },
 ]
 
 
@@ -113,18 +108,14 @@ func _execute_selected() -> void:
 	_output_lines.append("Running: %s..." % item["label"])
 
 	match cmd:
-		"quick":
-			_run_rcon_sequence([
-				"clear", "clearplayers", "",
-				"spawn dummy 800 880", "",
-				"spawn monster 960 880", "",
-				">> Waiting 8s for combat...",
-			])
-			_run_timed_test(8.0, ["hp", "fps", "ik", "enemies"])
 		"spawn_standdown":
 			_run_rcon_sequence(["spawn monster 670 520", "standdown on"])
 		"spawn_active":
 			_run_rcon_sequence(["spawn monster 960 880"])
+		"spawn_dummy":
+			_run_rcon_sequence(["spawn dummy 960 880"])
+		"kill":
+			_run_rcon_sequence(["kill"])
 		"monster_fight":
 			_run_rcon_sequence([
 				"clear", "clearplayers", "",
@@ -153,8 +144,7 @@ func _execute_selected() -> void:
 			call_deferred("_open_test_editor")
 			return
 		_:
-			_output_lines.append("Shell test '%s' — run from terminal:" % cmd)
-			_output_lines.append("  bash scripts/test_%s.sh" % cmd)
+			_output_lines.append("Unknown command: %s" % cmd)
 
 	if _overlay:
 		_overlay.queue_redraw()

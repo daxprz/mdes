@@ -5946,55 +5946,7 @@ func _draw_debug() -> void:
 			var planted_text: String = "PLANT" if _foot_planted[li] else "STEP"
 			draw_string(font, _legs[li][2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
 
-	# -- State info text panel --
-	# Show for selected entity, or for all entities if explicitly enabled
-	var is_selected: bool = (PlayerHUD.debug_selected_enemy == self)
-	if DebugOverlay.should_draw("state_info/state_text_panel", self) and (is_selected or not is_instance_valid(PlayerHUD.debug_selected_enemy)):
-		if floor_y == 0.0:
-			floor_y = _raycast_floor(Vector2(0, _spine[1].y))
-		var screen_x: float = global_position.x
-		var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
-		var info_pos := Vector2(text_x, -global_position.y + 50)
-		# Line from text panel to the entity — use selection color if selected
-		var line_col := Color(0, 0.9, 1.0, 0.25) if is_selected else Color(0.5, 0.5, 0.5, 0.15)
-		draw_line(info_pos + Vector2(0, 30), _spine[1], line_col, 1.5 if is_selected else 1.0)
-		var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD", "STANDDOWN", "CHAIN_DAZE"]
-		var state_text: String = state_names[_state] if _state < state_names.size() else "?"
-		var dy: int = 0
-		draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-		dy += 12
-		draw_string(font, info_pos + Vector2(0, dy), "HP: %d  Legs: %d  Vel: (%.0f,%.0f)" % [health, _count_active_legs(), velocity.x, velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-		dy += 12
-		var waypoint_str: String = "  WPT!" if _precog_has_waypoint else ""
-		draw_string(font, info_pos + Vector2(0, dy), "Floor: %s  noHit: %.0fs%s" % [str(is_on_floor()), _time_since_strike_range, waypoint_str], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-		dy += 12
-		draw_string(font, info_pos + Vector2(0, dy), "Pos: (%.0f,%.0f)  floorY: %.1f" % [global_position.x, global_position.y, floor_y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
-		dy += 14
-		var ik_col: Color = Color(0, 1, 0) if _ik_score < 20 else (Color(1, 1, 0) if _ik_score < 100 else Color(1, 0, 0))
-		draw_string(font, info_pos + Vector2(0, dy), "IK: %.0f avg:%.0f pk:%.0f" % [_ik_score, _ik_score_avg, _ik_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ik_col)
-		dy += 12
-		var thrash_col: Color = Color(0, 1, 0) if _strategy_changes < 5 else (Color(1, 1, 0) if _strategy_changes < 15 else Color(1, 0, 0))
-		draw_string(font, info_pos + Vector2(0, dy), "Thrash: %d  plan: %d/%d" % [_strategy_changes, _plan_attempts, MAX_PLAN_ATTEMPTS], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, thrash_col)
-		if _state == State.ATTACK_GRAB:
-			dy += 12
-			var ball_col: Color = Color(0, 1, 0) if _ball_score < 10 else (Color(1, 1, 0) if _ball_score < 50 else Color(1, 0, 0))
-			draw_string(font, info_pos + Vector2(0, dy), "Ball: %.0f pk:%.0f" % [_ball_score, _ball_score_peak], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, ball_col)
-
-		# Attack phase display — shows current attack sub-phase and timer
-		if _state in [State.ATTACK_BITE, State.ATTACK_SWIPE, State.ATTACK_TAIL,
-			State.ATTACK_LUNGE, State.ATTACK_SPRINT_SLASH]:
-			dy += 12
-			var phase_name: String = _get_attack_phase_name()
-			var phase_col: Color = Color(1, 0.8, 0.2) if "STRIKE" in phase_name else Color(0.6, 0.9, 1.0)
-			draw_string(font, info_pos + Vector2(0, dy), "Phase: %s  t=%.2f" % [phase_name, _attack_timer], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, phase_col)
-
-		# Config overrides — show non-default values
-		if not _config_stack.is_empty():
-			dy += 14
-			draw_string(font, info_pos + Vector2(0, dy), "Config stack: %d providers" % _config_stack.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.5, 1.0))
-			for provider in _config_stack:
-				dy += 10
-				draw_string(font, info_pos + Vector2(0, dy), "  %s" % str(provider), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.6, 0.4, 0.9))
+	# State info text panel removed — now handled by the generic selection overlay in debug_drawer.gd
 
 	# -- Waypoint marker --
 	if _precog_has_waypoint and DebugOverlay.should_draw("pathing/waypoints", self):

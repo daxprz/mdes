@@ -163,6 +163,13 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.23
+**UI cleanup: remove static entity info, streamline test menu, save/diff detection**
+
+- **Static entity info removed**: Eliminated the left/right positioned state text panel from monster `_draw_debug()`. Only the generic following overlay in the debug drawer remains.
+- **Test menu cleaned up** (Ctrl+T): Removed 8 obsolete test suite entries (now in debug drawer). Reorganized into Spawn, Actions, and Level sections. Added Kill All and Spawn Dummy.
+- **Save/diff detection**: Editor tracks disk hash — shows yellow ● + 💾 when content differs from the on-disk source file. Save promotes edits to `data/tests/` (git-tracked).
+
 ### v0.10.22
 **Result caching across versions, smart soft-wrap, comment toggle, suite auto-recompute**
 
