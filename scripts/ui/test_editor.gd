@@ -26,14 +26,14 @@ const HANDLE_DRAW  := 7.0    # Drawn handle radius
 
 # -- State ---------------------------------------------------------------------
 var _active := false
-var _docked := false  # True when debug drawer handles rendering; suppresses floating window
+var _docked := true   # Always docked — debug drawer handles rendering
 var _mode: Mode = Mode.EDIT
 
 var _test_name: String = ""
 var _script: Array[String] = []
 var _dirty: bool = false
 
-# Window position and drag
+# Window position and drag state (retained for compatibility with helper functions)
 var _window_pos := Vector2(20.0, 60.0)
 var _win_drag := false
 var _win_drag_off := Vector2.ZERO
@@ -146,8 +146,10 @@ func _add_overlay_to_scene() -> void:
 
 
 func toggle() -> void:
+	## Legacy toggle — now always activates in docked mode.
 	_active = not _active
 	visible = _active
+	_docked = true
 	if _overlay:
 		_overlay.visible = _active
 
@@ -197,142 +199,13 @@ func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 
-	# Picker intercepts all input when open (even when docked)
+	# Picker intercepts all input when open
 	if _picker_open:
 		_input_picker(event)
 		return
 
-	# When docked, the debug drawer handles keyboard/mouse — only process handles
-	if _docked:
-		_input_docked(event)
-		return
-
-	if event is InputEventKey and event.pressed:
-		var ctrl: bool = event.ctrl_pressed or event.meta_pressed
-		var shift: bool = event.shift_pressed
-
-		match event.keycode:
-			KEY_ESCAPE:
-				_deselect_row()
-				toggle()
-				get_viewport().set_input_as_handled()
-				return
-
-			KEY_TAB:
-				if _edit_focused:
-					_edit_autocomplete()
-				else:
-					_mode = Mode.EDIT if _mode == Mode.RUN else Mode.RUN
-				get_viewport().set_input_as_handled()
-				return
-
-			KEY_T:
-				if not _edit_focused:
-					_open_picker()
-					get_viewport().set_input_as_handled()
-					return
-
-			KEY_S:
-				if ctrl:
-					_save_test()
-					get_viewport().set_input_as_handled()
-					return
-
-			KEY_R:
-				if ctrl and not _test_name.is_empty():
-					_load_test(_test_name)
-					_status_msg = "Reloaded from disk"
-					_status_timer = 2.0
-					get_viewport().set_input_as_handled()
-					return
-
-		# Route to edit field if focused
-		if _edit_focused:
-			_input_edit_field(event, ctrl, shift)
-			get_viewport().set_input_as_handled()
-			return
-
-		# Row navigation when nothing focused
-		match event.keycode:
-			KEY_UP:
-				if _selected_row > 0:
-					_select_row(_selected_row - 1)
-				get_viewport().set_input_as_handled()
-			KEY_DOWN:
-				if _selected_row < _script.size() - 1:
-					_select_row(_selected_row + 1)
-				elif _selected_row < 0 and not _script.is_empty():
-					_select_row(0)
-				get_viewport().set_input_as_handled()
-			KEY_PAGEUP:
-				_row_scroll = maxi(0, _row_scroll - _max_rows_for_viewport())
-				if _selected_row >= 0:
-					_select_row(maxi(0, _selected_row - _max_rows_for_viewport()))
-				get_viewport().set_input_as_handled()
-			KEY_PAGEDOWN:
-				var max_scroll: int = maxi(0, _script.size() + 1 - _max_rows_for_viewport())
-				_row_scroll = mini(max_scroll, _row_scroll + _max_rows_for_viewport())
-				if _selected_row >= 0:
-					_select_row(mini(_script.size() - 1, _selected_row + _visible_row_count()))
-				get_viewport().set_input_as_handled()
-			KEY_DELETE:
-				# Delete hovered disallow handle, or delete row
-				if _handle_hover >= 0 and _try_delete_hovered_handle():
-					pass  # Disallow deleted
-				elif _selected_row >= 0:
-					_delete_row(_selected_row)
-				get_viewport().set_input_as_handled()
-
-	# Mouse wheel scroll
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			if _get_window_rect().has_point(event.position):
-				_row_scroll = maxi(0, _row_scroll - 3)
-				get_viewport().set_input_as_handled()
-				return
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			if _get_window_rect().has_point(event.position):
-				_row_scroll = mini(maxi(0, _script.size() + 1 - _max_rows_for_viewport()), _row_scroll + 3)
-				get_viewport().set_input_as_handled()
-				return
-
-	# Right-click: delete hovered disallow handle
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-		if _handle_hover >= 0 and _try_delete_hovered_handle():
-			get_viewport().set_input_as_handled()
-			return
-
-	# Mouse button — only consume if click is on our window or on a handle
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		if event.pressed:
-			var full_rect := _get_window_rect()
-			full_rect.size.y += 60
-			if full_rect.has_point(event.position) or _is_over_handle(event.position):
-				_on_mouse_press(event.position)
-				get_viewport().set_input_as_handled()
-		else:
-			# Always handle release if we were dragging something
-			if _win_drag or _handle_drag >= 0 or _row_drag >= 0:
-				_on_mouse_release()
-				get_viewport().set_input_as_handled()
-
-	# Mouse motion
-	if event is InputEventMouseMotion:
-		if _win_drag:
-			_window_pos = event.position - _win_drag_off
-			get_viewport().set_input_as_handled()
-		elif _row_drag >= 0:
-			# Row drag reordering — compute drop target from mouse Y
-			if absf(event.position.y - _row_drag_start_y) > 6.0:
-				var wy_top: float = _window_pos.y + TITLE_H
-				var rel_y: float = event.position.y - wy_top
-				_row_drag_target = clampi(_row_scroll + int(rel_y / ROW_H), 0, _script.size())
-			get_viewport().set_input_as_handled()
-		elif _handle_drag >= 0:
-			_do_handle_drag(_get_world_pos(event.position))
-			get_viewport().set_input_as_handled()
-		else:
-			_update_hover(event.position)
+	# Always docked — debug drawer handles panel UI, we only handle world-space handles
+	_input_docked(event)
 
 
 func _input_docked(event: InputEvent) -> void:
@@ -2277,348 +2150,13 @@ func _draw_command_visual(p: Dictionary, dim: float, line_num: String, font: Fon
 func _draw_panel() -> void:
 	if not _active:
 		return
-	# When docked, the debug drawer renders the editor content — only draw picker overlay
-	if _docked:
-		if _picker_open:
-			_draw_picker()
-		return
+	# Always docked — debug drawer renders the editor content. Only draw picker overlay here.
 	if _picker_open:
 		_draw_picker()
-		return
-
-	var font: Font = ThemeDB.fallback_font
-	var vp  := get_viewport().get_visible_rect().size
-	var wx  := _window_pos.x
-	var wy  := _window_pos.y
-	var ww  := WINDOW_W
-	var wh  := _window_height()
-
-	# Window shadow
-	_panel.draw_rect(Rect2(wx + 4, wy + 4, ww, wh), Color(0, 0, 0, 0.4))
-
-	# Window background
-	_panel.draw_rect(Rect2(wx, wy, ww, wh), Color(0.08, 0.08, 0.12, 0.97))
-	_panel.draw_rect(Rect2(wx, wy, ww, wh), Color(0.35, 0.55, 0.35, 0.7), false, 1.5)
-
-	# Title bar
-	var mode_col := Color(0.3, 0.8, 0.3) if _mode == Mode.EDIT else Color(0.8, 0.5, 0.2)
-	_panel.draw_rect(Rect2(wx, wy, ww, TITLE_H), Color(0.1, 0.15, 0.1, 1.0))
-	var title_str: String
-	if _test_name.is_empty():
-		title_str = "Test Editor  —  (no test)  press T"
-	else:
-		var dirty_mark := " ●" if _dirty else ""
-		var suite_pos := ""
-		if not _suite_all_tests.is_empty():
-			suite_pos = " [%d/%d]" % [_suite_current_idx + 1, _suite_all_tests.size()]
-		title_str = "%s%s%s" % [_test_name, suite_pos, dirty_mark]
-	_panel.draw_string(font, Vector2(wx + 10, wy + 17), title_str,
-		HORIZONTAL_ALIGNMENT_LEFT, ww - 80, 12, Color(0.85, 0.85, 0.85))
-	var mode_str := "EDIT" if _mode == Mode.EDIT else "▶ RUN"
-	_panel.draw_string(font, Vector2(wx + ww - 54, wy + 17), mode_str,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, mode_col)
-
-	# Row list
-	var ry := wy + TITLE_H
-	var list_h := _visible_row_count() * ROW_H
-	_panel.draw_rect(Rect2(wx, ry, ww, list_h), Color(0.06, 0.06, 0.09, 1.0))
-
-	for i in range(_visible_row_count()):
-		var script_idx: int = _row_scroll + i
-		var row_y := ry + i * ROW_H
-		var is_ghost := (script_idx >= _script.size())
-
-		if is_ghost:
-			# Ghost "add" row
-			_panel.draw_string(font, Vector2(wx + 30, row_y + 15),
-				"(click to add line)", HORIZONTAL_ALIGNMENT_LEFT, -1, 11,
-				Color(0.4, 0.6, 0.4, 0.5))
-			continue
-
-		var is_sel := (script_idx == _selected_row)
-
-		# Row background
-		if is_sel:
-			_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.15, 0.35, 0.15, 1.0))
-		elif i % 2 == 1:
-			_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.0, 0.0, 0.0, 0.15))
-
-		# Line number
-		var num_col := Color(0.4, 0.6, 0.4) if not is_sel else Color(0.7, 1.0, 0.7)
-		_panel.draw_string(font, Vector2(wx + 6, row_y + 15),
-			"%2d" % (script_idx + 1), HORIZONTAL_ALIGNMENT_LEFT, 20, 10, num_col)
-
-		# Status indicator — shows run state during execution, result after completion
-		var rcon_ls: Node = get_node_or_null("/root/Rcon")
-		var line_state: String = ""
-		if rcon_ls and rcon_ls._test_runner and rcon_ls._test_runner._line_states.has(script_idx):
-			line_state = rcon_ls._test_runner._line_states[script_idx]
-		if _run_results.has(script_idx):
-			# Post-run result
-			var res: String = _run_results[script_idx]
-			match res:
-				"pass":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✓",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
-				"fail":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✗",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(1.0, 0.3, 0.3))
-					_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.4, 0.1, 0.1, 0.3))
-				"info":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "·",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
-		elif _run_running and not _results_collected and not line_state.is_empty():
-			# During run — show execution state
-			match line_state:
-				"pending":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "○",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.5, 0.5))
-				"running":
-					var is_notify_line: bool = _script[script_idx].strip_edges().begins_with("notify ")
-					if is_notify_line:
-						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "⏸",
-							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.8, 0.3))
-						_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.2, 0.2, 0.05, 0.3))
-						# Countdown on the right
-						var rcon_cd: Node = get_node_or_null("/root/Rcon")
-						if rcon_cd and rcon_cd._notify_active:
-							var secs: int = ceili(rcon_cd._notify_timer)
-							var mm: int = secs / 60
-							var ss: int = secs % 60
-							var cd_text: String = "%02d:%02d" % [mm, ss]
-							_panel.draw_string(font, Vector2(wx + ww - 48, row_y + 15), cd_text,
-								HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.3, 0.7))
-					else:
-						_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "●",
-							HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.3, 1.0, 0.3))
-						_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.1, 0.25, 0.1, 0.3))
-				"complete":
-					_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "✓",
-						HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.7, 0.5))
-		# Notify line: show ⏸ + countdown when notify is active (after results collected)
-		if _results_collected and _script[script_idx].strip_edges().begins_with("notify "):
-			var rcon_cd: Node = get_node_or_null("/root/Rcon")
-			if rcon_cd and rcon_cd._notify_active:
-				_panel.draw_string(font, Vector2(wx + 26, row_y + 15), "⏸",
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.8, 0.8, 0.3))
-				_panel.draw_rect(Rect2(wx, row_y, ww, ROW_H), Color(0.2, 0.2, 0.05, 0.3))
-				var secs: int = ceili(rcon_cd._notify_timer)
-				var cd_text: String = "%02d:%02d" % [secs / 60, secs % 60]
-				_panel.draw_string(font, Vector2(wx + ww - 48, row_y + 15), cd_text,
-					HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.3, 0.7))
-
-		# Command text — truncated (leave room for result icon + X button)
-		var cmd_text: String = _script[script_idx]
-		var text_col := Color(0.95, 0.95, 0.85) if is_sel else _cmd_color(cmd_text)
-		_panel.draw_string(font, Vector2(wx + 38, row_y + 15), cmd_text,
-			HORIZONTAL_ALIGNMENT_LEFT, ww - 62, 11, text_col)
-
-		# Show actual override value on the right for var lines
-		if cmd_text.strip_edges().begins_with("var "):
-			var var_parts := cmd_text.strip_edges().split(" ", false)
-			if var_parts.size() >= 2:
-				var var_name: String = var_parts[1]
-				if _test_override_vars.has(var_name):
-					var actual := str(_test_override_vars[var_name])
-					_panel.draw_string(font, Vector2(wx + ww - 65, row_y + 15),
-						"= " + actual, HORIZONTAL_ALIGNMENT_LEFT, -1, 10,
-						Color(0.4, 0.9, 1.0, 0.8))
-
-		# Red X delete button on right edge — hidden during run mode
-		if not _run_running:
-			var xc := Vector2(wx + ww - 12, row_y + ROW_H * 0.5)
-			_panel.draw_string(font, xc + Vector2(-4, 5), "✕",
-				HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.7, 0.3, 0.3, 0.5 if not is_sel else 0.8))
-
-	# Separator
-	_panel.draw_line(Vector2(wx, ry + list_h), Vector2(wx + ww, ry + list_h),
-		Color(0.3, 0.5, 0.3, 0.5), 1.0)
-
-	# Row-drag drop indicator
-	if _row_drag >= 0 and _row_drag_target >= 0:
-		var drop_vis: int = _row_drag_target - _row_scroll
-		var drop_y: float = ry + drop_vis * ROW_H
-		_panel.draw_line(Vector2(wx + 4, drop_y), Vector2(wx + ww - 4, drop_y),
-			Color(0.3, 1.0, 0.3, 0.9), 2.0)
-		_panel.draw_circle(Vector2(wx + 4, drop_y), 3.0, Color(0.3, 1.0, 0.3))
-
-	# Inline edit field (when row selected)
-	var by := ry + list_h
-	if _selected_row >= 0:
-		_draw_edit_field(wx, by, ww)
-		by += _edit_field_height()
-		# Check detail log (when a check row with results is selected)
-		if _run_detail.has(_selected_row):
-			_draw_detail_panel(wx, by, ww)
-			by += _detail_panel_height()
-		# Notify help (when notify row is selected and active)
-		elif _selected_row >= 0 and _selected_row < _script.size() and _script[_selected_row].strip_edges().begins_with("notify ") and get_meta("notify_active", false):
-			var nh: float = 56.0
-			_panel.draw_rect(Rect2(wx, by, ww, nh), Color(0.1, 0.1, 0.05, 1.0))
-			_panel.draw_rect(Rect2(wx, by, ww, nh), Color(0.6, 0.6, 0.3, 0.4), false, 1.0)
-			_panel.draw_string(font, Vector2(wx + 10, by + 16),
-				"Review the test results above. Click check rows to see details.",
-				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.8, 0.8, 0.5))
-			_panel.draw_string(font, Vector2(wx + 10, by + 32),
-				"Inspect violations in the game world. Drag handles to adjust.",
-				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.8, 0.8, 0.5))
-			_panel.draw_string(font, Vector2(wx + 10, by + 48),
-				"Click [Done ✓] when finished reviewing.",
-				HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, Color(0.6, 0.9, 0.5))
-			by += nh
-
-	# Button bar
-	_draw_buttons(wx, by, ww)
-
-	# Result summary bar
-	if not _run_summary.is_empty():
-		by += BUTTON_H
-		var all_pass: bool = _run_summary.begins_with("%d/%d" % [_run_results.values().count("pass") + _run_results.values().count("info"), _run_results.values().count("pass") + _run_results.values().count("info")])
-		# Simpler: check if "fail" in any result
-		var has_fail: bool = "fail" in _run_results.values()
-		var sum_col := Color(0.3, 1.0, 0.3) if not has_fail else Color(1.0, 0.4, 0.4)
-		var sum_bg := Color(0.08, 0.15, 0.08, 0.95) if not has_fail else Color(0.2, 0.08, 0.08, 0.95)
-		_panel.draw_rect(Rect2(wx, by, ww, 22), sum_bg)
-		_panel.draw_string(font, Vector2(wx + 10, by + 16), _run_summary,
-			HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 12, sum_col)
 
 
-	# Status flash message (save feedback etc.)
-	if _status_timer > 0 and not _status_msg.is_empty():
-		var alpha: float = minf(1.0, _status_timer * 2.0)  # Fade out in last 0.5s
-		var scol := Color(0.3, 1.0, 0.3, alpha) if _status_msg.begins_with("OK") else Color(1.0, 0.9, 0.3, alpha)
-		_panel.draw_rect(Rect2(wx, wy + wh + 4, ww, 20), Color(0.08, 0.12, 0.08, 0.9 * alpha))
-		_panel.draw_string(font, Vector2(wx + 10, wy + wh + 18), _status_msg,
-			HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 11, scol)
 
-	# Top bar hint
-	var hint := "T:pick  Tab:mode  Ctrl+S:save  Ctrl+R:reload  Esc:close"
-	if _selected_row >= 0:
-		var sel_p := _parse_command(_script[_selected_row] if _selected_row < _script.size() else "")
-		if sel_p.get("type", "none") == "bleap_plan":
-			hint += "  RClick/Del:remove disallow"
-	_panel.draw_string(font, Vector2(wx, wy - 14), hint,
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.45, 0.45, 0.45))
-
-	# Scroll indicator
-	if _script.size() > _visible_row_count():
-		var shown_start := _row_scroll + 1
-		var shown_end   := mini(_row_scroll + _visible_row_count(), _script.size())
-		_panel.draw_string(font, Vector2(wx + ww - 60, wy + TITLE_H + 10),
-			"%d–%d/%d" % [shown_start, shown_end, _script.size()],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.4, 0.4, 0.4))
-
-
-func _draw_edit_field(wx: float, wy: float, ww: float) -> void:
-	var font: Font = ThemeDB.fallback_font
-	var eh: float = _edit_field_height()
-	var border_col := Color(0.4, 0.8, 0.4, 0.8) if _edit_focused else Color(0.3, 0.5, 0.3, 0.5)
-	_panel.draw_rect(Rect2(wx, wy, ww, eh), Color(0.05, 0.1, 0.05, 1.0))
-	_panel.draw_rect(Rect2(wx, wy, ww, eh), border_col, false, 1.0)
-
-	# Wrap text into visual lines
-	var avail_w: float = ww - 24.0
-	var display := "  " + _edit_text
-	var wrap_lines: PackedStringArray = _wrap_text(display, font, avail_w, 11)
-
-	# Draw each wrapped line
-	var ly: float = wy + 16.0
-	for wl in wrap_lines:
-		_panel.draw_string(font, Vector2(wx + 12, ly), wl,
-			HORIZONTAL_ALIGNMENT_LEFT, avail_w, 11, Color(0.9, 1.0, 0.85))
-		ly += 16.0
-
-	# Selection highlight (approximate — first visual line only for simplicity)
-	if _edit_has_sel():
-		var sf := mini(_edit_sel_start, _edit_cursor)
-		var st := maxi(_edit_sel_start, _edit_cursor)
-		var xf := 12.0 + font.get_string_size("  " + _edit_text.substr(0, sf),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		var xt := 12.0 + font.get_string_size("  " + _edit_text.substr(0, st),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		# Clamp to first line for now
-		xf = fmod(xf, avail_w)
-		xt = fmod(xt, avail_w)
-		if xt > xf:
-			_panel.draw_rect(Rect2(wx + xf, wy + 4, xt - xf, 14), Color(0.3, 0.6, 0.3, 0.4))
-
-	# Cursor
-	if _edit_focused and int(_run_blink * 2) % 2 == 0:
-		var full_cx: float = font.get_string_size("  " + _edit_text.substr(0, _edit_cursor),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x
-		var line_idx: int = int(full_cx / avail_w)
-		var cx: float = wx + 12.0 + fmod(full_cx, avail_w)
-		var cy: float = wy + 5.0 + line_idx * 16.0
-		_panel.draw_line(Vector2(cx, cy), Vector2(cx, cy + 12),
-			Color(0.4, 1.0, 0.4, 0.9), 1.5)
-
-
-func _wrap_text(text: String, font: Font, max_w: float, size: int) -> PackedStringArray:
-	## Split text into wrapped lines that fit within max_w pixels.
-	var lines: PackedStringArray = []
-	var current := ""
-	for ch in text:
-		var test := current + ch
-		if font.get_string_size(test, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x > max_w and not current.is_empty():
-			lines.append(current)
-			current = ch
-		else:
-			current = test
-	if not current.is_empty():
-		lines.append(current)
-	if lines.is_empty():
-		lines.append("")
-	return lines
-
-
-func _draw_detail_panel(wx: float, wy: float, ww: float) -> void:
-	## Draw the check detail log panel — shows per-plan pass/fail breakdown.
-	var detail_lines: Array = _run_detail.get(_selected_row, [])
-	if detail_lines.is_empty():
-		return
-	var font: Font = ThemeDB.fallback_font
-	var dh: float = _detail_panel_height()
-	# Background
-	_panel.draw_rect(Rect2(wx, wy, ww, dh), Color(0.04, 0.04, 0.07, 1.0))
-	_panel.draw_rect(Rect2(wx, wy, ww, dh), Color(0.4, 0.4, 0.6, 0.4), false, 1.0)
-	# Lines
-	var ly: float = wy + 12.0
-	var max_lines: int = mini(detail_lines.size(), 12)
-	for i in range(max_lines):
-		var dl: String = detail_lines[i]
-		var col := Color(0.7, 0.7, 0.7)
-		if "PASS" in dl or "MATCHED" in dl:
-			col = Color(0.3, 0.9, 0.3)
-		elif "FAIL" in dl or "not matched" in dl:
-			col = Color(1.0, 0.4, 0.4)
-		elif "LEAPS" in dl or "candidates" in dl or "leap_def" in dl:
-			col = Color(0.5, 0.7, 1.0)
-		_panel.draw_string(font, Vector2(wx + 8, ly), dl,
-			HORIZONTAL_ALIGNMENT_LEFT, ww - 16, 10, col)
-		ly += 14.0
-	if detail_lines.size() > 12:
-		_panel.draw_string(font, Vector2(wx + 8, ly), "... +%d more lines" % (detail_lines.size() - 12),
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.5))
-
-
-func _draw_buttons(wx: float, wy: float, ww: float) -> void:
-	var font: Font = ThemeDB.fallback_font
-	_panel.draw_rect(Rect2(wx, wy, ww, BUTTON_H), Color(0.07, 0.1, 0.07, 1.0))
-	_panel.draw_line(Vector2(wx, wy), Vector2(wx + ww, wy), Color(0.3, 0.5, 0.3, 0.4), 1.0)
-
-	var btns := _get_buttons()
-	var bw := (ww - 16.0) / float(btns.size())
-	for i in range(btns.size()):
-		var bx := wx + 8.0 + i * bw
-		var label: String = btns[i][0]
-		var col: Color = btns[i][1]
-		_panel.draw_rect(Rect2(bx, wy + 6, bw - 4, BUTTON_H - 12),
-			col * Color(1, 1, 1, 0.15))
-		_panel.draw_rect(Rect2(bx, wy + 6, bw - 4, BUTTON_H - 12),
-			col * Color(1, 1, 1, 0.5), false, 1.0)
-		_panel.draw_string(font, Vector2(bx + 4, wy + BUTTON_H - 10), label,
-			HORIZONTAL_ALIGNMENT_LEFT, bw - 8, 10, col)
-
+# Floating window drawing removed in v0.10.19 — always docked now.
 
 func _draw_picker() -> void:
 	var font: Font = ThemeDB.fallback_font

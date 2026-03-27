@@ -10,7 +10,6 @@ var _selected_idx: int = 0
 var _running: bool = false
 var _output_lines: Array[String] = []
 var _overlay: Control = null
-var _test_editor: Node = null
 
 const MENU_ITEMS := [
 	{ "label": "Tests...", "cmd": "open_editor" },
@@ -162,20 +161,11 @@ func _execute_selected() -> void:
 
 
 func _open_test_editor() -> void:
-	## Open the test editor. If the debug drawer is open, dock it there.
+	## Open the test editor — always docked in the debug drawer.
 	close()
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if rcon:
-		# Use RCON's _ensure_test_editor which handles docking
 		rcon._ensure_test_editor()
-		return
-	# Fallback: create floating editor
-	if _test_editor == null or not is_instance_valid(_test_editor):
-		var script := load("res://scripts/ui/test_editor.gd")
-		_test_editor = CanvasLayer.new()
-		_test_editor.set_script(script)
-		get_parent().add_child(_test_editor)
-	_test_editor.toggle()
 
 
 func _run_rcon_sequence(commands: Array) -> void:

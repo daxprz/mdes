@@ -112,11 +112,7 @@ func toggle() -> void:
 		PlayerHUD._debug_mode = true
 		_rebuild_visible_rows()
 		_cached_lists_dirty = true
-	else:
-		# Closing drawer — undock the test editor so it goes back to floating
-		var rcon: Node = get_node_or_null("/root/Rcon")
-		if rcon and rcon._test_editor and is_instance_valid(rcon._test_editor):
-			rcon._test_editor._docked = false
+	# Test editor stays docked — no floating mode anymore
 
 
 func is_open() -> bool:
@@ -174,8 +170,10 @@ func _get_test_editor() -> Node:
 	if not rcon:
 		return null
 	if rcon._test_editor and is_instance_valid(rcon._test_editor):
+		# Guard: script properties don't exist until _ready runs
+		if not "_docked" in rcon._test_editor:
+			return null  # Not ready yet — caller should handle null gracefully
 		rcon._test_editor._docked = true
-		# Ensure active so _process polls results and overlay draws
 		if not rcon._test_editor._active:
 			rcon._test_editor._active = true
 			rcon._test_editor.visible = true

@@ -524,9 +524,13 @@ func _execute(command: String) -> String:
 					var eq := parts[pi].find("=")
 					if eq > 0:
 						override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
-				editor._test_override_vars = override_vars
-				editor._load_test(parts[1])
-				editor.call_deferred("_run_test")
+				# If editor isn't ready yet (just created), defer the load+run
+				if not "_active" in editor:
+					call_deferred("_deferred_run_test", parts[1], override_vars)
+				else:
+					editor._test_override_vars = override_vars
+					editor._load_test(parts[1])
+					editor.call_deferred("_run_test")
 				return "OK: running test '%s' in editor (%s)" % [parts[1], str(override_vars)]
 			return "ERR: failed to open test editor"
 
@@ -1848,55 +1852,66 @@ func _cmd_debug_filter(parts: PackedStringArray) -> String:
 			return "ERR: unknown filter type '%s'. Try: type, id" % filter_type
 
 
+func _deferred_run_test(test_name: String, override_vars: Dictionary) -> void:
+	## Called deferred when the test editor was just created and isn't ready yet.
+	if _test_editor and is_instance_valid(_test_editor) and "_active" in _test_editor:
+		_test_editor._test_override_vars = override_vars
+		_test_editor._load_test(test_name)
+		_test_editor.call_deferred("_run_test")
+
+
 func _ensure_test_editor() -> Node:
-	## Find or create the test editor. Returns the editor node.
-	## If the debug drawer is open, dock the editor there instead of floating.
+	## Find or create the test editor. Always docked in the debug drawer.
 	if _test_editor and is_instance_valid(_test_editor):
-		if not _test_editor._active:
+		# Guard: script properties may not exist yet if _ready hasn't run
+		if not _test_editor.is_inside_tree():
+			return _test_editor
+		if "_active" in _test_editor and not _test_editor._active:
 			_test_editor._active = true
 			_test_editor.visible = true
-		# Check if debug drawer is open — if so, dock the editor
-		var drawer: Node = _get_debug_drawer()
-		if drawer and drawer.is_open():
+		if "_docked" in _test_editor:
 			_test_editor._docked = true
+		var drawer: Node = _get_debug_drawer()
+		if drawer:
+			if not drawer.is_open():
+				drawer.toggle()
 			drawer._current_section = 1  # Section.TEST_RUNNER
-		elif _test_editor._docked:
-			# Drawer closed — undock and show floating
-			_test_editor._docked = false
 		return _test_editor
 	# Look for existing editor in the scene
 	for node in get_tree().current_scene.get_children():
 		if node.has_method("toggle") and node.has_method("_load_test") and node.has_method("_run_test"):
 			_test_editor = node
+			_test_editor._docked = true
 			if not _test_editor._active:
 				_test_editor._active = true
 				_test_editor.visible = true
 			var drawer: Node = _get_debug_drawer()
-			if drawer and drawer.is_open():
-				_test_editor._docked = true
+			if drawer:
+				if not drawer.is_open():
+					drawer.toggle()
 				drawer._current_section = 1  # Section.TEST_RUNNER
 			return _test_editor
-	# Create one — defer activation until _ready has run
+	# Create one — always docked in the debug drawer.
+	# Script properties aren't available until _ready, so defer activation.
 	var script: GDScript = load("res://scripts/ui/test_editor.gd")
-	_test_editor = CanvasLayer.new()
-	_test_editor.set_script(script)
-	get_tree().current_scene.add_child(_test_editor)
+	var editor := CanvasLayer.new()
+	editor.set_script(script)
+	get_tree().current_scene.add_child(editor)
+	_test_editor = editor
+	# Open the debug drawer, switch to test runner
 	var drawer: Node = _get_debug_drawer()
-	if drawer and drawer.is_open():
-		_test_editor._docked = true
+	if drawer:
+		if not drawer.is_open():
+			drawer.toggle()
 		drawer._current_section = 1  # Section.TEST_RUNNER
-		_test_editor.call_deferred("_activate_docked")
-	else:
-		_test_editor.call_deferred("toggle")
-	return _test_editor
+	# Defer docked activation until _ready has run and script properties exist
+	editor.call_deferred("_activate_docked")
+	return editor
 
 
 func _get_debug_drawer() -> Node:
-	## Find the debug drawer node in the scene.
-	for node in get_tree().root.get_children():
-		if node.has_method("is_open") and node.has_method("toggle") and "ICON_BAR_WIDTH" in node:
-			return node
-	return null
+	## Find the debug drawer autoload.
+	return get_node_or_null("/root/DebugDrawer")
 
 
 func _ensure_test_runner() -> void:

@@ -163,6 +163,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.20
+**Remove floating test editor — always docked**
+
+- **Floating test editor removed**: ~350 lines of floating window drawing, input handling, and dead helper functions deleted from `test_editor.gd`
+- **Always docked**: `_docked` flag is always true. No floating fallback — RCON `run`/`suite` commands auto-open the debug drawer if closed
+- **Debug drawer auto-opens**: Running a test from RCON or the test menu opens the debug drawer and switches to the Test Runner section automatically
+- **Deferred initialization fixed**: Script properties (`_docked`, `_active`) are guarded against access before `_ready()` runs, preventing "Invalid access" errors on freshly created editors
+- **DebugDrawer lookup simplified**: Uses `get_node_or_null("/root/DebugDrawer")` instead of fragile property-sniffing loop
+
 ### v0.10.19
 **Generic entity selection, config panel overhaul, debug click fix**
 
