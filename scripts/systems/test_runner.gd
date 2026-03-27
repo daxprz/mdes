@@ -922,7 +922,7 @@ static func _compute_script_hash(script: Array) -> String:
 
 
 static func find_latest_results(test_name: String) -> Dictionary:
-	## Find the most recent results.json for a test and return its parsed data.
+	## Find the most recent results.json for a test in the CURRENT version.
 	## Returns empty dict if no results found.
 	var version_str: String = Version.get_string()
 	var test_dir: String = "user://test-output/%s/%s" % [version_str, test_name]
@@ -949,6 +949,53 @@ static func find_latest_results(test_name: String) -> Dictionary:
 	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
 		return {}
 	return json.data
+
+
+static func copy_results_forward(old_version: String, new_version: String) -> int:
+	## Copy the latest test results from old_version to new_version.
+	## Only copies the most recent timestamp dir per test (not full history).
+	## Returns the number of tests copied.
+	var base_dir: String = "user://test-output"
+	var old_dir: String = "%s/%s" % [base_dir, old_version]
+	var new_dir: String = "%s/%s" % [base_dir, new_version]
+	var src := DirAccess.open(old_dir)
+	if not src:
+		return 0
+	var copied: int = 0
+	src.list_dir_begin()
+	var test_name: String = src.get_next()
+	while test_name != "":
+		if src.current_is_dir():
+			# Find latest timestamp in this test's directory
+			var test_src: String = "%s/%s" % [old_dir, test_name]
+			var ts_dir := DirAccess.open(test_src)
+			if ts_dir:
+				var latest_ts: String = ""
+				ts_dir.list_dir_begin()
+				var ts: String = ts_dir.get_next()
+				while ts != "":
+					if ts_dir.current_is_dir() and ts > latest_ts:
+						latest_ts = ts
+					ts = ts_dir.get_next()
+				ts_dir.list_dir_end()
+				if not latest_ts.is_empty():
+					# Copy results.json and test.json to new version
+					var src_path: String = "%s/%s" % [test_src, latest_ts]
+					var dst_path: String = "%s/%s/%s" % [new_dir, test_name, latest_ts]
+					DirAccess.make_dir_recursive_absolute(dst_path)
+					for fname2 in ["results.json", "test.json"]:
+						var src_file := FileAccess.open(src_path + "/" + fname2, FileAccess.READ)
+						if src_file:
+							var content: String = src_file.get_as_text()
+							src_file.close()
+							var dst_file := FileAccess.open(dst_path + "/" + fname2, FileAccess.WRITE)
+							if dst_file:
+								dst_file.store_string(content)
+								dst_file.close()
+					copied += 1
+		test_name = src.get_next()
+	src.list_dir_end()
+	return copied
 
 
 func _extract_value(response: String, key: String) -> float:

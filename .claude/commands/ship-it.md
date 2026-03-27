@@ -41,7 +41,29 @@ Add a new version section under `## Release Notes` in `README.md`, ABOVE the pre
 - Focus on user-visible behavior, not implementation details
 ```
 
-### 4. Commit
+### 4. Copy Test Results Forward
+
+After bumping the version, copy the latest test results from the old version to the new version directory. This preserves result validity across version bumps (script hashes still validate content).
+
+```bash
+OLD_VER="X.Y.Z"  # The version BEFORE the bump
+NEW_VER="X.Y.W"  # The new version
+BASE="$HOME/Library/Application Support/Godot/app_userdata/The Ultimate Muffin/test-output"
+if [ -d "$BASE/$OLD_VER" ]; then
+  for test_dir in "$BASE/$OLD_VER"/*/; do
+    test_name=$(basename "$test_dir")
+    latest=$(ls -1 "$test_dir" | sort | tail -1)
+    if [ -n "$latest" ] && [ -d "$test_dir/$latest" ]; then
+      mkdir -p "$BASE/$NEW_VER/$test_name/$latest"
+      cp "$test_dir/$latest/results.json" "$BASE/$NEW_VER/$test_name/$latest/" 2>/dev/null
+      cp "$test_dir/$latest/test.json" "$BASE/$NEW_VER/$test_name/$latest/" 2>/dev/null
+    fi
+  done
+  echo "Copied test results: $OLD_VER → $NEW_VER"
+fi
+```
+
+### 5. Commit
 
 Stage and commit ALL changes (code + docs + version bump + README) in a single commit:
 
@@ -54,7 +76,7 @@ Use the version number from step 1. The commit message should be concise (under 
 
 Do NOT push or tag — the user will do that manually if they want to.
 
-### 5. Report
+### 6. Report
 
 Print a summary:
 - Version: old → new

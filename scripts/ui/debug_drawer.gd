@@ -329,7 +329,39 @@ func _update_suite_result(suite_name: String, passed: int, total: int) -> void:
 
 func _update_test_result(test_name: String, result: String) -> void:
 	## Record the result of a test run ("pass" or "fail").
+	## Also recomputes suite results for any suite containing this test.
 	_test_results_cache[test_name] = result
+	_recompute_suite_results()
+
+
+func _recompute_suite_results() -> void:
+	## Recompute all suite pass/fail from current test results cache.
+	for sname in _cached_suite_names:
+		var suite_path: String = "res://data/tests/suites/%s.json" % sname
+		var sfile := FileAccess.open(suite_path, FileAccess.READ)
+		if not sfile:
+			continue
+		var sjson := JSON.new()
+		if sjson.parse(sfile.get_as_text()) != OK or not sjson.data is Dictionary:
+			continue
+		var suite_tests: Array = sjson.data.get("tests", [])
+		if suite_tests.is_empty():
+			continue
+		var passed: int = 0
+		var total: int = suite_tests.size()
+		var all_known: bool = true
+		for st in suite_tests:
+			var st_name: String = str(st)
+			if _test_results_cache.has(st_name):
+				if _test_results_cache[st_name] == "pass":
+					passed += 1
+			else:
+				all_known = false
+		if all_known:
+			_suite_results[sname] = {"passed": passed, "total": total}
+		else:
+			# Partial results — show what we know
+			_suite_results[sname] = {"passed": passed, "total": total}
 
 
 func _rebuild_cached_lists() -> void:
@@ -357,6 +389,65 @@ func _rebuild_cached_lists() -> void:
 		test_dir.list_dir_end()
 	_cached_test_names.sort()
 	_cached_lists_dirty = false
+	# Scan all tests for cached results to populate pass/fail indicators
+	_scan_all_test_results()
+
+
+func _scan_all_test_results() -> void:
+	## Scan all tests for cached results and populate pass/fail indicators.
+	## Also aggregates suite results from their constituent tests.
+	var TestRunner: GDScript = load("res://scripts/systems/test_runner.gd")
+	# Scan individual tests
+	for tname in _cached_test_names:
+		if _test_results_cache.has(tname):
+			continue  # Already have a result from this session
+		var results: Dictionary = TestRunner.find_latest_results(tname)
+		if results.is_empty():
+			continue
+		# Load the test script to compute its hash
+		var test_path: String = "res://data/tests/%s.json" % tname
+		var file := FileAccess.open(test_path, FileAccess.READ)
+		if not file:
+			continue
+		var json := JSON.new()
+		if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+			continue
+		var test_data: Dictionary = json.data
+		var script_lines: Array = test_data.get("script", [])
+		var current_hash: String = TestRunner._compute_script_hash(script_lines)
+		var saved_hash: String = results.get("script_hash", "")
+		if saved_hash.is_empty() or saved_hash != current_hash:
+			continue  # Script changed — results invalid
+		var passed: int = results.get("passed", 0)
+		var total: int = results.get("total", 0)
+		_test_results_cache[tname] = "pass" if passed == total else "fail"
+
+	# Aggregate suite results from their tests
+	for sname in _cached_suite_names:
+		if _suite_results.has(sname):
+			continue  # Already have a result from this session
+		var suite_path: String = "res://data/tests/suites/%s.json" % sname
+		var sfile := FileAccess.open(suite_path, FileAccess.READ)
+		if not sfile:
+			continue
+		var sjson := JSON.new()
+		if sjson.parse(sfile.get_as_text()) != OK or not sjson.data is Dictionary:
+			continue
+		var suite_tests: Array = sjson.data.get("tests", [])
+		if suite_tests.is_empty():
+			continue
+		var suite_passed: int = 0
+		var suite_total: int = suite_tests.size()
+		var all_known: bool = true
+		for st in suite_tests:
+			var st_name: String = str(st)
+			if _test_results_cache.has(st_name):
+				if _test_results_cache[st_name] == "pass":
+					suite_passed += 1
+			else:
+				all_known = false
+		if all_known:
+			_suite_results[sname] = {"passed": suite_passed, "total": suite_total}
 
 
 func _process(delta: float) -> void:
@@ -905,6 +996,9 @@ func _handle_test_click(lx: float, my: float) -> void:
 
 		var body_y: float = header_end
 		var body_end: float = y + sub["height"]
+		# Editor fills remaining space — extend for click detection
+		if sub["id"] == "editor":
+			body_end = maxf(body_end, 9999.0)
 
 		# Check if click is in the resize zone at the bottom edge of this sub-section
 		# Resizes THIS section, Editor absorbs the change
@@ -1004,11 +1098,20 @@ func _handle_editor_subsection_click(lx: float, local_y: float, body_h: float) -
 	if is_exec_mode:
 		return
 
-	var edit_h: float = 32.0 if te._selected_row >= 0 and is_edit_mode else 0.0
-	var list_h: float = body_h - edit_h
 	var pw: float = _content_width
 	var font: Font = ThemeDB.fallback_font
 	var text_w: float = pw - 56
+	# Dynamic edit field height (must match the draw calculation)
+	var edit_h: float = 0.0
+	if te._selected_row >= 0 and is_edit_mode:
+		var edit_wrap: Array[String] = _get_soft_wrap_lines(te._edit_text, text_w, font, 10)
+		edit_h = maxf(32.0, 8.0 + edit_wrap.size() * 18.0)
+	var list_h: float = body_h - edit_h
+
+	# Click in edit field area — focus it (takes priority over row selection)
+	if local_y >= list_h and edit_h > 0 and is_edit_mode:
+		te._edit_focused = true
+		return
 
 	if local_y < list_h:
 		# EDIT mode: insertion indicator (left side, near row boundary)
@@ -1039,15 +1142,12 @@ func _handle_editor_subsection_click(lx: float, local_y: float, body_h: float) -
 			cum_y += rh
 
 		if clicked_idx >= 0 and clicked_idx < te._script.size():
-			if is_inspect_mode:
-				# INSPECT: select row to show its detail in the Status pane
-				te._selected_row = clicked_idx
-				_status_scroll_offset = 0  # Reset status scroll when selecting a new row
-			elif is_edit_mode:
-				# EDIT: check buttons first, then select
-				if lx >= pw - 34 and not te._run_running:
+			if is_edit_mode or is_inspect_mode:
+				# EDIT: check button zones (right side), then select
+				if lx >= pw - 40 and not te._run_running:
 					if _editor_pending_deletes.has(clicked_idx):
-						if lx < pw - 18:
+						# Pending delete: [↶ undo] [✕ confirm]
+						if lx < pw - 22:
 							_editor_pending_deletes.erase(clicked_idx)
 						else:
 							_editor_pending_deletes.erase(clicked_idx)
@@ -1059,13 +1159,33 @@ func _handle_editor_subsection_click(lx: float, local_y: float, body_h: float) -
 								else:
 									new_deletes[key] = true
 							_editor_pending_deletes = new_deletes
+					elif lx < pw - 24:
+						# Comment toggle (#) — left button zone
+						var line: String = te._script[clicked_idx]
+						if line.strip_edges().begins_with("#"):
+							# Uncomment: remove leading "# " or "#"
+							var stripped: String = line.strip_edges()
+							if stripped.begins_with("# "):
+								te._script[clicked_idx] = stripped.substr(2)
+							else:
+								te._script[clicked_idx] = stripped.substr(1)
+						else:
+							# Comment: prepend "# "
+							te._script[clicked_idx] = "# " + line
+						te._dirty = true
+						if te._selected_row == clicked_idx:
+							te._edit_text = te._script[clicked_idx]
+							te._edit_cursor = te._edit_text.length()
 					else:
+						# Delete button (✕) — right button zone
 						_editor_pending_deletes[clicked_idx] = true
 				else:
-					te._select_row(clicked_idx)
-	elif is_edit_mode and te._selected_row >= 0:
-		# Click in edit field area — focus it
-		te._edit_focused = true
+					if is_inspect_mode:
+						te._selected_row = clicked_idx
+						_status_scroll_offset = 0
+					else:
+						te._select_row(clicked_idx)
+	# Edit field click is handled above (before row selection)
 
 
 func _handle_test_hover(my: float) -> void:
@@ -1088,6 +1208,9 @@ func _handle_test_hover(my: float) -> void:
 			continue
 		var body_y: float = y + SUB_HEADER_H
 		var body_end: float = y + sub["height"]
+		# Editor section fills remaining space — extend body_end to panel height
+		if sub["id"] == "editor":
+			body_end = maxf(body_end, 9999.0)  # Effectively unbounded
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
 			match sub["id"]:
@@ -1137,6 +1260,8 @@ func _handle_test_scroll(my: float, delta: int) -> void:
 			continue
 		var body_y: float = y + SUB_HEADER_H
 		var body_end: float = y + sub["height"]
+		if sub["id"] == "editor":
+			body_end = maxf(body_end, 9999.0)
 		if my >= y and my < body_end:
 			match sub["id"]:
 				"tests":
@@ -1293,8 +1418,8 @@ func _draw_panel() -> void:
 	var pw: float = _panel_width
 	var ph: float = vp.y
 
-	# Background
-	_panel.draw_rect(Rect2(_panel_x, 0, pw, ph), Color(0.06, 0.06, 0.09, 0.95))
+	# Background (fully opaque — game viewport is scaled to the right of the panel)
+	_panel.draw_rect(Rect2(_panel_x, 0, pw, ph), Color(0.06, 0.06, 0.09, 1.0))
 	# Right border
 	_panel.draw_line(Vector2(_panel_x + pw, 0), Vector2(_panel_x + pw, ph), Color(0.2, 0.6, 1.0, 0.5), 2.0)
 
@@ -1954,7 +2079,11 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 	var is_edit_mode: bool = te._mode == 0  # EDIT
 	var is_exec_mode: bool = te._mode == 1  # EXECUTE
 	var is_inspect_mode: bool = te._mode == 2  # INSPECT
-	var edit_h: float = 32.0 if te._selected_row >= 0 and is_edit_mode else 0.0
+	# Edit field height: dynamic based on soft-wrapped content
+	var edit_h: float = 0.0
+	if te._selected_row >= 0 and is_edit_mode:
+		var edit_wrap_lines: Array[String] = _get_soft_wrap_lines(te._edit_text, text_w, font, 10)
+		edit_h = maxf(32.0, 8.0 + edit_wrap_lines.size() * base_row_h)
 	var list_h: float = h - edit_h
 	var script_size: int = te._script.size()
 	_editor_body_y = y
@@ -2050,14 +2179,19 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 			_panel.draw_line(Vector2(text_x, strike_y), Vector2(text_x + text_w, strike_y), Color(1.0, 0.3, 0.3, 0.6), 1.5)
 
 		# Right-side buttons (only in EDIT mode)
+		# Layout: [#] [✕] — comment toggle + delete, both on hover
+		# When pending delete: [↶] [✕] — undo + confirm, always visible
 		var is_hover_row: bool = (_editor_hover_row == si)
-		if is_edit_mode and not te._run_running:
+		var is_commented: bool = cmd_text.strip_edges().begins_with("#")
+		if (is_edit_mode or is_inspect_mode) and not te._run_running:
 			if is_pending_delete:
-				# UNDO (↶) on the left half, CONFIRM (✕ bold) on the right half — always visible
 				_panel.draw_string(font, Vector2(x + pw - 32, ry + 14), "↶", HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.5, 0.7, 1.0, 0.9))
 				_panel.draw_string(font, Vector2(x + pw - 16, ry + 14), "✕", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1.0, 0.2, 0.2, 1.0))
 			elif is_hover_row:
-				# Delete button (✕) — only visible on hover
+				# Comment toggle (#) — shows commented state
+				var hash_col: Color = Color(0.5, 0.8, 0.4, 0.9) if is_commented else Color(0.5, 0.5, 0.5, 0.7)
+				_panel.draw_string(font, Vector2(x + pw - 34, ry + 14), "#", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, hash_col)
+				# Delete button (✕)
 				_panel.draw_string(font, Vector2(x + pw - 20, ry + 14), "✕", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.3, 0.3, 0.8))
 
 		ry += this_row_h
@@ -2075,16 +2209,24 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 			_panel.draw_polygon(tri_pts, PackedColorArray([Color(0.3, 0.9, 0.3, 0.7), Color(0.3, 0.9, 0.3, 0.7), Color(0.3, 0.9, 0.3, 0.7)]))
 			_panel.draw_string(font, Vector2(tri_x + 10, ins_y + 4), "+", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.3, 0.9, 0.3, 0.9))
 
-	# Inline edit field (EDIT mode only)
+	# Inline edit field (EDIT mode only) — soft-wrapped to fit
 	if is_edit_mode and te._selected_row >= 0 and edit_h > 0:
 		var ey: float = y + list_h
 		var edit_bg: Color = Color(0.1, 0.12, 0.1) if te._edit_valid else Color(0.2, 0.1, 0.1)
 		_panel.draw_rect(Rect2(x, ey, pw - 8, edit_h), edit_bg)
 		_panel.draw_line(Vector2(x, ey), Vector2(x + pw - 8, ey), Color(0.3, 0.5, 0.3, 0.4), 1.0)
-		var edit_text: String = te._edit_text
+		# Build display text with cursor indicator
+		var edit_display: String = te._edit_text
 		if te._edit_focused and int(_cursor_blink * 2) % 2 == 0:
-			edit_text = edit_text.substr(0, te._edit_cursor) + "|" + edit_text.substr(te._edit_cursor)
-		_panel.draw_string(font, Vector2(x + 6, ey + 20), edit_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 10, Color(0.85, 0.95, 0.85))
+			edit_display = edit_display.substr(0, te._edit_cursor) + "|" + edit_display.substr(te._edit_cursor)
+		# Soft-wrap the edit text
+		var edit_lines: Array[String] = _get_soft_wrap_lines(edit_display, text_w, font, 10)
+		for eli in range(edit_lines.size()):
+			var eiy: float = ey + 16 + eli * base_row_h
+			var indent: float = 8.0 if eli > 0 else 0.0
+			if eli > 0:
+				_panel.draw_string(font, Vector2(text_x + text_w - 8, eiy - base_row_h), "↵", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.4, 0.5, 0.4, 0.5))
+			_panel.draw_string(font, Vector2(x + 6 + indent, eiy), edit_lines[eli], HORIZONTAL_ALIGNMENT_LEFT, text_w - indent, 10, Color(0.85, 0.95, 0.85))
 
 	# Scroll indicator
 	if script_size > 0:
@@ -2092,43 +2234,90 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 
 
 func _get_soft_wrap_lines(text: String, max_w: float, font: Font, font_size: int) -> Array[String]:
-	## Split a command into display lines using parser-aware soft wrap.
-	## Wraps at natural breakpoints: "unless", "label:", operator tokens.
+	## Split a command into display lines at sub-command boundaries.
+	## First line uses max_w, continuation lines use max_w - 8 (indented).
+	## Priority order (highest first):
+	##   1. Boundary commands: unless, check
+	##   2. Label/extract: label:, extract:
+	##   3. Comparisons: >, <, =
+	##   4. Any space
+	## Within each priority, pick the LATEST fitting position (maximize text per line).
 	if font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_w:
 		return [text]
-	# Find natural wrap points
-	var wrap_tokens: Array[String] = [" unless ", " label:", " extract:", " check "]
+
+	# Token groups in priority order — search each group fully before falling to the next
+	var token_groups: Array[Array] = [
+		[" unless ", " check "],          # 1. Boundary commands
+		[" label:", " extract:"],          # 2. Label/extract
+		[" > ", " < ", " = "],            # 3. Comparisons
+	]
 	var lines: Array[String] = []
 	var remaining: String = text
+	var is_first_line: bool = true
+
 	while not remaining.is_empty():
-		if font.get_string_size(remaining, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_w:
+		var line_w: float = max_w if is_first_line else max_w - 8.0
+		if font.get_string_size(remaining, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= line_w:
 			lines.append(remaining)
 			break
-		# Find the best wrap point that fits within max_w
+
 		var best_pos: int = -1
-		for token in wrap_tokens:
-			var pos: int = remaining.find(token)
-			while pos > 0:
-				var candidate: String = remaining.substr(0, pos)
-				if font.get_string_size(candidate, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_w:
-					best_pos = pos
-				# Find next occurrence
-				var next_pos: int = remaining.find(token, pos + 1)
-				if next_pos < 0:
-					break
-				pos = next_pos
+
+		# Search each priority group — stop at the first group that has a match.
+		# For boundary commands (group 0): prefer the EARLIEST match (one clause per line).
+		# For lower priority groups: prefer the LATEST match (maximize text per line).
+		for gi in range(token_groups.size()):
+			var group: Array = token_groups[gi]
+			var group_best: int = -1
+			for token in group:
+				var search_start: int = 0
+				while true:
+					var pos: int = remaining.find(token, search_start)
+					if pos < 0:
+						break
+					if pos == 0:
+						search_start = pos + 1
+						continue  # Don't wrap at the very start (empty first segment)
+					if font.get_string_size(remaining.substr(0, pos), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= line_w:
+						if gi == 0:
+							# Boundary commands: take the FIRST match (one clause per line)
+							if group_best < 0 or pos < group_best:
+								group_best = pos
+						else:
+							# Lower priority: take the LATEST match (maximize text)
+							if pos > group_best:
+								group_best = pos
+					else:
+						break
+					search_start = pos + 1
+			if group_best > 0:
+				best_pos = group_best
+				break
+
 		if best_pos > 0:
 			lines.append(remaining.substr(0, best_pos))
 			remaining = remaining.substr(best_pos)
 		else:
-			# No natural wrap point found — hard wrap at character boundary
-			var fit_chars: int = remaining.length()
-			while fit_chars > 1:
-				fit_chars -= 1
-				if font.get_string_size(remaining.substr(0, fit_chars), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= max_w:
-					break
-			lines.append(remaining.substr(0, fit_chars))
-			remaining = remaining.substr(fit_chars)
+			# 4. Last resort — wrap at any space (search from right to left)
+			var space_pos: int = -1
+			for ci in range(remaining.length() - 1, 0, -1):
+				if remaining[ci] == " ":
+					if font.get_string_size(remaining.substr(0, ci), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= line_w:
+						space_pos = ci
+						break
+			if space_pos > 0:
+				lines.append(remaining.substr(0, space_pos))
+				remaining = remaining.substr(space_pos + 1)
+			else:
+				# Absolute last resort — hard character wrap
+				var fit_chars: int = remaining.length()
+				while fit_chars > 1:
+					fit_chars -= 1
+					if font.get_string_size(remaining.substr(0, fit_chars), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x <= line_w:
+						break
+				lines.append(remaining.substr(0, fit_chars))
+				remaining = remaining.substr(fit_chars)
+		is_first_line = false
 	return lines
 
 

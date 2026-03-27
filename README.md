@@ -163,6 +163,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.22
+**Result caching across versions, smart soft-wrap, comment toggle, suite auto-recompute**
+
+- **Result caching across versions**: `/ship-it` copies latest results forward to the new version directory. Script hash validates content.
+- **Startup result scan**: All test/suite pass/fail indicators pre-populated on first open by scanning cached results
+- **Suite auto-recompute**: Running an individual test immediately updates pass/total for every suite containing it
+- **Comment toggle**: `#` button on hover toggles line commenting. Works in EDIT and INSPECT modes
+- **Smart soft-wrap**: Boundary commands (`unless`, `check`) wrap at earliest match (one clause per line). Lower priority tokens wrap at latest match
+- **Dynamic edit field**: Auto-sizes and soft-wraps to fit content. Same wrap algorithm as script rows
+- **Editor click fixes**: Edit field takes priority over row selection. Unbounded height for hover/click/scroll in editor section
+- **Opaque panel**: Fully opaque background since game viewport scales to the right
+- **Play button fix**: Correct draw offset and wider 40px click zone
+
 ### v0.10.21
 **Test runner overhaul: 3 editor modes, suite/test play buttons, result caching, soft-wrap**
 
