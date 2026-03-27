@@ -878,10 +878,14 @@ func _write_test_output(passed: int, total: int) -> void:
 				"arrival": [edge["arrival"].x, edge["arrival"].y],
 			})
 
+	# Compute script hash for result validity tracking
+	var script_hash: String = _compute_script_hash(_current_test_script)
+
 	var results_data: Dictionary = {
 		"test_name": test_name,
 		"version": version_str,
 		"timestamp": timestamp,
+		"script_hash": script_hash,
 		"duration_seconds": snapped(duration_s, 0.01),
 		"passed": passed,
 		"total": total,
@@ -906,6 +910,45 @@ func _write_test_output(passed: int, total: int) -> void:
 		results_file.close()
 
 	_log("  Output: %s" % base_dir, Color(0.5, 0.5, 0.5))
+
+
+static func _compute_script_hash(script: Array) -> String:
+	## Compute a stable hash of a test script for result validity tracking.
+	## Two scripts with the same content produce the same hash.
+	var combined: String = ""
+	for line in script:
+		combined += str(line) + "\n"
+	return str(combined.hash())
+
+
+static func find_latest_results(test_name: String) -> Dictionary:
+	## Find the most recent results.json for a test and return its parsed data.
+	## Returns empty dict if no results found.
+	var version_str: String = Version.get_string()
+	var test_dir: String = "user://test-output/%s/%s" % [version_str, test_name]
+	var dir := DirAccess.open(test_dir)
+	if not dir:
+		return {}
+	# Find the latest timestamp directory
+	var latest_dir: String = ""
+	dir.list_dir_begin()
+	var fname: String = dir.get_next()
+	while fname != "":
+		if dir.current_is_dir() and fname > latest_dir:
+			latest_dir = fname
+		fname = dir.get_next()
+	dir.list_dir_end()
+	if latest_dir.is_empty():
+		return {}
+	# Load results.json
+	var results_path: String = test_dir + "/" + latest_dir + "/results.json"
+	var file := FileAccess.open(results_path, FileAccess.READ)
+	if not file:
+		return {}
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return {}
+	return json.data
 
 
 func _extract_value(response: String, key: String) -> float:

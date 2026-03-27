@@ -11,7 +11,7 @@ extends CanvasLayer
 ##   bleap a/b X Y R           → circle center + radius grip
 ##   bleap plan req|opt ...    → START rect corners, END circle, DISALLOW capsule endpoints
 
-enum Mode { EDIT, RUN }
+enum Mode { EDIT, EXECUTE, INSPECT }
 
 # -- Layout constants ----------------------------------------------------------
 const WINDOW_W     := 420.0
@@ -928,6 +928,7 @@ func _input_picker(event: InputEvent) -> void:
 
 func _load_test(test_name: String) -> void:
 	## Load a test via RCON testload, then sync script state here.
+	## Auto-loads the latest test results if the script hash matches.
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if not rcon:
 		return
@@ -947,11 +948,59 @@ func _load_test(test_name: String) -> void:
 	_run_leap_edges.clear()
 	_breach_marker = {}
 	_results_collected = false
+	# Clear pending deletes from previous test
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer and "_editor_pending_deletes" in drawer:
+		drawer._editor_pending_deletes.clear()
+	# Auto-load latest results if the script hash matches
+	_try_load_cached_results()
 	# Clear the scene for a clean test environment
 	rcon._execute("clear")
 	rcon._execute("clearplayers")
 	rcon._execute("clearzones")
 	rcon._execute("portal off")
+
+
+func _try_load_cached_results() -> void:
+	## Check if the latest test results match the current script hash.
+	## If so, populate _run_results, _run_detail, and _run_summary from the saved data.
+	var TestRunner: GDScript = load("res://scripts/systems/test_runner.gd")
+	var current_hash: String = TestRunner._compute_script_hash(_script)
+	var results: Dictionary = TestRunner.find_latest_results(_test_name)
+	if results.is_empty():
+		return
+	var saved_hash: String = results.get("script_hash", "")
+	if saved_hash.is_empty() or saved_hash != current_hash:
+		return
+	# Hash matches — restore results
+	var passed: int = results.get("passed", 0)
+	var total: int = results.get("total", 0)
+	_run_summary = "%d/%d PASSED" % [passed, total]
+	# Restore per-check results mapped back to script lines
+	for check_group: Dictionary in results.get("checks", []):
+		var check_log: Array = check_group.get("log", [])
+		for c: Dictionary in check_group.get("checks", []):
+			var check_label: String = c.get("label", "")
+			var check_passed: bool = c.get("passed", false)
+			for si in range(_script.size()):
+				var line: String = _script[si].strip_edges()
+				if line.begins_with("check ") and check_label in line:
+					_run_results[si] = "pass" if check_passed else "fail"
+					_run_detail[si] = check_log
+					break
+	# Mark wait lines as info
+	for si in range(_script.size()):
+		if not _run_results.has(si):
+			var line: String = _script[si].strip_edges()
+			if line.begins_with("wait "):
+				_run_results[si] = "info"
+	# Switch to INSPECT mode since we have results to examine
+	_mode = Mode.INSPECT
+	# Notify drawer of test result
+	var drawer_node: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer_node and drawer_node.has_method("_update_test_result"):
+		drawer_node._update_test_result(_test_name, "pass" if passed == total else "fail")
+	print("EDITOR: auto-loaded results for '%s' (hash match, %d/%d)" % [_test_name, passed, total])
 
 
 func _save_test() -> void:
@@ -998,7 +1047,7 @@ func _run_test() -> void:
 		rcon._test_runner._override_vars = _test_override_vars.duplicate()
 		rcon._test_runner.run_test_script(_script, _test_name, null)
 		_run_running = true
-		_mode = Mode.RUN
+		_mode = Mode.EXECUTE
 
 
 func _collect_results(runner: Node) -> void:
@@ -1039,12 +1088,17 @@ func _collect_results(runner: Node) -> void:
 
 	_run_summary = "%d/%d PASSED" % [passed, total]
 
+	# Notify debug drawer of this test's result
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer and drawer.has_method("_update_test_result"):
+		drawer._update_test_result(_test_name, "pass" if passed == total else "fail")
+
 	# Auto-select the first failed check row so the human can see what went wrong
 	for si in range(_script.size()):
 		if _run_results.get(si, "") == "fail":
 			_select_row(si)
 			break
-	_mode = Mode.EDIT
+	_mode = Mode.INSPECT  # Switch to inspect mode after results arrive
 
 	# Use the test runner's captured leap evaluation (evaluated at check time, not after)
 	_run_leap_edges = runner._last_leap_eval.duplicate(true)
@@ -1391,6 +1445,13 @@ func _suite_show_results() -> void:
 	_status_timer = 10.0
 	# Print to stdout so log polling can detect suite completion
 	print("SUITE_COMPLETE %s %d/%d" % [_suite_name, passed, total])
+	# Notify the debug drawer of suite results
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer and drawer.has_method("_update_suite_result"):
+		drawer._update_suite_result(_suite_name, passed, total)
+		# Also update per-test results
+		for r: Dictionary in _suite_results:
+			drawer._update_test_result(r["name"], "pass" if r["passed"] else "fail")
 	# Write suite output to file
 	_write_suite_output(passed, total)
 	_suite_name = ""

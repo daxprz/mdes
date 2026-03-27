@@ -304,7 +304,7 @@ Saved on `Ctrl+S`. Loaded on game start.
 - Old `_debug_mode` flag in player_side.gd syncs from DebugOverlay
 - Debug auto-disabled when entering gameplay from title screen
 
-### Story 6: Docked Test Runner — COMPLETE (v0.10.20)
+### Story 6: Docked Test Runner — COMPLETE (v0.10.21)
 - Sub-section framework: 5 collapsible, resizable panels (Suites, Tests, Controls, Status, Editor)
 - Layout persisted to `user://debug_panel_layout.json`
 - Test editor docked into debug panel; floating window suppressed when docked

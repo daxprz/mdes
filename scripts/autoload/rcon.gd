@@ -553,8 +553,12 @@ func _execute(command: String) -> String:
 						var eq := parts[pi].find("=")
 						if eq > 0:
 							override_vars[parts[pi].substr(0, eq)] = parts[pi].substr(eq + 1)
-				editor._test_override_vars = override_vars
-				editor.run_suite(parts[1], skip_tests)
+				# If editor isn't ready yet (just created), defer the suite run
+				if not "_active" in editor:
+					call_deferred("_deferred_run_suite", parts[1], override_vars, skip_tests)
+				else:
+					editor._test_override_vars = override_vars
+					editor.run_suite(parts[1], skip_tests)
 				var skip_str: String = " skip=%s" % str(skip_tests) if not skip_tests.is_empty() else ""
 				return "OK: running suite '%s' in editor (%s)%s" % [parts[1], str(override_vars), skip_str]
 			return "ERR: failed to open test editor"
@@ -1858,6 +1862,13 @@ func _deferred_run_test(test_name: String, override_vars: Dictionary) -> void:
 		_test_editor._test_override_vars = override_vars
 		_test_editor._load_test(test_name)
 		_test_editor.call_deferred("_run_test")
+
+
+func _deferred_run_suite(suite_name: String, override_vars: Dictionary, skip_tests: Array[String]) -> void:
+	## Called deferred when the test editor was just created and isn't ready yet.
+	if _test_editor and is_instance_valid(_test_editor) and "_active" in _test_editor:
+		_test_editor._test_override_vars = override_vars
+		_test_editor.run_suite(suite_name, skip_tests)
 
 
 func _ensure_test_editor() -> Node:

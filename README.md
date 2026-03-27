@@ -163,6 +163,23 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.21
+**Test runner overhaul: 3 editor modes, suite/test play buttons, result caching, soft-wrap**
+
+- **Three editor modes**: EDIT (green, full editing), EXECUTE (orange, read-only during run), INSPECT (blue, click rows to view check details in Status pane)
+- **Suite selection**: Click a suite to filter the Tests list to its tests. Pass/fail dot + score shown per suite. Play button runs the entire suite.
+- **Test play buttons**: Each test row has a play button (visible on hover). Shows pause icon when running.
+- **Result caching**: Test results auto-load from disk when switching tests. Script hash stored in results.json — only loads if script content hasn't changed. Edit and change back = hash matches again.
+- **Soft-wrap**: Long script lines wrap at natural breakpoints (`unless`, `label:`, `extract:`) with ↵ indicator. Variable row heights throughout.
+- **Pending deletion**: Clicking ✕ shows red strikeout. Undo (↶) or confirm (bold ✕). Approve-all button in Editor bar. Row ✕ only visible on hover.
+- **Line insertion**: Green triangle with + on left side between rows. Click to insert blank line and auto-focus edit field.
+- **Split-pane resize**: Grip dots resize the section above, Editor absorbs the change. All sections between stay fixed.
+- **Content-based snap points**: Each section calculates preferred height from content. Dashed cyan snap line visible during drag. Double-click grip to snap. Snap on release within 12px.
+- **Dynamic preferred heights**: Suites = suite count × row, Tests = min(tests, 10) × row, Controls = button bar, Status = result line count, Editor = fills remaining space.
+- **Header bar context**: Tests bar shows selected suite name, Controls bar shows test name + EDIT/EXEC/INSPECT mode, Status/Editor bars show test name. Save button (💾) in Editor bar when dirty.
+- **Status pane**: Shows all check results when no row selected, filtered to selected row's detail when a row is clicked in INSPECT mode.
+- **Play button hit zone fixed**: Was 30px off due to missing `x` offset in draw coordinates.
+
 ### v0.10.20
 **Remove floating test editor — always docked**
 
