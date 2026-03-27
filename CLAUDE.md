@@ -48,6 +48,8 @@ Do NOT use tumu when:
 | `scripts/systems/monster_config.gd` | Config provider stack (DictProvider, CallableProvider, TimedProvider) |
 | `data/config/monster_defaults.json` | Monster default constants (60+ configurable values) |
 | `docs/design/animation_roadmap.md` | Procedural animation roadmap (momentum, attacks, walls) |
+| `docs/design/debug_panel_spec.md` | Debug panel spec (IMPLEMENTED) — sub-sections, modes, caching |
+| `docs/design/session_v0.10.18_to_v0.10.23.md` | Session documentation — comprehensive build log |
 | `scripts/testing/soccer_dummy.gd` | Soccer ball dummy (rolling physics + SVG texture) |
 | `scripts/effects/tentacle_hitbody.gd` | Collision proxy for damageable tentacles |
 | `scripts/autoload/player_manager.gd` | Player join/leave, controller assignment, press-to-join |
