@@ -7,7 +7,7 @@ extends Node
 
 const MAJOR := 0
 const MINOR := 10
-const PATCH := 17
+const PATCH := 18
 
 static func get_string() -> String:
 	return "%d.%d.%d" % [MAJOR, MINOR, PATCH]

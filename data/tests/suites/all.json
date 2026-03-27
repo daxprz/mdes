@@ -29,6 +29,7 @@
 		"chained_floor",
 		"chained_reach",
 		"chained_above",
+		"chained_leap_bounds",
 		"giant_floor_to_P3"
 	],
 	"aggregation": {

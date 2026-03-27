@@ -26,9 +26,30 @@ var _config_keys: Array[String] = []   # Sorted list of configurable keys
 var _config_slider_provider: Variant = null  # Single DictProvider for all slider edits
 var _config_slider_data: Dictionary = {}     # The data dict inside the provider
 
-# Test runner section state
+# Test runner section state — sub-section framework
 var _test_scroll_offset: int = 0
 var _test_hover_item: String = ""  # Hovered suite or test name
+
+# Sub-section framework for test runner (collapsible, resizable panels)
+const SUB_HEADER_H := 20.0      # Height of each sub-section header bar
+const SUB_MIN_HEIGHT := 20.0    # Minimum height when collapsed = just the header
+const SUB_RESIZE_ZONE := 5.0    # Pixels around the top edge for resize grab
+
+# Sub-section definitions: id, title, collapsed, height (total including header)
+var _subsections: Array[Dictionary] = []
+var _subsections_initialized: bool = false
+var _sub_resize_idx: int = -1      # Which sub-section is being resized (-1 = none)
+var _sub_resize_start_y: float = 0.0
+var _sub_resize_start_h: float = 0.0
+
+# Cached lists for the suites/tests sub-sections (rebuilt on section switch)
+var _cached_suite_names: Array[String] = []
+var _cached_test_names: Array[String] = []
+var _cached_lists_dirty: bool = true
+
+# Docked editor scroll offsets (separate from the suite/test list scrolls)
+var _editor_scroll_offset: int = 0
+var _status_scroll_offset: int = 0
 
 var _active := false
 var _panel_x: float = 0.0      # Current X offset (0 = fully visible)
@@ -73,10 +94,126 @@ func toggle() -> void:
 		DebugOverlay.global_enabled = true
 		PlayerHUD._debug_mode = true
 		_rebuild_visible_rows()
+		_cached_lists_dirty = true
+	else:
+		# Closing drawer — undock the test editor so it goes back to floating
+		var rcon: Node = get_node_or_null("/root/Rcon")
+		if rcon and rcon._test_editor and is_instance_valid(rcon._test_editor):
+			rcon._test_editor._docked = false
 
 
 func is_open() -> bool:
 	return _active
+
+
+func _init_subsections() -> void:
+	## Initialize the test runner sub-sections with default heights.
+	## Layout is loaded from user://debug_panel_layout.json if available.
+	_subsections = [
+		{"id": "suites", "title": "Suites", "collapsed": false, "height": 90.0},
+		{"id": "tests", "title": "Tests", "collapsed": false, "height": 140.0},
+		{"id": "controls", "title": "Controls", "collapsed": false, "height": 70.0},
+		{"id": "status", "title": "Status", "collapsed": false, "height": 100.0},
+		{"id": "editor", "title": "Editor", "collapsed": false, "height": 300.0},
+	]
+	_load_subsection_layout()
+	_subsections_initialized = true
+
+
+func _load_subsection_layout() -> void:
+	## Load sub-section collapsed/height state from disk.
+	var path: String = "user://debug_panel_layout.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	var data: Dictionary = json.data
+	for sub in _subsections:
+		var sid: String = sub["id"]
+		if data.has(sid):
+			var sd: Dictionary = data[sid]
+			sub["collapsed"] = sd.get("collapsed", sub["collapsed"])
+			sub["height"] = sd.get("height", sub["height"])
+
+
+func _save_subsection_layout() -> void:
+	## Persist sub-section layout to disk.
+	var data: Dictionary = {}
+	for sub in _subsections:
+		data[sub["id"]] = {"collapsed": sub["collapsed"], "height": sub["height"]}
+	var file := FileAccess.open("user://debug_panel_layout.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+
+
+func _get_test_editor() -> Node:
+	## Get the test editor node, creating it if needed.
+	## Sets _docked=true so the editor suppresses its floating window.
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon:
+		return null
+	if rcon._test_editor and is_instance_valid(rcon._test_editor):
+		rcon._test_editor._docked = true
+		# Ensure active so _process polls results and overlay draws
+		if not rcon._test_editor._active:
+			rcon._test_editor._active = true
+			rcon._test_editor.visible = true
+			if rcon._test_editor._overlay:
+				rcon._test_editor._overlay.visible = true
+		return rcon._test_editor
+	# Look for existing editor in the scene
+	for node in get_tree().current_scene.get_children():
+		if node.has_method("toggle") and node.has_method("_load_test") and node.has_method("_run_test"):
+			rcon._test_editor = node
+			node._docked = true
+			if not node._active:
+				node._active = true
+				node.visible = true
+				if node._overlay:
+					node._overlay.visible = true
+			return node
+	# Create one — _ready() will initialize _panel and _overlay.
+	# We set _docked now but defer activation until _ready has run.
+	var script: GDScript = load("res://scripts/ui/test_editor.gd")
+	var editor := CanvasLayer.new()
+	editor.set_script(script)
+	get_tree().current_scene.add_child(editor)
+	# _ready() sets visible=false. We activate on next frame after _ready.
+	editor._docked = true
+	rcon._test_editor = editor
+	editor.call_deferred("_activate_docked")
+	return editor
+
+
+func _rebuild_cached_lists() -> void:
+	## Rebuild cached suite and test name lists from disk.
+	_cached_suite_names.clear()
+	_cached_test_names.clear()
+	var suite_dir := DirAccess.open("res://data/tests/suites/")
+	if suite_dir:
+		suite_dir.list_dir_begin()
+		var fname: String = suite_dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				_cached_suite_names.append(fname.get_basename())
+			fname = suite_dir.get_next()
+		suite_dir.list_dir_end()
+	_cached_suite_names.sort()
+	var test_dir := DirAccess.open("res://data/tests/")
+	if test_dir:
+		test_dir.list_dir_begin()
+		var fname: String = test_dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				_cached_test_names.append(fname.get_basename())
+			fname = test_dir.get_next()
+		test_dir.list_dir_end()
+	_cached_test_names.sort()
+	_cached_lists_dirty = false
 
 
 func _process(delta: float) -> void:
@@ -112,6 +249,27 @@ func _input(event: InputEvent) -> void:
 		if not _active:
 			return
 
+		# Forward keyboard to docked test editor when test runner section is active
+		if _current_section == Section.TEST_RUNNER:
+			var te: Node = _get_test_editor()
+			if te and te._edit_focused:
+				te._input_edit_field(event, event.ctrl_pressed or event.meta_pressed, event.shift_pressed)
+				get_viewport().set_input_as_handled()
+				return
+			# Ctrl+S in test runner saves test (not debug profile)
+			if event.keycode == KEY_S and event.ctrl_pressed and te:
+				te._save_test()
+				get_viewport().set_input_as_handled()
+				return
+			# T opens picker
+			if event.keycode == KEY_T and not (event.ctrl_pressed or event.meta_pressed) and te:
+				if not te._edit_focused and not te._picker_open:
+					te._open_picker()
+					te._active = true
+					te.visible = true
+					get_viewport().set_input_as_handled()
+					return
+
 		# Text input for filter fields
 		if _filter_focused:
 			_handle_text_input(event, "_filter_text")
@@ -140,7 +298,7 @@ func _input(event: InputEvent) -> void:
 			_scroll_offset += 10
 			get_viewport().set_input_as_handled()
 
-	# Mouse release — stop scale/config drag
+	# Mouse release — stop scale/config/subsection drag
 	if _active and event is InputEventMouseButton and not event.pressed:
 		if _scale_dragging:
 			_scale_dragging = false
@@ -148,6 +306,11 @@ func _input(event: InputEvent) -> void:
 			return
 		if not _config_dragging_key.is_empty():
 			_config_dragging_key = ""
+			get_viewport().set_input_as_handled()
+			return
+		if _sub_resize_idx >= 0:
+			_sub_resize_idx = -1
+			_save_subsection_layout()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -172,29 +335,36 @@ func _input(event: InputEvent) -> void:
 			_handle_click(lx - ICON_BAR_WIDTH - 4, my)
 		get_viewport().set_input_as_handled()
 
-	# Mouse scroll
+	# Mouse scroll — route to the correct sub-section when in test runner
 	if _active and event is InputEventMouseButton:
 		if event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-				match _current_section:
-					Section.CONFIG: _config_scroll_offset = maxi(0, _config_scroll_offset - 3)
-					Section.TEST_RUNNER: _test_scroll_offset = maxi(0, _test_scroll_offset - 3)
-					_: _scroll_offset = maxi(0, _scroll_offset - 3)
+				if _current_section == Section.TEST_RUNNER:
+					_handle_test_scroll(event.position.y, -3)
+				elif _current_section == Section.CONFIG:
+					_config_scroll_offset = maxi(0, _config_scroll_offset - 3)
+				else:
+					_scroll_offset = maxi(0, _scroll_offset - 3)
 				get_viewport().set_input_as_handled()
 			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-				match _current_section:
-					Section.CONFIG: _config_scroll_offset += 3
-					Section.TEST_RUNNER: _test_scroll_offset += 3
-					_: _scroll_offset += 3
+				if _current_section == Section.TEST_RUNNER:
+					_handle_test_scroll(event.position.y, 3)
+				elif _current_section == Section.CONFIG:
+					_config_scroll_offset += 3
+				else:
+					_scroll_offset += 3
 				get_viewport().set_input_as_handled()
 
-	# Mouse motion for hover and scale/config drag
+	# Mouse motion for hover, scale/config/subsection drag
 	if _active and event is InputEventMouseMotion:
 		if _scale_dragging:
 			_handle_scale_drag(event.position.x)
 			get_viewport().set_input_as_handled()
 		elif not _config_dragging_key.is_empty():
 			_handle_config_drag(event.position.x)
+			get_viewport().set_input_as_handled()
+		elif _sub_resize_idx >= 0:
+			_handle_sub_resize_drag(event.position.y)
 			get_viewport().set_input_as_handled()
 		elif event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
 			if _current_section == Section.TEST_RUNNER:
@@ -319,9 +489,9 @@ func _handle_click(lx: float, my: float) -> void:
 	var row: Dictionary = _visible_rows[row_idx]
 
 	if row["type"] == "group":
-		# Check if clicking V or T column headers
-		var v_col_x: float = _panel_width - 60
-		var t_col_x: float = _panel_width - 30
+		# Check if clicking V or T column headers (relative to content area)
+		var v_col_x: float = _content_width - 60
+		var t_col_x: float = _content_width - 30
 		if lx >= v_col_x - 8 and lx < t_col_x - 8:
 			# Toggle group visual
 			var aspects: Array[String] = row["aspects"]
@@ -350,8 +520,8 @@ func _handle_click(lx: float, my: float) -> void:
 			_rebuild_visible_rows()
 
 	elif row["type"] == "aspect":
-		var v_col_x: float = _panel_width - 60
-		var t_col_x: float = _panel_width - 30
+		var v_col_x: float = _content_width - 60
+		var t_col_x: float = _content_width - 30
 		var path: String = row["path"]
 		var state: Array = DebugOverlay.get_observer_state(path, "human")
 
@@ -498,102 +668,203 @@ func _handle_icon_click(my: float) -> void:
 			else:
 				_current_section = icon_sections[i]
 				_config_keys.clear()  # Force rebuild when switching to config
+				_cached_lists_dirty = true  # Force rebuild test/suite lists
 			_panel.queue_redraw()
 			return
 
 
-func _handle_test_click(_lx: float, my: float) -> void:
-	## Click in the test runner section — run the clicked suite or test.
-	var rcon: Node = get_node_or_null("/root/Rcon")
-	if not rcon:
-		return
+func _handle_test_click(lx: float, my: float) -> void:
+	## Click in the test runner section — routes to the correct sub-section.
+	if not _subsections_initialized:
+		_init_subsections()
+	if _cached_lists_dirty:
+		_rebuild_cached_lists()
 
-	# Rebuild the item list to find what was clicked (mirrors draw order)
-	var y: float = 30.0  # After header
-	var row_h: float = 18.0
+	# Walk sub-sections to find which one was clicked
+	var y: float = 0.0
+	for i in range(_subsections.size()):
+		var sub: Dictionary = _subsections[i]
+		var header_y: float = y
+		var header_end: float = y + SUB_HEADER_H
 
-	# Suites
-	y += 22  # "Suites" header
-	var suite_dir: String = "res://data/tests/suites/"
-	var dir := DirAccess.open(suite_dir)
-	if dir:
-		dir.list_dir_begin()
-		var fname: String = dir.get_next()
-		while fname != "":
-			if fname.ends_with(".json"):
-				if my >= y and my < y + row_h:
-					var suite_name: String = fname.get_basename()
-					rcon._execute("suite %s owait=0" % suite_name)
-					return
-				y += row_h
-			fname = dir.get_next()
-		dir.list_dir_end()
-
-	y += 6 + 22  # gap + "Tests" header
-
-	# Individual tests
-	var test_dir: String = "res://data/tests/"
-	var tdir := DirAccess.open(test_dir)
-	var test_names: Array[String] = []
-	if tdir:
-		tdir.list_dir_begin()
-		var tfname: String = tdir.get_next()
-		while tfname != "":
-			if tfname.ends_with(".json"):
-				test_names.append(tfname.get_basename())
-			tfname = tdir.get_next()
-		tdir.list_dir_end()
-	test_names.sort()
-
-	var test_row_h: float = 16.0
-	for i in range(_test_scroll_offset, test_names.size()):
-		if my >= y and my < y + test_row_h:
-			rcon._execute("run %s owait=0" % test_names[i])
+		# Check click on header bar
+		if my >= header_y and my < header_end:
+			var pw: float = _content_width
+			if lx < 16:
+				# Click on collapse triangle — toggle collapse
+				sub["collapsed"] = not sub["collapsed"]
+				_save_subsection_layout()
+			elif lx > pw - 28:
+				# Click on grip dots — start resize drag
+				_sub_resize_idx = i
+				_sub_resize_start_y = my
+				_sub_resize_start_h = sub["height"]
+			# Clicks on the title or middle of the header do nothing
 			return
-		y += test_row_h
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = header_end
+		var body_end: float = y + sub["height"]
+
+		# Check if click is in the resize zone at the bottom edge of this sub-section
+		if my >= body_end - SUB_RESIZE_ZONE and my < body_end + SUB_RESIZE_ZONE and i < _subsections.size() - 1:
+			_sub_resize_idx = i
+			_sub_resize_start_y = my
+			_sub_resize_start_h = sub["height"]
+			return
+
+		# Check if click is in the body
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			_handle_subsection_click(sub["id"], lx, local_y, body_end - body_y)
+			return
+
+		y += sub["height"]
+
+
+func _handle_subsection_click(sub_id: String, lx: float, local_y: float, body_h: float) -> void:
+	## Handle a click inside a specific sub-section body.
+	match sub_id:
+		"suites":
+			var row_h: float = 18.0
+			var idx: int = int(local_y / row_h)
+			if idx >= 0 and idx < _cached_suite_names.size():
+				var rcon: Node = get_node_or_null("/root/Rcon")
+				if rcon:
+					rcon._execute("suite %s owait=0" % _cached_suite_names[idx])
+		"tests":
+			var row_h: float = 16.0
+			var idx: int = int(local_y / row_h) + _test_scroll_offset
+			if idx >= 0 and idx < _cached_test_names.size():
+				var te: Node = _get_test_editor()
+				if te:
+					te._test_override_vars = {"owait": "0"}
+					te._load_test(_cached_test_names[idx])
+					# Don't auto-run, just load into the editor sub-section
+		"controls":
+			# Button bar click — identify which button was clicked
+			var te: Node = _get_test_editor()
+			if te and local_y > 18:
+				# Buttons are in the bottom portion (below the title line)
+				var pw: float = _content_width
+				var btns: Array = te._get_buttons()
+				if not btns.is_empty():
+					var bw: float = (pw - 24.0) / float(btns.size())
+					var btn_idx: int = int((lx - 8.0) / bw)
+					if btn_idx >= 0 and btn_idx < btns.size():
+						var action: String = btns[btn_idx][2]
+						match action:
+							"play":
+								if te._run_running: te._pause_test()
+								else: te._run_test()
+							"stop":   te._stop_test()
+							"restart": te._restart_test()
+							"add_dis": te._try_add_disallow()
+							"add_fence": te._try_add_fence()
+							"add_exit_circle": te._try_add_exit_circle()
+							"suite_prev": te._suite_goto(te._suite_current_idx - 1)
+							"suite_next": te._suite_goto(te._suite_current_idx + 1)
+							"notify_done":
+								var rcon: Node = get_node_or_null("/root/Rcon")
+								if rcon:
+									rcon._cmd_notify_dismiss("OK")
+							"save":   te._save_test()
+		"editor":
+			_handle_editor_subsection_click(lx, local_y, body_h)
+
+
+func _handle_editor_subsection_click(lx: float, local_y: float, body_h: float) -> void:
+	## Handle click inside the editor sub-section — select rows, focus edit field.
+	var te: Node = _get_test_editor()
+	if not te:
+		return
+	var row_h: float = 18.0
+	var edit_h: float = 32.0 if te._selected_row >= 0 else 0.0
+	var list_h: float = body_h - edit_h
+	var pw: float = _content_width
+
+	if local_y < list_h:
+		# Click on a script row
+		var row_idx: int = int(local_y / row_h) + _editor_scroll_offset
+		if row_idx >= te._script.size():
+			# Ghost row — add new line
+			te._insert_row_after_selected()
+		elif row_idx >= 0:
+			# Check if click is on the X delete button (right edge)
+			if lx >= pw - 20 and not te._run_running:
+				te._delete_row(row_idx)
+			else:
+				te._select_row(row_idx)
+	elif te._selected_row >= 0:
+		# Click in edit field area — focus it
+		te._edit_focused = true
 
 
 func _handle_test_hover(my: float) -> void:
-	## Track which test/suite item the mouse is hovering over.
+	## Track which test/suite item the mouse is hovering over for highlight.
 	_test_hover_item = ""
-	var y: float = 30.0
-	var row_h: float = 18.0
+	if not _subsections_initialized:
+		return
+	if _cached_lists_dirty:
+		_rebuild_cached_lists()
 
-	y += 22  # Suites header
-	var suite_dir: String = "res://data/tests/suites/"
-	var dir := DirAccess.open(suite_dir)
-	if dir:
-		dir.list_dir_begin()
-		var fname: String = dir.get_next()
-		while fname != "":
-			if fname.ends_with(".json"):
-				if my >= y and my < y + row_h:
-					_test_hover_item = fname.get_basename()
-					return
-				y += row_h
-			fname = dir.get_next()
-		dir.list_dir_end()
-
-	y += 6 + 22
-	var test_dir: String = "res://data/tests/"
-	var tdir := DirAccess.open(test_dir)
-	var test_names: Array[String] = []
-	if tdir:
-		tdir.list_dir_begin()
-		var tfname: String = tdir.get_next()
-		while tfname != "":
-			if tfname.ends_with(".json"):
-				test_names.append(tfname.get_basename())
-			tfname = tdir.get_next()
-		tdir.list_dir_end()
-	test_names.sort()
-
-	var test_row_h: float = 16.0
-	for i in range(_test_scroll_offset, test_names.size()):
-		if my >= y and my < y + test_row_h:
-			_test_hover_item = test_names[i]
+	# Walk sub-sections to find which one the mouse is in
+	var y: float = 0.0
+	for sub in _subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"suites":
+					var idx: int = int(local_y / 18.0)
+					if idx >= 0 and idx < _cached_suite_names.size():
+						_test_hover_item = _cached_suite_names[idx]
+				"tests":
+					var idx: int = int(local_y / 16.0) + _test_scroll_offset
+					if idx >= 0 and idx < _cached_test_names.size():
+						_test_hover_item = _cached_test_names[idx]
 			return
-		y += test_row_h
+		y += sub["height"]
+
+
+func _handle_test_scroll(my: float, delta: int) -> void:
+	## Route scroll events to the correct sub-section based on mouse Y.
+	if not _subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if my >= y and my < body_end:
+			match sub["id"]:
+				"tests":
+					_test_scroll_offset = maxi(0, _test_scroll_offset + delta)
+				"editor":
+					_editor_scroll_offset = maxi(0, _editor_scroll_offset + delta)
+				"status":
+					_status_scroll_offset = maxi(0, _status_scroll_offset + delta)
+			return
+		y += sub["height"]
+
+
+func _handle_sub_resize_drag(my: float) -> void:
+	## Drag to resize a sub-section. Grows/shrinks the dragged sub-section,
+	## the next sub-section absorbs the difference.
+	if _sub_resize_idx < 0 or _sub_resize_idx >= _subsections.size():
+		return
+	var dy: float = my - _sub_resize_start_y
+	var new_h: float = maxf(SUB_HEADER_H + 20.0, _sub_resize_start_h + dy)
+	_subsections[_sub_resize_idx]["height"] = new_h
 
 
 func _handle_config_click(lx: float, my: float) -> void:
@@ -970,91 +1241,311 @@ func _draw_text_mode_indicator(tx: float, ty: float, mode: int, font: Font) -> v
 
 
 func _draw_test_runner_section(content_x: float, font: Font, ph: float) -> void:
-	## Test runner: shows suites, tests, run status, and results.
+	## Test runner with collapsible sub-sections: Suites, Tests, Controls, Status, Editor.
+	if not _subsections_initialized:
+		_init_subsections()
+	if _cached_lists_dirty:
+		_rebuild_cached_lists()
+
 	var x: float = content_x
 	var pw: float = _content_width
-	var y: float = 8.0
+	var y: float = 0.0
 
-	_panel.draw_string(font, Vector2(x, y + 14), "Test Runner", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.9, 0.5))
-	y += 22
+	# Get the test editor for status/editor sub-sections
+	var te: Node = _get_test_editor()
 
-	# Current run status
-	var rcon: Node = get_node_or_null("/root/Rcon")
-	var test_editor: Node = rcon._test_editor if rcon and is_instance_valid(rcon.get("_test_editor")) else null
-	if test_editor and test_editor.has_method("get_test_runner"):
-		var runner: Node = test_editor.get_test_runner()
-		if runner and runner._running:
-			_panel.draw_rect(Rect2(x, y, pw - 8, 18), Color(0.1, 0.2, 0.1))
-			_panel.draw_string(font, Vector2(x + 4, y + 13), "RUNNING: %s (%s)" % [runner._current_test_name, runner._test_state], HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.3, 1.0, 0.3))
-			y += 22
+	for sub in _subsections:
+		# Clip: don't draw sub-sections that are entirely below the panel
+		if y > ph:
+			break
 
-	# Suites header
-	_panel.draw_line(Vector2(x, y + 4), Vector2(x + pw - 16, y + 4), Color(0.2, 0.3, 0.4), 1.0)
-	_panel.draw_string(font, Vector2(x, y + 16), "Suites", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
-	y += 22
+		# Draw header bar
+		_draw_sub_header(x, y, pw, font, sub)
 
-	# List suites
-	var suite_dir: String = "res://data/tests/suites/"
-	var dir := DirAccess.open(suite_dir)
-	if dir:
-		dir.list_dir_begin()
-		var fname: String = dir.get_next()
-		while fname != "":
-			if fname.ends_with(".json"):
-				var suite_name: String = fname.get_basename()
-				var hover: bool = _test_hover_item == suite_name
-				if hover:
-					_panel.draw_rect(Rect2(x, y, pw - 8, 16), Color(0.15, 0.2, 0.3))
-				var icon_col: Color = Color(0.4, 0.7, 0.3) if hover else Color(0.3, 0.5, 0.25)
-				# Play icon
-				var pts: PackedVector2Array = [
-					Vector2(x + 4, y + 3), Vector2(x + 12, y + 8), Vector2(x + 4, y + 13)]
-				_panel.draw_polygon(pts, PackedColorArray([icon_col, icon_col, icon_col]))
-				_panel.draw_string(font, Vector2(x + 16, y + 12), suite_name, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8) if hover else Color(0.6, 0.6, 0.6))
-				y += 18
-			fname = dir.get_next()
-		dir.list_dir_end()
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
 
-	y += 6
+		# Draw body with clipping
+		var body_y: float = y + SUB_HEADER_H
+		var body_h: float = sub["height"] - SUB_HEADER_H
+		if body_h > 0:
+			match sub["id"]:
+				"suites":  _draw_sub_suites(x, body_y, pw, body_h, font)
+				"tests":   _draw_sub_tests(x, body_y, pw, body_h, font)
+				"controls": _draw_sub_controls(x, body_y, pw, body_h, font, te)
+				"status":  _draw_sub_status(x, body_y, pw, body_h, font, te)
+				"editor":  _draw_sub_editor(x, body_y, pw, body_h, font, te)
 
-	# Tests header
-	_panel.draw_line(Vector2(x, y + 4), Vector2(x + pw - 16, y + 4), Color(0.2, 0.3, 0.4), 1.0)
-	_panel.draw_string(font, Vector2(x, y + 16), "Tests", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
-	y += 22
+		y += sub["height"]
 
-	# List individual tests (scrollable)
-	var test_dir: String = "res://data/tests/"
-	var tdir := DirAccess.open(test_dir)
-	var test_names: Array[String] = []
-	if tdir:
-		tdir.list_dir_begin()
-		var tfname: String = tdir.get_next()
-		while tfname != "":
-			if tfname.ends_with(".json"):
-				test_names.append(tfname.get_basename())
-			tfname = tdir.get_next()
-		tdir.list_dir_end()
-	test_names.sort()
+		# Draw resize grip line at the bottom of each sub-section
+		_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.3, 0.4, 0.4), 1.0)
 
-	var visible_rows: int = int((ph - y - 10) / 16)
-	var max_scroll: int = maxi(0, test_names.size() - visible_rows)
+
+func _draw_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	## Draw a sub-section header bar with collapse icon and title.
+	var bg_col := Color(0.08, 0.1, 0.14, 0.95)
+	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.25, 0.35, 0.5, 0.6), 1.0)
+
+	# Collapse triangle
+	var tri_x: float = x + 6
+	var tri_y: float = y + SUB_HEADER_H * 0.5
+	var tri_col := Color(0.5, 0.6, 0.7)
+	if sub["collapsed"]:
+		# Right-pointing triangle (collapsed)
+		var pts: PackedVector2Array = [
+			Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+	else:
+		# Down-pointing triangle (expanded)
+		var pts: PackedVector2Array = [
+			Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+
+	# Title
+	var title_col := Color(0.6, 0.8, 0.5)
+	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, title_col)
+
+	# Drag grip dots (right side)
+	var grip_x: float = x + pw - 22
+	for gi in range(3):
+		for gj in range(2):
+			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.35, 0.4))
+
+
+func _draw_sub_suites(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw suite list inside its sub-section body.
+	var row_h: float = 18.0
+	var visible_count: int = int(h / row_h)
+	for i in range(mini(visible_count, _cached_suite_names.size())):
+		var suite_name: String = _cached_suite_names[i]
+		var ry: float = y + i * row_h
+		var hover: bool = _test_hover_item == suite_name
+		if hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.2, 0.3))
+		var icon_col: Color = Color(0.4, 0.7, 0.3) if hover else Color(0.3, 0.5, 0.25)
+		# Play icon triangle
+		var pts: PackedVector2Array = [
+			Vector2(x + 4, ry + 3), Vector2(x + 12, ry + 8), Vector2(x + 4, ry + 13)]
+		_panel.draw_polygon(pts, PackedColorArray([icon_col, icon_col, icon_col]))
+		_panel.draw_string(font, Vector2(x + 16, ry + 13), suite_name, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8) if hover else Color(0.6, 0.6, 0.6))
+
+
+func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw scrollable test list inside its sub-section body.
+	var row_h: float = 16.0
+	var visible_count: int = int(h / row_h)
+	var max_scroll: int = maxi(0, _cached_test_names.size() - visible_count)
 	_test_scroll_offset = clampi(_test_scroll_offset, 0, max_scroll)
 
-	for i in range(_test_scroll_offset, mini(_test_scroll_offset + visible_rows, test_names.size())):
-		var tname: String = test_names[i]
+	for i in range(mini(visible_count, _cached_test_names.size() - _test_scroll_offset)):
+		var tname: String = _cached_test_names[i + _test_scroll_offset]
+		var ry: float = y + i * row_h
 		var hover: bool = _test_hover_item == tname
+		# Highlight if this test is loaded in the editor
+		var te: Node = _get_test_editor()
+		var is_loaded: bool = te != null and te._test_name == tname
 		if hover:
-			_panel.draw_rect(Rect2(x, y, pw - 8, 14), Color(0.15, 0.2, 0.3))
-		_panel.draw_string(font, Vector2(x + 8, y + 11), tname, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 8, Color(0.7, 0.7, 0.7) if hover else Color(0.5, 0.5, 0.5))
-		y += 16
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.2, 0.3))
+		elif is_loaded:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.1, 0.18, 0.1))
+		var col := Color(0.7, 0.7, 0.7) if hover else (Color(0.5, 0.8, 0.4) if is_loaded else Color(0.5, 0.5, 0.5))
+		_panel.draw_string(font, Vector2(x + 8, ry + 12), tname, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 8, col)
 
 	# Scrollbar
-	if test_names.size() > visible_rows:
-		var pct: float = float(_test_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
-		var bar_h: float = maxf(20.0, ph * float(visible_rows) / float(test_names.size()))
-		var bar_start_y: float = 100.0  # Approx where tests list starts
-		var bar_y: float = bar_start_y + pct * (ph - bar_start_y - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+	if _cached_test_names.size() > visible_count and max_scroll > 0:
+		var pct: float = float(_test_scroll_offset) / float(max_scroll)
+		var bar_h: float = maxf(16.0, h * float(visible_count) / float(_cached_test_names.size()))
+		var bar_y: float = y + pct * (h - bar_h)
+		_panel.draw_rect(Rect2(x + pw - 12, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+
+
+func _draw_sub_controls(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
+	## Draw test controls: test name header + button bar.
+	if not te:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "(no test loaded)", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.4, 0.4))
+		return
+
+	# Test name and mode
+	var title_str: String = te._test_name if not te._test_name.is_empty() else "(no test)"
+	var dirty_mark: String = " ●" if te._dirty else ""
+	if not te._suite_all_tests.is_empty():
+		title_str += " [%d/%d]" % [te._suite_current_idx + 1, te._suite_all_tests.size()]
+	title_str += dirty_mark
+	var mode_col := Color(0.3, 0.8, 0.3) if te._mode == 0 else Color(0.8, 0.5, 0.2)  # 0=EDIT, 1=RUN
+	_panel.draw_string(font, Vector2(x + 4, y + 14), title_str, HORIZONTAL_ALIGNMENT_LEFT, pw - 60, 10, Color(0.85, 0.85, 0.85))
+	var mode_str: String = "EDIT" if te._mode == 0 else "▶ RUN"
+	_panel.draw_string(font, Vector2(x + pw - 54, y + 14), mode_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, mode_col)
+
+	# Button bar (below title)
+	if h > 24:
+		var btn_y: float = y + 20
+		var btn_h: float = h - 22
+		_panel.draw_rect(Rect2(x, btn_y, pw - 8, btn_h), Color(0.07, 0.1, 0.07, 0.8))
+		var btns: Array = te._get_buttons()
+		var bw: float = (pw - 24.0) / float(btns.size())
+		for i in range(btns.size()):
+			var bx: float = x + 8.0 + i * bw
+			var label: String = btns[i][0]
+			var col: Color = btns[i][1]
+			_panel.draw_rect(Rect2(bx, btn_y + 4, bw - 4, btn_h - 8), col * Color(1, 1, 1, 0.15))
+			_panel.draw_rect(Rect2(bx, btn_y + 4, bw - 4, btn_h - 8), col * Color(1, 1, 1, 0.5), false, 1.0)
+			_panel.draw_string(font, Vector2(bx + 4, btn_y + btn_h - 8), label, HORIZONTAL_ALIGNMENT_LEFT, bw - 8, 9, col)
+
+
+func _draw_sub_status(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
+	## Draw test status/results inside its sub-section body.
+	if not te:
+		return
+
+	var ry: float = y
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	var runner: Node = rcon._test_runner if rcon else null
+
+	# Run status indicator
+	if runner and runner._running:
+		_panel.draw_rect(Rect2(x, ry, pw - 8, 16), Color(0.1, 0.2, 0.1))
+		var elapsed: float = (Time.get_ticks_msec() - runner._test_start_time) / 1000.0
+		_panel.draw_string(font, Vector2(x + 4, ry + 12), "RUNNING: %s (%s) %.1fs" % [runner._current_test_name, runner._test_state, elapsed], HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.3, 1.0, 0.3))
+		ry += 18
+
+	# Result summary
+	if not te._run_summary.is_empty():
+		var has_fail: bool = "fail" in te._run_results.values()
+		var sum_col := Color(0.3, 1.0, 0.3) if not has_fail else Color(1.0, 0.4, 0.4)
+		var sum_bg := Color(0.08, 0.15, 0.08, 0.95) if not has_fail else Color(0.2, 0.08, 0.08, 0.95)
+		_panel.draw_rect(Rect2(x, ry, pw - 8, 18), sum_bg)
+		_panel.draw_string(font, Vector2(x + 4, ry + 13), te._run_summary, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, sum_col)
+		ry += 20
+
+	# Per-check detail log (for selected row)
+	if te._selected_row >= 0 and te._run_detail.has(te._selected_row):
+		var log_lines: Array = te._run_detail[te._selected_row]
+		var line_h: float = 13.0
+		var visible_count: int = int((y + h - ry) / line_h)
+		var max_scroll: int = maxi(0, log_lines.size() - visible_count)
+		_status_scroll_offset = clampi(_status_scroll_offset, 0, max_scroll)
+		for li in range(_status_scroll_offset, mini(_status_scroll_offset + visible_count, log_lines.size())):
+			var line_text: String = str(log_lines[li])
+			var line_col := Color(0.6, 0.6, 0.6)
+			if "FAIL" in line_text or "✗" in line_text:
+				line_col = Color(1.0, 0.4, 0.4)
+			elif "PASS" in line_text or "✓" in line_text:
+				line_col = Color(0.4, 0.9, 0.4)
+			_panel.draw_string(font, Vector2(x + 4, ry + 10), line_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 8, line_col)
+			ry += line_h
+
+
+func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
+	## Draw test script editor inside its sub-section body.
+	if not te or te._script.is_empty():
+		var msg: String = "(no script loaded — click a test above, or press T)" if not te or te._test_name.is_empty() else "(empty script)"
+		_panel.draw_string(font, Vector2(x + 4, y + 14), msg, HORIZONTAL_ALIGNMENT_LEFT, pw - 8, 10, Color(0.4, 0.4, 0.4))
+		return
+
+	var row_h: float = 18.0
+	var edit_h: float = 32.0 if te._selected_row >= 0 else 0.0
+	var list_h: float = h - edit_h
+	var visible_count: int = int(list_h / row_h)
+	var script_size: int = te._script.size()
+	var total_rows: int = script_size + 1  # +1 for ghost "add" row
+	var max_scroll: int = maxi(0, total_rows - visible_count)
+	_editor_scroll_offset = clampi(_editor_scroll_offset, 0, max_scroll)
+
+	# Script row list
+	_panel.draw_rect(Rect2(x, y, pw - 8, list_h), Color(0.05, 0.05, 0.08, 0.9))
+
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	for i in range(visible_count):
+		var script_idx: int = _editor_scroll_offset + i
+		var ry: float = y + i * row_h
+		if ry > y + list_h:
+			break
+
+		if script_idx >= script_size:
+			# Ghost "add" row
+			_panel.draw_string(font, Vector2(x + 30, ry + 14), "(click to add line)", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.6, 0.4, 0.5))
+			continue
+
+		var is_sel: bool = (script_idx == te._selected_row)
+
+		# Row background
+		if is_sel:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h), Color(0.15, 0.35, 0.15, 1.0))
+		elif i % 2 == 1:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h), Color(0.0, 0.0, 0.0, 0.15))
+
+		# Line number
+		var num_col := Color(0.4, 0.6, 0.4) if not is_sel else Color(0.7, 1.0, 0.7)
+		_panel.draw_string(font, Vector2(x + 4, ry + 14), "%2d" % (script_idx + 1), HORIZONTAL_ALIGNMENT_LEFT, 20, 9, num_col)
+
+		# Status indicator (run state / result)
+		if te._run_results.has(script_idx):
+			var res: String = te._run_results[script_idx]
+			match res:
+				"pass":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✓", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 1.0, 0.3))
+				"fail":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✗", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.3))
+					_panel.draw_rect(Rect2(x, ry, pw - 8, row_h), Color(0.4, 0.1, 0.1, 0.3))
+				"info":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "·", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
+		elif te._run_running and rcon and rcon._test_runner:
+			var line_state: String = ""
+			if rcon._test_runner._line_states.has(script_idx):
+				line_state = rcon._test_runner._line_states[script_idx]
+			match line_state:
+				"pending":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "○", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
+				"running":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "●", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 1.0, 0.3))
+					_panel.draw_rect(Rect2(x, ry, pw - 8, row_h), Color(0.1, 0.25, 0.1, 0.3))
+				"complete":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✓", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.7, 0.5))
+
+		# Command text
+		var cmd_text: String = te._script[script_idx]
+		var text_col := Color(0.95, 0.95, 0.85) if is_sel else _test_cmd_color(cmd_text)
+		_panel.draw_string(font, Vector2(x + 36, ry + 14), cmd_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 58, 10, text_col)
+
+		# X delete button (hidden during run)
+		if not te._run_running:
+			_panel.draw_string(font, Vector2(x + pw - 20, ry + 14), "✕", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.7, 0.3, 0.3, 0.5 if not is_sel else 0.8))
+
+	# Inline edit field when a row is selected
+	if te._selected_row >= 0 and edit_h > 0:
+		var ey: float = y + list_h
+		var edit_bg: Color = Color(0.1, 0.12, 0.1) if te._edit_valid else Color(0.2, 0.1, 0.1)
+		_panel.draw_rect(Rect2(x, ey, pw - 8, edit_h), edit_bg)
+		_panel.draw_line(Vector2(x, ey), Vector2(x + pw - 8, ey), Color(0.3, 0.5, 0.3, 0.4), 1.0)
+		var edit_text: String = te._edit_text
+		if te._edit_focused and int(_cursor_blink * 2) % 2 == 0:
+			edit_text = edit_text.substr(0, te._edit_cursor) + "|" + edit_text.substr(te._edit_cursor)
+		_panel.draw_string(font, Vector2(x + 6, ey + 20), edit_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 10, Color(0.85, 0.95, 0.85))
+
+	# Scroll indicator
+	if total_rows > visible_count:
+		var shown_start: int = _editor_scroll_offset + 1
+		var shown_end: int = mini(_editor_scroll_offset + visible_count, script_size)
+		_panel.draw_string(font, Vector2(x + pw - 60, y + 10), "%d–%d/%d" % [shown_start, shown_end, script_size], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.4, 0.4, 0.4))
+
+
+func _test_cmd_color(cmd: String) -> Color:
+	## Color-code test commands by category.
+	var c := cmd.strip_edges()
+	if c.begins_with("#"):                     return Color(0.45, 0.55, 0.45)
+	if c.begins_with("debug "):               return Color(0.5, 0.5, 0.8)
+	if c.begins_with("wait "):                return Color(0.8, 0.7, 0.3)
+	if c.begins_with("check "):               return Color(0.3, 0.85, 0.85)
+	if c.begins_with("bleap "):               return Color(0.7, 0.5, 0.9)
+	if c.begins_with("spawn "):               return Color(0.4, 0.9, 0.5)
+	if c.begins_with("etz "):                 return Color(0.3, 0.9, 0.6)
+	if c.begins_with("daz "):                 return Color(0.9, 0.4, 0.4)
+	if c.begins_with("standdown") or c.begins_with("clear") or c.begins_with("portal"):
+		return Color(0.75, 0.55, 0.35)
+	return Color(0.72, 0.72, 0.72)
 
 
 func _draw_config_section(content_x: float, font: Font, ph: float) -> void:

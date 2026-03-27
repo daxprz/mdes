@@ -14,6 +14,9 @@ const BALLOON_INFLATE_TIME := 1.5
 const BALLOON_MAX_RADIUS := 16.0
 const BALLOON_WIND_SENSITIVITY := 3.0  # How much wind affects the balloon
 const BALLOON_LIFETIME := 8.0
+const POP_CHAIN_RADIUS := 80.0   # How far a pop triggers nearby balloons
+const POP_CHAIN_DELAY := 0.12    # Seconds between each chain pop
+const FIREBALL_RADIUS := 45.0    # Visual fireball circle radius on pop
 
 var dart_direction: Vector2 = Vector2.RIGHT
 var owner_index: int = -1
@@ -32,6 +35,7 @@ var _balloon_timer: float = 0.0
 var _balloon_color: Color
 
 var _age: float = 0.0
+var _popping: bool = false  # Guard against double-pop from chain reactions
 var _wind_dir: Vector2 = Vector2.ZERO
 var _wind_force: float = 0.0
 var _shadow_node: ColorRect = null
@@ -214,16 +218,22 @@ func _update_balloon(delta: float) -> void:
 			if "Fireball" in proj.name or "fireball" in proj.name:
 				is_flame = true
 
+			if _popping:
+				continue  # Already being popped by a chain reaction
 			if is_flame:
 				# HYDROGEN EXPLOSION!
 				AudioManager.play("explosion", 2.0, 0.6)
 				AudioManager.play("rocket_crash", -2.0, 1.5)
 				_spawn_hydrogen_explosion()
+				_spawn_fireball_blast(_balloon_pos)
+				_chain_pop_nearby()
 			else:
-				# Normal pop - release H2 gas cloud
-				AudioManager.play("explosion", -6.0, 2.0)
+				# Normal pop - release H2 gas cloud + fireball blast
+				AudioManager.play("explosion", -4.0, 1.8)
 				_spawn_pop_particles()
+				_spawn_fireball_blast(_balloon_pos)
 				_spawn_h2_gas_cloud()
+				_chain_pop_nearby()
 
 			proj.queue_free()
 			_detach_and_free()
@@ -494,6 +504,123 @@ func _spawn_pop_particles() -> void:
 			await get_tree().create_timer(0.03).timeout
 		if is_instance_valid(cam):
 			cam.offset = orig
+
+
+func _spawn_fireball_blast(pos: Vector2) -> void:
+	## Spawn an obvious circular fireball blast at the pop location.
+	var parent: Node = get_parent()
+	if not parent:
+		return
+
+	# Inner white-hot flash circle
+	var flash := ColorRect.new()
+	flash.color = Color(1.0, 1.0, 0.9, 0.9)
+	flash.size = Vector2(20, 20)
+	flash.position = pos - Vector2(10, 10)
+	flash.pivot_offset = Vector2(10, 10)
+	flash.z_index = 13
+	parent.add_child(flash)
+	var ft := flash.create_tween()
+	ft.set_parallel(true)
+	var flash_scale: float = FIREBALL_RADIUS * 2.0 / 20.0
+	ft.tween_property(flash, "scale", Vector2(flash_scale, flash_scale), 0.12).set_ease(Tween.EASE_OUT)
+	ft.tween_property(flash, "modulate:a", 0.0, 0.2)
+	ft.chain().tween_callback(flash.queue_free)
+
+	# Orange fireball ring expanding outward
+	var ring := ColorRect.new()
+	ring.color = Color(1.0, 0.55, 0.1, 0.7)
+	ring.size = Vector2(24, 24)
+	ring.position = pos - Vector2(12, 12)
+	ring.pivot_offset = Vector2(12, 12)
+	ring.z_index = 12
+	parent.add_child(ring)
+	var ring_scale: float = FIREBALL_RADIUS * 2.0 / 24.0
+	var rt := ring.create_tween()
+	rt.set_parallel(true)
+	rt.tween_property(ring, "scale", Vector2(ring_scale, ring_scale), 0.18).set_ease(Tween.EASE_OUT)
+	rt.tween_property(ring, "modulate:a", 0.0, 0.25)
+	rt.chain().tween_callback(ring.queue_free)
+
+	# Red outer ring (slower, larger)
+	var outer := ColorRect.new()
+	outer.color = Color(1.0, 0.2, 0.0, 0.45)
+	outer.size = Vector2(30, 30)
+	outer.position = pos - Vector2(15, 15)
+	outer.pivot_offset = Vector2(15, 15)
+	outer.z_index = 11
+	parent.add_child(outer)
+	var outer_scale: float = FIREBALL_RADIUS * 2.5 / 30.0
+	var ot := outer.create_tween()
+	ot.set_parallel(true)
+	ot.tween_property(outer, "scale", Vector2(outer_scale, outer_scale), 0.22).set_ease(Tween.EASE_OUT)
+	ot.tween_property(outer, "modulate:a", 0.0, 0.3)
+	ot.chain().tween_callback(outer.queue_free)
+
+	# A few bright sparks flying outward
+	for i in range(8):
+		var spark := ColorRect.new()
+		spark.color = Color(1.0, 0.8, 0.2, 0.9)
+		spark.size = Vector2(3, 3)
+		spark.position = pos
+		spark.z_index = 12
+		parent.add_child(spark)
+		var angle: float = randf() * TAU
+		var dist: float = FIREBALL_RADIUS * (0.5 + randf() * 0.8)
+		var target: Vector2 = pos + Vector2(cos(angle), sin(angle)) * dist
+		var st := spark.create_tween()
+		st.set_parallel(true)
+		st.tween_property(spark, "position", target, 0.15 + randf() * 0.1)
+		st.tween_property(spark, "modulate:a", 0.0, 0.2 + randf() * 0.1)
+		st.chain().tween_callback(spark.queue_free)
+
+	# Damage enemies and players in the blast radius
+	var pop_damage: int = 20
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < FIREBALL_RADIUS and body.has_method("take_damage"):
+				body.take_damage(pop_damage, owner_index)
+				if body.has_method("apply_knockback"):
+					var kb: Vector2 = (body.global_position - pos).normalized() * 200.0
+					body.apply_knockback(kb)
+	for body in get_tree().get_nodes_in_group("players"):
+		if body is Node2D:
+			var dist: float = pos.distance_to(body.global_position)
+			if dist < FIREBALL_RADIUS and body.has_method("take_damage"):
+				body.take_damage(10, -1)  # Friendly fire
+
+
+func _chain_pop_nearby() -> void:
+	## Trigger nearby balloons to pop with a slight staggered delay.
+	_popping = true
+	var my_pos: Vector2 = _balloon_pos
+	var delay: float = 0.0
+	for other in get_tree().get_nodes_in_group("balloon_darts"):
+		if other == self or not is_instance_valid(other):
+			continue
+		if not other is Node2D:
+			continue
+		# Skip balloons already popping or still in dart flight
+		if other._dart_active or other._popping:
+			continue
+		var dist: float = my_pos.distance_to(other._balloon_pos)
+		if dist < POP_CHAIN_RADIUS:
+			other._popping = true  # Mark now to prevent double-triggering
+			delay += POP_CHAIN_DELAY
+			var timer := get_tree().create_timer(delay)
+			timer.timeout.connect(other._chain_pop_receive.bind(), CONNECT_ONE_SHOT)
+
+
+func _chain_pop_receive() -> void:
+	## Called when a nearby balloon's explosion triggers this one to pop.
+	if not is_inside_tree() or not is_instance_valid(self):
+		return
+	AudioManager.play("explosion", -4.0, 1.8)
+	_spawn_fireball_blast(_balloon_pos)
+	_spawn_pop_particles()
+	_chain_pop_nearby()
+	_detach_and_free()
 
 
 func _spawn_h2_gas_cloud() -> void:

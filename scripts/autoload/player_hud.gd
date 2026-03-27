@@ -528,7 +528,7 @@ func _update_popup_data(player_index: int, popup: Dictionary, p_data: Dictionary
 
 
 func _update_debug_labels() -> void:
-	if not _debug_mode:
+	if not DebugOverlay.should_draw("player/button_state", self):
 		for pi in _debug_labels.keys():
 			if is_instance_valid(_debug_labels[pi]):
 				_debug_labels[pi].visible = false
@@ -663,17 +663,18 @@ func _input(event: InputEvent) -> void:
 		return
 
 	# TAB cycles through enemies in debug mode
-	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
+	if DebugOverlay.global_enabled and event is InputEventKey and event.pressed and event.keycode == KEY_TAB:
 		_debug_cycle_enemy()
 
 	# SPACEBAR dumps selected entity skeleton JSON
-	if _debug_mode and event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
+	if DebugOverlay.global_enabled and event is InputEventKey and event.pressed and event.keycode == KEY_SPACE:
 		if is_instance_valid(debug_selected_enemy):
 			dump_entity_skeleton(debug_selected_enemy, "manual")
 
 	# I toggles debug draw on ALL enemies (no prerequisites)
 	if event is InputEventKey and event.pressed and event.keycode == KEY_I:
-		_debug_mode = true  # Ensure debug mode is on
+		DebugOverlay.global_enabled = true
+		_debug_mode = true
 		for e in get_tree().get_nodes_in_group("enemies"):
 			if "debug_draw_lite" in e:
 				e.debug_draw_lite = not e.debug_draw_lite

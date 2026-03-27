@@ -164,8 +164,9 @@ func _physics_process(delta: float) -> void:
 	# Re-apply surface collision after constraints (may have pushed points inside)
 	_collide_with_surfaces()
 
-	# Check for projectile hits
+	# Check for projectile hits and melee attacks
 	_check_projectile_hits()
+	_check_melee_hits()
 
 	# Shake decay
 	if _shake_timer > 0:
@@ -252,6 +253,35 @@ func _check_projectile_hits() -> void:
 					sever()
 					return
 				break
+
+
+func _check_melee_hits() -> void:
+	## Check if any player's active attack area overlaps the chain segments.
+	## Players deal damage to chains with all weapon types.
+	for player in get_tree().get_nodes_in_group("players"):
+		if not player is CharacterBody2D:
+			continue
+		# Check if the player's attack area is actively monitoring (mid-attack)
+		if not "attack_area" in player:
+			continue
+		var area: Area2D = player.attack_area
+		if not area.monitoring:
+			continue
+		# Get attack area world position
+		var area_pos: Vector2 = player.global_position + area.position
+		# Check proximity to each chain segment
+		for i in range(_point_count - 1):
+			var dist: float = _point_to_segment_distance(area_pos, _points[i], _points[i + 1])
+			if dist < CHAIN_HIT_RADIUS + 12.0:  # 12 = roughly half the attack shape width
+				var dmg: int = 8  # Melee hits are stronger than projectile grazes
+				current_hp -= dmg
+				_shake_timer = 0.3
+				_shake_intensity = 2.0
+				AudioManager.play("grapple_hit", -6.0, 1.2)
+				if current_hp <= 0:
+					sever()
+					return
+				return  # One hit per frame per player
 
 
 func _point_to_segment_distance(point: Vector2, seg_a: Vector2, seg_b: Vector2) -> float:

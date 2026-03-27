@@ -125,7 +125,8 @@ func _input(event: InputEvent) -> void:
 
 	# SEL while paused = toggle debug mode
 	if event.is_action_pressed("debug_toggle"):
-		PlayerHUD._debug_mode = not PlayerHUD._debug_mode
+		DebugOverlay.global_enabled = not DebugOverlay.global_enabled
+		PlayerHUD._debug_mode = DebugOverlay.global_enabled
 		get_viewport().set_input_as_handled()
 		return
 

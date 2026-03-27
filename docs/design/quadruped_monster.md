@@ -168,6 +168,18 @@ Bite and shake:
 - Target knocked sideways each thrash
 - Final thrash **flings the player** at 600 speed in the direction of the last swing
 
+### Chain Yank & Daze (`CHAIN_DAZE`)
+
+When a chained monster leaps beyond its chain's reach, the chain yanks it back:
+
+1. **Yank**: Position clamped to chain boundary, velocity reversed (60% + downward). Monster takes 30 damage, chain takes 25 damage + violent shake.
+2. **Falling** (phase 0): Monster goes limp — all limbs dangle, tail droops, skull drops. Gravity pulls it down.
+3. **Dazed** (phase 1, 5s): Lying flat on ground. Skeleton collapsed horizontally. 5 sparkly 4-pointed stars circle the head in an elliptical, undulating pattern with pulsing brightness.
+4. **Standing up** (phase 2, 2s): Spine and limbs lerp from collapsed to upright standing pose. Stars continue during standup.
+5. **Recovery**: Returns to CHASE with 2x leap cooldown.
+
+If the chain's HP reaches 0 from the yank damage, it severs and the monster is freed.
+
 ## Hitboxes & Severing
 
 7 independently damageable zones, each an `Area2D` repositioned per-frame:

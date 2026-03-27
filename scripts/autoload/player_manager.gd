@@ -118,6 +118,9 @@ func _ready() -> void:
 func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
 	if not connected:
 		_handle_device_disconnect(device_id)
+	else:
+		# Controller reconnected — auto-rejoin if it has a saved player slot
+		call_deferred("_try_auto_rejoin", device_id)
 
 
 # -- Input Handling ------------------------------------------------------------
@@ -143,29 +146,31 @@ func _try_join(device_id: int) -> void:
 	if _joined_devices.has(device_id):
 		return
 
-	# Auto-create guest profile if no profile bound
-	if not ProfileManager.has_device_profile(device_id):
-		var last_profile: Dictionary = ProfileManager.get_last_profile_for_device(device_id)
-		if not last_profile.is_empty():
-			var pid: String = last_profile.get("id", "")
-			var already_bound := false
-			for did in ProfileManager.device_profiles:
-				if ProfileManager.device_profiles[did].get("id", "") == pid:
-					already_bound = true
-					break
-			if not already_bound:
-				ProfileManager.bind_device_to_profile(device_id, last_profile)
-		if not ProfileManager.has_device_profile(device_id):
-			var guest: Dictionary = ProfileManager.create_profile("Player %d" % (players.size() + 1))
-			ProfileManager.bind_device_to_profile(device_id, guest)
 	if players.size() >= MAX_PLAYERS:
 		return
 
-	var player_index := _next_available_index()
+	# Assign the next available slot (press-to-join order)
+	var player_index: int = _next_available_index()
 	if player_index == -1:
 		return
 
-	var chosen_class := _pick_preferred_or_random_class(device_id)
+	# Restore the slot's saved profile, or create a guest
+	var slot_pid: String = ProfileManager.get_slot_profile_id(player_index)
+	if not slot_pid.is_empty():
+		var slot_profile: Dictionary = ProfileManager.get_profile(slot_pid)
+		if not slot_profile.is_empty():
+			ProfileManager.bind_device_to_profile(device_id, slot_profile)
+	if not ProfileManager.has_device_profile(device_id):
+		var guest: Dictionary = ProfileManager.create_profile("Player %d" % (player_index + 1))
+		ProfileManager.bind_device_to_profile(device_id, guest)
+
+	# Restore the class saved for this slot, or pick a new one
+	var saved_class: int = ProfileManager.get_slot_class(player_index)
+	var chosen_class: CharacterClass
+	if saved_class >= 0 and saved_class < CharacterClass.values().size():
+		chosen_class = saved_class as CharacterClass
+	else:
+		chosen_class = _pick_preferred_or_random_class(device_id)
 	var stats: Dictionary = CLASS_STATS[chosen_class]
 
 	var player_data := {
@@ -200,6 +205,10 @@ func _try_join(device_id: int) -> void:
 	if not device_profile.is_empty():
 		ProfileManager.assign_profile_to_player(player_index, device_profile)
 
+	# Persist slot data (profile + class for this player slot)
+	var pid: String = device_profile.get("id", "") if not device_profile.is_empty() else ""
+	ProfileManager.save_slot_data(player_index, pid, int(chosen_class))
+
 	_spawn_join_effect(player_index)
 	player_joined.emit(player_index)
 
@@ -214,9 +223,36 @@ func remove_player(player_index: int) -> void:
 
 
 func _handle_device_disconnect(device_id: int) -> void:
+	## Controller disconnected — keep the player slot reserved so they can reconnect.
+	## Only unlink the device from the active device map.
 	if _joined_devices.has(device_id):
 		var player_index: int = _joined_devices[device_id]
-		remove_player(player_index)
+		_joined_devices.erase(device_id)
+		# Mark player as disconnected but don't remove them
+		if players.has(player_index):
+			players[player_index]["_disconnected"] = true
+			print("Player %d controller disconnected — slot reserved" % player_index)
+
+
+func _try_auto_rejoin(device_id: int) -> void:
+	## Auto-rejoin a reconnected controller to its disconnected player slot.
+	## Only reconnects if the slot is marked _disconnected (mid-game drop/reconnect).
+	## Does NOT auto-join on startup — players must press a button to claim a slot.
+	if join_disabled:
+		return
+	if _joined_devices.has(device_id):
+		return
+	# Find any disconnected player slot that was using this device_id
+	for pi in players:
+		if players[pi].get("_disconnected", false):
+			# Reconnect to the first disconnected slot
+			# (we can't identify which physical controller it was, but the player
+			# can swap by leaving and rejoining if needed)
+			players[pi]["device_id"] = device_id
+			players[pi].erase("_disconnected")
+			_joined_devices[device_id] = pi
+			print("Player %d controller reconnected (device %d)" % [pi, device_id])
+			return
 
 
 func _next_available_index() -> int:

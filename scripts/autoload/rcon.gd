@@ -102,7 +102,55 @@ func _execute(command: String) -> String:
 
 	match cmd:
 		"help":
-			return "Commands: help, debug [list|on|off|log|...], spawn <monster|dummy|attacker> [x y], tp <x> <y>, tab [n], key <k>, enemies, players, precog, standdown [on|off], run <test>, suite <suite>, tests, etz, daz, zones, clearzones, leaps, clearleaps, status, quit"
+			return """Commands:
+  help                          — this list
+  status                        — debug state, enemy/player counts
+  debug [list|on|off|log|...]   — debug overlay aspects
+  spawn <monster|dummy|attacker> [x y] — spawn entity
+  kill                          — kill all enemies (damage to death)
+  clear                         — remove all enemies (instant)
+  clearplayers                  — remove all players
+  enablejoins                   — allow new player joins
+  revive                        — revive dead players
+  tp <x> <y>                    — teleport selected enemy
+  tab [n]                       — cycle/select enemy
+  key <k>                       — simulate keypress
+  eval <expr>                   — evaluate GDScript expression
+  standdown [on|off]            — toggle monster standdown
+  precog                        — force precognition
+  hp                            — show player HP
+  resethp                       — reset player HP to max
+  fps                           — show FPS
+  ik                            — show IK metrics
+  ikreset                       — reset IK peak
+  ball                          — drop ball simulation
+  thrash                        — toggle thrash test
+  dump [ik|skeleton]            — dump debug data to file
+  splay ...                     — splay pose commands
+  chain ...                     — chain commands
+  tether ...                    — tether commands
+  attach/detach                 — attachment system
+  buff <key=val ...> <duration> — apply config overrides
+  attacker ...                  — attacker dummy commands
+  territorial                   — toggle territorial mode
+  portal [on|off]               — toggle class-change portal
+  level <name>                  — load level
+  run <test> [key=val ...]      — run test
+  suite <name> [key=val ...]    — run test suite
+  tests                         — list available tests
+  etz/daz <id> <x> <y> <r>     — add ETZ/DAZ zone
+  zones / clearzones            — show/clear zones
+  leaps / clearleaps            — show/clear leap graph
+  bleap ...                     — bounded leap commands
+  testload/testsave/testrun/... — test editor commands
+  notify <name> <msg> ...       — show modal notification
+  notify_dismiss <button>       — dismiss notification
+  emit <signal>                 — emit a signal
+  title                         — return to title screen
+  score                         — show score panel
+  grid                          — toggle grid overlay
+  debugdraw                     — toggle enemy debug draw
+  quit                          — quit game"""
 
 		"debug":
 			return _cmd_debug(parts)
@@ -200,6 +248,16 @@ func _execute(command: String) -> String:
 			var lines: Array[String] = ["players: %d" % players.size()]
 			for p in players:
 				lines.append("  %s at (%.0f,%.0f)" % [p.name, p.global_position.x, p.global_position.y])
+			# Show controller bindings
+			lines.append("controllers:")
+			for did in Input.get_connected_joypads():
+				var guid: String = Input.get_joy_guid(did)
+				var jname: String = Input.get_joy_name(did)
+				var ctrl_name: String = ProfileManager._get_controller_name(did)
+				var slot: int = ProfileManager.get_preferred_player_index(did)
+				var joined_as: String = str(PlayerManager._joined_devices.get(did, "none"))
+				lines.append("  dev=%d guid=%s name=%s ctrl=%s saved_slot=%d joined=%s" % [did, guid, jname, ctrl_name, slot, joined_as])
+			lines.append("keyboard: slot=%d" % ProfileManager.get_preferred_player_index(-1))
 			return "\n".join(lines)
 
 		"tp":
@@ -222,6 +280,18 @@ func _execute(command: String) -> String:
 			PlayerManager.join_disabled = false
 			PlayerManager._joined_devices.clear()
 			return "OK: joins enabled"
+
+		"kill":
+			# Kill all monsters by dealing massive damage (triggers death sequence)
+			var killed: int = 0
+			for e in get_tree().get_nodes_in_group("enemies"):
+				if e.has_method("take_damage"):
+					e.take_damage(99999, -1)
+					killed += 1
+				else:
+					e.queue_free()
+					killed += 1
+			return "OK: killed %d enemies" % killed
 
 		"clear":
 			var cleared: int = 0
@@ -738,55 +808,19 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			return "OK: spawned monster '%s' at (%.0f, %.0f)%s%s%s" % [monster.entity_id, x, y, state_str, scale_str, config_str]
 
 		"dummy":
-			# Fake player — a simple CharacterBody2D in the "players" group
-			# that the monster can target. No controller needed.
+			# Soccer ball dummy — a rolling ball that monsters can target.
+			var dummy_script: GDScript = load("res://scripts/testing/soccer_dummy.gd")
 			var dummy := CharacterBody2D.new()
+			dummy.set_script(dummy_script)
 			var dummy_count: int = get_tree().get_nodes_in_group("players").size()
 			dummy.name = "DummyPlayer_%d" % dummy_count
 			dummy.add_to_group("players")
 			dummy.global_position = Vector2(x, y)
-			dummy.set("player_index", 0)
+			dummy.player_index = 0
 			dummy.collision_layer = 2  # Player layer
 			dummy.collision_mask = 1   # World
-			# Collision shape so it stands on platforms
-			var col := CollisionShape2D.new()
-			var shape := CapsuleShape2D.new()
-			shape.radius = 8.0
-			shape.height = 30.0
-			col.shape = shape
-			dummy.add_child(col)
-			# Gravity
-			var gravity_script := GDScript.new()
-			gravity_script.source_code = """extends CharacterBody2D
-
-var player_index: int = 0
-var entity_id: String = ""
-var health: int = 1000
-var max_health: int = 1000
-var damage_taken: int = 0
-
-func _physics_process(delta: float) -> void:
-	velocity.y += 600.0 * delta
-	move_and_slide()
-
-func _draw() -> void:
-	draw_circle(Vector2.ZERO, 10.0, Color(0.2, 0.8, 0.2, 0.8))
-	draw_circle(Vector2(0, -14), 7.0, Color(0.2, 0.8, 0.2, 0.8))
-	var hp_text: String = "HP:%d DMG:%d" % [health, damage_taken]
-	draw_string(ThemeDB.fallback_font, Vector2(-20, -26), hp_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color.GREEN)
-
-func take_damage(amount: int, _source: int = -1) -> void:
-	damage_taken += amount
-	health -= amount
-	if health < 0:
-		health = 0
-	queue_redraw()
-"""
-			gravity_script.reload()
-			dummy.set_script(gravity_script)
 			dummy.entity_id = "dummy_%d" % dummy_count
 			container.add_child(dummy)
-			dummy.queue_redraw()
 			return "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
 
 		"attacker":
@@ -875,7 +909,7 @@ func _cmd_eval(expr_text: String) -> String:
 func _cmd_status() -> String:
 	var enemies: int = get_tree().get_nodes_in_group("enemies").size()
 	var players: int = get_tree().get_nodes_in_group("players").size()
-	var debug: bool = PlayerHUD._debug_mode
+	var debug: bool = DebugOverlay.global_enabled
 	var sel: String = "none"
 	if is_instance_valid(PlayerHUD.debug_selected_enemy):
 		sel = PlayerHUD.debug_selected_enemy.name
@@ -1816,24 +1850,53 @@ func _cmd_debug_filter(parts: PackedStringArray) -> String:
 
 func _ensure_test_editor() -> Node:
 	## Find or create the test editor. Returns the editor node.
+	## If the debug drawer is open, dock the editor there instead of floating.
 	if _test_editor and is_instance_valid(_test_editor):
 		if not _test_editor._active:
-			_test_editor.toggle()
+			_test_editor._active = true
+			_test_editor.visible = true
+		# Check if debug drawer is open — if so, dock the editor
+		var drawer: Node = _get_debug_drawer()
+		if drawer and drawer.is_open():
+			_test_editor._docked = true
+			drawer._current_section = 1  # Section.TEST_RUNNER
+		elif _test_editor._docked:
+			# Drawer closed — undock and show floating
+			_test_editor._docked = false
 		return _test_editor
 	# Look for existing editor in the scene
 	for node in get_tree().current_scene.get_children():
 		if node.has_method("toggle") and node.has_method("_load_test") and node.has_method("_run_test"):
 			_test_editor = node
 			if not _test_editor._active:
-				_test_editor.toggle()
+				_test_editor._active = true
+				_test_editor.visible = true
+			var drawer: Node = _get_debug_drawer()
+			if drawer and drawer.is_open():
+				_test_editor._docked = true
+				drawer._current_section = 1  # Section.TEST_RUNNER
 			return _test_editor
-	# Create one
+	# Create one — defer activation until _ready has run
 	var script: GDScript = load("res://scripts/ui/test_editor.gd")
 	_test_editor = CanvasLayer.new()
 	_test_editor.set_script(script)
 	get_tree().current_scene.add_child(_test_editor)
-	_test_editor.toggle()
+	var drawer: Node = _get_debug_drawer()
+	if drawer and drawer.is_open():
+		_test_editor._docked = true
+		drawer._current_section = 1  # Section.TEST_RUNNER
+		_test_editor.call_deferred("_activate_docked")
+	else:
+		_test_editor.call_deferred("toggle")
 	return _test_editor
+
+
+func _get_debug_drawer() -> Node:
+	## Find the debug drawer node in the scene.
+	for node in get_tree().root.get_children():
+		if node.has_method("is_open") and node.has_method("toggle") and "ICON_BAR_WIDTH" in node:
+			return node
+	return null
 
 
 func _ensure_test_runner() -> void:

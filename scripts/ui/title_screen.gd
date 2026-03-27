@@ -121,11 +121,12 @@ func _apply_saved_classes(saved_choices: Dictionary) -> void:
 
 
 func _auto_join_connected_controllers() -> void:
-	## Auto-join only connected joypads (not keyboard)
-	for dev_id in Input.get_connected_joypads():
-		_auto_join_device(dev_id)
+	## "Press to join" mode — don't auto-join any controllers.
+	## Players press a button to claim the next available slot (P1, P2, P3, P4).
+	## The slot's saved profile/class is restored regardless of which physical controller.
 	# Listen for controllers connecting/disconnecting
-	Input.joy_connection_changed.connect(_on_joy_connection_changed)
+	if not Input.joy_connection_changed.is_connected(_on_joy_connection_changed):
+		Input.joy_connection_changed.connect(_on_joy_connection_changed)
 
 
 func _auto_join_device(device_id: int) -> void:
@@ -431,12 +432,12 @@ func _input(event: InputEvent) -> void:
 
 	# Debug: G key regenerates nearest scenery item to P1
 	if event is InputEventKey and event.pressed and event.keycode == KEY_G:
-		if PlayerHUD._debug_mode:
+		if DebugOverlay.global_enabled:
 			_debug_regenerate_nearest_scenery()
 
 	# Debug: M key spawns a quadruped monster
 	if event is InputEventKey and event.pressed and event.keycode == KEY_M:
-		if PlayerHUD._debug_mode:
+		if DebugOverlay.global_enabled:
 			_debug_spawn_monster()
 
 
@@ -703,7 +704,8 @@ func _on_name_cancelled() -> void:
 
 func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
 	if connected:
-		_auto_join_device(device_id)
+		# Don't auto-join — wait for the player to press a button
+		pass
 	else:
 		# Remove the player associated with this device
 		var pi := _get_player_index_for_device(device_id)
@@ -717,6 +719,11 @@ func _on_joy_connection_changed(device_id: int, connected: bool) -> void:
 # -- Class Change with Portal/Ghost/Poof Sequence -----------------------------
 
 func _on_class_changed(player_index: int, new_class: PlayerManager.CharacterClass) -> void:
+	# Persist the new class for this slot
+	var slot_profile: Dictionary = ProfileManager.get_active_profile(player_index)
+	var slot_pid: String = slot_profile.get("id", "")
+	ProfileManager.save_slot_data(player_index, slot_pid, int(new_class))
+
 	# Block class changes while rift is active for this player
 	if _rift_locks.has(player_index):
 		return

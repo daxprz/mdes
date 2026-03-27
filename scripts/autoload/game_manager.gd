@@ -114,17 +114,30 @@ func go_to_title() -> void:
 
 
 func go_to_overworld() -> void:
+	_disable_debug_on_level_start()
 	change_state(GameState.OVERWORLD)
 	transition_to_scene("res://scenes/overworld/valley.tscn")
 
 
 func go_to_tower(tower_id: int) -> void:
+	_disable_debug_on_level_start()
 	current_tower_id = tower_id
 	change_state(GameState.TOWER)
 	if tower_id == 2:
 		transition_to_scene("res://scenes/towers/dungeon_tower.tscn")
 	else:
 		transition_to_scene("res://scenes/towers/tower_base.tscn")
+
+
+func _disable_debug_on_level_start() -> void:
+	## Turn off all debug displays when entering gameplay from the title screen.
+	## Debug can be re-enabled with Ctrl+D or the pause menu during play.
+	DebugOverlay.global_enabled = false
+	PlayerHUD._debug_mode = false
+	# Close the debug drawer if it's open
+	for node in get_tree().root.get_children():
+		if node.has_method("is_open") and node.has_method("toggle") and node.is_open():
+			node.toggle()
 
 
 func go_to_boss(tower_id: int = -1) -> void:

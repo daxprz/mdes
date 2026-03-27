@@ -223,6 +223,38 @@ func bind_device_to_profile(device_id: int, profile: Dictionary) -> void:
 		_save_bindings()
 
 
+func save_player_index_for_device(device_id: int, player_index: int) -> void:
+	## Persist which player slot this controller prefers.
+	## Enforces uniqueness: if another controller was bound to this slot, remove it.
+	## If this controller was bound to a different slot, remove that too.
+	var controller_name: String = _get_controller_name(device_id)
+	if controller_name.is_empty():
+		return
+	var slot_key: String = controller_name + ":slot"
+
+	# Remove any OTHER controller bound to this same player slot
+	var keys_to_remove: Array[String] = []
+	for key in _controller_bindings:
+		if key.ends_with(":slot") and key != slot_key:
+			if int(_controller_bindings[key]) == player_index:
+				keys_to_remove.append(key)
+	for key in keys_to_remove:
+		_controller_bindings.erase(key)
+
+	# Set the new binding
+	_controller_bindings[slot_key] = player_index
+	_save_bindings()
+
+
+func get_preferred_player_index(device_id: int) -> int:
+	## Returns the player index this controller last used, or -1 if unknown.
+	var controller_name: String = _get_controller_name(device_id)
+	var slot_key: String = controller_name + ":slot"
+	if _controller_bindings.has(slot_key):
+		return int(_controller_bindings[slot_key])
+	return -1
+
+
 func get_device_profile(device_id: int) -> Dictionary:
 	if device_profiles.has(device_id):
 		return device_profiles[device_id]
@@ -251,14 +283,53 @@ func request_profile_for_device(device_id: int) -> void:
 	device_needs_profile.emit(device_id)
 
 
+# -- Per-Slot Persistence (profile + class saved per player slot) --------------
+
+func save_slot_data(player_index: int, profile_id: String, char_class: int) -> void:
+	## Persist the profile and class for a player slot.
+	## This is slot-based, not controller-based — so P1 always restores the same data.
+	_controller_bindings["slot_%d:profile" % player_index] = profile_id
+	_controller_bindings["slot_%d:class" % player_index] = char_class
+	_save_bindings()
+
+
+func get_slot_profile_id(player_index: int) -> String:
+	## Returns the profile ID saved for this slot, or empty if none.
+	var key: String = "slot_%d:profile" % player_index
+	if _controller_bindings.has(key):
+		return str(_controller_bindings[key])
+	return ""
+
+
+func get_slot_class(player_index: int) -> int:
+	## Returns the character class saved for this slot, or -1 if none.
+	var key: String = "slot_%d:class" % player_index
+	if _controller_bindings.has(key):
+		return int(_controller_bindings[key])
+	return -1
+
+
 func _get_controller_name(device_id: int) -> String:
+	## Returns a stable identifier for a controller that persists across restarts.
+	## Uses the joy GUID (hardware UUID) instead of the volatile device_id.
+	## For identical controllers (same GUID), appends a differentiator based on
+	## how many controllers with that GUID are currently connected.
 	if device_id == -1:
 		return "keyboard"
-	var joy_name: String = Input.get_joy_name(device_id)
-	if joy_name.is_empty():
-		return "controller_%d" % device_id
-	# Include device index to differentiate multiple identical controllers
-	return joy_name + "_%d" % device_id
+	var guid: String = Input.get_joy_guid(device_id)
+	if guid.is_empty():
+		# Fallback to name if no GUID available
+		var joy_name: String = Input.get_joy_name(device_id)
+		if joy_name.is_empty():
+			return "controller_unknown_%d" % device_id
+		guid = joy_name
+	# Count how many connected devices share this GUID with a lower device_id
+	# This gives a stable sub-index for identical controllers
+	var same_guid_idx: int = 0
+	for did in range(device_id):
+		if Input.get_joy_name(did) != "" and Input.get_joy_guid(did) == guid:
+			same_guid_idx += 1
+	return guid + "_%d" % same_guid_idx
 
 
 # -- Persistent Bindings (controller → profile) --------------------------------

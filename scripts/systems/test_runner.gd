@@ -313,6 +313,12 @@ func _parse_script_check(line: String) -> Dictionary:
 		# from_rcon_bleap signals _execute_check_task to pull bleap state from RCON
 		return {"command": "bounded_leaps", "from_rcon_bleap": true, "label": label}
 
+	if after.begins_with("no_leaps"):
+		var label: String = after.substr(8).strip_edges()
+		if label.is_empty():
+			label = "no_leaps"
+		return {"command": "no_leaps", "label": label}
+
 	if after == "zones":
 		return {"command": "zones", "label": "zones"}
 
@@ -715,6 +721,20 @@ func _execute_check_task(task: Dictionary) -> void:
 		if cmd == "zones":
 			var zone_passed: bool = _check_zones(check, label, test_result)
 			if not zone_passed:
+				test_result["passed"] = false
+			continue
+
+		# No-leaps check: verifies the monster has zero planned leap edges
+		if cmd == "no_leaps":
+			var edge_count: int = 0
+			for enemy in get_tree().get_nodes_in_group("enemies"):
+				if "_precog_edges" in enemy:
+					edge_count += enemy._precog_edges.size()
+			var passed: bool = (edge_count == 0)
+			_log("  [%s] %s: %d edges (expected 0)" % ["PASS" if passed else "FAIL", label, edge_count],
+				Color(0.3, 1.0, 0.3) if passed else Color(1.0, 0.3, 0.3))
+			test_result["checks"].append({"label": label, "passed": passed, "value": edge_count, "expected": 0})
+			if not passed:
 				test_result["passed"] = false
 			continue
 

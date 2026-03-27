@@ -297,14 +297,19 @@ Saved on `Ctrl+S`. Loaded on game start.
 - Register/unregister test observers on test start/end
 - `debug clear_transient` command
 
-### Story 5: Migrate Existing Debug Rendering
-- Replace `_draw_debug()` in quadruped_monster.gd — route every draw call through DebugOverlay
-- Replace all conditional print statements with `DebugOverlay.log()`
-- Remove `debug_draw_lite`, `debug_draw_enabled`, `PlayerHUD._debug_mode` (absorbed into new system)
-- Remove old Ctrl+D handler from PlayerHUD
-- Migrate test_zones.gd rendering through DebugOverlay
-- Migrate chain visualization through DebugOverlay
-- Migrate player_hud.gd input debug display through DebugOverlay
+### Story 5: Migrate Existing Debug Rendering — COMPLETE (v0.10.18)
+- Player debug rendering migrated to DebugOverlay aspects (`player/velocity_arrows`, `player/jump_tracers`, `player/archer_arcs`, `player/reticle_info`, `player/button_state`)
+- `PlayerHUD._debug_mode` replaced by `DebugOverlay.global_enabled` as source of truth
+- Hitbox debug aspects added (`hitboxes/monster_parts`, `hitboxes/player_attack`)
+- Old `_debug_mode` flag in player_side.gd syncs from DebugOverlay
+- Debug auto-disabled when entering gameplay from title screen
+
+### Story 6: Docked Test Runner — IN PROGRESS (v0.10.18)
+- Sub-section framework: 5 collapsible, resizable panels (Suites, Tests, Controls, Status, Editor)
+- Layout persisted to `user://debug_panel_layout.json`
+- Test editor docked into debug panel; floating window suppressed when docked
+- World-space overlay (handles, zones) still renders independently
+- RCON `run`/`suite` commands auto-dock when debug drawer is open
 
 ## Implementation Order
 

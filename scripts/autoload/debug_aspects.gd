@@ -83,3 +83,14 @@ func _register_all() -> void:
 	r.call("scaling/active_scale", "Current creature_scale factor overlay")
 	r.call("scaling/effective_radii", "Body radius circle, leap radius, hitbox extents")
 	r.call("scaling/speed_info", "Effective speed vs base speed tiers")
+
+	# -- Hitboxes --
+	r.call("hitboxes/monster_parts", "Monster damageable part hitboxes (head, body, legs, tail, eye)")
+	r.call("hitboxes/player_attack", "Player attack area when active")
+
+	# -- Player --
+	r.call("player/velocity_arrows", "Current velocity (green) and predicted jump (red) arrows")
+	r.call("player/jump_tracers", "Lingering jump impulse snapshots: pre-vel, impulse, post-vel")
+	r.call("player/archer_arcs", "Archer aim arc trajectory and debug trails")
+	r.call("player/reticle_info", "Reticle position text overlay")
+	r.call("player/button_state", "Controller/keyboard button state labels on HUD")

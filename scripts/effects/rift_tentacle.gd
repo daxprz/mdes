@@ -21,6 +21,8 @@ const FLING_SPEED := 600.0
 const TENTACLE_MAX_HEALTH := 50.0  # Sub-health for the tentacle when attached
 const SEGMENT_DRAG := 0.92  # Velocity retention per frame (lower = more sluggish)
 const SEGMENT_GRAVITY := 30.0  # Downward pull on each segment
+const FREE_TENTACLE_HEALTH := 30.0  # Health when not attached to an enemy
+const DAMAGE_FLASH_DURATION := 0.15  # Seconds to flash white on hit
 
 # Phases: 0=wiggle, 1=hunt, 2=smashing player, 3=attached to enemy (permanent)
 var _segments: Array[Vector2] = []  # positions in local space
@@ -42,6 +44,10 @@ var _attached_target_pi: int = -1
 var _attached_smash_phase: int = 0  # 0=hunting, 1=grabbed/pound, 2=flinging
 var _tentacle_health: float = TENTACLE_MAX_HEALTH  # Sub-health shown as rift size
 var _original_take_damage: Callable  # Stores enemy's original take_damage
+var _hitbody: CharacterBody2D = null  # Collision body so player attacks detect the tentacle
+var _hitshape: CollisionShape2D = null
+var _free_health: float = FREE_TENTACLE_HEALTH  # Health pool when not attached to enemy
+var _damage_flash: float = 0.0  # Timer for white flash on damage
 
 
 func setup(owner_index: int) -> void:
@@ -56,11 +62,43 @@ func _ready() -> void:
 		var pos := Vector2(0, i * SEGMENT_LENGTH)
 		_segments[i] = pos
 		_prev_segments[i] = pos
+	# Create a collision body covering the tentacle tip so player attacks can hit it.
+	# Uses layer 8 (enemies) so player AttackArea (mask=8) detects it.
+	var hitbody_script: GDScript = load("res://scripts/effects/tentacle_hitbody.gd")
+	_hitbody = CharacterBody2D.new()
+	_hitbody.set_script(hitbody_script)
+	_hitbody._tentacle = self
+	_hitbody.collision_layer = 8
+	_hitbody.collision_mask = 0
+	_hitshape = CollisionShape2D.new()
+	var shape := CircleShape2D.new()
+	shape.radius = 12.0
+	_hitshape.shape = shape
+	_hitbody.add_child(_hitshape)
+	add_child(_hitbody)
+
+
+func take_damage(amount: int, _attacker_index: int = -1) -> void:
+	## Player attacks call this via the hitbody. Damages the tentacle directly.
+	if _phase == 3:
+		# When attached, route through the existing sub-health system
+		take_tentacle_damage(amount)
+	else:
+		_free_health -= amount
+		_damage_flash = DAMAGE_FLASH_DURATION
+		if _free_health <= 0:
+			_spawn_death_smoke()
+			PlayerHUD.active_tentacle_count = maxi(0, PlayerHUD.active_tentacle_count - 1)
+			queue_free()
 
 
 func _process(delta: float) -> void:
 	_timer += delta
 	_rift_scale = minf(_timer / 0.3, 1.0)
+
+	# Damage flash tick-down
+	if _damage_flash > 0.0:
+		_damage_flash -= delta
 
 	# Lunge cooldown
 	if _lunge_cooldown > 0.0:
@@ -89,6 +127,9 @@ func _process(delta: float) -> void:
 	# Verlet integration with drag on all interior segments
 	_verlet_step(delta)
 	_apply_constraints()
+	# Move the hitbody to the tentacle tip so attacks can connect
+	if _hitbody:
+		_hitbody.position = _segments[SEGMENT_COUNT - 1]
 	queue_redraw()
 
 
@@ -510,6 +551,13 @@ func _draw_tentacle() -> void:
 		outer_color = Color(0.55, 0.1, 0.5)
 		inner_color = Color(0.8, 0.35, 0.7)
 		sucker_color = Color(0.7, 0.25, 0.6, 0.8)
+
+	# Damage flash: lerp all colors toward white
+	if _damage_flash > 0.0:
+		var flash_t: float = clampf(_damage_flash / DAMAGE_FLASH_DURATION, 0.0, 1.0)
+		outer_color = outer_color.lerp(Color.WHITE, flash_t * 0.8)
+		inner_color = inner_color.lerp(Color.WHITE, flash_t * 0.8)
+		sucker_color = sucker_color.lerp(Color.WHITE, flash_t * 0.8)
 
 	for i in range(SEGMENT_COUNT - 1):
 		var a: Vector2 = _segments[i]

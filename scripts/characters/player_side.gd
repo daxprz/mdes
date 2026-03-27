@@ -321,6 +321,15 @@ func _draw() -> void:
 	_draw_archer_aim()
 	_draw_hud_popup_indicator()
 	_draw_debug()
+	# Hitbox: show attack area when active
+	if attack_area.monitoring and DebugOverlay.should_draw("hitboxes/player_attack", self):
+		var area_pos: Vector2 = attack_area.position
+		var atk_shape: CollisionShape2D = attack_area.get_node_or_null("AttackShape")
+		if atk_shape and atk_shape.shape is RectangleShape2D:
+			var half: Vector2 = (atk_shape.shape as RectangleShape2D).size * 0.5
+			var rect := Rect2(area_pos - half, half * 2.0)
+			draw_rect(rect, Color(1.0, 0.3, 0.1, 0.35))
+			draw_rect(rect, Color(1.0, 0.5, 0.2, 0.7), false, 1.5)
 
 
 func _apply_class_sprite() -> void:
@@ -499,7 +508,7 @@ func _init_reticle_pos() -> void:
 
 func _needs_redraw() -> bool:
 	## Returns true if this player needs to redraw custom visuals this frame.
-	if _debug_mode:
+	if DebugOverlay.global_enabled:
 		return true
 	if _hud_aura_fade > 0.0:
 		return true
@@ -556,9 +565,8 @@ func _input(event: InputEvent) -> void:
 
 
 func _physics_process(delta: float) -> void:
-	# Sync debug mode from PlayerHUD (toggled via pause menu)
-	if PlayerHUD:
-		_debug_mode = PlayerHUD._debug_mode
+	# Sync debug mode from DebugOverlay global state
+	_debug_mode = DebugOverlay.global_enabled
 	if _needs_redraw():
 		queue_redraw()
 	_apply_gravity(delta)
@@ -1841,6 +1849,8 @@ func _start_ground_slam() -> void:
 func _check_ground_slam_landing() -> void:
 	if not _ground_slam_active:
 		return
+	# Pop any balloons we pass through while falling — doesn't stop the slam
+	_ground_slam_pop_balloons()
 	if not is_on_floor():
 		return
 
@@ -1872,6 +1882,20 @@ func _check_ground_slam_landing() -> void:
 				body.apply_knockback(kb * 250.0)
 
 	_charge_time = 0.0
+
+
+func _ground_slam_pop_balloons() -> void:
+	## While ground-slamming downward, pop any balloons the player overlaps.
+	## The player keeps falling — balloons don't stop the slam.
+	var hit_radius: float = 20.0  # Player body radius for collision
+	for balloon in get_tree().get_nodes_in_group("balloon_darts"):
+		if not is_instance_valid(balloon) or not balloon is Node2D:
+			continue
+		if balloon._dart_active or balloon._popping:
+			continue
+		var dist: float = global_position.distance_to(balloon._balloon_pos)
+		if dist < hit_radius + balloon._balloon_radius:
+			balloon._chain_pop_receive()
 
 
 # -- Special Abilities ---------------------------------------------------------
@@ -3316,7 +3340,7 @@ func _grapple_jump_release() -> void:
 	_grapple_launch_immunity = 0.5
 
 	# Debug tracers: snapshot all vectors at this moment
-	if _debug_mode:
+	if DebugOverlay.should_draw("player/jump_tracers", self):
 		_debug_tracers.append({
 			"pos": global_position,
 			"pre_vel": pre_vel,
@@ -3561,86 +3585,72 @@ func _draw_hud_popup_indicator() -> void:
 
 
 func _draw_debug() -> void:
-	if not _debug_mode:
-		# Still tick down tracers even when debug off
-		var dt: float = get_process_delta_time()
-		var i: int = _debug_tracers.size() - 1
-		while i >= 0:
-			_debug_tracers[i]["time"] -= dt
-			if _debug_tracers[i]["time"] <= 0.0:
-				_debug_tracers.remove_at(i)
-			i -= 1
-		return
-
-	# Tick down and draw tracer arrows (lingering snapshots from jump releases)
+	# Always tick down tracers regardless of debug state
 	var dt: float = get_process_delta_time()
 	var i: int = _debug_tracers.size() - 1
 	while i >= 0:
 		_debug_tracers[i]["time"] -= dt
 		if _debug_tracers[i]["time"] <= 0.0:
 			_debug_tracers.remove_at(i)
-			i -= 1
-			continue
-
-		var tracer: Dictionary = _debug_tracers[i]
-		var tpos: Vector2 = tracer["pos"] - global_position  # Relative to current player pos
-		var fade: float = clampf(tracer["time"] / 3.0, 0.1, 1.0)  # Fade over last 3 seconds
-		var scale_f: float = 0.12
-
-		# Pre-velocity (green, dashed)
-		var pre: Vector2 = tracer["pre_vel"]
-		if pre.length() > 5.0:
-			var pend: Vector2 = tpos + pre.normalized() * clampf(pre.length() * scale_f, 5.0, 80.0)
-			draw_line(tpos, pend, Color(0.2, 0.8, 0.2, 0.5 * fade), 1.5)
-
-		# Jump impulse (yellow)
-		var imp: Vector2 = tracer["impulse"]
-		if imp.length() > 5.0:
-			var iend: Vector2 = tpos + imp.normalized() * clampf(imp.length() * scale_f, 5.0, 80.0)
-			draw_line(tpos, iend, Color(1.0, 1.0, 0.2, 0.7 * fade), 2.0)
-
-		# Post-velocity / actual result (cyan, thick)
-		var post: Vector2 = tracer["post_vel"]
-		if post.length() > 5.0:
-			var oend: Vector2 = tpos + post.normalized() * clampf(post.length() * scale_f, 5.0, 100.0)
-			draw_line(tpos, oend, Color(0.2, 0.9, 1.0, 0.8 * fade), 3.0)
-			# Arrowhead
-			var odir: Vector2 = post.normalized()
-			var operp: Vector2 = Vector2(-odir.y, odir.x)
-			draw_line(oend, oend - odir * 8.0 + operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
-			draw_line(oend, oend - odir * 8.0 - operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
-
-		# Speed label
-		draw_string(ThemeDB.fallback_font, tpos + Vector2(5, -10),
-			"v:%d +j:%d = %d" % [int(pre.length()), int(imp.length()), int(post.length())],
-			HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 1.0, 1.0, 0.7 * fade))
-
 		i -= 1
 
-	# Current velocity arrow (green)
-	if velocity.length() > 5.0:
-		var vel_dir: Vector2 = velocity.normalized()
-		var vel_len: float = clampf(velocity.length() * 0.15, 10.0, 120.0)
-		var vel_end: Vector2 = vel_dir * vel_len
-		draw_line(Vector2.ZERO, vel_end, Color(0.2, 1.0, 0.2, 0.7), 2.0)
+	# Jump tracers — lingering snapshots from jump releases
+	if DebugOverlay.should_draw("player/jump_tracers", self):
+		for ti in range(_debug_tracers.size()):
+			var tracer: Dictionary = _debug_tracers[ti]
+			var tpos: Vector2 = tracer["pos"] - global_position
+			var fade: float = clampf(tracer["time"] / 3.0, 0.1, 1.0)
+			var scale_f: float = 0.12
 
-	# Predicted jump-release velocity arrow (red) — only while grapple connected
-	if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
-		var aim: Vector2 = _get_aim_direction_analog()
-		var predicted: Vector2 = velocity + aim * abs(JUMP_VELOCITY)
-		if predicted.length() > 5.0:
-			var pred_dir: Vector2 = predicted.normalized()
-			var pred_len: float = clampf(predicted.length() * 0.15, 10.0, 150.0)
-			var pred_end: Vector2 = pred_dir * pred_len
-			# Red arrow line
-			draw_line(Vector2.ZERO, pred_end, Color(1.0, 0.15, 0.1, 0.8), 2.5)
-			# Arrowhead
-			var perp: Vector2 = Vector2(-pred_dir.y, pred_dir.x)
-			draw_line(pred_end, pred_end - pred_dir * 10.0 + perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
-			draw_line(pred_end, pred_end - pred_dir * 10.0 - perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
-			# Show speed text
-			var speed_text: String = "%d" % int(predicted.length())
-			draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
+			# Pre-velocity (green)
+			var pre: Vector2 = tracer["pre_vel"]
+			if pre.length() > 5.0:
+				var pend: Vector2 = tpos + pre.normalized() * clampf(pre.length() * scale_f, 5.0, 80.0)
+				draw_line(tpos, pend, Color(0.2, 0.8, 0.2, 0.5 * fade), 1.5)
+
+			# Jump impulse (yellow)
+			var imp: Vector2 = tracer["impulse"]
+			if imp.length() > 5.0:
+				var iend: Vector2 = tpos + imp.normalized() * clampf(imp.length() * scale_f, 5.0, 80.0)
+				draw_line(tpos, iend, Color(1.0, 1.0, 0.2, 0.7 * fade), 2.0)
+
+			# Post-velocity / actual result (cyan, thick)
+			var post: Vector2 = tracer["post_vel"]
+			if post.length() > 5.0:
+				var oend: Vector2 = tpos + post.normalized() * clampf(post.length() * scale_f, 5.0, 100.0)
+				draw_line(tpos, oend, Color(0.2, 0.9, 1.0, 0.8 * fade), 3.0)
+				var odir: Vector2 = post.normalized()
+				var operp: Vector2 = Vector2(-odir.y, odir.x)
+				draw_line(oend, oend - odir * 8.0 + operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
+				draw_line(oend, oend - odir * 8.0 - operp * 5.0, Color(0.2, 0.9, 1.0, 0.8 * fade), 2.5)
+
+			# Speed label
+			draw_string(ThemeDB.fallback_font, tpos + Vector2(5, -10),
+				"v:%d +j:%d = %d" % [int(pre.length()), int(imp.length()), int(post.length())],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 1.0, 1.0, 0.7 * fade))
+
+	# Current velocity arrow (green) + predicted jump arrow (red)
+	if DebugOverlay.should_draw("player/velocity_arrows", self):
+		if velocity.length() > 5.0:
+			var vel_dir: Vector2 = velocity.normalized()
+			var vel_len: float = clampf(velocity.length() * 0.15, 10.0, 120.0)
+			var vel_end: Vector2 = vel_dir * vel_len
+			draw_line(Vector2.ZERO, vel_end, Color(0.2, 1.0, 0.2, 0.7), 2.0)
+
+		# Predicted jump-release velocity arrow (red) — only while grapple connected
+		if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED]:
+			var aim: Vector2 = _get_aim_direction_analog()
+			var predicted: Vector2 = velocity + aim * abs(JUMP_VELOCITY)
+			if predicted.length() > 5.0:
+				var pred_dir: Vector2 = predicted.normalized()
+				var pred_len: float = clampf(predicted.length() * 0.15, 10.0, 150.0)
+				var pred_end: Vector2 = pred_dir * pred_len
+				draw_line(Vector2.ZERO, pred_end, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+				var perp: Vector2 = Vector2(-pred_dir.y, pred_dir.x)
+				draw_line(pred_end, pred_end - pred_dir * 10.0 + perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+				draw_line(pred_end, pred_end - pred_dir * 10.0 - perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
+				var speed_text: String = "%d" % int(predicted.length())
+				draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
 
 
 func _draw_grapple() -> void:
@@ -4184,7 +4194,7 @@ func _archer_fire_aimed() -> void:
 	var vy: float = _archer_solved_vy
 
 	# Debug: save the solver arc trail
-	if _debug_mode and _archer_arc_points.size() > 1:
+	if DebugOverlay.should_draw("player/archer_arcs", self) and _archer_arc_points.size() > 1:
 		var solver_trail: Array[Vector2] = []
 		for pt in _archer_arc_points:
 			solver_trail.append(pt + global_position)  # Convert to world pos
@@ -4210,7 +4220,7 @@ func _archer_fire_aimed() -> void:
 	get_parent().add_child(proj)
 
 	# Debug: track the actual arrow trail over time
-	if _debug_mode:
+	if DebugOverlay.should_draw("player/archer_arcs", self):
 		_track_arrow_trail(proj)
 
 
@@ -4251,8 +4261,8 @@ func _draw_archer_aim() -> void:
 
 	# -- Manual reticle (independent of auto-aim) --
 
-	# Always draw debug trails even when not aiming
-	if _debug_mode:
+	# Draw debug trails (arc solver + arrow paths) when aspect enabled
+	if DebugOverlay.should_draw("player/archer_arcs", self):
 		for trail in _archer_debug_trails:
 			var pts: Array = trail["points"]
 			var fade: float = clampf(trail["time"] / 3.0, 0.05, 1.0)
@@ -4308,7 +4318,7 @@ func _draw_archer_aim() -> void:
 	# Circle outline
 	draw_arc(reticle_local, 16.0, 0, TAU, 24, ret_color, 2.5)
 	# Debug: print reticle position
-	if _debug_mode:
+	if DebugOverlay.should_draw("player/reticle_info", self):
 		draw_string(ThemeDB.fallback_font, reticle_local + Vector2(-30, -25),
 			"RET(%.0f,%.0f)" % [_archer_reticle_pos.x, _archer_reticle_pos.y],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color.RED)
@@ -4322,8 +4332,8 @@ func _draw_archer_aim() -> void:
 			var sparkle_alpha: float = 0.5 + 0.5 * sin(_archer_gleam_timer * 8.0 + i * 1.5)
 			draw_circle(sparkle_pos, 2.0, Color(1.0, 0.9, 0.3, sparkle_alpha))
 
-	# Draw arc in debug mode — always, even without a solution (shows best attempt)
-	if _debug_mode and _archer_arc_points.size() >= 2:
+	# Draw arc when debug enabled — always, even without a solution (shows best attempt)
+	if DebugOverlay.should_draw("player/archer_arcs", self) and _archer_arc_points.size() >= 2:
 		var arc_color := Color(0.2, 1.0, 0.3, 0.5) if _archer_has_solution else Color(1.0, 0.3, 0.2, 0.35)
 		for i in range(_archer_arc_points.size() - 1):
 			if i % 3 == 0:

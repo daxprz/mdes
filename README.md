@@ -163,6 +163,26 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.18
+**Docked test editor, chain daze, soccer ball dummy, balloon explosions, press-to-join**
+
+- **Docked test runner**: 5 collapsible, resizable sub-sections (Suites, Tests, Controls, Status, Editor) inside the debug drawer. Collapse via triangle, resize via grip dots. Layout persists to disk
+- **Chain daze**: Monster yanked back mid-leap when exceeding chain length. Takes 30 damage, falls limp (ragdoll), lies dazed with circling sparkly stars for 5s, stands up over 2s. Chain takes 25 damage + violent shake
+- **Soccer ball dummy**: `spawn dummy` creates a rolling soccer ball (Wikipedia SVG texture). Realistic rotation (angular velocity = linear velocity / radius), bounce, friction, knockback
+- **Balloon chain explosions**: Popping a balloon triggers nearby balloons to pop with staggered 0.12s delay. Every pop spawns a 3-layer expanding fireball blast that deals 20 damage to enemies + 10 friendly fire
+- **Melee ground slam pops balloons**: Slam through balloons mid-fall without stopping
+- **Damageable tentacles**: Rift tentacles have a collision hitbody (CharacterBody2D on layer 8). 30 HP when free, damage flash on hit, death smoke on kill
+- **Chains damageable by all weapons**: Player attack areas detected against chain segments each frame. 8 damage per melee hit with shake + sound
+- **Press-to-join controllers**: No auto-join on startup. First button press = P1, second = P2, etc. Class/profile persisted per slot (not per controller). Mid-game disconnect reserves the slot for reconnect
+- **Player debug migrated to DebugOverlay**: 5 new aspects (`player/velocity_arrows`, `player/jump_tracers`, `player/archer_arcs`, `player/reticle_info`, `player/button_state`). Old `_debug_mode` replaced
+- **Hitbox debug aspects**: `hitboxes/monster_parts` (colored circles per part), `hitboxes/player_attack` (attack area rectangle when swinging)
+- **Debug auto-disabled on level start**: Entering gameplay from title screen turns off all debug overlays
+- **`kill` RCON command**: Deals 99999 damage to all enemies (triggers death sequence, unlike `clear`)
+- **`check no_leaps`**: New test check verifies monster has zero planned leap edges
+- **Complete `help` command**: All RCON commands listed with descriptions
+- **Debug V/T checkbox click fix**: Hit detection corrected (was offset by icon bar width)
+- **test_menu.gd null viewport fix**: `get_viewport()` guarded after scene reload
+
 ### v0.10.17
 **Multi-section debug panel, config sliders, test runner UI, bounds enforcement**
 

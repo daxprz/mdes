@@ -375,7 +375,7 @@ enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
 			 ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
 			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD,
-			 STANDDOWN }
+			 STANDDOWN, CHAIN_DAZE }
 enum Posture { QUADRUPED, BIPEDAL }
 enum DamageState { NONE, MEDIUM, HIGH }
 
@@ -440,6 +440,15 @@ var _pose_locked := false     # When true, skip _solve_pose — external system 
 var _chained := false         # When true, chains control position — skip gravity and move_and_slide
 var _chained_stuck_timer: float = 0.0  # How long we've been stuck at chain limit
 var _chained_last_pos: Vector2 = Vector2.ZERO  # Position last frame for stuck detection
+
+# Chain daze state — triggered when a leap exceeds chain bounds
+const CHAIN_DAZE_DURATION := 5.0       # Seconds of star-daze on ground
+const CHAIN_DAZE_STANDUP := 2.0        # Seconds to stand up after daze
+const CHAIN_YANK_DAMAGE := 30          # Damage to monster when yanked by chain
+const CHAIN_YANK_CHAIN_DAMAGE := 25    # Damage to the chain itself
+var _chain_daze_timer: float = 0.0     # Counts up during daze
+var _chain_daze_phase: int = 0         # 0=falling, 1=dazed on ground, 2=standing up
+var _chain_daze_stars: float = 0.0     # Animation timer for circling stars
 var territorial := false      # When true, attacks other monsters instead of/in addition to players
 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
@@ -1173,12 +1182,15 @@ func _physics_process(delta: float) -> void:
 			_do_transition_quadruped(delta)
 		State.STANDDOWN:
 			pass  # No AI — just idle in place, skeleton still runs
+		State.CHAIN_DAZE:
+			_do_chain_daze(delta)
 
-	# Leap/precog states handle their own skeleton — skip normal locomotion/pose
+	# Leap/precog/daze states handle their own skeleton — skip normal locomotion/pose
 	var in_leap_flight: bool = (_state == State.ATTACK_LEAP_WINDUP
 		or _state == State.ATTACK_LEAP_AIRBORNE or _state == State.ATTACK_LEAP_STRIKE
 		or _state == State.ATTACK_LEAP_THRASH)
 	var in_precog: bool = (_state == State.PRECOGNITION)
+	var in_chain_daze: bool = (_state == State.CHAIN_DAZE)
 
 	# Async graph building (2 pairs per frame)
 	if _precog_graph_building:
@@ -1198,7 +1210,8 @@ func _physics_process(delta: float) -> void:
 	else:
 		# Apply chain constraints BEFORE move_and_slide — but NOT during
 		# airborne leaps. Chain only limits ROUTE PLANNING, not flight physics.
-		if _chained and not in_leap_flight:
+		# During chain daze, DO apply constraints (monster is falling back).
+		if _chained and (not in_leap_flight or in_chain_daze):
 			_apply_chain_constraints()
 		move_and_slide()
 
@@ -1206,6 +1219,8 @@ func _physics_process(delta: float) -> void:
 		_update_leap_pose(delta)
 	elif in_grab:
 		pass  # Grab pose is handled inside _do_grab — skip all normal skeleton updates
+	elif in_chain_daze:
+		pass  # Chain daze handles its own skeleton in _do_chain_daze
 	elif not in_precog:
 		_update_spine()
 		_update_gait(delta)
@@ -4649,6 +4664,17 @@ func _do_leap_airborne(delta: float) -> void:
 	# Apply gravity for parabolic arc
 	velocity.y += cfg("gravity", GRAVITY) * delta
 
+	# Check chain constraint — if we've exceeded the chain length, YANK back
+	if _chained:
+		var barrier: Dictionary = get_chain_barrier()
+		if not barrier.is_empty():
+			var chain_center: Vector2 = barrier["center"]
+			var chain_radius: float = barrier["radius"]
+			var dist: float = global_position.distance_to(chain_center)
+			if dist > chain_radius:
+				_trigger_chain_yank(chain_center, chain_radius)
+				return
+
 
 # Force facing to match horizontal velocity — no backwards flight (instant)
 	if absf(velocity.x) > 10.0:
@@ -4847,6 +4873,176 @@ func _do_leap_thrash(delta: float) -> void:
 			_target.velocity = fling_dir * 600.0
 
 		_end_leap()
+
+
+func _trigger_chain_yank(chain_center: Vector2, chain_radius: float) -> void:
+	## Monster hit the end of its chain mid-leap — YANK it back.
+	## Deals damage to both the monster and the chain, then enters daze state.
+	DebugOverlay.log("pathing/platform_leap_path", self, "CHAIN YANK: dist=%.0f radius=%.0f at (%.0f,%.0f)", [
+		global_position.distance_to(chain_center), chain_radius, global_position.x, global_position.y])
+
+	# Clamp position to chain boundary
+	var dir_from_center: Vector2 = (global_position - chain_center).normalized()
+	global_position = chain_center + dir_from_center * chain_radius
+
+	# Reverse velocity — yanked back toward the chain anchor with force
+	var yank_dir: Vector2 = (chain_center - global_position).normalized()
+	velocity = yank_dir * velocity.length() * 0.6 + Vector2(0, 200)  # Bounce back + downward
+
+	# Damage the monster
+	take_damage(CHAIN_YANK_DAMAGE, -1)
+
+	# Damage and shake the chain
+	for tether in get_tree().get_nodes_in_group("tethers"):
+		if not is_instance_valid(tether) or tether._severed:
+			continue
+		if tether.anchor_a.get("body") == self or tether.anchor_b.get("body") == self:
+			tether.current_hp -= CHAIN_YANK_CHAIN_DAMAGE
+			tether._shake_timer = 0.8
+			tether._shake_intensity = 4.0
+			AudioManager.play("grapple_hit", 2.0, 0.8)
+			if tether.current_hp <= 0:
+				tether.sever()
+			break
+
+	# End the leap cleanly
+	_jaw_open = 0.0
+	_leap_plan_results.clear()
+	_leap_chosen_arc_l.clear()
+	_leap_chosen_arc_r.clear()
+
+	# Enter chain daze state
+	_chain_daze_timer = 0.0
+	_chain_daze_phase = 0  # Falling
+	_chain_daze_stars = 0.0
+	_change_state(State.CHAIN_DAZE)
+
+
+func _do_chain_daze(delta: float) -> void:
+	## Chain daze: monster was yanked by its chain mid-leap.
+	## Phase 0: falling limp to ground (ragdoll)
+	## Phase 1: lying dazed with stars circling head (5 seconds)
+	## Phase 2: standing up slowly (2 seconds)
+	_chain_daze_timer += delta
+	_chain_daze_stars += delta
+
+	match _chain_daze_phase:
+		0:  # FALLING — limp ragdoll until hitting the ground
+			velocity.y += cfg("gravity", GRAVITY) * delta
+			# Limp skeleton: all limbs dangle downward
+			for li in range(4):
+				if _leg_severed[li]:
+					continue
+				_legs[li][2].y += 50.0 * delta  # Feet droop
+				_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5  # Knee sags
+			# Tail droops
+			if not _tail_severed:
+				for ti in range(_tail.size()):
+					_tail[ti].y += 30.0 * delta
+			# Skull drops
+			_skull.y += 20.0 * delta
+			# Check if we landed
+			if is_on_floor():
+				velocity = Vector2.ZERO
+				_chain_daze_phase = 1
+				_chain_daze_timer = 0.0
+				AudioManager.play("explosion", -8.0, 0.5)  # Thud
+
+		1:  # DAZED — lying on ground with stars circling
+			velocity = Vector2.ZERO
+			# Keep skeleton limp/collapsed — body flat on the ground
+			var floor_y: float = 0.0
+			var body_center: Vector2 = _spine[1]
+			# Flatten spine horizontally on the floor
+			_spine[0] = Vector2(_facing * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), floor_y - sc(4))
+			_spine[1] = Vector2(0, floor_y - sc(4))
+			_spine[2] = Vector2(-_facing * sc(cfg("spine_seg_len", SPINE_SEG_LEN)), floor_y - sc(4))
+			# Limbs spread out flat
+			for li in range(4):
+				if _leg_severed[li]:
+					continue
+				var hip: Vector2 = _spine[0] if li < 2 else _spine[2]
+				var side: float = 1.0 if li % 2 == 0 else -1.0
+				_legs[li][0] = hip
+				_legs[li][2] = hip + Vector2(side * sc(20), floor_y + sc(2))
+				_legs[li][1] = (hip + _legs[li][2]) * 0.5
+			# Skull on the ground
+			_skull = _spine[0] + Vector2(_facing * sc(cfg("neck_len", NECK_LEN)), floor_y - sc(2))
+			# After 5 seconds, start standing up
+			if _chain_daze_timer >= CHAIN_DAZE_DURATION:
+				_chain_daze_phase = 2
+				_chain_daze_timer = 0.0
+
+		2:  # STANDING UP — slowly restore to normal standing pose over 2 seconds
+			velocity = Vector2.ZERO
+			var stand_t: float = clampf(_chain_daze_timer / CHAIN_DAZE_STANDUP, 0.0, 1.0)
+			# Lerp spine from flat to upright
+			var body_y: float = -(sc(4.0) + sc(cfg("leg_upper_len", LEG_UPPER_LEN)) + sc(cfg("leg_lower_len", LEG_LOWER_LEN)))
+			var target_spine_0: Vector2 = Vector2(sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
+			var target_spine_1: Vector2 = Vector2(0, body_y)
+			var target_spine_2: Vector2 = Vector2(-sc(cfg("spine_seg_len", SPINE_SEG_LEN)) * _facing, body_y)
+			_spine[0] = _spine[0].lerp(target_spine_0, stand_t * stand_t)
+			_spine[1] = _spine[1].lerp(target_spine_1, stand_t * stand_t)
+			_spine[2] = _spine[2].lerp(target_spine_2, stand_t * stand_t)
+			# Legs lerp to standing pose
+			for li in range(4):
+				if _leg_severed[li]:
+					continue
+				var hip_spine: Vector2 = _spine[0] if li < 2 else _spine[2]
+				var rest: Array = _leg_rest[li]
+				var target_hip: Vector2 = hip_spine + _get_facing_offset(rest[0])
+				var target_knee: Vector2 = hip_spine + _get_facing_offset(rest[1])
+				var target_foot: Vector2 = hip_spine + _get_facing_offset(rest[2])
+				_legs[li][0] = _legs[li][0].lerp(target_hip, stand_t)
+				_legs[li][1] = _legs[li][1].lerp(target_knee, stand_t)
+				_legs[li][2] = _legs[li][2].lerp(target_foot, stand_t)
+			# Skull rises
+			var neck_attach: Vector2 = _spine[0] + Vector2(sc(cfg("neck_len", NECK_LEN)) * 0.3 * _facing, -sc(cfg("neck_len", NECK_LEN)) * 0.7)
+			_skull = _skull.lerp(neck_attach, stand_t)
+			# Done standing
+			if _chain_daze_timer >= CHAIN_DAZE_STANDUP:
+				_leap_cooldown = cfg("leap_cooldown", LEAP_COOLDOWN) * 2.0  # Extra cooldown after yank
+				_change_state(State.CHASE)
+
+
+func _draw_chain_daze_stars() -> void:
+	## Draw sparkly stars circling the monster's head during chain daze.
+	## Stars circle in an elliptical, undulating pattern.
+	if _state != State.CHAIN_DAZE:
+		return
+	if _chain_daze_phase == 0:
+		return  # Don't draw stars while falling
+
+	var head_pos: Vector2 = _skull
+	var star_count: int = 5
+	var orbit_rx: float = sc(18.0)  # Horizontal orbit radius
+	var orbit_ry: float = sc(8.0)   # Vertical orbit radius (elliptical)
+	var speed: float = 3.0          # Orbits per second
+	var font: Font = ThemeDB.fallback_font
+
+	for i in range(star_count):
+		var phase: float = _chain_daze_stars * speed * TAU + i * TAU / star_count
+		# Undulating: vertical oscillation on top of the orbit
+		var undulate: float = sin(_chain_daze_stars * 2.0 + i * 1.5) * sc(3.0)
+		var star_pos: Vector2 = head_pos + Vector2(
+			cos(phase) * orbit_rx,
+			sin(phase) * orbit_ry + undulate - sc(12.0)  # Above head
+		)
+		# Star brightness pulses
+		var brightness: float = 0.7 + 0.3 * sin(_chain_daze_stars * 8.0 + i * 2.0)
+		var star_col := Color(1.0, 1.0, 0.3, brightness)
+		# Draw a 4-pointed star shape
+		var sr: float = sc(3.0) + sin(_chain_daze_stars * 5.0 + i) * sc(1.0)
+		draw_line(star_pos + Vector2(-sr, 0), star_pos + Vector2(sr, 0), star_col, 1.5)
+		draw_line(star_pos + Vector2(0, -sr), star_pos + Vector2(0, sr), star_col, 1.5)
+		# Diagonal spikes (smaller)
+		var sr2: float = sr * 0.6
+		draw_line(star_pos + Vector2(-sr2, -sr2), star_pos + Vector2(sr2, sr2), star_col, 1.0)
+		draw_line(star_pos + Vector2(sr2, -sr2), star_pos + Vector2(-sr2, sr2), star_col, 1.0)
+
+	# Fade stars during standup phase
+	if _chain_daze_phase == 2:
+		pass  # Stars still visible but monster is getting up
 
 
 func _end_leap() -> void:
@@ -5469,6 +5665,7 @@ func _draw() -> void:
 	_draw_legs_subset(near_legs)
 	_draw_neck_head()
 	_draw_blood_particles()
+	_draw_chain_daze_stars()
 	# Chain barrier visualization: candy-striped red circle showing reach limit
 	if _chained and DebugOverlay.should_draw("chain/tether_arc", self):
 		var chain_barrier: Dictionary = get_chain_barrier()
@@ -5760,7 +5957,7 @@ func _draw_debug() -> void:
 		var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
 		var info_pos := Vector2(text_x, -global_position.y + 50)
 		draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
-		var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD"]
+		var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD", "STANDDOWN", "CHAIN_DAZE"]
 		var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 		var dy: int = 0
 		draw_string(font, info_pos + Vector2(0, dy), "State: %s  Facing: %s  Spd: %.0f" % [state_text, "R" if _facing > 0 else "L", _move_speed], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, dbg)
@@ -6005,3 +6202,23 @@ func _draw_debug() -> void:
 			var acount: int = _attachments[point_name].size() if _attachments.has(point_name) else 0
 			if acount > 0:
 				draw_string(font, pos + Vector2(-8, r + 10), "x%d" % acount, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1, 0.8, 0.2))
+
+	# -- Hitboxes --
+	if DebugOverlay.should_draw("hitboxes/monster_parts", self):
+		var hb_colors: Dictionary = {
+			"body": Color(1.0, 0.3, 0.3, 0.4),
+			"head": Color(1.0, 0.8, 0.2, 0.4),
+			"tail": Color(0.6, 0.3, 1.0, 0.4),
+			"eye":  Color(1.0, 0.1, 0.1, 0.6),
+		}
+		for part_name in _hitboxes:
+			var area: Area2D = _hitboxes[part_name]
+			var hpos: Vector2 = area.position
+			var hr: float = 8.0
+			if area.get_child_count() > 0:
+				var shape_node := area.get_child(0) as CollisionShape2D
+				if shape_node and shape_node.shape is CircleShape2D:
+					hr = (shape_node.shape as CircleShape2D).radius
+			var hcol: Color = hb_colors.get(part_name, Color(0.5, 1.0, 0.3, 0.35))
+			draw_arc(hpos, hr, 0, TAU, 16, hcol, 1.5)
+			draw_string(font, hpos + Vector2(-12, -hr - 3), part_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, hcol)

@@ -89,14 +89,16 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 			KEY_ENTER:
 				_execute_selected()
-				get_viewport().set_input_as_handled()
+				if get_viewport():
+					get_viewport().set_input_as_handled()
 			_:
 				# Number keys 1-9 for quick access
 				var num: int = event.keycode - KEY_0
 				if num >= 1 and num <= 9 and num <= MENU_ITEMS.size():
 					_selected_idx = num - 1
 					_execute_selected()
-					get_viewport().set_input_as_handled()
+					if get_viewport():
+						get_viewport().set_input_as_handled()
 
 	if _overlay:
 		_overlay.queue_redraw()
@@ -160,8 +162,14 @@ func _execute_selected() -> void:
 
 
 func _open_test_editor() -> void:
-	## Open the test editor. Close the menu first so they don't overlap.
+	## Open the test editor. If the debug drawer is open, dock it there.
 	close()
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		# Use RCON's _ensure_test_editor which handles docking
+		rcon._ensure_test_editor()
+		return
+	# Fallback: create floating editor
 	if _test_editor == null or not is_instance_valid(_test_editor):
 		var script := load("res://scripts/ui/test_editor.gd")
 		_test_editor = CanvasLayer.new()

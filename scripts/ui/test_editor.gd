@@ -26,6 +26,7 @@ const HANDLE_DRAW  := 7.0    # Drawn handle radius
 
 # -- State ---------------------------------------------------------------------
 var _active := false
+var _docked := false  # True when debug drawer handles rendering; suppresses floating window
 var _mode: Mode = Mode.EDIT
 
 var _test_name: String = ""
@@ -151,6 +152,15 @@ func toggle() -> void:
 		_overlay.visible = _active
 
 
+func _activate_docked() -> void:
+	## Called deferred after _ready when created in docked mode.
+	## Activates the editor without showing the floating window.
+	_active = true
+	visible = true
+	if _overlay:
+		_overlay.visible = true
+
+
 func _process(delta: float) -> void:
 	if not _active:
 		return
@@ -187,9 +197,14 @@ func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 
-	# Picker intercepts all input when open
+	# Picker intercepts all input when open (even when docked)
 	if _picker_open:
 		_input_picker(event)
+		return
+
+	# When docked, the debug drawer handles keyboard/mouse — only process handles
+	if _docked:
+		_input_docked(event)
 		return
 
 	if event is InputEventKey and event.pressed:
@@ -318,6 +333,29 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		else:
 			_update_hover(event.position)
+
+
+func _input_docked(event: InputEvent) -> void:
+	## When docked, only handle world-space handle interactions (drag/hover).
+	## The debug drawer handles all panel UI clicks and keyboard.
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if _is_over_handle(event.position):
+				_try_start_handle_drag(_get_world_pos(event.position))
+				get_viewport().set_input_as_handled()
+		else:
+			if _handle_drag >= 0:
+				_handle_drag = -1
+				get_viewport().set_input_as_handled()
+	elif event is InputEventMouseMotion:
+		if _handle_drag >= 0:
+			_do_handle_drag(_get_world_pos(event.position))
+			get_viewport().set_input_as_handled()
+		else:
+			_update_hover(event.position)
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		if _handle_hover >= 0 and _try_delete_hovered_handle():
+			get_viewport().set_input_as_handled()
 
 
 # -- Edit field keyboard -------------------------------------------------------
@@ -2238,6 +2276,11 @@ func _draw_command_visual(p: Dictionary, dim: float, line_num: String, font: Fon
 
 func _draw_panel() -> void:
 	if not _active:
+		return
+	# When docked, the debug drawer renders the editor content — only draw picker overlay
+	if _docked:
+		if _picker_open:
+			_draw_picker()
 		return
 	if _picker_open:
 		_draw_picker()

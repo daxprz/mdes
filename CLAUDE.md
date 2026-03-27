@@ -39,7 +39,7 @@ Do NOT use tumu when:
 | `scripts/autoload/debug_overlay.gd` | Debug aspect system |
 | `scripts/autoload/debug_aspects.gd` | Registered debug aspects |
 | `scripts/systems/test_runner.gd` | Test execution engine |
-| `scripts/ui/debug_drawer.gd` | Debug config UI + scale slider |
+| `scripts/ui/debug_drawer.gd` | Debug panel with docked test runner + config sliders |
 | `scripts/ui/level_editor.gd` | Level editor with splay scale/rotate widget |
 | `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
 | `scripts/systems/chain.gd` | Chain physics + scaled rendering |
@@ -48,6 +48,10 @@ Do NOT use tumu when:
 | `scripts/systems/monster_config.gd` | Config provider stack (DictProvider, CallableProvider, TimedProvider) |
 | `data/config/monster_defaults.json` | Monster default constants (60+ configurable values) |
 | `docs/design/animation_roadmap.md` | Procedural animation roadmap (momentum, attacks, walls) |
+| `scripts/testing/soccer_dummy.gd` | Soccer ball dummy (rolling physics + SVG texture) |
+| `scripts/effects/tentacle_hitbody.gd` | Collision proxy for damageable tentacles |
+| `scripts/autoload/player_manager.gd` | Player join/leave, controller assignment, press-to-join |
+| `scripts/autoload/profile_manager.gd` | Profile persistence, per-slot class/profile bindings |
 
 ## Conventions
 
