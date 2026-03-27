@@ -5680,11 +5680,8 @@ func _draw() -> void:
 				draw_arc(center_local, radius, a1, a2, 4, col, 3.0)
 
 	# Selection indicator: pulsing cyan ring when TAB-selected
-	if PlayerHUD.debug_selected_enemy == self and DebugOverlay.should_draw("state_info/selection_indicator", self):
-		var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
-		var sel_col := Color(0, 0.9, 1.0, pulse)
-		draw_arc(_spine[1], sc(30.0), 0, TAU, 24, sel_col, 2.0)
-		draw_string(ThemeDB.fallback_font, _spine[1] + Vector2(-sc(20), -sc(35)), "SELECTED", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, sel_col)
+	# Selection indicator is now drawn generically by the debug drawer's world overlay
+	# for ALL entity types (monsters, bats, players, etc.)
 	if DebugOverlay.should_draw("state_info/sleep_standdown", self):
 		if _asleep:
 			var zzz_pos: Vector2 = _skull + Vector2(10, -20)
@@ -5950,13 +5947,17 @@ func _draw_debug() -> void:
 			draw_string(font, _legs[li][2] + Vector2(4, 20), planted_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, col)
 
 	# -- State info text panel --
-	if DebugOverlay.should_draw("state_info/state_text_panel", self):
+	# Show for selected entity, or for all entities if explicitly enabled
+	var is_selected: bool = (PlayerHUD.debug_selected_enemy == self)
+	if DebugOverlay.should_draw("state_info/state_text_panel", self) and (is_selected or not is_instance_valid(PlayerHUD.debug_selected_enemy)):
 		if floor_y == 0.0:
 			floor_y = _raycast_floor(Vector2(0, _spine[1].y))
 		var screen_x: float = global_position.x
 		var text_x: float = -global_position.x + 200 if screen_x > 960 else -global_position.x + 1700
 		var info_pos := Vector2(text_x, -global_position.y + 50)
-		draw_line(info_pos + Vector2(0, 30), _spine[1], Color(0.5, 0.5, 0.5, 0.15), 1.0)
+		# Line from text panel to the entity — use selection color if selected
+		var line_col := Color(0, 0.9, 1.0, 0.25) if is_selected else Color(0.5, 0.5, 0.5, 0.15)
+		draw_line(info_pos + Vector2(0, 30), _spine[1], line_col, 1.5 if is_selected else 1.0)
 		var state_names := ["PATROL", "CHASE", "BITE", "SWIPE", "TAIL", "LUNGE", "SPRINT", "HOP-UP", "GRAB", "LEAP:PLAN", "LEAP:WIND", "LEAP:AIR", "LEAP:SLASH", "LEAP:THRASH", "PRECOG", "->BIPED", "->QUAD", "HURT", "DEAD", "STANDDOWN", "CHAIN_DAZE"]
 		var state_text: String = state_names[_state] if _state < state_names.size() else "?"
 		var dy: int = 0

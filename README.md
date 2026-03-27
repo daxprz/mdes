@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.19
+**Generic entity selection, config panel overhaul, debug click fix**
+
+- **Generic entity selection**: Any entity (monsters, bats, players, dummies) can be selected from the Config panel. Pulsing cyan circle with 1-indexed number drawn in world space for any selected entity
+- **World-space state info panel**: Selected entity shows a floating info box with type, ID, position, HP, state, velocity, scale, chain status — with a line pointing to it. Works for all entity types
+- **Config panel redesign**: Search filter at top, full entity list (all types, no cap), then type-adaptive config — monsters get cfg() sliders, other entities show their script properties
+- **Entity list shows ID + type**: Each entity displays its entity_id and script type name side by side with 1-indexed number for visual correlation
+- **Debug aspect tree click fix**: Click/hover detection was using hardcoded `HEADER_HEIGHT` (160px) instead of the dynamically calculated tree start position. Now syncs correctly — clicking V/T checkboxes always hits the right row
+- **Selection indicator generified**: Removed monster-specific "SELECTED" text from quadruped_monster.gd. All selection rendering handled by a generic world-space overlay in the debug drawer
+
 ### v0.10.18
 **Docked test editor, chain daze, soccer ball dummy, balloon explosions, press-to-join**
 

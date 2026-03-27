@@ -311,6 +311,15 @@ Saved on `Ctrl+S`. Loaded on game start.
 - World-space overlay (handles, zones) still renders independently
 - RCON `run`/`suite` commands auto-dock when debug drawer is open
 
+### Story 7: Generic Entity Selection & Config Panel — COMPLETE (v0.10.19)
+- Config panel reorganized: search filter, entity list, config sliders
+- Entity list shows ALL entities (enemies, players, dummies) with 1-indexed numbers, ID, and type
+- Click any entity to select it — works for monsters, bats, players, dummies
+- Generic world-space selection overlay: pulsing circle + number + state info panel with line pointing to entity
+- Selection indicator removed from quadruped_monster.gd — now handled generically by debug drawer
+- Config adapts to entity type: monsters show cfg() sliders, other entities show script properties
+- Debug aspect tree click offset bug fixed (was using hardcoded header height)
+
 ## Implementation Order
 
 1. **Story 1** — Core infrastructure (can test via RCON immediately)

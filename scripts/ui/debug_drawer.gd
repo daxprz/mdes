@@ -7,7 +7,7 @@ extends CanvasLayer
 const SLIDE_SPEED := 1200.0
 const ROW_HEIGHT := 18.0
 const INDENT := 20.0
-const HEADER_HEIGHT := 160.0  # Entity filter + global toggle + scale control area
+var _tree_y_start: float = 160.0  # Dynamically set each frame when drawing the debug section
 const CHECKBOX_SIZE := 12.0
 const GROUP_ARROW_SIZE := 8.0
 var SCALE_PRESETS: Array[float] = [0.25, 0.5, 1.0, 2.0, 4.0]
@@ -25,6 +25,8 @@ var _config_dragging_key: String = ""  # Which config slider is being dragged
 var _config_keys: Array[String] = []   # Sorted list of configurable keys
 var _config_slider_provider: Variant = null  # Single DictProvider for all slider edits
 var _config_slider_data: Dictionary = {}     # The data dict inside the provider
+var _config_filter_text: String = ""         # Search filter for config keys
+var _config_filter_focused: bool = false     # Whether the config filter field has focus
 
 # Test runner section state — sub-section framework
 var _test_scroll_offset: int = 0
@@ -76,6 +78,8 @@ const SCALE_MIN := 0.1
 const SCALE_MAX := 8.0
 
 
+var _world_overlay: Node2D = null  # World-space overlay for entity selection indicators
+
 func _ready() -> void:
 	layer = 109  # Below console (110), above game
 	_panel_x = -_panel_width
@@ -85,6 +89,19 @@ func _ready() -> void:
 	_panel.draw.connect(_draw_panel)
 	_panel.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(_panel)
+	# Deferred: add world-space overlay to the scene for selection indicators
+	call_deferred("_init_world_overlay")
+
+
+func _init_world_overlay() -> void:
+	var scene := get_tree().current_scene
+	if not scene:
+		return
+	_world_overlay = Node2D.new()
+	_world_overlay.name = "DebugSelectionOverlay"
+	_world_overlay.z_index = 40
+	scene.add_child(_world_overlay)
+	_world_overlay.draw.connect(_draw_selection_overlay)
 
 
 func toggle() -> void:
@@ -230,6 +247,9 @@ func _process(delta: float) -> void:
 	if _active:
 		_cursor_blink += delta
 		_panel.queue_redraw()
+	# Redraw world overlay for selection indicators (always, even when drawer closed)
+	if _world_overlay and is_instance_valid(_world_overlay):
+		_world_overlay.queue_redraw()
 
 
 func _input(event: InputEvent) -> void:
@@ -279,12 +299,18 @@ func _input(event: InputEvent) -> void:
 			_handle_id_input(event)
 			get_viewport().set_input_as_handled()
 			return
+		if _config_filter_focused:
+			_handle_text_input(event, "_config_filter_text")
+			_config_keys.clear()  # Force rebuild when filter changes
+			get_viewport().set_input_as_handled()
+			return
 
 		# Escape closes drawer or unfocuses
 		if event.keycode == KEY_ESCAPE:
-			if _filter_focused or _id_filter_focused:
+			if _filter_focused or _id_filter_focused or _config_filter_focused:
 				_filter_focused = false
 				_id_filter_focused = false
+				_config_filter_focused = false
 			else:
 				toggle()
 			get_viewport().set_input_as_handled()
@@ -480,8 +506,8 @@ func _handle_click(lx: float, my: float) -> void:
 	_filter_focused = false
 	_id_filter_focused = false
 
-	# Aspect tree area
-	var tree_y_start: float = HEADER_HEIGHT
+	# Aspect tree area — use the dynamically calculated tree start position
+	var tree_y_start: float = _tree_y_start
 	var row_idx: int = int((my - tree_y_start) / ROW_HEIGHT) + _scroll_offset
 	if row_idx < 0 or row_idx >= _visible_rows.size():
 		return
@@ -549,8 +575,17 @@ func _handle_type_filter_click(lx: float) -> void:
 
 func _get_selected_monster() -> Node2D:
 	## Returns the TAB-selected enemy if it has creature_scale, else null.
+	## Used for monster-specific features (scale slider, config stack).
 	var sel: Node2D = PlayerHUD.debug_selected_enemy
 	if is_instance_valid(sel) and "creature_scale" in sel:
+		return sel
+	return null
+
+
+func _get_selected_entity() -> Node2D:
+	## Returns the TAB/click-selected enemy, any type. Null if none.
+	var sel: Node2D = PlayerHUD.debug_selected_enemy
+	if is_instance_valid(sel):
 		return sel
 	return null
 
@@ -868,20 +903,63 @@ func _handle_sub_resize_drag(my: float) -> void:
 
 
 func _handle_config_click(lx: float, my: float) -> void:
-	## Click in the config section — start slider drag.
+	## Click in the config section — filter, entity list, or slider drag.
+	var pw: float = _content_width
+	var y: float = 8.0
+
+	# Title
+	y += 22
+
+	# Filter field (y to y+20)
+	if my >= y and my < y + 20:
+		_config_filter_focused = true
+		return
+	y += 24
+
+	# Entity list — same combined list as drawing
+	var all_entities_click: Array = []
+	all_entities_click.append_array(get_tree().get_nodes_in_group("enemies"))
+	all_entities_click.append_array(get_tree().get_nodes_in_group("players"))
+	all_entities_click.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	var seen_click: Dictionary = {}
+	var entities_click: Array = []
+	for e in all_entities_click:
+		if not seen_click.has(e.get_instance_id()):
+			seen_click[e.get_instance_id()] = true
+			entities_click.append(e)
+	y += 2  # separator
+	y += 16  # "Entities" header
+	var entity_row_h: float = 16.0
+	for ei in range(entities_click.size()):
+		if my >= y and my < y + entity_row_h:
+			# Click on an entity — select it directly
+			PlayerHUD.debug_select_entity(entities_click[ei])
+			# Auto-enable state_info
+			DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
+			DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
+			_config_keys.clear()
+			_config_filter_focused = false
+			return
+		y += entity_row_h
+	if entities_click.is_empty():
+		y += entity_row_h
+	y += 8  # gap + separator
+
+	_config_filter_focused = false
+
+	# Entity info header (type + props line)
+	y += 16
+
+	# Slider area — only for monsters with cfg()
 	var monster: Node2D = _get_selected_monster()
 	if not monster or _config_keys.is_empty():
 		return
 
-	var y: float = 30.0  # After header
 	var slider_h: float = 16.0
 	var slider_gap: float = 2.0
-	var pw: float = _content_width
-
 	var row: int = int((my - y) / (slider_h + slider_gap)) + _config_scroll_offset
 	if row >= 0 and row < _config_keys.size():
 		var key: String = _config_keys[row]
-		# Check if click is in the slider area
 		if lx > pw * 0.47 and lx < pw * 0.82:
 			_config_dragging_key = key
 			_handle_config_drag_at(lx, monster)
@@ -921,7 +999,7 @@ func _handle_config_drag_at(lx: float, monster: Node2D) -> void:
 
 
 func _update_hover(my: float) -> void:
-	var tree_y_start: float = HEADER_HEIGHT
+	var tree_y_start: float = _tree_y_start
 	var row_idx: int = int((my - tree_y_start) / ROW_HEIGHT) + _scroll_offset
 	_hover_row = row_idx
 
@@ -1097,6 +1175,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 	if _visible_rows.is_empty():
 		_rebuild_visible_rows()
 
+	_tree_y_start = y  # Store for click/hover detection
 	var tree_y_start: float = y
 	var max_visible: int = int((ph - tree_y_start - 8) / ROW_HEIGHT)
 	var end_idx: int = mini(_scroll_offset + max_visible, _visible_rows.size())
@@ -1549,33 +1628,135 @@ func _test_cmd_color(cmd: String) -> Color:
 
 
 func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
-	## Config sliders for the TAB-selected monster's cfg() values.
+	## Entity config: search filter, entity list, config sliders.
 	var x: float = content_x
 	var y: float = 8.0
 	var pw: float = _content_width
 
-	_panel.draw_string(font, Vector2(x, y + 14), "Monster Config", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.7, 0.3))
+	_panel.draw_string(font, Vector2(x, y + 14), "Entity Config", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.7, 0.3))
 	y += 22
 
-	# Find the selected monster
-	var monster: Node2D = _get_selected_monster()
-	if not monster:
-		_panel.draw_string(font, Vector2(x, y + 14), "TAB-select a monster first", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
+	# -- Search filter field --
+	var cfg_filter_bg: Color = Color(0.12, 0.12, 0.16) if _config_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y, pw - 16, 20), cfg_filter_bg)
+	var cfg_filter_display: String = _config_filter_text
+	if _config_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		cfg_filter_display += "_"
+	if cfg_filter_display == "" and not _config_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "Filter config...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), cfg_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.8, 0.8, 0.8))
+	y += 24
+
+	# -- Entity list (enemies + players + dummies — anything selectable) --
+	var all_entities: Array = []
+	all_entities.append_array(get_tree().get_nodes_in_group("enemies"))
+	all_entities.append_array(get_tree().get_nodes_in_group("players"))
+	all_entities.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	# Deduplicate (some may be in multiple groups)
+	var seen: Dictionary = {}
+	var entities: Array = []
+	for e in all_entities:
+		if not seen.has(e.get_instance_id()):
+			seen[e.get_instance_id()] = true
+			entities.append(e)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.2, 0.3, 0.4), 1.0)
+	y += 2
+	_panel.draw_string(font, Vector2(x, y + 12), "Entities (%d)" % entities.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
+	y += 16
+
+	var entity_row_h: float = 16.0
+	var selected_entity: Node2D = _get_selected_entity()
+	for ei in range(entities.size()):
+		var e: Node2D = entities[ei]
+		var is_sel: bool = (e == selected_entity)
+		# Entity ID
+		var eid: String = ""
+		if "entity_id" in e and not str(e.entity_id).is_empty():
+			eid = str(e.entity_id)
+		else:
+			eid = e.name
+		# Entity type
+		var etype: String = "unknown"
+		if e.get_script():
+			var script_path: String = e.get_script().resource_path
+			var fname: String = script_path.get_file().get_basename()
+			etype = fname  # e.g. "quadruped_monster", "skeleton", "gummy_bear"
+		if is_sel:
+			_panel.draw_rect(Rect2(x, y, pw - 16, entity_row_h - 2), Color(0.15, 0.25, 0.15))
+		var id_col := Color(0.5, 1.0, 0.5) if is_sel else Color(0.7, 0.7, 0.7)
+		var type_col := Color(0.4, 0.8, 0.4) if is_sel else Color(0.5, 0.5, 0.5)
+		var num_col := Color(0.3, 0.9, 1.0) if is_sel else Color(0.4, 0.5, 0.6)
+		# 1-indexed number for visual correlation with the in-world indicator
+		_panel.draw_string(font, Vector2(x + 2, y + 12), "%d" % (ei + 1), HORIZONTAL_ALIGNMENT_LEFT, 14, 9, num_col)
+		_panel.draw_string(font, Vector2(x + 18, y + 12), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 9, id_col)
+		_panel.draw_string(font, Vector2(x + pw * 0.48, y + 12), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, type_col)
+		y += entity_row_h
+
+	if entities.is_empty():
+		_panel.draw_string(font, Vector2(x + 6, y + 12), "(no entities in scene)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		y += entity_row_h
+
+	y += 4
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.2, 0.3, 0.4), 1.0)
+	y += 4
+
+	# -- Config sliders --
+	if not selected_entity:
+		_panel.draw_string(font, Vector2(x, y + 14), "Click an entity above to configure", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
 		return
 
+	# Show entity info header
+	var has_cfg: bool = selected_entity.has_method("cfg")
+	var entity_type_label: String = ""
+	if selected_entity.get_script():
+		entity_type_label = selected_entity.get_script().resource_path.get_file().get_basename()
+	_panel.draw_string(font, Vector2(x, y + 12), entity_type_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 9, Color(0.9, 0.7, 0.3))
+
+	# Show basic properties for any entity
+	var props_text: String = ""
+	if "health" in selected_entity:
+		props_text += "HP:%d " % selected_entity.health
+	if "creature_scale" in selected_entity:
+		props_text += "scale:%.1f " % selected_entity.creature_scale
+	if "_chained" in selected_entity and selected_entity._chained:
+		props_text += "[chained] "
+	if "_state" in selected_entity:
+		props_text += "state:%d" % selected_entity._state
+	if not props_text.is_empty():
+		_panel.draw_string(font, Vector2(x + pw * 0.5, y + 12), props_text, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, Color(0.6, 0.6, 0.6))
+	y += 16
+
+	# Only show config sliders for entities that have cfg() (monsters)
+	if not has_cfg:
+		# For non-monster entities, show their exported/public properties
+		_draw_entity_properties(x, y, pw, ph, font, selected_entity)
+		return
+
+	var monster: Node2D = selected_entity
 	# Build sorted config key list (once, or when monster changes)
 	if _config_keys.is_empty():
 		_rebuild_config_keys(monster)
+
+	# Filter config keys
+	var filtered_keys: Array[String] = []
+	if _config_filter_text.is_empty():
+		filtered_keys.assign(_config_keys)
+	else:
+		var ft: String = _config_filter_text.to_lower()
+		for key in _config_keys:
+			if key.begins_with("# ") or ft in key.to_lower():
+				filtered_keys.append(key)
 
 	# Draw sliders
 	var slider_h: float = 16.0
 	var slider_gap: float = 2.0
 	var visible_count: int = int((ph - y - 10) / (slider_h + slider_gap))
-	var max_scroll: int = maxi(0, _config_keys.size() - visible_count)
+	var max_scroll: int = maxi(0, filtered_keys.size() - visible_count)
 	_config_scroll_offset = clampi(_config_scroll_offset, 0, max_scroll)
 
-	for i in range(_config_scroll_offset, mini(_config_scroll_offset + visible_count, _config_keys.size())):
-		var key: String = _config_keys[i]
+	for i in range(_config_scroll_offset, mini(_config_scroll_offset + visible_count, filtered_keys.size())):
+		var key: String = filtered_keys[i]
 
 		# Group header
 		if key.begins_with("# "):
@@ -1613,11 +1794,141 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 		y += slider_h + slider_gap
 
 	# Scrollbar
-	if _config_keys.size() > visible_count:
+	if filtered_keys.size() > visible_count:
 		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
-		var bar_h: float = maxf(20.0, ph * float(visible_count) / float(_config_keys.size()))
-		var bar_y: float = 30.0 + pct * (ph - 30.0 - bar_h)
+		var bar_h: float = maxf(20.0, ph * float(visible_count) / float(filtered_keys.size()))
+		var bar_y: float = y + pct * (ph - y - bar_h)
 		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+
+
+func _get_all_entities() -> Array:
+	## Returns a deduplicated list of all entities (enemies + players + dummies).
+	var all: Array = []
+	all.append_array(get_tree().get_nodes_in_group("enemies"))
+	all.append_array(get_tree().get_nodes_in_group("players"))
+	all.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	var seen: Dictionary = {}
+	var result: Array = []
+	for e in all:
+		if is_instance_valid(e) and not seen.has(e.get_instance_id()):
+			seen[e.get_instance_id()] = true
+			result.append(e)
+	return result
+
+
+func _draw_selection_overlay() -> void:
+	## Draw selection indicator (pulsing circle + number) on the selected entity.
+	## This is world-space — drawn by a Node2D child of the scene.
+	if not DebugOverlay.global_enabled:
+		return
+	var sel: Node2D = _get_selected_entity()
+	if not sel:
+		return
+	if not DebugOverlay.should_draw("state_info/selection_indicator", sel):
+		return
+
+	var font: Font = ThemeDB.fallback_font
+	var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 200.0)
+	var sel_col := Color(0, 0.9, 1.0, pulse)
+	var pos: Vector2 = sel.global_position
+
+	# Pulsing selection ring
+	_world_overlay.draw_arc(pos, 24.0, 0, TAU, 24, sel_col, 2.0)
+
+	# 1-indexed number
+	var entities: Array = _get_all_entities()
+	var idx: int = entities.find(sel)
+	if idx >= 0:
+		_world_overlay.draw_string(font, pos + Vector2(-5, -28), "%d" % (idx + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, sel_col)
+
+	# State info panel — draw entity properties in world space
+	if not DebugOverlay.should_draw("state_info/state_text_panel", sel):
+		return
+
+	# Position the info panel to the left or right of the entity
+	var screen_x: float = pos.x
+	var text_x: float = pos.x - 250 if screen_x > 960 else pos.x + 80
+	var info_pos := Vector2(text_x, pos.y - 80)
+
+	# Line from panel to entity
+	_world_overlay.draw_line(info_pos + Vector2(0, 14), pos, Color(0, 0.9, 1.0, 0.2), 1.5)
+
+	# Background
+	_world_overlay.draw_rect(Rect2(info_pos.x - 4, info_pos.y - 4, 200, 100), Color(0.05, 0.05, 0.08, 0.8))
+
+	var dy: float = 0
+	var line_h: float = 12.0
+	var label_col := Color(0.6, 0.6, 0.6)
+	var val_col := Color(0.8, 0.9, 0.8)
+
+	# Entity type
+	var etype: String = ""
+	if sel.get_script():
+		etype = sel.get_script().resource_path.get_file().get_basename()
+	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), etype, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3))
+	dy += line_h
+
+	# Entity ID
+	var eid: String = sel.name
+	if "entity_id" in sel and not str(sel.entity_id).is_empty():
+		eid = str(sel.entity_id)
+	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "id: " + eid, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+	dy += line_h
+
+	# Position
+	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "pos: (%.0f, %.0f)" % [pos.x, pos.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+	dy += line_h
+
+	# Common properties
+	if "health" in sel:
+		var max_hp: String = "/%d" % sel.max_health if "max_health" in sel else ""
+		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "hp: %d%s" % [sel.health, max_hp], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		dy += line_h
+	if "_state" in sel:
+		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "state: %d" % sel._state, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		dy += line_h
+	if "velocity" in sel:
+		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "vel: (%.0f, %.0f)" % [sel.velocity.x, sel.velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		dy += line_h
+	if "creature_scale" in sel:
+		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "scale: %.2f" % sel.creature_scale, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		dy += line_h
+	if "_chained" in sel and sel._chained:
+		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "[CHAINED]", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.5, 0.2))
+		dy += line_h
+
+
+func _draw_entity_properties(x: float, y: float, pw: float, ph: float, font: Font, entity: Node2D) -> void:
+	## Draw readable properties for non-monster entities (bats, skeletons, etc.)
+	var prop_h: float = 14.0
+	var props: Array[Array] = []  # [[key, value_str], ...]
+
+	# Gather interesting properties from the entity
+	for prop in entity.get_property_list():
+		var pname: String = prop["name"]
+		# Skip internal/private and boring properties
+		if pname.begins_with("_") or pname in ["script", "process_mode", "process_priority", "editor_description"]:
+			continue
+		if prop["usage"] & PROPERTY_USAGE_SCRIPT_VARIABLE:
+			var val = entity.get(pname)
+			if val == null:
+				continue
+			var val_str: String = str(val)
+			if val_str.length() > 40:
+				val_str = val_str.substr(0, 37) + "..."
+			props.append([pname, val_str])
+
+	if props.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 12), "(no configurable properties)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+
+	var visible_count: int = int((ph - y - 10) / prop_h)
+	for i in range(mini(visible_count, props.size())):
+		var key: String = props[i][0]
+		var val: String = props[i][1]
+		_panel.draw_string(font, Vector2(x + 4, y + 10), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.45, 8, Color(0.7, 0.7, 0.7))
+		_panel.draw_string(font, Vector2(x + pw * 0.48, y + 10), val, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 8, Color(0.5, 0.8, 0.5))
+		y += prop_h
 
 
 func _rebuild_config_keys(_monster: Node2D) -> void:

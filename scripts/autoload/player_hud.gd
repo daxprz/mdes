@@ -773,6 +773,33 @@ func _debug_cycle_enemy() -> void:
 		debug_selected_enemy = null
 
 
+func debug_select_enemy_by_index(idx: int) -> void:
+	## Directly select the enemy at the given index in the enemies group.
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	if idx < 0 or idx >= enemies.size():
+		debug_selected_enemy = null
+		_debug_enemy_index = -1
+		return
+	_debug_enemy_index = idx
+	debug_selected_enemy = enemies[idx]
+
+
+func debug_select_entity(entity: Node2D) -> void:
+	## Directly select any entity (enemy, player, dummy, etc.)
+	debug_selected_enemy = entity
+	# Update the enemy index if this entity is in the enemies group
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	_debug_enemy_index = enemies.find(entity)
+
+
+func debug_get_selected_index() -> int:
+	## Returns the 0-based index of the currently selected enemy, or -1.
+	if not is_instance_valid(debug_selected_enemy):
+		return -1
+	var enemies: Array = get_tree().get_nodes_in_group("enemies")
+	return enemies.find(debug_selected_enemy)
+
+
 func _get_device_from_event(event: InputEvent) -> int:
 	if event is InputEventKey:
 		return -1
