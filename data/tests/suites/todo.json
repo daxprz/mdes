@@ -3,6 +3,5 @@
 	"description": "Tests that currently fail — active work items",
 	"gate": false,
 	"tests": [
-		"leap_floor_to_P4"
 	]
 }

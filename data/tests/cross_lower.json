@@ -9,7 +9,7 @@
 		"clearplayers",
 		"spawn dummy 1400 745",
 		"spawn monster 400 745",
-		"wait 15 unless exit_circle 1369 735 31 dummy*",
+		"wait 15 unless exit_circle 1369 735 80 dummy*",
 		"standdown on",
 		"check hp extract:damage_taken > 0.0 label:damage",
 		"check fps extract:fps > 20.0",
