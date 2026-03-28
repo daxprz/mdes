@@ -453,6 +453,9 @@ func _execute(command: String) -> String:
 		"chaindump":
 			return _cmd_chaindump()
 
+		"mocap":
+			return _cmd_mocap(parts)
+
 		"chain":
 			return _cmd_chain(parts)
 
@@ -1272,6 +1275,62 @@ func _cmd_splay(parts: PackedStringArray) -> String:
 
 		_:
 			return "ERR: unknown splay subcommand '%s'. Try: list, spawn, clear, status" % subcmd
+
+
+func _cmd_mocap(parts: Array) -> String:
+	## Mocap bridge commands: connect, disconnect, status
+	var subcmd: String = parts[1] if parts.size() > 1 else "status"
+	var client: Node = _get_or_create_mocap_client()
+	match subcmd:
+		"connect":
+			var port: int = int(parts[2]) if parts.size() > 2 else 7777
+			return client.connect_to_bridge(port)
+		"disconnect":
+			return client.disconnect_bridge()
+		"calibrate":
+			return client.start_calibration()
+		"panel":
+			return client.toggle_config_panel()
+		"reset":
+			client._reset_scene()
+			return "OK: mocap scene reset"
+		"status":
+			return client.get_status()
+		"set":
+			# mocap set <key> <value> — adjust config
+			if parts.size() < 4:
+				return "ERR: usage: mocap set <key> <value>. Keys: angle, smooth, xscale, yscale, depth, armscale"
+			var key: String = parts[2]
+			var val: float = float(parts[3])
+			match key:
+				"angle": client.cfg_stance_angle = val
+				"smooth": client.cfg_smooth_weight = clampf(val, 0.01, 1.0)
+				"xscale": client.cfg_x_scale = val
+				"yscale": client.cfg_y_scale = val
+				"depth": client.cfg_depth_blend = val
+				"armscale": client.cfg_arm_scale = val
+				_: return "ERR: unknown key '%s'" % key
+			return "OK: mocap %s = %.2f" % [key, val]
+		"get":
+			return "angle=%.1f smooth=%.2f xscale=%.2f yscale=%.2f depth=%.2f armscale=%.2f" % [
+				client.cfg_stance_angle, client.cfg_smooth_weight,
+				client.cfg_x_scale, client.cfg_y_scale,
+				client.cfg_depth_blend, client.cfg_arm_scale]
+		_:
+			return "ERR: unknown mocap subcommand '%s'. Try: connect, disconnect, calibrate, set, get, status" % subcmd
+
+
+var _mocap_client: Node = null
+
+func _get_or_create_mocap_client() -> Node:
+	if _mocap_client and is_instance_valid(_mocap_client):
+		return _mocap_client
+	var script: GDScript = load("res://scripts/systems/mocap_client.gd")
+	_mocap_client = Node.new()
+	_mocap_client.set_script(script)
+	_mocap_client.name = "MocapClient"
+	add_child(_mocap_client)
+	return _mocap_client
 
 
 func _cmd_chaindump() -> String:

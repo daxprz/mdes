@@ -63,6 +63,10 @@ func _register_all() -> void:
 	r.call("monster/blend", "Movement blend: facing turns, speed ramps, landing recovery")
 	r.call("monster/player_input", "Player controller input: direction, attacks, state")
 
+	# -- Input Debug --
+	r.call("input/mouse_clicks", "Log mouse click positions and targets")
+	r.call("input/mouse_motion", "Log mouse motion during drag (verbose)")
+
 	# -- Factions --
 	r.call("factions/labels", "Faction label above each entity")
 

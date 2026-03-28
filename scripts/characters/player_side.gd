@@ -2262,6 +2262,19 @@ func _attack_balloonist() -> void:
 	dart.global_position = global_position + aim * 12.0
 	get_parent().add_child(dart)
 
+	# Limit balloons on screen to 20 — pop the oldest when exceeding
+	const MAX_BALLOONS := 20
+	var all_darts: Array = get_tree().get_nodes_in_group("balloon_darts")
+	while all_darts.size() > MAX_BALLOONS:
+		var oldest: Node2D = all_darts[0]
+		if oldest.has_method("_spawn_pop_particles"):
+			oldest._spawn_pop_particles()
+		if oldest.has_method("_detach_and_free"):
+			oldest._detach_and_free()
+		else:
+			oldest.queue_free()
+		all_darts.remove_at(0)
+
 
 func _special_balloonist_burst() -> void:
 	# Pop all active balloons for AoE damage around each

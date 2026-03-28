@@ -19,6 +19,12 @@ const ATTACK_BUFFER_WINDOW := 0.15
 # Jump intent
 var _jump_requested: bool = false
 
+# Combat stance (L2 held = rear up on haunches, front legs free)
+var _combat_stance: bool = false
+var _combat_stance_blend: float = 0.0  # 0=quadruped, 1=fully reared
+const COMBAT_STANCE_RISE_SPEED := 4.0   # How fast we rear up
+const COMBAT_STANCE_DROP_SPEED := 6.0   # How fast we drop back down
+
 # Leap aiming (hold L1 to charge, stick to aim, release to leap)
 var _leap_charging: bool = false
 var _leap_charge_time: float = 0.0
@@ -81,6 +87,63 @@ func update(monster: CharacterBody2D, delta: float) -> void:
 		monster._head_look_pos = monster.global_position + right_stick.normalized() * aim_range
 	else:
 		monster._head_look_pos = Vector2.ZERO  # Disable override — head returns to neutral
+
+	# -- Combat stance (L2 held = rear up on haunches, 45-degree body) --
+	var l2_pressed: bool = false
+	if device_id >= 0:
+		l2_pressed = Input.get_joy_axis(device_id, JOY_AXIS_TRIGGER_LEFT) > 0.3
+	else:
+		l2_pressed = Input.is_key_pressed(KEY_TAB)
+
+	var can_stance: bool = monster._state in [
+		monster.State.PATROL, monster.State.CHASE, monster.State.STANDDOWN
+	]
+
+	if l2_pressed and can_stance:
+		_combat_stance = true
+		_combat_stance_blend = minf(_combat_stance_blend + delta * COMBAT_STANCE_RISE_SPEED, 1.0)
+		# Slow movement while reared
+		monster._target_move_speed *= 0.3
+	elif _combat_stance:
+		_combat_stance_blend -= delta * COMBAT_STANCE_DROP_SPEED
+		if _combat_stance_blend <= 0.0:
+			_combat_stance_blend = 0.0
+			_combat_stance = false
+
+	# Apply combat stance: butt stays planted, shoulders tilt UP and BACK (~45 deg)
+	# Mocap data: body angle goes from ~0 to -50 degrees (hip→shoulder vector)
+	# In monster coords: spine[2] (rear) stays, spine[0] (front) rises and pulls back
+	if _combat_stance_blend > 0.0:
+		var t: float = _combat_stance_blend
+		# Rear stays planted — spine[2] unchanged
+		# Front rises UP (strong) and pulls BACK from facing direction (tilts body)
+		monster._spine[0].y -= monster.sc(50.0) * t
+		monster._spine[0].x -= monster._facing * monster.sc(20.0) * t  # Pull back
+		# Mid-spine follows partially
+		monster._spine[1].y -= monster.sc(25.0) * t
+		monster._spine[1].x -= monster._facing * monster.sc(10.0) * t
+
+		# Front legs: unplant and hold as "arms ready"
+		for li in [0, 1]:
+			if monster._leg_severed[li]:
+				continue
+			monster._foot_planted[li] = false
+			# Arms hang forward from the raised shoulders, claws at ready
+			var shoulder: Vector2 = monster._spine[0]
+			var arm_hang := shoulder + Vector2(monster._facing * monster.sc(20.0), monster.sc(15.0))
+			var claw_ready := arm_hang + Vector2(monster._facing * monster.sc(10.0), monster.sc(5.0))
+			monster._legs[li][2] = monster._legs[li][2].lerp(claw_ready, t * 6.0 * delta)
+			monster._legs[li][1] = monster._legs[li][1].lerp(
+				(monster._legs[li][0] + monster._legs[li][2]) * 0.5, t * 6.0 * delta)
+
+		# Set posture so gait system skips front leg IK
+		monster._posture = monster.Posture.BIPEDAL
+		monster._posture_blend = t
+	elif monster._posture == monster.Posture.BIPEDAL and not can_stance:
+		pass  # Let the attack state handle posture
+	elif monster._posture == monster.Posture.BIPEDAL and _combat_stance_blend <= 0.0:
+		monster._posture = monster.Posture.QUADRUPED
+		monster._posture_blend = 0.0
 
 	# -- Jump (not in ball mode — Cross in ball triggers ball-leap below) --
 	if monster._state != monster.State.BALL:
@@ -294,7 +357,12 @@ func _try_attack(monster: CharacterBody2D, attack_name: String) -> bool:
 			return true
 		"swipe":
 			monster._attack_timer = 0.0
-			monster._change_state(monster.State.ATTACK_SWIPE)
+			if _combat_stance:
+				# Already reared — go straight to swipe
+				monster._change_state(monster.State.ATTACK_SWIPE)
+			else:
+				# Need to rear up first
+				monster._change_state(monster.State.TRANSITION_BIPEDAL)
 			monster._attack_cooldown = monster.cfg("attack_cooldown", monster.ATTACK_COOLDOWN)
 			return true
 		"tail":

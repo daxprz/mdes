@@ -2505,46 +2505,114 @@ func _do_bite(delta: float) -> void:
 
 
 func _do_swipe(delta: float) -> void:
+	## Two-arm alternating swipe — derived from mocap takes 010-013.
+	## Monster is reared up (butt down, shoulders up at ~45 degrees).
+	## Left arm swipes across while body tilts, then right arm follows.
+	##
+	## From mocap (take_010 frames 63-94):
+	##   Body angle: 0 → -50 degrees (shoulder tilts back from hip pivot)
+	##   Left arm: sweeps from front (+0.35) to far behind (-0.52) during tilt
+	##   Right arm: sweeps from behind (-0.34) to forward (-0.03) after left
+	##   Then body returns upright
 	_attack_timer += delta
-	velocity.x = 0
-	var swipe_leg: int = 0 if not _leg_severed[0] else 1
 
-	# Phase timings (configurable)
-	var coil_t: float = cfg("swipe_coil", 0.2)       # Shoulder coil — body leans away
-	var raise_t: float = coil_t + cfg("swipe_raise", 0.15)  # Leg raises high
-	var strike_t: float = raise_t + cfg("swipe_strike", 0.15) # Claw arcs down
-	var follow_t: float = strike_t + 0.1               # Follow-through
-	var recover_t: float = follow_t + cfg("swipe_recover", 0.2)
+	# Phase timings: left swipe → right swipe → recover
+	var left_coil: float = 0.2
+	var left_strike: float = left_coil + 0.25
+	var pause: float = left_strike + 0.1
+	var right_coil: float = pause + 0.15
+	var right_strike: float = right_coil + 0.25
+	var recover_t: float = right_strike + 0.3
 
-	if _attack_timer < coil_t:
-		# COIL: body leans away from swipe side, shoulder pulls back.
-		# Weight shifts opposite to the swipe for a visible wind-up.
-		var t: float = _attack_timer / coil_t
-		velocity.x = -_facing * 15.0 * t  # Lean back
-		# Spine tilts slightly — front drops, back rises
-		_spine[0].y += 8.0 * delta * t
-		if not _leg_severed[swipe_leg]:
-			# Claw pulls back toward body (coiling)
-			_legs[swipe_leg][2] += Vector2(-_facing * 40.0 * delta, -60.0 * delta)
-	elif _attack_timer < raise_t:
-		# RAISE: front leg lifts high, body shifts weight forward.
-		if not _leg_severed[swipe_leg]:
-			_legs[swipe_leg][2] += Vector2(_facing * 80.0 * delta, -250.0 * delta)
-	elif _attack_timer < strike_t:
-		# STRIKE: claw arcs downward FAST. Much faster than windup — the snap.
-		if not _leg_severed[swipe_leg]:
-			_legs[swipe_leg][2] += Vector2(_facing * 800.0 * delta, 900.0 * delta)
-			_check_swipe_hit(swipe_leg)
-			_spawn_slash_effect(_legs[swipe_leg][2])
-		velocity.x = _facing * 50.0  # Body pushes into the swipe
-	elif _attack_timer < follow_t:
-		# FOLLOW-THROUGH: claw continues past, body momentum carries
-		if not _leg_severed[swipe_leg]:
-			_legs[swipe_leg][2] += Vector2(_facing * 200.0 * delta, 150.0 * delta)
-	elif _attack_timer < recover_t:
-		# RECOVERY: springs back to rest pose
+	var leg_l: int = 0 if not _leg_severed[0] else 1  # "left" arm
+	var leg_r: int = 1 if not _leg_severed[1] else 0  # "right" arm
+
+	# Keep body reared — butt planted, shoulders up and back
+	_posture_blend = 1.0
+	_posture = Posture.BIPEDAL
+	# Hold reared pose: spine[2] stays, spine[0] rises + pulls back
+	_spine[0].y -= sc(50.0) * delta * 3.0
+	_spine[0].x -= _facing * sc(20.0) * delta * 3.0
+	_spine[1].y -= sc(25.0) * delta * 3.0
+	_spine[1].x -= _facing * sc(10.0) * delta * 3.0
+	# Unplant front feet
+	for li in [0, 1]:
+		if not _leg_severed[li]:
+			_foot_planted[li] = false
+
+	velocity.x = lerpf(velocity.x, 0.0, 5.0 * delta)
+
+	# -- LEFT ARM SWIPE (body tilts as arm sweeps) --
+	if _attack_timer < left_coil:
+		# Left arm coils back — draws up and behind
+		var t: float = _attack_timer / left_coil
+		if not _leg_severed[leg_l]:
+			var coil_target := _spine[0] + Vector2(_facing * sc(35.0), -sc(30.0))
+			_legs[leg_l][2] = _legs[leg_l][2].lerp(coil_target, t * 8.0 * delta)
+			_legs[leg_l][1] = (_legs[leg_l][0] + _legs[leg_l][2]) * 0.5
+		# Right arm at guard
+		if not _leg_severed[leg_r]:
+			var guard := _spine[0] + Vector2(-_facing * sc(10.0), sc(5.0))
+			_legs[leg_r][2] = _legs[leg_r][2].lerp(guard, 5.0 * delta)
+			_legs[leg_r][1] = (_legs[leg_r][0] + _legs[leg_r][2]) * 0.5
+
+	elif _attack_timer < left_strike:
+		# Left arm sweeps across — huge arc from front to far behind
+		# Mocap: wrist goes (+0.35,-0.31) → (-0.52,-0.23) in 0.4s
+		var phase_t: float = (_attack_timer - left_coil) / (left_strike - left_coil)
+		var snap: float = 1.0 - (1.0 - phase_t) * (1.0 - phase_t)
+		if not _leg_severed[leg_l]:
+			# Sweep target: far on the other side, slightly below shoulder
+			var sweep_end := _spine[0] + Vector2(-_facing * sc(55.0), sc(10.0))
+			_legs[leg_l][2] = _legs[leg_l][2].lerp(sweep_end, snap * 12.0 * delta + phase_t * 0.25)
+			_legs[leg_l][1] = _legs[leg_l][1].lerp(
+				(_legs[leg_l][0] + _legs[leg_l][2]) * 0.5, snap * 8.0 * delta)
+			_check_swipe_hit(leg_l)
+			if Engine.get_frames_drawn() % 2 == 0:
+				_spawn_slash_effect(_legs[leg_l][2])
+		# Body tilts with the swipe (mocap: angle goes from ~0 to -30)
+		_spine[0].x -= _facing * sc(15.0) * delta * (1.0 - snap)
+
+	elif _attack_timer < pause:
+		# Brief pause — both arms settling
 		pass
+
+	elif _attack_timer < right_coil:
+		# Right arm coils back
+		var t: float = (_attack_timer - pause) / (right_coil - pause)
+		if not _leg_severed[leg_r]:
+			var coil_target := _spine[0] + Vector2(-_facing * sc(35.0), -sc(25.0))
+			_legs[leg_r][2] = _legs[leg_r][2].lerp(coil_target, t * 8.0 * delta)
+			_legs[leg_r][1] = (_legs[leg_r][0] + _legs[leg_r][2]) * 0.5
+		# Left arm pulls back to guard
+		if not _leg_severed[leg_l]:
+			var guard := _spine[0] + Vector2(_facing * sc(10.0), sc(5.0))
+			_legs[leg_l][2] = _legs[leg_l][2].lerp(guard, 5.0 * delta)
+			_legs[leg_l][1] = (_legs[leg_l][0] + _legs[leg_l][2]) * 0.5
+
+	elif _attack_timer < right_strike:
+		# Right arm sweeps across — opposite direction
+		# Mocap: right wrist sweeps from behind to forward
+		var phase_t: float = (_attack_timer - right_coil) / (right_strike - right_coil)
+		var snap: float = 1.0 - (1.0 - phase_t) * (1.0 - phase_t)
+		if not _leg_severed[leg_r]:
+			var sweep_end := _spine[0] + Vector2(_facing * sc(55.0), sc(10.0))
+			_legs[leg_r][2] = _legs[leg_r][2].lerp(sweep_end, snap * 12.0 * delta + phase_t * 0.25)
+			_legs[leg_r][1] = _legs[leg_r][1].lerp(
+				(_legs[leg_r][0] + _legs[leg_r][2]) * 0.5, snap * 8.0 * delta)
+			_check_swipe_hit(leg_r)
+			if Engine.get_frames_drawn() % 2 == 0:
+				_spawn_slash_effect(_legs[leg_r][2])
+		# Body tilts back the other way
+		_spine[0].x += _facing * sc(15.0) * delta * (1.0 - snap)
+
+	elif _attack_timer < recover_t:
+		# Recover — settle back toward quadruped
+		var phase_t: float = (_attack_timer - right_strike) / 0.3
+		_posture_blend = 1.0 - phase_t
+		# Let spine spring back to normal via _solve_pose
 	else:
+		_posture_blend = 0.0
 		_change_state(State.TRANSITION_QUADRUPED)
 
 
@@ -2976,8 +3044,15 @@ func _do_hop_up(delta: float) -> void:
 func _do_transition_bipedal(delta: float) -> void:
 	_attack_timer += delta
 	velocity.x = 0
-	_posture_blend = clampf(_attack_timer / 0.4, 0.0, 1.0)
-	if _attack_timer >= 0.4:
+	_posture_blend = clampf(_attack_timer / 0.3, 0.0, 1.0)
+	# Raise front spine during transition
+	_spine[0].y -= sc(45.0) * delta * 3.0 * _posture_blend
+	_spine[1].y -= sc(20.0) * delta * 3.0 * _posture_blend
+	# Unplant front feet
+	for li in [0, 1]:
+		if not _leg_severed[li]:
+			_foot_planted[li] = false
+	if _attack_timer >= 0.3:
 		_change_state(State.ATTACK_SWIPE)
 
 
@@ -6155,6 +6230,19 @@ func _draw_debug() -> void:
 	var cyan := Color(0, 0.9, 1, 0.7)
 	var yellow := Color(1, 1, 0, 0.6)
 	var font: Font = ThemeDB.fallback_font
+
+	# -- Mocap calibration message --
+	if has_meta("_mocap_cal_msg"):
+		var cal_msg: String = get_meta("_mocap_cal_msg")
+		if not cal_msg.is_empty():
+			var cal_lines: PackedStringArray = cal_msg.split("\n")
+			var cal_y: float = _spine[1].y - sc(100)
+			for line in cal_lines:
+				var col := Color(1.0, 0.9, 0.2) if line.contains("HOLD") else Color(1.0, 1.0, 1.0)
+				var fsize: int = 16 if line.contains("HOLD") or line.begins_with("CAPTURING") else 12
+				draw_string(font, Vector2(_spine[1].x - sc(80), cal_y), line,
+					HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, col)
+				cal_y += fsize + 4
 
 	# -- Faction label --
 	if DebugOverlay.should_draw("factions/labels", self):

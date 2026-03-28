@@ -29,3 +29,7 @@ Thumbs.db
 # Build exports
 build/
 export/
+
+# Mocap tool output + model (large binary)
+tools/mocap/output/*.json
+tools/mocap/pose_landmarker_full.task
