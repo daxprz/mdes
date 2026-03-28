@@ -1,6 +1,8 @@
 extends CanvasLayer
 
-## Quake-style pop-down console. Slides from top of screen on backtick (`).
+## Console slides up from the bottom of the screen on backtick (`).
+## Respects the debug drawer — limits width to the area right of the drawer.
+## Game viewport resizes to fit above the console and right of the drawer.
 ## Accepts RCON commands directly. Supports test runner via `run` and `suite` commands.
 ## Input line supports cursor movement, text selection, and clipboard (cut/copy/paste).
 
@@ -11,9 +13,10 @@ const INPUT_FONT_SIZE := 12
 const OUTPUT_FONT_SIZE := 11
 
 var _active := false
-var _panel_y: float = -400.0  # Current Y position (negative = hidden)
-var _target_y: float = -400.0 # Target Y position
-var _panel_height: float = 400.0
+var _panel_y: float = 0.0     # Current Y position of the TOP of the panel (screen coords)
+var _target_y: float = 0.0    # Target Y position
+var _panel_height: float = 300.0
+var _panel_x: float = 0.0     # Left edge (shifted right when debug drawer is open)
 
 var _output_lines: Array[Dictionary] = []  # [{text, color}]
 var _command_history: Array[String] = []
@@ -72,6 +75,9 @@ func _ready() -> void:
 	_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_panel.draw.connect(_draw_console)
 	add_child(_panel)
+	# Start hidden below screen
+	_panel_y = 1200.0  # Will be corrected on first _process
+	_target_y = 1200.0
 	_log("Game Console v%s — type 'help' for commands" % Version.get_string(), Color(0.5, 0.8, 0.5))
 	_log("  run <test>  — run a test file", Color(0.4, 0.6, 0.4))
 	_log("  suite <name> — run a test suite", Color(0.4, 0.6, 0.4))
@@ -80,14 +86,31 @@ func _ready() -> void:
 
 func toggle() -> void:
 	_active = not _active
-	_target_y = 0.0 if _active else -_panel_height
+	_update_target_y()
 
 
 func is_open() -> bool:
 	return _active
 
 
+func _update_target_y() -> void:
+	var vp_h: float = get_viewport().get_visible_rect().size.y
+	_target_y = vp_h - _panel_height if _active else vp_h + 10
+
+
+func _get_drawer_right_edge() -> float:
+	## Returns the right edge of the debug drawer panel (0 if closed).
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer and drawer.is_open():
+		return maxf(0.0, drawer._panel_x + drawer._panel_width)
+	return 0.0
+
+
 func _process(delta: float) -> void:
+	# Update layout based on debug drawer state
+	_panel_x = _get_drawer_right_edge()
+	_update_target_y()
+
 	# Slide animation
 	if absf(_panel_y - _target_y) > 1.0:
 		_panel_y = lerpf(_panel_y, _target_y, delta * 8.0)
@@ -98,6 +121,55 @@ func _process(delta: float) -> void:
 	if _active:
 		_cursor_blink += delta
 		_panel.queue_redraw()
+		# Only manage viewport when the debug drawer is NOT open
+		# (when drawer is open, it handles both horizontal + vertical scaling)
+		var drawer: Node = get_node_or_null("/root/DebugDrawer")
+		if not drawer or not drawer.is_open():
+			_update_game_viewport()
+	elif _panel_y >= get_viewport().get_visible_rect().size.y:
+		_restore_game_viewport()
+
+
+func _update_game_viewport() -> void:
+	## When the console is open, shrink the game viewport to fit above the console
+	## and to the right of the debug drawer. The debug drawer's own viewport logic
+	## handles the horizontal shift — we only adjust the vertical scale.
+	## NOTE: The debug drawer already manages canvas_transform. We avoid fighting
+	## it by only adjusting when the drawer is NOT open. When both are open, the
+	## drawer handles horizontal and we add vertical compression.
+	var vp: Viewport = get_viewport()
+	if not vp:
+		return
+	var vp_size: Vector2 = vp.get_visible_rect().size
+	var console_visible_h: float = maxf(0.0, vp_size.y - _panel_y)
+	if console_visible_h < 5.0:
+		return
+
+	var game_h: float = vp_size.y - console_visible_h
+	if game_h < 100:
+		return
+
+	var scale_y: float = game_h / vp_size.y
+	var drawer_right: float = _panel_x
+	var game_w: float = vp_size.x - drawer_right
+	var scale_x: float = game_w / vp_size.x if game_w > 100 else 1.0
+
+	var target_transform := Transform2D()
+	target_transform = target_transform.scaled(Vector2(scale_x, scale_y))
+	target_transform.origin = Vector2(drawer_right, 0)
+
+	var current: Transform2D = vp.canvas_transform
+	vp.canvas_transform = current.interpolate_with(target_transform, 0.15)
+
+
+func _restore_game_viewport() -> void:
+	## Reset viewport when console closes (only if debug drawer isn't also managing it).
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if drawer and drawer.is_open():
+		return  # Drawer will handle its own transform
+	var vp: Viewport = get_viewport()
+	if vp:
+		vp.canvas_transform = vp.canvas_transform.interpolate_with(Transform2D.IDENTITY, 0.15)
 
 
 func _input(event: InputEvent) -> void:
@@ -508,18 +580,19 @@ func _history_down() -> void:
 # -- Drawing -------------------------------------------------------------------
 
 func _draw_console() -> void:
-	if _panel_y <= -_panel_height + 1:
-		return  # Fully hidden
-
 	var vp: Vector2 = get_viewport().get_visible_rect().size
+	if _panel_y >= vp.y:
+		return  # Fully hidden below screen
+
 	var font: Font = ThemeDB.fallback_font
-	var pw: float = vp.x
+	var px: float = _panel_x  # Left edge (right of debug drawer)
+	var pw: float = vp.x - px # Available width
 	var ph: float = _panel_height
 
 	# Background
-	_panel.draw_rect(Rect2(0, _panel_y, pw, ph), Color(0.05, 0.05, 0.08, 0.95))
-	# Bottom border
-	_panel.draw_line(Vector2(0, _panel_y + ph), Vector2(pw, _panel_y + ph), Color(0.3, 0.8, 0.3, 0.6), 2.0)
+	_panel.draw_rect(Rect2(px, _panel_y, pw, ph), Color(0.05, 0.05, 0.08, 0.95))
+	# Top border (console slides up, so top edge is the accent)
+	_panel.draw_line(Vector2(px, _panel_y), Vector2(px + pw, _panel_y), Color(0.3, 0.8, 0.3, 0.6), 2.0)
 
 	# Output lines (scrollable)
 	var line_h: float = 14.0
@@ -530,7 +603,7 @@ func _draw_console() -> void:
 	var y: float = _panel_y + 10
 	for i in range(start_idx, end_idx):
 		var entry: Dictionary = _output_lines[i]
-		_panel.draw_string(font, Vector2(10, y + 10), entry["text"],
+		_panel.draw_string(font, Vector2(px + 10, y + 10), entry["text"],
 			HORIZONTAL_ALIGNMENT_LEFT, pw - 20, OUTPUT_FONT_SIZE, entry["color"])
 		y += line_h
 
@@ -547,12 +620,12 @@ func _draw_console() -> void:
 		var hint_text: String = "  ".join(hint_parts)
 		if _tab_completions.size() > 8:
 			hint_text += "  (+%d more)" % (_tab_completions.size() - 8)
-		_panel.draw_string(font, Vector2(10, hint_y + 10), hint_text,
+		_panel.draw_string(font, Vector2(px + 10, hint_y + 10), hint_text,
 			HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 10, Color(0.5, 0.7, 0.5, 0.7))
 
 	# Input line background
 	var input_y: float = _panel_y + ph - 20
-	_panel.draw_rect(Rect2(0, input_y - 2, pw, 20), Color(0.08, 0.08, 0.1, 0.9))
+	_panel.draw_rect(Rect2(px, input_y - 2, pw, 20), Color(0.08, 0.08, 0.1, 0.9))
 
 	# Measure prompt prefix to find pixel position of characters
 	var prompt_prefix: String = "> "
@@ -562,19 +635,19 @@ func _draw_console() -> void:
 	if _has_selection():
 		var sel_from: int = mini(_select_start, _cursor_pos)
 		var sel_to: int   = maxi(_select_start, _cursor_pos)
-		var x_from: float = 10 + prefix_w + font.get_string_size(
+		var x_from: float = px + 10 + prefix_w + font.get_string_size(
 			_current_input.substr(0, sel_from), HORIZONTAL_ALIGNMENT_LEFT, -1, INPUT_FONT_SIZE).x
-		var x_to: float = 10 + prefix_w + font.get_string_size(
+		var x_to: float = px + 10 + prefix_w + font.get_string_size(
 			_current_input.substr(0, sel_to), HORIZONTAL_ALIGNMENT_LEFT, -1, INPUT_FONT_SIZE).x
 		_panel.draw_rect(Rect2(x_from, input_y - 1, x_to - x_from, 16), Color(0.3, 0.6, 0.3, 0.4))
 
 	# Input text
-	_panel.draw_string(font, Vector2(10, input_y + 12),
+	_panel.draw_string(font, Vector2(px + 10, input_y + 12),
 		prompt_prefix + _current_input, HORIZONTAL_ALIGNMENT_LEFT, pw - 20, INPUT_FONT_SIZE, Color(0.3, 1.0, 0.3))
 
 	# Cursor (blinking vertical bar at _cursor_pos)
 	if int(_cursor_blink * 2) % 2 == 0:
-		var cursor_x: float = 10 + prefix_w + font.get_string_size(
+		var cursor_x: float = px + 10 + prefix_w + font.get_string_size(
 			_current_input.substr(0, _cursor_pos), HORIZONTAL_ALIGNMENT_LEFT, -1, INPUT_FONT_SIZE).x
 		_panel.draw_line(
 			Vector2(cursor_x, input_y - 1),
@@ -583,5 +656,5 @@ func _draw_console() -> void:
 
 	# Scroll indicator
 	if _scroll_offset > 0:
-		_panel.draw_string(font, Vector2(pw - 80, _panel_y + 10), "PgUp/PgDn",
+		_panel.draw_string(font, Vector2(px + pw - 80, _panel_y + 10), "PgUp/PgDn",
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))

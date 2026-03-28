@@ -408,11 +408,8 @@ func _check_non_movement_press(device_id: int) -> bool:
 # -- Input ---------------------------------------------------------------------
 
 func _input(event: InputEvent) -> void:
-	# Ctrl+E toggles level editor
-	if event is InputEventKey and event.pressed and event.keycode == KEY_E and event.ctrl_pressed:
-		_toggle_editor()
-		get_viewport().set_input_as_handled()
-		return
+	# Ctrl+E now handled by debug drawer Level Editor section
+	# (level editor is activated by selecting a mode in the drawer)
 
 	# ? toggles help overlay, ESC closes it
 	if event is InputEventKey and event.pressed and event.keycode == KEY_SLASH and event.shift_pressed:

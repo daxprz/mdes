@@ -39,8 +39,9 @@ Do NOT use tumu when:
 | `scripts/autoload/debug_overlay.gd` | Debug aspect system |
 | `scripts/autoload/debug_aspects.gd` | Registered debug aspects |
 | `scripts/systems/test_runner.gd` | Test execution engine |
-| `scripts/ui/debug_drawer.gd` | Debug panel with docked test runner + config sliders |
-| `scripts/ui/level_editor.gd` | Level editor with splay scale/rotate widget |
+| `scripts/ui/debug_drawer.gd` | Debug panel: debug aspects, test runner, config, level editor, blueprints |
+| `scripts/ui/level_editor.gd` | Level editor world-space overlay (handles, zones, splay edit) |
+| `scripts/ui/game_console.gd` | Bottom-slide console (backtick), respects drawer width |
 | `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
 | `scripts/systems/chain.gd` | Chain physics + scaled rendering |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |

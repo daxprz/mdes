@@ -13,11 +13,112 @@ const GROUP_ARROW_SIZE := 8.0
 var SCALE_PRESETS: Array[float] = [0.25, 0.5, 1.0, 2.0, 4.0]
 
 # Section management
-enum Section { DEBUG, TEST_RUNNER, CONFIG }
+enum Section { DEBUG, TEST_RUNNER, CONFIG, LEVEL_EDITOR, BLUEPRINTS }
 var _current_section: Section = Section.DEBUG
 const ICON_BAR_WIDTH := 36.0
 const ICON_SIZE := 20.0
 const ICON_PAD := 8.0
+
+# Level editor section state — sub-section framework (same pattern as test runner)
+var _le_subsections: Array[Dictionary] = []
+var _le_subsections_initialized: bool = false
+var _le_sub_resize_idx: int = -1
+var _le_sub_resize_start_y: float = 0.0
+var _le_sub_resize_start_h: float = 0.0
+var _le_sub_resize_next_h: float = 0.0
+var _le_grip_last_click_idx: int = -1
+var _le_grip_last_click_time: float = 0.0
+
+# Level editor sub-section min heights
+const LE_SUB_MIN := {
+	"le_level":      30.0,
+	"le_modes":      30.0,
+	"le_items":      36.0,
+	"le_properties": 60.0,
+	"le_actions":    36.0,
+	"le_save":       SUB_HEADER_H + 3 * 16.0,
+}
+
+# Constructs section state
+var _ct_subsections: Array[Dictionary] = []
+var _ct_subsections_initialized: bool = false
+var _ct_sub_resize_idx: int = -1
+var _ct_sub_resize_start_y: float = 0.0
+var _ct_sub_resize_start_h: float = 0.0
+var _ct_sub_resize_next_h: float = 0.0
+var _ct_grip_last_click_idx: int = -1
+var _ct_grip_last_click_time: float = 0.0
+var _ct_hover_type_idx: int = -1
+var _ct_hover_instance_idx: int = -1
+var _ct_instances_scroll_offset: int = 0
+var _ct_selected_type: String = "splays"  # "splays" or "trees"
+
+const CT_SUB_MIN := {
+	"ct_types":     30.0,
+	"ct_instances": 60.0,
+}
+
+# Cached level names
+var _le_cached_level_names: Array[String] = []
+var _le_level_names_dirty: bool = true
+var _le_level_scroll_offset: int = 0
+var _le_hover_level_idx: int = -1
+
+# Level editor scroll/hover state
+var _le_items_scroll_offset: int = 0
+var _le_properties_scroll_offset: int = 0
+var _le_hover_mode_idx: int = -1
+var _le_hover_item_idx: int = -1
+var _le_scene_hover_idx: int = -1
+
+# Level editor property edit state
+var _le_prop_edit_key: String = ""
+var _le_prop_edit_text: String = ""
+var _le_prop_edit_cursor: int = 0
+var _le_prop_edit_focused: bool = false
+var _le_prop_dragging_key: String = ""
+
+# Level editor scene action flash
+var _le_scene_flash: String = ""
+var _le_scene_flash_timer: float = 0.0
+
+# Level editor mode names & colors
+# Index -1 = Gameplay (no editing). Indices 0-5 match level_editor.gd Mode enum.
+const LE_MODE_GAMEPLAY := -1
+const LE_MODE_DISPLAY_NAMES := ["Gameplay", "Spawn Areas", "Spawn Pos", "Seeds", "Platforms", "Portal", "Migration", "Splays"]
+const LE_MODE_DISPLAY_COLORS: Array[Color] = [
+	Color(0.5, 0.8, 0.5),   # Gameplay: soft green
+	Color(1.0, 0.9, 0.2),   Color(0.2, 0.9, 0.5),   Color(0.3, 0.8, 0.4),
+	Color(0.4, 0.6, 1.0),   Color(0.9, 0.3, 0.9),   Color(0.3, 0.5, 1.0),
+	Color(0.9, 0.4, 0.2),   # Splays: orange
+]
+# Map display index → level_editor.gd Mode value (-1 = gameplay/none)
+# 0=SPAWN_AREAS, 1=SPAWN_POS, 2=SEEDS, 3=PLATFORMS, 4=PORTAL, 5=MIGRATION, 6=SPLAY
+const LE_MODE_MAP := [-1, 0, 1, 2, 3, 4, 5, 6]
+
+# Active display mode index (0=Gameplay, 1+=editor modes)
+var _le_active_display_mode: int = 0  # Start in Gameplay
+
+# Always-available actions (shown in every mode)
+const LE_ACTIONS_ALWAYS: Array[Dictionary] = [
+	{"label": "LEVEL", "cmd": ""},
+	{"label": "Clear Entities", "cmd": "clear", "color": Color(1.0, 0.5, 0.3)},
+	{"label": "Restart Level", "cmd": "restart_level", "color": Color(1.0, 0.6, 0.2)},
+]
+
+# Gameplay-only actions
+const LE_ACTIONS_GAMEPLAY: Array[Dictionary] = [
+	{"label": "SPAWN", "cmd": ""},
+	{"label": "Monster (standdown)", "cmd": "spawn_standdown", "color": Color(0.4, 0.9, 0.5)},
+	{"label": "Monster (active)", "cmd": "spawn_active", "color": Color(0.4, 0.9, 0.5)},
+	{"label": "Dummy (soccer ball)", "cmd": "spawn_dummy", "color": Color(0.3, 0.8, 1.0)},
+	{"label": "Monster Fight!", "cmd": "monster_fight", "color": Color(1.0, 0.6, 0.3)},
+	{"label": "GAMEPLAY", "cmd": ""},
+	{"label": "Kill All Enemies", "cmd": "kill", "color": Color(1.0, 0.4, 0.4)},
+	{"label": "Toggle Territorial", "cmd": "territorial", "color": Color(0.8, 0.6, 0.3)},
+	{"label": "Revive All Players", "cmd": "revive", "color": Color(0.3, 0.9, 0.6)},
+	{"label": "Enable Player Joins", "cmd": "enable_joins", "color": Color(0.3, 0.8, 0.8)},
+]
 
 # Config section state
 var _config_scroll_offset: int = 0
@@ -463,6 +564,8 @@ func _process(delta: float) -> void:
 
 	if _active:
 		_cursor_blink += delta
+		if _le_scene_flash_timer > 0:
+			_le_scene_flash_timer -= delta
 		_panel.queue_redraw()
 	# Redraw world overlay for selection indicators (always, even when drawer closed)
 	if _world_overlay and is_instance_valid(_world_overlay):
@@ -484,6 +587,12 @@ func _input(event: InputEvent) -> void:
 			return
 
 		if not _active:
+			return
+
+		# Forward keyboard to level editor property edit field
+		if _current_section == Section.LEVEL_EDITOR and _le_prop_edit_focused:
+			_handle_le_prop_edit_key(event)
+			get_viewport().set_input_as_handled()
 			return
 
 		# Forward keyboard to docked test editor when test runner section is active
@@ -557,6 +666,22 @@ func _input(event: InputEvent) -> void:
 			_save_subsection_layout()
 			get_viewport().set_input_as_handled()
 			return
+		if _le_sub_resize_idx >= 0:
+			_handle_le_sub_resize_release()
+			_le_sub_resize_idx = -1
+			_save_le_layout()
+			get_viewport().set_input_as_handled()
+			return
+		if _ct_sub_resize_idx >= 0:
+			_handle_ct_sub_resize_release()
+			_ct_sub_resize_idx = -1
+			_save_ct_layout()
+			get_viewport().set_input_as_handled()
+			return
+		if not _le_prop_dragging_key.is_empty():
+			_le_prop_dragging_key = ""
+			get_viewport().set_input_as_handled()
+			return
 
 	# Mouse clicks (left button only — not scroll wheel)
 	if _active and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -575,6 +700,10 @@ func _input(event: InputEvent) -> void:
 			_handle_config_click(lx - ICON_BAR_WIDTH - 4, my)
 		elif _current_section == Section.TEST_RUNNER:
 			_handle_test_click(lx - ICON_BAR_WIDTH - 4, my)
+		elif _current_section == Section.LEVEL_EDITOR:
+			_handle_le_click(lx - ICON_BAR_WIDTH - 4, my)
+		elif _current_section == Section.BLUEPRINTS:
+			_handle_ct_click(lx - ICON_BAR_WIDTH - 4, my)
 		else:
 			_handle_click(lx - ICON_BAR_WIDTH - 4, my)
 		get_viewport().set_input_as_handled()
@@ -585,6 +714,10 @@ func _input(event: InputEvent) -> void:
 			if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
 				if _current_section == Section.TEST_RUNNER:
 					_handle_test_scroll(event.position.y, -3)
+				elif _current_section == Section.LEVEL_EDITOR:
+					_handle_le_scroll(event.position.y, -3)
+				elif _current_section == Section.BLUEPRINTS:
+					_handle_ct_scroll(event.position.y, -3)
 				elif _current_section == Section.CONFIG:
 					_config_scroll_offset = maxi(0, _config_scroll_offset - 3)
 				else:
@@ -593,6 +726,10 @@ func _input(event: InputEvent) -> void:
 			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
 				if _current_section == Section.TEST_RUNNER:
 					_handle_test_scroll(event.position.y, 3)
+				elif _current_section == Section.LEVEL_EDITOR:
+					_handle_le_scroll(event.position.y, 3)
+				elif _current_section == Section.BLUEPRINTS:
+					_handle_ct_scroll(event.position.y, 3)
 				elif _current_section == Section.CONFIG:
 					_config_scroll_offset += 3
 				else:
@@ -610,9 +747,22 @@ func _input(event: InputEvent) -> void:
 		elif _sub_resize_idx >= 0:
 			_handle_sub_resize_drag(event.position.y)
 			get_viewport().set_input_as_handled()
+		elif _le_sub_resize_idx >= 0:
+			_handle_le_sub_resize_drag(event.position.y)
+			get_viewport().set_input_as_handled()
+		elif _ct_sub_resize_idx >= 0:
+			_handle_ct_sub_resize_drag(event.position.y)
+			get_viewport().set_input_as_handled()
+		elif not _le_prop_dragging_key.is_empty():
+			_handle_le_prop_drag(event.position.x)
+			get_viewport().set_input_as_handled()
 		elif event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
 			if _current_section == Section.TEST_RUNNER:
 				_handle_test_hover(event.position.y)
+			elif _current_section == Section.LEVEL_EDITOR:
+				_handle_le_hover(event.position.y)
+			elif _current_section == Section.BLUEPRINTS:
+				_handle_ct_hover(event.position.y)
 			_update_hover(event.position.y)
 
 
@@ -878,39 +1028,45 @@ func _cycle_text_mode(current: int) -> int:
 
 
 func _update_game_viewport() -> void:
-	## When the drawer is open, use the Viewport's canvas transform to shift
-	## and scale the game so it fits in the remaining visible area (right of drawer).
-	## This moves ALL rendering, not just the camera.
+	## Fit the game into the remaining visible area: right of drawer, above console.
+	## Both the drawer and console contribute to the available rectangle.
 	var vp: Viewport = get_viewport()
 	if not vp:
 		return
 
-	var vp_width: float = vp.get_visible_rect().size.x
+	var vp_size: Vector2 = vp.get_visible_rect().size
 	var visible_panel: float = maxf(0.0, _panel_x + _panel_width)
-	var game_width: float = vp_width - visible_panel
 
-	if not _active and visible_panel < 2.0:
-		# Drawer closed — reset to identity transform
+	# Check if the console is eating space from the bottom
+	var console: Node = get_node_or_null("/root/GameConsole")
+	var console_h: float = 0.0
+	if console and console.is_open() and "_panel_y" in console:
+		console_h = maxf(0.0, vp_size.y - console._panel_y)
+
+	var game_width: float = vp_size.x - visible_panel
+	var game_height: float = vp_size.y - console_h
+
+	if not _active and visible_panel < 2.0 and console_h < 2.0:
+		# Nothing open — reset to identity transform
 		vp.canvas_transform = Transform2D.IDENTITY
 		return
 
-	if game_width < 100:
+	if game_width < 100 or game_height < 100:
 		return
 
-	# Scale to fit remaining width, shift right past the drawer
-	var scale_factor: float = game_width / vp_width
+	var scale_x: float = game_width / vp_size.x
+	var scale_y: float = game_height / vp_size.y
 	var target_transform := Transform2D()
-	target_transform = target_transform.scaled(Vector2(scale_factor, scale_factor))
+	target_transform = target_transform.scaled(Vector2(scale_x, scale_y))
 	target_transform.origin = Vector2(visible_panel, 0)
 
-	# Smooth lerp toward target
 	var current: Transform2D = vp.canvas_transform
 	vp.canvas_transform = current.interpolate_with(target_transform, 0.15)
 
 
 func _handle_icon_click(my: float) -> void:
 	## Click on the icon bar — switch section or collapse.
-	var icon_sections: Array = [Section.DEBUG, Section.TEST_RUNNER, Section.CONFIG]
+	var icon_sections: Array = [Section.DEBUG, Section.TEST_RUNNER, Section.CONFIG, Section.LEVEL_EDITOR, Section.BLUEPRINTS]
 	for i in range(icon_sections.size()):
 		var iy: float = 8.0 + i * (ICON_SIZE + ICON_PAD * 2 + 4)
 		var ih: float = ICON_SIZE + ICON_PAD * 2
@@ -1432,6 +1588,8 @@ func _draw_panel() -> void:
 		{"section": Section.DEBUG, "label": "D"},
 		{"section": Section.TEST_RUNNER, "label": "T"},
 		{"section": Section.CONFIG, "label": "C"},
+		{"section": Section.LEVEL_EDITOR, "label": "E"},
+		{"section": Section.BLUEPRINTS, "label": "B"},
 	]
 	for i in range(icon_sections.size()):
 		var iy: float = 8.0 + i * (ICON_SIZE + ICON_PAD * 2 + 4)
@@ -1452,6 +1610,10 @@ func _draw_panel() -> void:
 			_draw_test_runner_section(content_x, font, ph)
 		Section.CONFIG:
 			_draw_config_section(content_x, font, ph)
+		Section.LEVEL_EDITOR:
+			_draw_level_editor_section(content_x, font, ph)
+		Section.BLUEPRINTS:
+			_draw_blueprints_section(content_x, font, ph)
 
 
 func _draw_section_icon(center: Vector2, section: Section, active: bool) -> void:
@@ -1478,6 +1640,27 @@ func _draw_section_icon(center: Vector2, section: Section, active: bool) -> void
 				var p1: Vector2 = center + Vector2(cos(a), sin(a)) * r * 0.5
 				var p2: Vector2 = center + Vector2(cos(a), sin(a)) * r * 1.0
 				_panel.draw_line(p1, p2, col, 2.0)
+		Section.LEVEL_EDITOR:
+			# Pencil icon — diagonal line with nib
+			var tip: Vector2 = center + Vector2(-r, r)
+			var end: Vector2 = center + Vector2(r, -r)
+			_panel.draw_line(tip, end, col, 2.0)
+			_panel.draw_line(tip, tip + Vector2(3, 0), col, 1.5)
+			_panel.draw_line(tip, tip + Vector2(0, -3), col, 1.5)
+		Section.BLUEPRINTS:
+			# Blueprint icon — page with corner fold
+			var bx: float = center.x - r * 0.6
+			var by: float = center.y - r * 0.8
+			var bw: float = r * 1.2
+			var bh: float = r * 1.6
+			_panel.draw_rect(Rect2(bx, by, bw, bh), col, false, 1.5)
+			# Corner fold
+			_panel.draw_line(Vector2(bx + bw - r * 0.4, by), Vector2(bx + bw - r * 0.4, by + r * 0.4), col, 1.0)
+			_panel.draw_line(Vector2(bx + bw - r * 0.4, by + r * 0.4), Vector2(bx + bw, by + r * 0.4), col, 1.0)
+			# Horizontal lines (content)
+			for li in range(3):
+				var ly: float = by + r * 0.6 + li * r * 0.35
+				_panel.draw_line(Vector2(bx + 2, ly), Vector2(bx + bw - 3, ly), col * Color(1, 1, 1, 0.5), 1.0)
 
 
 func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
@@ -2704,3 +2887,1668 @@ func _get_config_range(key: String, default_val: float) -> Vector2:
 	if default_val == 0.0:
 		return Vector2(0.0, 1.0)
 	return Vector2(0.0, default_val * 2.5)
+
+
+# ==============================================================================
+# LEVEL EDITOR SECTION — sub-section framework (same pattern as test runner)
+# ==============================================================================
+
+func _get_level_editor() -> Node:
+	## Get the level editor node from the scene tree.
+	var scene := get_tree().current_scene
+	if not scene:
+		return null
+	for node in scene.get_children():
+		if node.get_script() and node.get_script().resource_path.ends_with("level_editor.gd"):
+			return node
+	return null
+
+
+func _init_le_subsections() -> void:
+	_le_subsections = []
+	for sid in ["le_level", "le_modes", "le_items", "le_properties", "le_actions", "le_save"]:
+		_le_subsections.append({
+			"id": sid,
+			"title": sid.substr(3).capitalize(),  # Strip "le_" prefix
+			"collapsed": false,
+			"height": _get_le_preferred_height(sid),
+		})
+	_load_le_layout()
+	_auto_snap_le()
+	_le_subsections_initialized = true
+	_le_rebuild_level_names()
+
+
+func _load_le_layout() -> void:
+	var path: String = "user://level_editor_layout.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	var data: Dictionary = json.data
+	for sub in _le_subsections:
+		if data.has(sub["id"]):
+			var sd: Dictionary = data[sub["id"]]
+			sub["collapsed"] = sd.get("collapsed", sub["collapsed"])
+			sub["height"] = sd.get("height", sub["height"])
+
+
+func _save_le_layout() -> void:
+	var data: Dictionary = {}
+	for sub in _le_subsections:
+		data[sub["id"]] = {"collapsed": sub["collapsed"], "height": sub["height"]}
+	var file := FileAccess.open("user://level_editor_layout.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+
+
+func _auto_snap_le() -> void:
+	if _le_subsections.is_empty():
+		return
+	var last_idx: int = _le_subsections.size() - 1
+	var last_sub: Dictionary = _le_subsections[last_idx]
+	for i in range(last_idx):
+		var sub: Dictionary = _le_subsections[i]
+		if sub["collapsed"]:
+			continue
+		var preferred: float = _get_le_preferred_height(sub["id"])
+		var delta: float = preferred - sub["height"]
+		sub["height"] = preferred
+		last_sub["height"] -= delta
+	var last_min: float = LE_SUB_MIN.get("le_save", 30.0)
+	if last_sub["height"] < last_min:
+		last_sub["height"] = last_min
+
+
+func _get_le_preferred_height(sid: String) -> float:
+	match sid:
+		"le_level":
+			var count: int = maxi(2, _le_cached_level_names.size())
+			return SUB_HEADER_H + count * ROW_HEIGHT + 4.0
+		"le_modes":
+			return SUB_HEADER_H + LE_MODE_DISPLAY_NAMES.size() * ROW_HEIGHT + 4.0
+		"le_items":
+			var count: int = _le_get_item_count()
+			return SUB_HEADER_H + clampi(count, 2, 10) * 16.0 + 4.0
+		"le_properties":
+			return SUB_HEADER_H + 6 * 18.0 + 4.0
+		"le_actions":
+			return SUB_HEADER_H + 6 * 18.0 + 4.0
+		"le_save":
+			return SUB_HEADER_H + 4 * 16.0 + 4.0
+	return SUB_HEADER_H + 40.0
+
+
+func _snap_le_height(sid: String, h: float) -> float:
+	var preferred: float = _get_le_preferred_height(sid)
+	if absf(h - preferred) < SUB_SNAP_DISTANCE:
+		return preferred
+	return h
+
+
+# -- LE helpers ----------------------------------------------------------------
+
+func _le_rebuild_level_names() -> void:
+	## Scan res://levels/ for available level JSON files.
+	_le_cached_level_names.clear()
+	var dir := DirAccess.open("res://levels/")
+	if dir:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				_le_cached_level_names.append(fname.get_basename())
+			fname = dir.get_next()
+		dir.list_dir_end()
+	_le_cached_level_names.sort()
+	_le_level_names_dirty = false
+
+
+func _le_get_current_level_name() -> String:
+	var le: Node = _get_level_editor()
+	if le and "_level_name" in le:
+		return le._level_name
+	return "title_screen"
+
+
+func _le_load_level(level_name: String) -> void:
+	## Load a level via RCON — rebuilds the world.
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		rcon._execute("level %s" % level_name)
+	# If the level editor exists, update its config reference
+	_le_ensure_editor_for_level(level_name)
+
+
+func _le_ensure_editor_for_level(level_name: String) -> void:
+	## Ensure the level editor exists and is configured for the given level.
+	var scene: Node = get_tree().current_scene
+	if not scene:
+		return
+	var le: Node = _get_level_editor()
+	if le:
+		# Update existing editor with new level
+		var config: Dictionary = LevelConfig.load_level(level_name)
+		if not config.is_empty():
+			le.setup(level_name, config)
+		return
+	# Create the level editor (same pattern as title_screen._toggle_editor)
+	var editor_script: GDScript = load("res://scripts/ui/level_editor.gd")
+	le = CanvasLayer.new()
+	le.set_script(editor_script)
+	var config: Dictionary = LevelConfig.load_level(level_name)
+	le.setup(level_name, config)
+	if scene.has_method("_rebuild_from_config"):
+		le.config_changed.connect(scene._rebuild_from_config)
+	scene.add_child(le)
+
+
+func _le_get_mode() -> int:
+	## Get the display mode index (0=Gameplay, 1+=editor modes).
+	return _le_active_display_mode
+
+
+func _le_set_mode(display_idx: int) -> void:
+	## Set the active display mode. 0=Gameplay (no editing), 1+=editor modes.
+	_le_active_display_mode = display_idx
+	_le_items_scroll_offset = 0
+
+	if display_idx <= 0 or display_idx >= LE_MODE_MAP.size():
+		# Gameplay — deactivate level editor overlay
+		var le: Node = _get_level_editor()
+		if le and "_active" in le and le._active:
+			le._active = false
+			le.visible = false
+			if le._overlay:
+				le._overlay.visible = false
+		return
+
+	# Editor mode — map display index to level_editor.gd Mode value
+	var editor_mode: int = LE_MODE_MAP[display_idx]
+	var le: Node = _get_level_editor()
+	if not le:
+		# Auto-create the level editor
+		_le_ensure_editor_for_level(_le_get_current_level_name())
+		le = _get_level_editor()
+	if le:
+		if not le._active:
+			le._active = true
+			le.visible = true
+			if le._overlay:
+				le._overlay.visible = true
+		le._mode = editor_mode
+		le._selected_idx = -1
+		if le.has_method("_update_display"):
+			le._update_display()
+
+
+func _le_get_selected_idx() -> int:
+	var le: Node = _get_level_editor()
+	if le and "_selected_idx" in le:
+		return le._selected_idx
+	return -1
+
+
+func _le_get_config() -> Dictionary:
+	var le: Node = _get_level_editor()
+	if le and "_config" in le:
+		return le._config
+	return {}
+
+
+func _le_get_editor_mode_value() -> int:
+	## Map display mode to level_editor.gd Mode enum value. -1 = gameplay.
+	if _le_active_display_mode <= 0 or _le_active_display_mode >= LE_MODE_MAP.size():
+		return -1
+	return LE_MODE_MAP[_le_active_display_mode]
+
+
+func _le_get_item_count() -> int:
+	var config: Dictionary = _le_get_config()
+	if config.is_empty():
+		return 0
+	match _le_get_editor_mode_value():
+		0:  # SPAWN_AREAS
+			var total: int = 0
+			for key in config.get("spawn_zones", {}):
+				total += (config["spawn_zones"][key] as Array).size()
+			return total
+		1: return config.get("spawn_positions", []).size()
+		2: return config.get("scenery", {}).get("trees", []).size() + config.get("scenery", {}).get("rocks", []).size()
+		3: return config.get("platforms", []).size()
+		4: return 1 if config.has("portal") else 0
+		5:
+			var total: int = 0
+			for p in config.get("migration_patterns", []):
+				for phase in p.get("phases", []):
+					total += phase.get("zones", []).size()
+			return total
+		6: return config.get("splays", []).size()
+	return 0
+
+
+func _le_get_item_count_for_mode(mode: int) -> int:
+	var config: Dictionary = _le_get_config()
+	if config.is_empty():
+		return 0
+	match mode:
+		0:
+			var total: int = 0
+			for key in config.get("spawn_zones", {}):
+				total += (config["spawn_zones"][key] as Array).size()
+			return total
+		1: return config.get("spawn_positions", []).size()
+		2: return config.get("scenery", {}).get("trees", []).size() + config.get("scenery", {}).get("rocks", []).size()
+		3: return config.get("platforms", []).size()
+		4: return 1 if config.has("portal") else 0
+		5:
+			var total: int = 0
+			for p in config.get("migration_patterns", []):
+				total += p.get("phases", []).size()
+			return total
+		6: return config.get("splays", []).size()
+	return 0
+
+
+func _le_build_item_list() -> Array:
+	## Build a flat list of {label, color, idx, zone_type?} for the current mode.
+	var config: Dictionary = _le_get_config()
+	var mode: int = _le_get_editor_mode_value()
+	var items: Array = []
+	if config.is_empty():
+		return items
+	match mode:
+		0:
+			for key in ["fireflies", "bats"]:
+				var zone_list: Array = config.get("spawn_zones", {}).get(key, [])
+				var zcol: Color = Color(1.0, 0.9, 0.2) if key == "fireflies" else Color(0.7, 0.2, 0.9)
+				for i in range(zone_list.size()):
+					var r: Array = zone_list[i].get("rect", [0, 0, 100, 100])
+					items.append({"label": "%s #%d  (%d,%d)" % [key.substr(0, 2).to_upper(), i+1, int(r[0]), int(r[1])], "color": zcol, "idx": i, "zone_type": key})
+		1:
+			for i in range(config.get("spawn_positions", []).size()):
+				var p: Array = config["spawn_positions"][i]
+				items.append({"label": "P%d  (%d, %d)" % [i+1, int(p[0]), int(p[1])], "color": Color(0.2, 0.9, 1.0), "idx": i})
+		2:
+			var trees: Array = config.get("scenery", {}).get("trees", [])
+			for i in range(trees.size()):
+				var p: Array = trees[i].get("pos", [0, 0])
+				items.append({"label": "Tree #%d  seed:%d" % [i+1, int(trees[i].get("seed", 0))], "color": Color(0.3, 0.8, 0.4), "idx": i})
+			var rocks: Array = config.get("scenery", {}).get("rocks", [])
+			for i in range(rocks.size()):
+				items.append({"label": "Rock #%d  seed:%d" % [i+1, int(rocks[i].get("seed", 0))], "color": Color(0.8, 0.7, 0.4), "idx": i})
+		3:
+			for i in range(config.get("platforms", []).size()):
+				var p: Array = config["platforms"][i].get("pos", [0, 0])
+				var w: float = config["platforms"][i].get("width", 200)
+				items.append({"label": "Plat %d  (%d,%d) w:%d" % [i+1, int(p[0]), int(p[1]), int(w)], "color": Color(0.4, 0.6, 1.0), "idx": i})
+		4:
+			var portal: Dictionary = config.get("portal", {})
+			var p: Array = portal.get("pos", [960, 880])
+			items.append({"label": "Portal  (%d,%d)" % [int(p[0]), int(p[1])], "color": Color(0.9, 0.3, 0.9), "idx": 0})
+		5:
+			for pi in range(config.get("migration_patterns", []).size()):
+				var pattern: Dictionary = config["migration_patterns"][pi]
+				var species: String = str(pattern.get("species", "?"))
+				for phi in range(pattern.get("phases", []).size()):
+					var zones: Array = pattern["phases"][phi].get("zones", [])
+					for zi in range(zones.size()):
+						items.append({"label": "%s P%d Z%d" % [species, phi+1, int(zones[zi].get("zone_id", 0))], "color": Color(0.3, 0.5, 1.0), "idx": zi})
+		6:
+			for i in range(config.get("splays", []).size()):
+				var s: Dictionary = config["splays"][i]
+				items.append({"label": "%s  %s  x%.1f" % [s.get("pose", "?"), s.get("behavior", "?"), s.get("scale", 1.0)], "color": Color(0.9, 0.4, 0.2), "idx": i})
+	return items
+
+
+func _le_get_properties() -> Array:
+	## Returns Array of {key, label, value, type, editable, min?, max?}.
+	var config: Dictionary = _le_get_config()
+	var le: Node = _get_level_editor()
+	var sel: int = _le_get_selected_idx()
+	var props: Array = []
+	if sel < 0 or config.is_empty():
+		return props
+	match _le_get_editor_mode_value():
+		1:
+			var positions: Array = config.get("spawn_positions", [])
+			if sel < positions.size():
+				props.append({"key": "x", "label": "X", "value": positions[sel][0], "type": "number", "editable": true})
+				props.append({"key": "y", "label": "Y", "value": positions[sel][1], "type": "number", "editable": true})
+		3:
+			var platforms: Array = config.get("platforms", [])
+			if sel < platforms.size():
+				props.append({"key": "x", "label": "X", "value": platforms[sel]["pos"][0], "type": "number", "editable": true})
+				props.append({"key": "y", "label": "Y", "value": platforms[sel]["pos"][1], "type": "number", "editable": true})
+				props.append({"key": "width", "label": "Width", "value": platforms[sel].get("width", 200), "type": "slider", "editable": true, "min": 50.0, "max": 800.0})
+		4:
+			var portal: Dictionary = config.get("portal", {})
+			props.append({"key": "x", "label": "X", "value": portal.get("pos", [960, 880])[0], "type": "number", "editable": true})
+			props.append({"key": "y", "label": "Y", "value": portal.get("pos", [960, 880])[1], "type": "number", "editable": true})
+			props.append({"key": "range", "label": "Range", "value": portal.get("activation_range", 100), "type": "slider", "editable": true, "min": 20.0, "max": 400.0})
+		6:
+			var splays: Array = config.get("splays", [])
+			if sel < splays.size():
+				var s: Dictionary = splays[sel]
+				props.append({"key": "x", "label": "X", "value": s.get("pos", [960, 500])[0], "type": "number", "editable": true})
+				props.append({"key": "y", "label": "Y", "value": s.get("pos", [960, 500])[1], "type": "number", "editable": true})
+				props.append({"key": "rotation", "label": "Rotation", "value": s.get("rotation", 0), "type": "slider", "editable": true, "min": -180.0, "max": 180.0})
+				props.append({"key": "scale", "label": "Scale", "value": s.get("scale", 1.0), "type": "slider", "editable": true, "min": 0.25, "max": 8.0})
+				props.append({"key": "pose", "label": "Pose", "value": s.get("pose", ""), "type": "text", "editable": false})
+				props.append({"key": "behavior", "label": "Behavior", "value": s.get("behavior", ""), "type": "text", "editable": false})
+	return props
+
+
+func _le_get_current_actions() -> Array:
+	## Return the action list for the current mode.
+	var actions: Array = []
+	if _le_active_display_mode == 0:
+		# Gameplay mode — show gameplay actions + always actions
+		actions.append_array(LE_ACTIONS_GAMEPLAY)
+	actions.append_array(LE_ACTIONS_ALWAYS)
+	return actions
+
+
+func _le_get_action_buttons() -> Array:
+	## Returns Array of [label, color, action_id] for the current mode.
+	match _le_get_editor_mode_value():
+		5: return [
+			["+Phase", Color(0.3, 0.8, 0.3), "mig_add_phase"],
+			["-Phase", Color(0.8, 0.3, 0.3), "mig_del_phase"],
+			["+Zone", Color(0.3, 0.6, 1.0), "mig_add_zone"],
+			["Species", Color(0.8, 0.6, 0.3), "mig_cycle_species"],
+		]
+		6: return [
+			["Add", Color(0.3, 0.8, 0.3), "splay_add"],
+			["Del", Color(0.8, 0.3, 0.3), "splay_delete"],
+			["Pose", Color(0.3, 0.6, 1.0), "splay_cycle_pose"],
+			["Bhvr", Color(0.8, 0.6, 0.3), "splay_cycle_behavior"],
+			["Lib", Color(0.6, 0.4, 0.8), "splay_library"],
+		]
+	return []
+
+
+func _le_execute_action(action: String) -> void:
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	match action:
+		"mig_add_phase": if le.has_method("_migration_add_phase"): le._migration_add_phase()
+		"mig_del_phase": if le.has_method("_migration_delete_last_phase"): le._migration_delete_last_phase()
+		"mig_add_zone": if le.has_method("_migration_add_zone"): le._migration_add_zone()
+		"mig_cycle_species": if le.has_method("_migration_cycle_species"): le._migration_cycle_species()
+		"splay_add": if le.has_method("_splay_add_instance"): le._splay_add_instance()
+		"splay_delete": if le.has_method("_splay_delete_selected"): le._splay_delete_selected()
+		"splay_cycle_pose": if le.has_method("_splay_cycle_pose"): le._splay_cycle_pose(1)
+		"splay_cycle_behavior": if le.has_method("_splay_cycle_behavior"): le._splay_cycle_behavior()
+		"splay_library": if le.has_method("_splay_open_library"): le._splay_open_library()
+
+
+func _le_execute_scene_action(cmd: String) -> void:
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon:
+		return
+	match cmd:
+		"spawn_standdown":
+			rcon._execute("spawn monster 670 520")
+			rcon._execute("standdown on")
+			_le_scene_flash = "Spawned monster (standdown)"
+		"spawn_active":
+			rcon._execute("spawn monster 960 880")
+			_le_scene_flash = "Spawned monster"
+		"spawn_dummy":
+			rcon._execute("spawn dummy 960 880")
+			_le_scene_flash = "Spawned dummy"
+		"monster_fight":
+			rcon._execute("clear")
+			rcon._execute("clearplayers")
+			rcon._execute("spawn monster 400 880")
+			rcon._execute("spawn monster 1500 880")
+			rcon._execute("territorial on")
+			_le_scene_flash = "Monster fight!"
+		"kill":
+			rcon._execute("kill")
+			_le_scene_flash = "Killed all"
+		"clear":
+			rcon._execute("clear")
+			_le_scene_flash = "Cleared"
+		"territorial":
+			rcon._execute("territorial")
+			_le_scene_flash = "Toggled territorial"
+		"revive":
+			rcon._execute("revive")
+			_le_scene_flash = "Revived"
+		"enable_joins":
+			rcon._execute("enablejoins")
+			_le_scene_flash = "Joins enabled"
+		"clear_level":
+			rcon._execute("clear")
+			rcon._execute("clearplayers")
+			rcon._execute("enablejoins")
+			_le_scene_flash = "Level cleared"
+		"restart_level":
+			get_tree().reload_current_scene()
+			return
+	_le_scene_flash_timer = 2.0
+
+
+func _le_select_item(idx: int) -> void:
+	## Translate flat list index into correct selection in the level editor.
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	var config: Dictionary = _le_get_config()
+	var mode: int = _le_get_editor_mode_value()
+	le._selected_idx = -1  # Reset first
+	match mode:
+		0:
+			var flat: int = 0
+			for key in ["fireflies", "bats"]:
+				var zone_list: Array = config.get("spawn_zones", {}).get(key, [])
+				for i in range(zone_list.size()):
+					if flat == idx:
+						le._selected_idx = i
+						le._drag_item_type = key + "_zone"
+						return
+					flat += 1
+		1:
+			if idx >= 0 and idx < config.get("spawn_positions", []).size():
+				le._selected_idx = idx
+				le._drag_item_type = "spawn_position"
+		3:
+			if idx >= 0 and idx < config.get("platforms", []).size():
+				le._selected_idx = idx
+				le._drag_item_type = "platform"
+		4:
+			le._selected_idx = 0
+			le._drag_item_type = "portal"
+		6:
+			if idx >= 0 and idx < config.get("splays", []).size():
+				le._selected_idx = idx
+				le._drag_item_type = "splay_move"
+
+
+# -- LE click handlers ---------------------------------------------------------
+
+func _handle_le_click(lx: float, my: float) -> void:
+	if not _le_subsections_initialized:
+		_init_le_subsections()
+	var y: float = 0.0
+	for i in range(_le_subsections.size()):
+		var sub: Dictionary = _le_subsections[i]
+		var header_end: float = y + SUB_HEADER_H
+
+		if my >= y and my < header_end:
+			var pw: float = _content_width
+			if lx < 16:
+				sub["collapsed"] = not sub["collapsed"]
+				_save_le_layout()
+			elif lx > pw - 28 and i > 0:
+				var target_idx: int = i - 1
+				var now: float = Time.get_ticks_msec() / 1000.0
+				if _le_grip_last_click_idx == target_idx and (now - _le_grip_last_click_time) < 0.4:
+					var sub_above: Dictionary = _le_subsections[target_idx]
+					var last_sub: Dictionary = _le_subsections[_le_subsections.size() - 1]
+					var preferred: float = _get_le_preferred_height(sub_above["id"])
+					var delta: float = preferred - sub_above["height"]
+					sub_above["height"] = preferred
+					last_sub["height"] -= delta
+					_save_le_layout()
+					_le_grip_last_click_idx = -1
+					return
+				_le_grip_last_click_idx = target_idx
+				_le_grip_last_click_time = now
+				_le_sub_resize_idx = target_idx
+				_le_sub_resize_start_y = my
+				_le_sub_resize_start_h = _le_subsections[target_idx]["height"]
+				_le_sub_resize_next_h = _le_subsections[_le_subsections.size() - 1]["height"]
+			return
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = header_end
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "le_save":
+			body_end = maxf(body_end, 9999.0)
+
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			_handle_le_subsection_click(sub["id"], lx, local_y, body_end - body_y)
+			return
+		y += sub["height"]
+
+
+func _handle_le_subsection_click(sub_id: String, lx: float, local_y: float, _body_h: float) -> void:
+	match sub_id:
+		"le_level":
+			var idx: int = int(local_y / ROW_HEIGHT) + _le_level_scroll_offset
+			if idx >= 0 and idx < _le_cached_level_names.size():
+				_le_load_level(_le_cached_level_names[idx])
+		"le_modes":
+			var idx: int = int(local_y / ROW_HEIGHT)
+			if idx >= 0 and idx < LE_MODE_DISPLAY_NAMES.size():
+				_le_set_mode(idx)
+		"le_items":
+			var idx: int = int(local_y / 16.0) + _le_items_scroll_offset
+			_le_select_item(idx)
+		"le_properties":
+			_handle_le_properties_click(lx, local_y)
+		"le_actions":
+			_handle_le_actions_click(lx, local_y)
+		"le_save":
+			_handle_le_save_click(lx, local_y)
+
+
+func _handle_le_properties_click(lx: float, local_y: float) -> void:
+	var props: Array = _le_get_properties()
+	var row_h: float = 18.0
+	var idx: int = int(local_y / row_h) + _le_properties_scroll_offset
+	if idx < 0 or idx >= props.size():
+		_le_prop_edit_focused = false
+		return
+	var prop: Dictionary = props[idx]
+	var pw: float = _content_width
+	if lx > pw * 0.45 and prop.get("editable", false):
+		if prop.get("type", "") == "slider":
+			_le_prop_dragging_key = prop["key"]
+			_handle_le_prop_drag_at(lx)
+		else:
+			_le_prop_edit_key = prop["key"]
+			_le_prop_edit_text = str(prop.get("value", ""))
+			_le_prop_edit_cursor = _le_prop_edit_text.length()
+			_le_prop_edit_focused = true
+
+
+func _handle_le_actions_click(lx: float, local_y: float) -> void:
+	## Click on an action row. Actions depend on mode.
+	var actions: Array = _le_get_current_actions()
+	var row_h: float = 18.0
+	var y: float = 0.0
+
+	# Mode-specific button bar (if any)
+	var action_btns: Array = _le_get_action_buttons()
+	if not action_btns.is_empty():
+		var btn_h: float = 24.0
+		if local_y < btn_h:
+			var pw: float = _content_width
+			var bw: float = (pw - 24.0) / float(action_btns.size())
+			var btn_idx: int = int((lx - 8.0) / bw)
+			if btn_idx >= 0 and btn_idx < action_btns.size():
+				_le_execute_action(action_btns[btn_idx][2])
+			return
+		y += btn_h + 4
+
+	# Action list
+	for i in range(actions.size()):
+		var action: Dictionary = actions[i]
+		if action["cmd"] == "":
+			y += 16  # separator
+			continue
+		if local_y >= y and local_y < y + row_h:
+			_le_execute_scene_action(action["cmd"])
+			return
+		y += row_h
+
+
+func _handle_le_save_click(lx: float, local_y: float) -> void:
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	var pw: float = _content_width
+	var btn_y: float = 18.0  # After summary line
+	var btn_h: float = 22.0
+	if local_y >= btn_y and local_y < btn_y + btn_h:
+		if lx < pw * 0.48 and Version.is_source_mode():
+			if le.has_method("_save_original"):
+				le._save_original()
+		elif lx >= pw * 0.5:
+			if le.has_method("_save"):
+				le._save()
+
+
+# -- LE scroll/resize ----------------------------------------------------------
+
+func _handle_le_scroll(my: float, delta: int) -> void:
+	if not _le_subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _le_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "le_save":
+			body_end = maxf(body_end, 9999.0)
+		if my >= y and my < body_end:
+			match sub["id"]:
+				"le_level": _le_level_scroll_offset = maxi(0, _le_level_scroll_offset + delta)
+				"le_items": _le_items_scroll_offset = maxi(0, _le_items_scroll_offset + delta)
+				"le_properties": _le_properties_scroll_offset = maxi(0, _le_properties_scroll_offset + delta)
+				"le_actions": pass
+			return
+		y += sub["height"]
+
+
+func _handle_le_sub_resize_drag(my: float) -> void:
+	if _le_sub_resize_idx < 0 or _le_sub_resize_idx >= _le_subsections.size():
+		return
+	var dy: float = my - _le_sub_resize_start_y
+	var sub: Dictionary = _le_subsections[_le_sub_resize_idx]
+	var last_sub: Dictionary = _le_subsections[_le_subsections.size() - 1]
+	var min_h: float = LE_SUB_MIN.get(sub["id"], 30.0)
+	var last_min: float = LE_SUB_MIN.get(last_sub["id"], 30.0)
+	dy = clampf(dy, min_h - _le_sub_resize_start_h, _le_sub_resize_next_h - last_min)
+	sub["height"] = _le_sub_resize_start_h + dy
+	last_sub["height"] = _le_sub_resize_next_h - (sub["height"] - _le_sub_resize_start_h)
+
+
+func _handle_le_sub_resize_release() -> void:
+	if _le_sub_resize_idx < 0 or _le_sub_resize_idx >= _le_subsections.size():
+		return
+	var sub: Dictionary = _le_subsections[_le_sub_resize_idx]
+	var last_sub: Dictionary = _le_subsections[_le_subsections.size() - 1]
+	var snapped: float = _snap_le_height(sub["id"], sub["height"])
+	if snapped != sub["height"]:
+		var delta: float = snapped - sub["height"]
+		sub["height"] = snapped
+		last_sub["height"] -= delta
+
+
+func _handle_le_hover(my: float) -> void:
+	_le_hover_mode_idx = -1
+	_le_hover_item_idx = -1
+	_le_scene_hover_idx = -1
+	_le_hover_level_idx = -1
+	if not _le_subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _le_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "le_save":
+			body_end = maxf(body_end, 9999.0)
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"le_level": _le_hover_level_idx = int(local_y / ROW_HEIGHT) + _le_level_scroll_offset
+				"le_modes": _le_hover_mode_idx = int(local_y / ROW_HEIGHT)
+				"le_items": _le_hover_item_idx = int(local_y / 16.0) + _le_items_scroll_offset
+				"le_actions":
+					var sy: float = 0.0
+					var action_btns: Array = _le_get_action_buttons()
+					if not action_btns.is_empty():
+						sy += 28.0
+					var actions: Array = _le_get_current_actions()
+					var aidx: int = 0
+					for ai in range(actions.size()):
+						if actions[ai]["cmd"] == "":
+							sy += 18
+							continue
+						if local_y >= sy and local_y < sy + 18:
+							_le_scene_hover_idx = aidx
+						sy += 18
+						aidx += 1
+			return
+		y += sub["height"]
+
+
+# -- LE property editing -------------------------------------------------------
+
+func _handle_le_prop_edit_key(event: InputEventKey) -> void:
+	match event.keycode:
+		KEY_ENTER:
+			_apply_le_prop_edit()
+		KEY_ESCAPE:
+			_le_prop_edit_focused = false
+			_le_prop_edit_key = ""
+		KEY_BACKSPACE:
+			if _le_prop_edit_cursor > 0:
+				_le_prop_edit_text = _le_prop_edit_text.substr(0, _le_prop_edit_cursor - 1) + _le_prop_edit_text.substr(_le_prop_edit_cursor)
+				_le_prop_edit_cursor -= 1
+		KEY_LEFT:
+			_le_prop_edit_cursor = maxi(0, _le_prop_edit_cursor - 1)
+		KEY_RIGHT:
+			_le_prop_edit_cursor = mini(_le_prop_edit_text.length(), _le_prop_edit_cursor + 1)
+		_:
+			if event.unicode > 0 and not event.ctrl_pressed:
+				var ch := char(event.unicode)
+				_le_prop_edit_text = _le_prop_edit_text.substr(0, _le_prop_edit_cursor) + ch + _le_prop_edit_text.substr(_le_prop_edit_cursor)
+				_le_prop_edit_cursor += 1
+
+
+func _apply_le_prop_edit() -> void:
+	if _le_prop_edit_key.is_empty():
+		_le_prop_edit_focused = false
+		return
+	_le_set_property(_le_prop_edit_key, _le_prop_edit_text.to_float())
+	_le_prop_edit_focused = false
+	_le_prop_edit_key = ""
+
+
+func _handle_le_prop_drag(mx: float) -> void:
+	var lx: float = mx - _panel_x - ICON_BAR_WIDTH - 4
+	_handle_le_prop_drag_at(lx)
+
+
+func _handle_le_prop_drag_at(lx: float) -> void:
+	var pw: float = _content_width
+	var slider_x: float = pw * 0.47
+	var slider_w: float = pw * 0.35
+	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+	for prop in _le_get_properties():
+		if prop["key"] == _le_prop_dragging_key:
+			var new_val: float = lerpf(prop.get("min", 0.0), prop.get("max", 1000.0), t)
+			_le_set_property(_le_prop_dragging_key, new_val)
+			return
+
+
+func _le_set_property(key: String, value: float) -> void:
+	var config: Dictionary = _le_get_config()
+	var le: Node = _get_level_editor()
+	var sel: int = _le_get_selected_idx()
+	if sel < 0 or not le:
+		return
+	match _le_get_editor_mode_value():
+		1:
+			var positions: Array = config.get("spawn_positions", [])
+			if sel < positions.size():
+				match key:
+					"x": positions[sel][0] = value
+					"y": positions[sel][1] = value
+		3:
+			var platforms: Array = config.get("platforms", [])
+			if sel < platforms.size():
+				match key:
+					"x": platforms[sel]["pos"][0] = value
+					"y": platforms[sel]["pos"][1] = value
+					"width": platforms[sel]["width"] = value
+		4:
+			var portal: Dictionary = config.get("portal", {})
+			match key:
+				"x": portal["pos"][0] = value
+				"y": portal["pos"][1] = value
+				"range": portal["activation_range"] = value
+		6:
+			var splays: Array = config.get("splays", [])
+			if sel < splays.size():
+				match key:
+					"x": splays[sel]["pos"][0] = value
+					"y": splays[sel]["pos"][1] = value
+					"rotation": splays[sel]["rotation"] = value
+					"scale": splays[sel]["scale"] = clampf(value, 0.25, 8.0)
+	le.config_changed.emit(config)
+
+
+# -- LE drawing ----------------------------------------------------------------
+
+func _draw_level_editor_section(content_x: float, font: Font, ph: float) -> void:
+	if not _le_subsections_initialized:
+		_init_le_subsections()
+
+	var x: float = content_x
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	for si in range(_le_subsections.size()):
+		var sub: Dictionary = _le_subsections[si]
+		if y > ph:
+			break
+
+		_draw_le_sub_header(x, y, pw, font, sub)
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = y + SUB_HEADER_H
+		var body_h: float
+		if sub["id"] == "le_save":
+			body_h = maxf(LE_SUB_MIN["le_save"] - SUB_HEADER_H, ph - body_y)
+		else:
+			body_h = sub["height"] - SUB_HEADER_H
+
+		if body_h > 0:
+			match sub["id"]:
+				"le_level":      _draw_le_sub_level(x, body_y, pw, body_h, font)
+				"le_modes":      _draw_le_sub_modes(x, body_y, pw, body_h, font)
+				"le_items":      _draw_le_sub_items(x, body_y, pw, body_h, font)
+				"le_properties": _draw_le_sub_properties(x, body_y, pw, body_h, font)
+				"le_actions":    _draw_le_sub_actions(x, body_y, pw, body_h, font)
+				"le_save":       _draw_le_sub_save(x, body_y, pw, body_h, font)
+
+		# Snap indicator during resize
+		if _le_sub_resize_idx == si and sub["id"] != "le_save":
+			var snap_h: float = _get_le_preferred_height(sub["id"])
+			var snap_y: float = y + snap_h
+			var near_snap: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
+			var snap_col := Color(0.9, 0.6, 0.2, 0.6) if near_snap else Color(0.9, 0.6, 0.2, 0.25)
+			var dx: float = 0.0
+			while dx < pw - 16:
+				_panel.draw_line(Vector2(x + dx, snap_y), Vector2(x + minf(dx + 6.0, pw - 16), snap_y), snap_col, 1.0)
+				dx += 10.0
+			if near_snap:
+				_panel.draw_string(font, Vector2(x + pw - 40, snap_y - 3), "snap", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, snap_col)
+
+		if sub["id"] == "le_save":
+			y += body_h + SUB_HEADER_H
+		else:
+			y += sub["height"]
+
+		if sub["id"] != "le_save":
+			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.25, 0.2, 0.4), 1.0)
+
+
+func _draw_le_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	## Draw sub-section header — same structure as test runner, warm color accent.
+	var bg_col := Color(0.08, 0.08, 0.06, 0.95)
+	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.3, 0.25, 0.15, 0.6), 1.0)
+
+	# Collapse triangle
+	var tri_x: float = x + 6
+	var tri_y: float = y + SUB_HEADER_H * 0.5
+	var tri_col := Color(0.5, 0.5, 0.45)
+	if sub["collapsed"]:
+		var pts: PackedVector2Array = [
+			Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+	else:
+		var pts: PackedVector2Array = [
+			Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+
+	# Title
+	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 70, 10, Color(0.9, 0.7, 0.3))
+
+	# Context info
+	var ctx_text: String = ""
+	var ctx_col := Color(0.6, 0.55, 0.4)
+	match sub["id"]:
+		"le_level":
+			ctx_text = _le_get_current_level_name()
+		"le_modes":
+			var mi: int = _le_active_display_mode
+			if mi >= 0 and mi < LE_MODE_DISPLAY_NAMES.size():
+				ctx_text = LE_MODE_DISPLAY_NAMES[mi]
+				ctx_col = LE_MODE_DISPLAY_COLORS[mi]
+		"le_items":
+			ctx_text = "%d items" % _le_get_item_count()
+		"le_properties":
+			var sel: int = _le_get_selected_idx()
+			if sel >= 0:
+				ctx_text = "#%d" % (sel + 1)
+		"le_scene":
+			var enemy_count: int = get_tree().get_nodes_in_group("enemies").size()
+			var player_count: int = get_tree().get_nodes_in_group("players").size()
+			ctx_text = "%dE %dP" % [enemy_count, player_count]
+		"le_save":
+			var le: Node = _get_level_editor()
+			if le and "_changed" in le:
+				var total: int = 0
+				for k in le._changed:
+					if le._changed[k]:
+						total += 1
+				if total > 0:
+					ctx_text = "%d changed" % total
+					ctx_col = Color(1.0, 0.8, 0.3)
+
+	if not ctx_text.is_empty():
+		_panel.draw_string(font, Vector2(x + 88, y + 14), ctx_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 120, 9, ctx_col)
+
+	# Grip dots
+	var grip_x: float = x + pw - 22
+	for gi in range(3):
+		for gj in range(2):
+			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.3, 0.25))
+
+
+func _draw_le_sub_level(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw scrollable level selector list.
+	if _le_level_names_dirty:
+		_le_rebuild_level_names()
+	var row_h: float = ROW_HEIGHT
+	var visible_count: int = int(h / row_h)
+	var max_scroll: int = maxi(0, _le_cached_level_names.size() - visible_count)
+	_le_level_scroll_offset = clampi(_le_level_scroll_offset, 0, max_scroll)
+	var current_level: String = _le_get_current_level_name()
+
+	for i in range(mini(visible_count, _le_cached_level_names.size() - _le_level_scroll_offset)):
+		var lname: String = _le_cached_level_names[i + _le_level_scroll_offset]
+		var ry: float = y + i * row_h
+		var is_current: bool = (lname == current_level)
+		var is_hover: bool = (_le_hover_level_idx == i + _le_level_scroll_offset)
+
+		if is_current:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.25, 0.1))
+			_panel.draw_rect(Rect2(x, ry, 2, row_h - 2), Color(0.3, 0.8, 0.3))
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.12, 0.12, 0.08))
+
+		var col: Color = Color(0.5, 1.0, 0.5) if is_current else (Color(0.75, 0.75, 0.7) if is_hover else Color(0.5, 0.5, 0.45))
+		_panel.draw_string(font, Vector2(x + 8, ry + 13), lname, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, col)
+
+	if _le_cached_level_names.size() > visible_count and max_scroll > 0:
+		var pct: float = float(_le_level_scroll_offset) / float(max_scroll)
+		var bar_h: float = maxf(16.0, h * float(visible_count) / float(_le_cached_level_names.size()))
+		_panel.draw_rect(Rect2(x + pw - 12, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.25, 0.5))
+
+
+func _draw_le_sub_modes(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var row_h: float = ROW_HEIGHT
+	var current_mode: int = _le_active_display_mode
+	var visible_count: int = int(h / row_h)
+
+	for i in range(mini(visible_count, LE_MODE_DISPLAY_NAMES.size())):
+		var ry: float = y + i * row_h
+		var is_active_mode: bool = (i == current_mode)
+		var is_hover: bool = (_le_hover_mode_idx == i)
+		var col: Color = LE_MODE_DISPLAY_COLORS[i]
+
+		if is_active_mode:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), col * Color(1, 1, 1, 0.15))
+			_panel.draw_rect(Rect2(x, ry, 2, row_h - 2), col)
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.12, 0.12, 0.08))
+
+		# Mode dot
+		_panel.draw_circle(Vector2(x + 8, ry + 8), 3.0 if is_active_mode else 2.0, col if is_active_mode else col * Color(1, 1, 1, 0.4))
+
+		# Name
+		var name_col: Color = col if is_active_mode else (Color(0.7, 0.7, 0.65) if is_hover else Color(0.5, 0.5, 0.45))
+		_panel.draw_string(font, Vector2(x + 16, ry + 13), LE_MODE_DISPLAY_NAMES[i], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, name_col)
+
+		# Count (skip for Gameplay)
+		if i > 0 and i < LE_MODE_MAP.size():
+			var editor_mode: int = LE_MODE_MAP[i]
+			_panel.draw_string(font, Vector2(x + pw - 48, ry + 13), "(%d)" % _le_get_item_count_for_mode(editor_mode), HORIZONTAL_ALIGNMENT_LEFT, 40, 8, Color(0.4, 0.4, 0.35))
+
+
+func _draw_le_sub_items(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var row_h: float = 16.0
+	var items: Array = _le_build_item_list()
+	var visible_count: int = int(h / row_h)
+	var max_scroll: int = maxi(0, items.size() - visible_count)
+	_le_items_scroll_offset = clampi(_le_items_scroll_offset, 0, max_scroll)
+
+	var sel: int = _le_get_selected_idx()
+	var le: Node = _get_level_editor()
+
+	for i in range(mini(visible_count, items.size() - _le_items_scroll_offset)):
+		var item: Dictionary = items[i + _le_items_scroll_offset]
+		var ry: float = y + i * row_h
+		# Selection check: for spawn areas, match both idx and zone type
+		var is_selected: bool = false
+		if sel >= 0:
+			if item.has("zone_type") and le and "_drag_item_type" in le:
+				is_selected = (sel == item["idx"] and le._drag_item_type == item["zone_type"] + "_zone")
+			else:
+				is_selected = (sel == item.get("idx", -1))
+		var is_hover: bool = (_le_hover_item_idx == i + _le_items_scroll_offset)
+
+		if is_selected:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.22, 0.1))
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.12, 0.12, 0.08))
+
+		_panel.draw_string(font, Vector2(x + 2, ry + 11), "%d" % (i + _le_items_scroll_offset + 1), HORIZONTAL_ALIGNMENT_LEFT, 16, 8, Color(0.4, 0.4, 0.35))
+
+		var col: Color = item.get("color", Color(0.6, 0.6, 0.6))
+		if is_selected: col = col.lightened(0.3)
+		elif is_hover: col = col.lightened(0.15)
+		_panel.draw_string(font, Vector2(x + 20, ry + 11), item.get("label", "?"), HORIZONTAL_ALIGNMENT_LEFT, pw - 36, 8, col)
+
+	if items.size() > visible_count and max_scroll > 0:
+		var pct: float = float(_le_items_scroll_offset) / float(max_scroll)
+		var bar_h: float = maxf(16.0, h * float(visible_count) / float(items.size()))
+		_panel.draw_rect(Rect2(x + pw - 12, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.25, 0.5))
+
+
+func _draw_le_sub_properties(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var props: Array = _le_get_properties()
+	if props.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "(select an item)", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.4, 0.35))
+		return
+
+	var row_h: float = 18.0
+	var visible_count: int = int(h / row_h)
+	for i in range(mini(visible_count, props.size())):
+		var prop: Dictionary = props[i]
+		var ry: float = y + i * row_h
+		var is_editing: bool = _le_prop_edit_focused and _le_prop_edit_key == prop["key"]
+
+		_panel.draw_string(font, Vector2(x + 4, ry + 13), prop["label"], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.4, 9, Color(0.6, 0.6, 0.55))
+
+		var val_x: float = x + pw * 0.47
+		var val_w: float = pw * 0.48
+		if prop.get("type", "") == "slider" and prop.get("editable", false):
+			var slider_w: float = pw * 0.35
+			var slider_y: float = ry + 8
+			_panel.draw_rect(Rect2(val_x, slider_y - 2, slider_w, 4), Color(0.2, 0.2, 0.18))
+			var min_v: float = prop.get("min", 0.0)
+			var max_v: float = prop.get("max", 1000.0)
+			var cur_v: float = float(prop.get("value", 0))
+			var t: float = clampf((cur_v - min_v) / (max_v - min_v), 0.0, 1.0) if max_v != min_v else 0.0
+			var thumb_col := Color(0.9, 0.6, 0.2) if _le_prop_dragging_key == prop["key"] else Color(0.8, 0.6, 0.3)
+			_panel.draw_circle(Vector2(val_x + t * slider_w, slider_y), 5.0, thumb_col)
+			_panel.draw_string(font, Vector2(val_x + slider_w + 4, ry + 13), "%.1f" % cur_v, HORIZONTAL_ALIGNMENT_LEFT, 50, 8, Color(0.7, 0.7, 0.6))
+		elif is_editing:
+			_panel.draw_rect(Rect2(val_x, ry + 1, val_w, row_h - 4), Color(0.12, 0.12, 0.1))
+			var display: String = _le_prop_edit_text
+			if int(_cursor_blink * 2) % 2 == 0:
+				display = display.substr(0, _le_prop_edit_cursor) + "|" + display.substr(_le_prop_edit_cursor)
+			_panel.draw_string(font, Vector2(val_x + 4, ry + 13), display, HORIZONTAL_ALIGNMENT_LEFT, val_w - 8, 9, Color(0.9, 0.9, 0.8))
+		else:
+			var val_text: String = "%.1f" % prop["value"] if prop.get("value") is float else str(prop.get("value", ""))
+			var val_col: Color = Color(0.8, 0.8, 0.7) if prop.get("editable", false) else Color(0.5, 0.5, 0.45)
+			_panel.draw_string(font, Vector2(val_x + 4, ry + 13), val_text, HORIZONTAL_ALIGNMENT_LEFT, val_w, 9, val_col)
+
+
+func _draw_le_sub_actions(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw mode-dependent actions. Gameplay shows spawn/kill/etc. Editor modes show
+	## mode-specific button bar. Always-available actions appear at the bottom.
+	var ry: float = y
+
+	# Mode-specific action button bar (migration/splay etc.)
+	var action_btns: Array = _le_get_action_buttons()
+	if not action_btns.is_empty():
+		var btn_h: float = 22.0
+		_panel.draw_rect(Rect2(x, ry, pw - 8, btn_h), Color(0.06, 0.06, 0.04, 0.8))
+		var bw: float = (pw - 24.0) / float(action_btns.size())
+		for i in range(action_btns.size()):
+			var bx: float = x + 8.0 + i * bw
+			var col: Color = action_btns[i][1]
+			_panel.draw_rect(Rect2(bx, ry + 2, bw - 4, btn_h - 4), col * Color(1, 1, 1, 0.12))
+			_panel.draw_rect(Rect2(bx, ry + 2, bw - 4, btn_h - 4), col * Color(1, 1, 1, 0.45), false, 1.0)
+			_panel.draw_string(font, Vector2(bx + 4, ry + btn_h - 6), action_btns[i][0], HORIZONTAL_ALIGNMENT_LEFT, bw - 8, 8, col)
+		ry += btn_h + 4
+
+	# Mode-dependent action list
+	var actions: Array = _le_get_current_actions()
+	var row_h: float = 18.0
+	var action_idx: int = 0
+	for i in range(actions.size()):
+		if ry > y + h:
+			break
+		var action: Dictionary = actions[i]
+		if action["cmd"] == "":
+			ry += 2
+			_panel.draw_line(Vector2(x, ry), Vector2(x + pw - 16, ry), Color(0.25, 0.25, 0.2, 0.4), 1.0)
+			ry += 2
+			_panel.draw_string(font, Vector2(x + 4, ry + 10), action["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.45))
+			ry += 14
+			continue
+
+		var is_hover: bool = (_le_scene_hover_idx == action_idx)
+		if is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.15, 0.1))
+		var col: Color = action.get("color", Color(0.6, 0.6, 0.6))
+		if not is_hover:
+			col = col * Color(1, 1, 1, 0.7)
+		_panel.draw_string(font, Vector2(x + 8, ry + 13), action["label"], HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, col)
+		ry += row_h
+		action_idx += 1
+
+	# Flash feedback
+	if _le_scene_flash_timer > 0:
+		var alpha: float = clampf(_le_scene_flash_timer / 0.5, 0.0, 1.0)
+		ry += 4
+		_panel.draw_string(font, Vector2(x + 8, ry + 12), _le_scene_flash, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.3, 1.0, 0.5, alpha))
+
+
+func _draw_le_sub_save(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	var ry: float = y
+	var le: Node = _get_level_editor()
+
+	# Change summary
+	if le and "_changed" in le:
+		var parts: Array[String] = []
+		for key in le._changed:
+			if le._changed[key]:
+				var count: int = le._changed_items[key].size() if le._changed_items.has(key) else 1
+				parts.append("%d %s" % [count, key])
+		if not parts.is_empty():
+			_panel.draw_string(font, Vector2(x + 4, ry + 12), ", ".join(parts), HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(1.0, 0.8, 0.3))
+		else:
+			_panel.draw_string(font, Vector2(x + 4, ry + 12), "No unsaved changes", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.4, 0.5, 0.4))
+	ry += 18
+
+	# Save buttons
+	var btn_h: float = 22.0
+	if Version.is_source_mode():
+		var o_col := Color(0.3, 0.8, 1.0)
+		_panel.draw_rect(Rect2(x + 4, ry, pw * 0.44, btn_h), o_col * Color(1, 1, 1, 0.1))
+		_panel.draw_rect(Rect2(x + 4, ry, pw * 0.44, btn_h), o_col * Color(1, 1, 1, 0.5), false, 1.0)
+		_panel.draw_string(font, Vector2(x + 12, ry + 15), "Save Original", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, o_col)
+
+	var c_col := Color(0.3, 1.0, 0.3)
+	var cx: float = x + pw * 0.5
+	_panel.draw_rect(Rect2(cx, ry, pw * 0.44, btn_h), c_col * Color(1, 1, 1, 0.1))
+	_panel.draw_rect(Rect2(cx, ry, pw * 0.44, btn_h), c_col * Color(1, 1, 1, 0.5), false, 1.0)
+	_panel.draw_string(font, Vector2(cx + 8, ry + 15), "Save Custom", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, c_col)
+	ry += btn_h + 6
+
+	# Status
+	if le and le.has_method("_has_custom_level"):
+		if le._has_custom_level():
+			_panel.draw_string(font, Vector2(x + 4, ry + 12), "CUSTOM", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.6, 0.3))
+		else:
+			_panel.draw_string(font, Vector2(x + 4, ry + 12), "ORIGINAL", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.3, 0.8, 1.0, 0.6))
+
+
+# ==============================================================================
+# BLUEPRINTS SECTION — Edit construct definitions (splay poses, tree shapes).
+# Opens a blank sandbox level for editing. All spawned entities are temporary.
+# ==============================================================================
+
+const CT_TYPE_NAMES := ["Splay Poses", "Trees"]
+const CT_TYPE_COLORS: Array[Color] = [Color(0.9, 0.4, 0.2), Color(0.3, 0.8, 0.4)]
+
+# Tracks whether we're in the blueprint sandbox
+var _ct_sandbox_active: bool = false
+var _ct_sandbox_return_level: String = ""  # Level to return to when exiting sandbox
+
+
+func _init_ct_subsections() -> void:
+	_ct_subsections = []
+	for sid in ["ct_types", "ct_instances"]:
+		_ct_subsections.append({
+			"id": sid,
+			"title": sid.substr(3).capitalize(),
+			"collapsed": false,
+			"height": _get_ct_preferred_height(sid),
+		})
+	_load_ct_layout()
+	_auto_snap_ct()
+	_ct_subsections_initialized = true
+
+
+func _load_ct_layout() -> void:
+	var path: String = "user://constructs_layout.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	for sub in _ct_subsections:
+		if json.data.has(sub["id"]):
+			sub["collapsed"] = json.data[sub["id"]].get("collapsed", sub["collapsed"])
+			sub["height"] = json.data[sub["id"]].get("height", sub["height"])
+
+
+func _save_ct_layout() -> void:
+	var data: Dictionary = {}
+	for sub in _ct_subsections:
+		data[sub["id"]] = {"collapsed": sub["collapsed"], "height": sub["height"]}
+	var file := FileAccess.open("user://constructs_layout.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+
+
+func _auto_snap_ct() -> void:
+	if _ct_subsections.is_empty():
+		return
+	var last: Dictionary = _ct_subsections[_ct_subsections.size() - 1]
+	for i in range(_ct_subsections.size() - 1):
+		var sub: Dictionary = _ct_subsections[i]
+		if sub["collapsed"]:
+			continue
+		var preferred: float = _get_ct_preferred_height(sub["id"])
+		var delta: float = preferred - sub["height"]
+		sub["height"] = preferred
+		last["height"] -= delta
+	if last["height"] < CT_SUB_MIN.get("ct_instances", 60.0):
+		last["height"] = CT_SUB_MIN.get("ct_instances", 60.0)
+
+
+func _get_ct_preferred_height(sid: String) -> float:
+	match sid:
+		"ct_types":
+			return SUB_HEADER_H + CT_TYPE_NAMES.size() * ROW_HEIGHT + 4.0
+		"ct_instances":
+			var count: int = _ct_get_instance_count()
+			return SUB_HEADER_H + clampi(count, 3, 15) * 16.0 + 4.0
+	return SUB_HEADER_H + 40.0
+
+
+func _ct_get_splay_pose_names() -> Array[String]:
+	## Scan splay_poses directories for available pose JSON files.
+	var names: Array[String] = []
+	# Bundled poses
+	var dir := DirAccess.open("res://data/splay_poses/")
+	if dir:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				names.append(fname.get_basename())
+			fname = dir.get_next()
+		dir.list_dir_end()
+	# Custom poses (user://)
+	var udir := DirAccess.open("user://splay_poses/")
+	if udir:
+		udir.list_dir_begin()
+		var fname2: String = udir.get_next()
+		while fname2 != "":
+			if fname2.ends_with(".json"):
+				var bname: String = fname2.get_basename()
+				if bname not in names:
+					names.append(bname)
+			fname2 = udir.get_next()
+		udir.list_dir_end()
+	names.sort()
+	return names
+
+
+func _ct_get_instance_count() -> int:
+	match _ct_selected_type:
+		"splays": return _ct_get_splay_pose_names().size()
+		"trees":
+			var config: Dictionary = _le_get_config()
+			return config.get("scenery", {}).get("trees", []).size()
+	return 0
+
+
+func _ct_build_instance_list() -> Array:
+	## Build the list of blueprint definitions (not level instances).
+	## Splays: lists available pose files. Trees: lists tree definitions.
+	var items: Array = []
+	match _ct_selected_type:
+		"splays":
+			var poses: Array[String] = _ct_get_splay_pose_names()
+			for i in range(poses.size()):
+				items.append({"label": poses[i], "color": Color(0.9, 0.4, 0.2), "idx": i})
+		"trees":
+			var config: Dictionary = _le_get_config()
+			for i in range(config.get("scenery", {}).get("trees", []).size()):
+				var t: Dictionary = config["scenery"]["trees"][i]
+				items.append({"label": "Tree #%d  seed:%d" % [i+1, int(t.get("seed", 0))], "color": Color(0.3, 0.8, 0.4), "idx": i})
+	return items
+
+
+# -- CT click/scroll/hover/resize ---------------------------------------------
+
+func _handle_ct_click(lx: float, my: float) -> void:
+	if not _ct_subsections_initialized:
+		_init_ct_subsections()
+	var y: float = 0.0
+	for i in range(_ct_subsections.size()):
+		var sub: Dictionary = _ct_subsections[i]
+		var header_end: float = y + SUB_HEADER_H
+
+		if my >= y and my < header_end:
+			var pw: float = _content_width
+			if lx < 16:
+				sub["collapsed"] = not sub["collapsed"]
+				_save_ct_layout()
+			elif lx > pw - 28 and i > 0:
+				var target_idx: int = i - 1
+				var now: float = Time.get_ticks_msec() / 1000.0
+				if _ct_grip_last_click_idx == target_idx and (now - _ct_grip_last_click_time) < 0.4:
+					var sub_above: Dictionary = _ct_subsections[target_idx]
+					var last_sub: Dictionary = _ct_subsections[_ct_subsections.size() - 1]
+					var preferred: float = _get_ct_preferred_height(sub_above["id"])
+					var delta: float = preferred - sub_above["height"]
+					sub_above["height"] = preferred
+					last_sub["height"] -= delta
+					_save_ct_layout()
+					_ct_grip_last_click_idx = -1
+					return
+				_ct_grip_last_click_idx = target_idx
+				_ct_grip_last_click_time = now
+				_ct_sub_resize_idx = target_idx
+				_ct_sub_resize_start_y = my
+				_ct_sub_resize_start_h = _ct_subsections[target_idx]["height"]
+				_ct_sub_resize_next_h = _ct_subsections[_ct_subsections.size() - 1]["height"]
+			return
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = header_end
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "ct_instances":
+			body_end = maxf(body_end, 9999.0)
+
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"ct_types":
+					var idx: int = int(local_y / ROW_HEIGHT)
+					if idx == 0: _ct_selected_type = "splays"
+					elif idx == 1: _ct_selected_type = "trees"
+					_ct_instances_scroll_offset = 0
+				"ct_instances":
+					var idx: int = int(local_y / 16.0) + _ct_instances_scroll_offset
+					_ct_select_instance(idx)
+			return
+		y += sub["height"]
+
+
+func _ct_enter_sandbox() -> void:
+	## Enter the blueprint sandbox — load a blank level for construct editing.
+	## Remembers the current level to return to later.
+	if _ct_sandbox_active:
+		return
+	_ct_sandbox_return_level = _le_get_current_level_name()
+	_ct_sandbox_active = true
+	# Load flat_floor as the sandbox (minimal level)
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		rcon._execute("clear")
+		rcon._execute("level flat_floor")
+
+
+func _ct_exit_sandbox() -> void:
+	## Exit the blueprint sandbox — return to the previous level.
+	if not _ct_sandbox_active:
+		return
+	_ct_sandbox_active = false
+	# Deactivate level editor overlay
+	var le: Node = _get_level_editor()
+	if le and le._active:
+		if le._mode == 7:  # SPLAY_EDIT — exit cleanly
+			le._exit_splay_edit()
+			le._mode = 6
+		le._active = false
+		le.visible = false
+		if le._overlay:
+			le._overlay.visible = false
+	# Return to previous level
+	if not _ct_sandbox_return_level.is_empty():
+		var rcon: Node = get_node_or_null("/root/Rcon")
+		if rcon:
+			rcon._execute("level %s" % _ct_sandbox_return_level)
+	_ct_sandbox_return_level = ""
+
+
+func _ct_select_instance(idx: int) -> void:
+	## Select a blueprint instance to edit. Enters sandbox if not already there.
+	## For splay poses: enters SPLAY_EDIT mode with that pose loaded.
+	## For trees: selects the tree for seed/position editing.
+	if not _ct_sandbox_active:
+		_ct_enter_sandbox()
+		# Wait a frame for the level to load before entering edit mode
+		# For now, just set up — the user can click again after sandbox loads
+		return
+
+	var le: Node = _get_level_editor()
+	if not le:
+		_le_ensure_editor_for_level("flat_floor")
+		le = _get_level_editor()
+	if not le:
+		return
+
+	match _ct_selected_type:
+		"splays":
+			# Build list of available pose names
+			var poses: Array[String] = _ct_get_splay_pose_names()
+			if idx >= 0 and idx < poses.size():
+				var pose_name: String = poses[idx]
+				# Activate level editor in SPLAY_EDIT mode for this pose
+				le._active = true
+				le.visible = true
+				if le._overlay:
+					le._overlay.visible = true
+				# Set up for splay edit — need a splay instance referencing this pose
+				le._mode = 6  # SPLAY first
+				# Create a temporary splay config pointing to this pose
+				if not le._config.has("splays"):
+					le._config["splays"] = []
+				var splays: Array = le._config["splays"]
+				# Find or create a splay for this pose
+				var found_idx: int = -1
+				for si in range(splays.size()):
+					if splays[si].get("pose", "") == pose_name:
+						found_idx = si
+						break
+				if found_idx < 0:
+					splays.append({"pose": pose_name, "creature": "quadruped", "pos": [960, 500], "rotation": 0, "behavior": "asleep"})
+					found_idx = splays.size() - 1
+				le._selected_idx = found_idx
+				le._splay_edit_pose_idx = found_idx
+				le._mode = 7  # SPLAY_EDIT
+				le._enter_splay_edit()
+				le._update_display()
+
+
+func _handle_ct_scroll(my: float, delta: int) -> void:
+	if not _ct_subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _ct_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "ct_instances":
+			body_end = maxf(body_end, 9999.0)
+		if my >= y and my < body_end:
+			if sub["id"] == "ct_instances":
+				_ct_instances_scroll_offset = maxi(0, _ct_instances_scroll_offset + delta)
+			return
+		y += sub["height"]
+
+
+func _handle_ct_hover(my: float) -> void:
+	_ct_hover_type_idx = -1
+	_ct_hover_instance_idx = -1
+	if not _ct_subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _ct_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "ct_instances":
+			body_end = maxf(body_end, 9999.0)
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"ct_types": _ct_hover_type_idx = int(local_y / ROW_HEIGHT)
+				"ct_instances": _ct_hover_instance_idx = int(local_y / 16.0) + _ct_instances_scroll_offset
+			return
+		y += sub["height"]
+
+
+func _handle_ct_sub_resize_drag(my: float) -> void:
+	if _ct_sub_resize_idx < 0 or _ct_sub_resize_idx >= _ct_subsections.size():
+		return
+	var dy: float = my - _ct_sub_resize_start_y
+	var sub: Dictionary = _ct_subsections[_ct_sub_resize_idx]
+	var last: Dictionary = _ct_subsections[_ct_subsections.size() - 1]
+	var min_h: float = CT_SUB_MIN.get(sub["id"], 30.0)
+	var last_min: float = CT_SUB_MIN.get(last["id"], 60.0)
+	dy = clampf(dy, min_h - _ct_sub_resize_start_h, _ct_sub_resize_next_h - last_min)
+	sub["height"] = _ct_sub_resize_start_h + dy
+	last["height"] = _ct_sub_resize_next_h - (sub["height"] - _ct_sub_resize_start_h)
+
+
+func _handle_ct_sub_resize_release() -> void:
+	if _ct_sub_resize_idx < 0 or _ct_sub_resize_idx >= _ct_subsections.size():
+		return
+	var sub: Dictionary = _ct_subsections[_ct_sub_resize_idx]
+	var last: Dictionary = _ct_subsections[_ct_subsections.size() - 1]
+	var preferred: float = _get_ct_preferred_height(sub["id"])
+	if absf(sub["height"] - preferred) < SUB_SNAP_DISTANCE:
+		var delta: float = preferred - sub["height"]
+		sub["height"] = preferred
+		last["height"] -= delta
+
+
+# -- CT drawing ----------------------------------------------------------------
+
+func _draw_blueprints_section(content_x: float, font: Font, ph: float) -> void:
+	if not _ct_subsections_initialized:
+		_init_ct_subsections()
+
+	var x: float = content_x
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	for si in range(_ct_subsections.size()):
+		var sub: Dictionary = _ct_subsections[si]
+		if y > ph:
+			break
+
+		# Header
+		_draw_ct_sub_header(x, y, pw, font, sub)
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = y + SUB_HEADER_H
+		var body_h: float
+		if sub["id"] == "ct_instances":
+			body_h = maxf(CT_SUB_MIN["ct_instances"] - SUB_HEADER_H, ph - body_y)
+		else:
+			body_h = sub["height"] - SUB_HEADER_H
+
+		if body_h > 0:
+			match sub["id"]:
+				"ct_types":     _draw_ct_sub_types(x, body_y, pw, body_h, font)
+				"ct_instances": _draw_ct_sub_instances(x, body_y, pw, body_h, font)
+
+		# Snap indicator
+		if _ct_sub_resize_idx == si and sub["id"] != "ct_instances":
+			var snap_h: float = _get_ct_preferred_height(sub["id"])
+			var snap_y: float = y + snap_h
+			var near: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
+			var scol := Color(0.9, 0.5, 0.2, 0.6) if near else Color(0.9, 0.5, 0.2, 0.25)
+			var dx: float = 0.0
+			while dx < pw - 16:
+				_panel.draw_line(Vector2(x + dx, snap_y), Vector2(x + minf(dx + 6, pw - 16), snap_y), scol, 1.0)
+				dx += 10.0
+
+		if sub["id"] == "ct_instances":
+			y += body_h + SUB_HEADER_H
+		else:
+			y += sub["height"]
+
+		if sub["id"] != "ct_instances":
+			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.2, 0.15, 0.4), 1.0)
+
+
+func _draw_ct_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	var bg_col := Color(0.08, 0.07, 0.05, 0.95)
+	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.3, 0.2, 0.1, 0.6), 1.0)
+
+	var tri_x: float = x + 6
+	var tri_y: float = y + SUB_HEADER_H * 0.5
+	var tri_col := Color(0.5, 0.45, 0.4)
+	if sub["collapsed"]:
+		_panel.draw_polygon(PackedVector2Array([Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]), PackedColorArray([tri_col, tri_col, tri_col]))
+	else:
+		_panel.draw_polygon(PackedVector2Array([Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]), PackedColorArray([tri_col, tri_col, tri_col]))
+
+	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 80, 10, Color(0.9, 0.55, 0.2))
+
+	# Context
+	var ctx: String = ""
+	var ctx_col := Color(0.6, 0.5, 0.4)
+	match sub["id"]:
+		"ct_types":
+			ctx = _ct_selected_type.capitalize()
+			if _ct_sandbox_active:
+				ctx += "  [SANDBOX]"
+				ctx_col = Color(1.0, 0.7, 0.3)
+		"ct_instances":
+			ctx = "%d blueprints" % _ct_get_instance_count()
+	if not ctx.is_empty():
+		_panel.draw_string(font, Vector2(x + 98, y + 14), ctx, HORIZONTAL_ALIGNMENT_LEFT, pw - 130, 9, ctx_col)
+
+	# Grip
+	var grip_x: float = x + pw - 22
+	for gi in range(3):
+		for gj in range(2):
+			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.25, 0.2))
+
+
+func _draw_ct_sub_types(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var row_h: float = ROW_HEIGHT
+	for i in range(mini(int(h / row_h), CT_TYPE_NAMES.size())):
+		var ry: float = y + i * row_h
+		var type_key: String = "splays" if i == 0 else "trees"
+		var is_selected: bool = (_ct_selected_type == type_key)
+		var is_hover: bool = (_ct_hover_type_idx == i)
+		var col: Color = CT_TYPE_COLORS[i]
+
+		if is_selected:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), col * Color(1, 1, 1, 0.15))
+			_panel.draw_rect(Rect2(x, ry, 2, row_h - 2), col)
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.12, 0.1, 0.06))
+
+		_panel.draw_circle(Vector2(x + 8, ry + 8), 3.0 if is_selected else 2.0, col if is_selected else col * Color(1, 1, 1, 0.4))
+		var ncol: Color = col if is_selected else (Color(0.7, 0.7, 0.65) if is_hover else Color(0.5, 0.5, 0.45))
+		_panel.draw_string(font, Vector2(x + 16, ry + 13), CT_TYPE_NAMES[i], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, ncol)
+
+		# Count
+		var config: Dictionary = _le_get_config()
+		var count: int = 0
+		match type_key:
+			"splays": count = config.get("splays", []).size()
+			"trees": count = config.get("scenery", {}).get("trees", []).size()
+		_panel.draw_string(font, Vector2(x + pw - 48, ry + 13), "(%d)" % count, HORIZONTAL_ALIGNMENT_LEFT, 40, 8, Color(0.4, 0.4, 0.35))
+
+
+func _draw_ct_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var row_h: float = 16.0
+	var items: Array = _ct_build_instance_list()
+	var visible_count: int = int(h / row_h)
+	var max_scroll: int = maxi(0, items.size() - visible_count)
+	_ct_instances_scroll_offset = clampi(_ct_instances_scroll_offset, 0, max_scroll)
+
+	if items.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "(no %s)" % _ct_selected_type, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.4, 0.35))
+		return
+
+	# For splay poses, track which pose is being edited (by name in splay edit mode)
+	var le: Node = _get_level_editor()
+	var editing_pose: String = ""
+	if le and "_mode" in le and le._mode == 7 and "_splay_edit_origin_pose_name" in le:
+		editing_pose = le._splay_edit_origin_pose_name
+
+	for i in range(mini(visible_count, items.size() - _ct_instances_scroll_offset)):
+		var item: Dictionary = items[i + _ct_instances_scroll_offset]
+		var ry: float = y + i * row_h
+		var is_selected: bool = false
+		if _ct_selected_type == "splays":
+			is_selected = (not editing_pose.is_empty() and item.get("label", "") == editing_pose)
+		else:
+			var le_sel: int = le._selected_idx if le and "_selected_idx" in le else -1
+			is_selected = (le_sel == item.get("idx", -1))
+		var is_hover: bool = (_ct_hover_instance_idx == i + _ct_instances_scroll_offset)
+
+		if is_selected:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.15, 0.22, 0.1))
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 2), Color(0.12, 0.1, 0.06))
+
+		_panel.draw_string(font, Vector2(x + 2, ry + 11), "%d" % (i + _ct_instances_scroll_offset + 1), HORIZONTAL_ALIGNMENT_LEFT, 16, 8, Color(0.4, 0.4, 0.35))
+		var col: Color = item.get("color", Color(0.6, 0.6, 0.6))
+		if is_selected: col = col.lightened(0.3)
+		elif is_hover: col = col.lightened(0.15)
+		_panel.draw_string(font, Vector2(x + 20, ry + 11), item.get("label", "?"), HORIZONTAL_ALIGNMENT_LEFT, pw - 36, 8, col)
+
+	if items.size() > visible_count and max_scroll > 0:
+		var pct: float = float(_ct_instances_scroll_offset) / float(max_scroll)
+		var bar_h: float = maxf(16.0, h * float(visible_count) / float(items.size()))
+		_panel.draw_rect(Rect2(x + pw - 12, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.25, 0.2, 0.5))

@@ -66,13 +66,16 @@ func _ready() -> void:
 	_build_overlay()
 
 
+var _top_bar: ColorRect  # Reference kept so we can hide it when drawer is active
+
 func _build_ui() -> void:
-	# Semi-transparent top bar
-	var top_bar := ColorRect.new()
-	top_bar.color = Color(0.05, 0.05, 0.1, 0.85)
-	top_bar.anchor_right = 1.0
-	top_bar.offset_bottom = 40
-	add_child(top_bar)
+	# Semi-transparent top bar — hidden when the debug drawer manages the editor
+	_top_bar = ColorRect.new()
+	_top_bar.color = Color(0.05, 0.05, 0.1, 0.85)
+	_top_bar.anchor_right = 1.0
+	_top_bar.offset_bottom = 40
+	add_child(_top_bar)
+	var top_bar := _top_bar
 
 	# Mode label (left)
 	_mode_label = Label.new()
@@ -136,22 +139,40 @@ func _process(delta: float) -> void:
 		_nav_cooldown -= delta
 	if _overlay:
 		_overlay.queue_redraw()
+	# Hide top bar when the debug drawer is managing us
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	var drawer_open: bool = drawer != null and drawer.is_open()
+	if _top_bar:
+		_top_bar.visible = not drawer_open
+	if _mode_label:
+		_mode_label.visible = not drawer_open
+	if _info_label:
+		_info_label.visible = not drawer_open
+	if _status_label:
+		_status_label.visible = not drawer_open
 
 
 func _input(event: InputEvent) -> void:
 	if not _active:
 		return
 
-	# ESC closes editor (unless in SPLAY_EDIT which handles its own ESC)
+	# When the debug drawer is open, it manages the level editor — suppress
+	# ESC (close) and Tab (mode switch) so the drawer stays in control.
+	var _debug_drawer: Node = get_node_or_null("/root/DebugDrawer")
+	var drawer_is_open: bool = _debug_drawer != null and _debug_drawer.is_open()
+
+	# ESC closes editor (unless drawer is managing us, or in SPLAY_EDIT)
 	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		if _mode != Mode.SPLAY_EDIT:
+		if not drawer_is_open and _mode != Mode.SPLAY_EDIT:
 			toggle()
 			get_viewport().set_input_as_handled()
 			return
 
-	# Tab to switch modes
+	# Tab to switch modes (only when drawer is not managing us)
 	if event is InputEventKey and event.pressed:
-		if event.keycode == KEY_TAB:
+		if event.keycode == KEY_TAB and drawer_is_open:
+			pass  # Drawer handles mode switching
+		elif event.keycode == KEY_TAB:
 			_mode = ((_mode + 1) % Mode.size()) as Mode
 			_selected_idx = -1
 			_update_display()
@@ -368,6 +389,10 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 
+	# Skip mouse input when the click is over the debug drawer panel
+	if (event is InputEventMouseButton or event is InputEventMouseMotion) and _is_over_debug_drawer(event.position):
+		return
+
 	# Mouse input for dragging
 	if event is InputEventMouseButton:
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -407,6 +432,22 @@ func _update_display() -> void:
 			_mode_label.text = "MODE: Migration (no patterns)"
 	else:
 		_mode_label.text = "MODE: " + MODE_NAMES[_mode]
+
+
+func _is_drawer_managing() -> bool:
+	## Returns true if the debug drawer is open and managing us — suppress our own UI.
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	return drawer != null and drawer.is_open()
+
+
+func _is_over_debug_drawer(screen_pos: Vector2) -> bool:
+	## Returns true if the screen position is over the debug drawer's panel area.
+	## Prevents the level editor from consuming clicks meant for the drawer.
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if not drawer or not drawer.is_open():
+		return false
+	var panel_right: float = drawer._panel_x + drawer._panel_width
+	return screen_pos.x < panel_right
 
 
 func _get_world_pos(screen_pos: Vector2) -> Vector2:
@@ -876,8 +917,9 @@ func _draw_overlay() -> void:
 		Mode.SPLAY_EDIT:
 			_draw_splay_edit_overlay()
 
-	# -- Common overlay: change summary + save dialogs --
-	_draw_change_summary()
+	# -- Common overlay: change summary + save dialogs (hidden when drawer manages) --
+	if not _is_drawer_managing():
+		_draw_change_summary()
 	if _level_save_dialog_active:
 		_draw_level_save_dialog()
 
@@ -1481,8 +1523,8 @@ func _draw_splay_overlay() -> void:
 			_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -22), display_pose_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
 		_overlay.draw_string(ThemeDB.fallback_font, pos + Vector2(-30, -10), behavior, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, col * Color(1, 1, 1, 0.7))
 
-	# Help text
-	if _active:
+	# Help text (suppressed when debug drawer is managing the editor)
+	if _active and not _is_drawer_managing():
 		var physics_str: String = " [PHYSICS ON]" if _splay_physics_preview else ""
 		var help := "SPLAY: N=add  P=library  `=physics%s  Del=delete  U/D=pose  B=behavior  E=edit  Drag: body=move  ○=rotate  ◇=scale" % physics_str
 		_overlay.draw_string(ThemeDB.fallback_font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3, 0.8))
@@ -2533,7 +2575,9 @@ func _draw_splay_edit_overlay() -> void:
 		_overlay.draw_line(Vector2(dx + 200, dy + 62), Vector2(dx + 210, dy + 62), c_col, 1.5)
 		_overlay.draw_string(font, Vector2(dx + 211, dy + 60), "ustom", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, c_col)
 
-	var mirror_str: String = " [MIRROR]" if _splay_edit_mirror else ""
-	var src_str: String = " [DEV]" if Version.is_source_mode() else ""
-	var help := "SPLAY EDIT: Click=select  SPACE=toggle  C=rope/chain  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back%s" % [mirror_str, src_str]
-	_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))
+	# Help text (suppressed when debug drawer is managing the editor)
+	if not _is_drawer_managing():
+		var mirror_str: String = " [MIRROR]" if _splay_edit_mirror else ""
+		var src_str: String = " [DEV]" if Version.is_source_mode() else ""
+		var help := "SPLAY EDIT: Click=select  SPACE=toggle  C=rope/chain  P=pin  M=mirror%s  Drag=IK  L/R/U/D=pose  Ctrl+S=save  Esc=back%s" % [mirror_str, src_str]
+		_overlay.draw_string(font, Vector2(10, 30), help, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, 0.8))

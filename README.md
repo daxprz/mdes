@@ -163,6 +163,25 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.24
+**Level Editor and Blueprints integrated into debug drawer — Ctrl+E removed**
+
+- **Level Editor section** (pencil icon): New debug drawer section with 6 sub-sections using the Test Runner's polished framework (collapsible, resizable, snap-points, grip dots, layout persistence)
+- **Level selector**: Scrollable list of available levels at the top. Click to load. Current level highlighted.
+- **Mode list**: Gameplay + 6 editor modes (Spawn Areas, Spawn Pos, Seeds, Platforms, Portal, Migration, Splays). Selecting a mode auto-activates the level editor overlay.
+- **Gameplay mode**: No editing — shows spawn/kill/territorial/revive actions (replaces Ctrl+T test menu functionality)
+- **Mode-dependent actions**: Each mode shows relevant action buttons. Always-available: Clear Entities, Restart Level.
+- **Property inspector**: Inline editing for selected items — number fields (click to type), sliders (drag), read-only text for pose/behavior.
+- **Save sub-section**: Change summary, Save Original / Save Custom buttons, CUSTOM/ORIGINAL status indicator.
+- **Blueprints section** (blueprint icon): Separate workshop for editing construct definitions (splay poses, tree shapes). Lists available pose files from `data/splay_poses/` and `user://splay_poses/`.
+- **Blueprint sandbox**: Clicking a blueprint enters a blank sandbox level (flat_floor) for editing. Spawned entities are temporary. Remembers previous level to return to.
+- **Ctrl+E eliminated**: Level editor now activates entirely through the debug drawer's mode list. No more separate toggle.
+- **Click-through fix**: Level editor world-space mouse handling skips clicks over the debug drawer panel area.
+- **Top bar suppression**: Level editor's top bar, help text overlays, and change summary hidden when the debug drawer is managing it.
+- **Console slides from bottom**: Game console now slides up from the bottom of the screen instead of down from the top.
+- **Console respects drawer**: Console width limited to the area right of the debug drawer when both are open.
+- **Game viewport adapts**: Game area resizes to fit above the console and right of the drawer, keeping gameplay visible in the remaining rectangle.
+
 ### v0.10.23
 **UI cleanup: remove static entity info, streamline test menu, save/diff detection**
 

@@ -505,7 +505,7 @@
 	},
 	"splays": [
 		{
-			"_creature_ref": "@CharacterBody2D@97:<CharacterBody2D#100579411893>",
+			"_creature_ref": "@CharacterBody2D@335:<CharacterBody2D#618496866125703>",
 			"behavior": "asleep",
 			"creature": "quadruped",
 			"pos": [
@@ -517,7 +517,7 @@
 			"scale": 2.0
 		},
 		{
-			"_creature_ref": "@CharacterBody2D@121:<CharacterBody2D#102643009522>",
+			"_creature_ref": "@CharacterBody2D@359:<CharacterBody2D#618498057308306>",
 			"behavior": "active",
 			"creature": "quadruped",
 			"pos": [

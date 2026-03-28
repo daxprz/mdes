@@ -1,17 +1,19 @@
 # Debug Panel — Multi-Section Dockable UI Spec
 
-**Status: IMPLEMENTED (v0.10.18-v0.10.23)**
+**Status: IMPLEMENTED (v0.10.18-v0.10.24)**
 
 ## Architecture
 
-The debug drawer is a multi-section dockable panel with an icon bar. It is always the primary interface for test editing — there is no floating editor.
+The debug drawer is a multi-section dockable panel with an icon bar. It is the primary interface for debug aspects, test editing, entity config, level editing, and blueprint construction.
 
 ### Icon Bar (left strip, ~36px)
 - **Magnifying Glass** — Debug aspect tree
 - **Play/Bug** — Test Runner (docked)
 - **Gear** — Entity config panel
+- **Pencil** — Level Editor (level selector, modes, items, properties, actions, save)
+- **Blueprint** — Blueprints (splay pose / tree shape editor in sandbox)
 
-### Three Panels
+### Five Panels
 
 #### Debug Panel (Magnifying Glass)
 - Aspect filter search box
