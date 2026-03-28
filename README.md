@@ -163,6 +163,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.26
+**Debug drawer UI fixes, level editor tree/rock selection**
+
+- **Icon bar overlap fix**: Icon buttons (magnifying glass, play, gear, etc.) no longer extend past the icon bar into the content pane. Buttons now sized to fit within the 36px bar with proper margins.
+- **Row hover alignment fix**: Debug section hover highlight now aligns with the content area instead of starting at the panel's left edge (covering the icon bar).
+- **Tree/rock row selection**: Clicking a tree or rock row in the level editor's Items list now selects it, matching the behavior of clicking trees/rocks in the world view.
+- **Scale slider removed**: Removed the monster scale slider from the debug section to reduce clutter.
+- **Session consolidation command**: Added `/aid-session-consolidate` command for persisting session summaries to `/var/tumu/aid/sessions/`.
+
 ### v0.10.25
 **Tree blueprint system, tree placement in level editor, console keybindings**
 

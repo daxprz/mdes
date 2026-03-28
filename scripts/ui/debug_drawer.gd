@@ -872,13 +872,6 @@ func _handle_click(lx: float, my: float) -> void:
 		_id_filter_focused = false
 		return
 
-	# Check scale control area
-	if my >= _scale_area_y and my < _scale_area_y + SCALE_SLIDER_H:
-		_filter_focused = false
-		_id_filter_focused = false
-		_handle_scale_click(lx, my)
-		return
-
 	_filter_focused = false
 	_id_filter_focused = false
 
@@ -1075,9 +1068,10 @@ func _update_game_viewport() -> void:
 func _handle_icon_click(my: float) -> void:
 	## Click on the icon bar — switch section or collapse.
 	var icon_sections: Array = [Section.DEBUG, Section.TEST_RUNNER, Section.CONFIG, Section.LEVEL_EDITOR, Section.BLUEPRINTS]
+	var icon_btn_size: float = ICON_BAR_WIDTH - 4
 	for i in range(icon_sections.size()):
-		var iy: float = 8.0 + i * (ICON_SIZE + ICON_PAD * 2 + 4)
-		var ih: float = ICON_SIZE + ICON_PAD * 2
+		var iy: float = 8.0 + i * (icon_btn_size + 4)
+		var ih: float = icon_btn_size
 		if my >= iy and my < iy + ih:
 			if _current_section == icon_sections[i]:
 				# Clicking active icon could collapse, but for now just keep it
@@ -1588,7 +1582,6 @@ func _draw_panel() -> void:
 	_panel.draw_line(Vector2(_panel_x + pw, 0), Vector2(_panel_x + pw, ph), Color(0.2, 0.6, 1.0, 0.5), 2.0)
 
 	# -- Icon bar (left strip) --
-	var icon_x: float = _panel_x + 4
 	_panel.draw_rect(Rect2(_panel_x, 0, ICON_BAR_WIDTH, ph), Color(0.04, 0.04, 0.07, 0.98))
 	_panel.draw_line(Vector2(_panel_x + ICON_BAR_WIDTH, 0), Vector2(_panel_x + ICON_BAR_WIDTH, ph), Color(0.15, 0.15, 0.2), 1.0)
 
@@ -1599,14 +1592,16 @@ func _draw_panel() -> void:
 		{"section": Section.LEVEL_EDITOR, "label": "E"},
 		{"section": Section.BLUEPRINTS, "label": "B"},
 	]
+	var icon_btn_size: float = ICON_BAR_WIDTH - 4  # Fit within bar with 2px margin each side
+	var icon_x: float = _panel_x + 2
 	for i in range(icon_sections.size()):
-		var iy: float = 8.0 + i * (ICON_SIZE + ICON_PAD * 2 + 4)
+		var iy: float = 8.0 + i * (icon_btn_size + 4)
 		var is_active: bool = _current_section == icon_sections[i]["section"]
 		var bg_col: Color = Color(0.15, 0.25, 0.4, 0.8) if is_active else Color(0.08, 0.08, 0.12, 0.6)
-		_panel.draw_rect(Rect2(icon_x, iy, ICON_SIZE + ICON_PAD * 2, ICON_SIZE + ICON_PAD * 2), bg_col, true)
+		_panel.draw_rect(Rect2(icon_x, iy, icon_btn_size, icon_btn_size), bg_col, true)
 		if is_active:
-			_panel.draw_rect(Rect2(icon_x, iy, 2, ICON_SIZE + ICON_PAD * 2), Color(0.3, 0.7, 1.0), true)
-		var icon_center := Vector2(icon_x + ICON_PAD + ICON_SIZE * 0.5, iy + ICON_PAD + ICON_SIZE * 0.5)
+			_panel.draw_rect(Rect2(icon_x, iy, 2, icon_btn_size), Color(0.3, 0.7, 1.0), true)
+		var icon_center := Vector2(icon_x + icon_btn_size * 0.5, iy + icon_btn_size * 0.5)
 		_draw_section_icon(icon_center, icon_sections[i]["section"], is_active)
 
 	# -- Content area --
@@ -1723,39 +1718,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 	_panel.draw_string(font, Vector2(x + pw - 90, y + 12), save_hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 	y += 20
 
-	# -- Scale control --
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.3, 0.3, 0.3), 1.0)
-	y += 4
-	_scale_area_y = y  # Track for click detection
-	var monster: Node2D = _get_selected_monster()
-	if monster:
-		var cur_scale: float = monster.creature_scale
-		var label_col := Color(0.5, 0.9, 0.5)
-		_panel.draw_string(font, Vector2(x, y + 12), "Scale:", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, label_col)
-		# Slider track
-		var slider_x: float = x + 62
-		var slider_w: float = pw - 90.0
-		var slider_y: float = y + 8
-		_panel.draw_rect(Rect2(slider_x, slider_y - 2, slider_w, 4), Color(0.2, 0.2, 0.25))
-		# Tick marks at preset values
-		for preset in SCALE_PRESETS:
-			var tick_t: float = _scale_to_slider_t(preset)
-			var tick_x: float = slider_x + tick_t * slider_w
-			_panel.draw_line(Vector2(tick_x, slider_y - 5), Vector2(tick_x, slider_y + 5), Color(0.35, 0.35, 0.4), 1.0)
-		# 1.0 tick highlighted
-		var one_t: float = _scale_to_slider_t(1.0)
-		var one_x: float = slider_x + one_t * slider_w
-		_panel.draw_line(Vector2(one_x, slider_y - 6), Vector2(one_x, slider_y + 6), Color(0.5, 0.7, 1.0, 0.6), 1.0)
-		# Thumb
-		var thumb_t: float = _scale_to_slider_t(cur_scale)
-		var thumb_x: float = slider_x + thumb_t * slider_w
-		var thumb_col := Color(0.3, 1.0, 0.5) if _scale_dragging else Color(0.5, 0.9, 0.5)
-		_panel.draw_circle(Vector2(thumb_x, slider_y), 6.0, thumb_col)
-		# Value text
-		_panel.draw_string(font, Vector2(x + pw - 48, y + 13), "%.2f" % cur_scale, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, label_col)
-	else:
-		_panel.draw_string(font, Vector2(x, y + 12), "Scale: (TAB-select a monster)", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.4, 0.4, 0.4))
-	y += SCALE_SLIDER_H
+	_scale_area_y = -1  # Disabled — scale slider removed
 
 	# -- Column headers --
 	var v_col_x: float = x + pw - 60
@@ -1780,7 +1743,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 		var is_hovered: bool = (ri == _hover_row)
 
 		if is_hovered:
-			_panel.draw_rect(Rect2(_panel_x, ry, pw, ROW_HEIGHT), Color(0.15, 0.15, 0.2))
+			_panel.draw_rect(Rect2(x, ry, pw - 8, ROW_HEIGHT), Color(0.15, 0.15, 0.2))
 
 		if row["type"] == "group":
 			_draw_group_row(row, x, ry, v_col_x, t_col_x, font)
@@ -3460,6 +3423,15 @@ func _le_select_item(idx: int) -> void:
 			if idx >= 0 and idx < config.get("spawn_positions", []).size():
 				le._selected_idx = idx
 				le._drag_item_type = "spawn_position"
+		2:
+			var trees: Array = config.get("scenery", {}).get("trees", [])
+			var rocks: Array = config.get("scenery", {}).get("rocks", [])
+			if idx < trees.size():
+				le._selected_idx = idx
+				le._drag_item_type = "tree"
+			elif idx - trees.size() < rocks.size():
+				le._selected_idx = idx - trees.size()
+				le._drag_item_type = "rock"
 		3:
 			if idx >= 0 and idx < config.get("platforms", []).size():
 				le._selected_idx = idx
