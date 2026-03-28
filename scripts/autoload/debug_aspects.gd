@@ -61,6 +61,17 @@ func _register_all() -> void:
 	# -- Monster State Machine --
 	r.call("monster/state", "State transition log (old → new)")
 	r.call("monster/blend", "Movement blend: facing turns, speed ramps, landing recovery")
+	r.call("monster/player_input", "Player controller input: direction, attacks, state")
+
+	# -- Factions --
+	r.call("factions/labels", "Faction label above each entity")
+
+	# -- Attack Zones (visual area-of-effect indicators) --
+	r.call("attack_zones/bite", "Bite attack hit zone (circle at skull)")
+	r.call("attack_zones/swipe", "Swipe attack hit zone (circle at claw)")
+	r.call("attack_zones/tail", "Tail whip hit zone (circles at tail tip)")
+	r.call("attack_zones/lunge", "Lunge hit zone (circle at body center)")
+	r.call("attack_zones/grab", "Grab damage zone (circle at grab center)")
 
 	# -- State Info --
 	r.call("state_info/state_text_panel", "State, HP, velocity, IK metrics text")

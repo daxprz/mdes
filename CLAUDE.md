@@ -57,6 +57,10 @@ Do NOT use tumu when:
 | `scripts/effects/tentacle_hitbody.gd` | Collision proxy for damageable tentacles |
 | `scripts/autoload/player_manager.gd` | Player join/leave, controller assignment, press-to-join |
 | `scripts/autoload/profile_manager.gd` | Profile persistence, per-slot class/profile bindings |
+| `scripts/autoload/factions.gd` | Faction system (players, monsters, animals, bugs) — hostility matrix |
+| `scripts/enemies/monster_controller.gd` | Base class for monster controllers (AI or Player) |
+| `scripts/enemies/monster_ai_controller.gd` | AI controller — delegates to monster's built-in _do_* functions |
+| `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode |
 
 ## Conventions
 

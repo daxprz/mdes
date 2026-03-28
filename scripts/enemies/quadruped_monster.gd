@@ -5,6 +5,8 @@ extends CharacterBody2D
 ## All rendering via _draw(), no sprites.
 
 const MCP = preload("res://scripts/systems/monster_config.gd")
+const AIController = preload("res://scripts/enemies/monster_ai_controller.gd")
+const PlayerController = preload("res://scripts/enemies/monster_player_controller.gd")
 
 signal died(global_pos: Vector2)
 
@@ -205,6 +207,8 @@ func _change_state(new_state: State) -> void:
 ## Cleanup when leaving a state. Resets transient flags that the old state owned.
 func _exit_state(old_state: State, new_state: State) -> void:
 	match old_state:
+		State.BALL:
+			_exit_ball()
 		State.ATTACK_TAIL:
 			_tail_whipping = false
 		State.ATTACK_GRAB:
@@ -251,6 +255,8 @@ func _enter_state(new_state: State, _old_state: State) -> void:
 		_attack_cooldown = cfg("attack_cooldown", ATTACK_COOLDOWN)
 
 	match new_state:
+		State.BALL:
+			_enter_ball()
 		State.STANDDOWN:
 			_want_direction = 0.0
 			velocity.x = 0.0
@@ -375,7 +381,7 @@ enum State { PATROL, CHASE, ATTACK_BITE, ATTACK_SWIPE, ATTACK_TAIL,
 			 ATTACK_LEAP_PLAN, ATTACK_LEAP_WINDUP,
 			 ATTACK_LEAP_AIRBORNE, ATTACK_LEAP_STRIKE, ATTACK_LEAP_THRASH,
 			 PRECOGNITION, TRANSITION_BIPEDAL, TRANSITION_QUADRUPED, HURT, DEAD,
-			 STANDDOWN, CHAIN_DAZE }
+			 STANDDOWN, CHAIN_DAZE, BALL }
 enum Posture { QUADRUPED, BIPEDAL }
 enum DamageState { NONE, MEDIUM, HIGH }
 
@@ -454,6 +460,23 @@ var territorial := false      # When true, attacks other monsters instead of/in 
 # Pose overrides for splay system (attachment point name -> target local Vector2)
 var _pose_overrides: Dictionary = {}
 const POSE_OVERRIDE_BLEND := 0.8  # 0.0 = natural, 1.0 = fully overridden
+
+# -- Controller system ---------------------------------------------------------
+# Swappable controller: AI (default) or Player. The controller sets intent
+# variables (_want_direction, _target_move_speed, _facing_target) and requests
+# attacks each frame. The monster's state machine validates and executes.
+var _controller: RefCounted = null  # MonsterController (AI or Player)
+
+func set_controller(ctrl: RefCounted) -> void:
+	if _controller:
+		_controller.on_detach(self)
+	_controller = ctrl
+	if _controller:
+		_controller.on_attach(self)
+
+func is_player_controlled() -> bool:
+	return _controller != null and _controller.is_player()
+
 var _state: State = State.PATROL
 var _posture: Posture = Posture.QUADRUPED
 var _facing: float = 1.0  # 1=right, -1=left (blends smoothly toward _facing_target)
@@ -470,6 +493,22 @@ var _gait_phase: float = 0.0     # Oscillation phase for walking gait (radians, 
 var _posture_blend: float = 0.0  # 0=quadruped, 1=bipedal
 var _breathe_time: float = 0.0  # Idle breathing phase
 var _want_direction: float = 0.0  # AI intent: -1=left, 0=stop, 1=right
+var _head_look_pos: Vector2 = Vector2.ZERO  # Player controller: world-space head aim target (Vector2.ZERO = disabled)
+var _leap_preview_arc: PackedVector2Array = PackedVector2Array()  # Player controller: arc preview points (local space)
+
+# Attack zone debug visualization — stores recent hit zones for drawing
+# Each entry: {pos: Vector2 (local), radius: float, color: Color, ttl: float}
+var _debug_attack_zones: Array = []
+
+# Ball mode — monster curls into a ball, rolls and bounces with physics
+var _ball_radius: float = 0.0      # Computed from creature_scale in _enter_ball
+var _ball_rotation: float = 0.0    # Visual spin angle (radians)
+var _ball_curl: float = 0.0        # 0=uncurled, 1=fully curled (transition blend)
+var _ball_was_on_floor: bool = false
+const BALL_FRICTION := 0.97
+const BALL_AIR_FRICTION := 0.998
+const BALL_BOUNCE := 0.55
+const BALL_PUSH_FORCE := 600.0  # Horizontal push from stick input while rolling
 var _initialized: bool = false  # First-frame init flag
 var _leap_cooldown: float = 0.0  # Cooldown between leaps
 var _leap_ik_off: bool = false   # Disable leg IK during leap (legs positioned manually)
@@ -577,6 +616,7 @@ static var _next_entity_id: int = 0  # Auto-increment for default entity_id
 
 func _ready() -> void:
 	add_to_group("enemies")
+	set_meta("faction", "monsters")  # Default; player controller overrides to "players"
 	collision_layer = 8
 	collision_mask = 1
 
@@ -593,6 +633,13 @@ func _ready() -> void:
 	_init_collision()
 	_init_hitboxes()
 	_init_attach_points()
+
+	# Default to AI controller if none set. If pre-set (e.g. player controller
+	# assigned before add_child), call on_attach now that the monster is ready.
+	if not _controller:
+		set_controller(AIController.new())
+	else:
+		_controller.on_attach(self)
 
 
 func _init_skeleton() -> void:
@@ -1002,6 +1049,13 @@ func _apply_attach_forces(delta: float) -> void:
 			velocity.y = -120.0
 
 
+# -- Input (player controller) -------------------------------------------------
+
+func _input(event: InputEvent) -> void:
+	if _controller and _controller is PlayerController:
+		_controller.handle_input(event)
+
+
 # -- Physics -------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
@@ -1143,47 +1197,59 @@ func _physics_process(delta: float) -> void:
 	if _state != State.ATTACK_LEAP_AIRBORNE:
 		velocity.y += cfg("gravity", GRAVITY) * delta
 
-	# State machine (sets _want_direction and _target_move_speed)
+	# Controller update (sets _want_direction, _target_move_speed, triggers attacks)
 	_want_direction = 0.0
-	match _state:
-		State.PATROL:
-			_do_patrol(delta)
-		State.CHASE:
-			_do_chase(delta)
-		State.ATTACK_BITE:
-			_do_bite(delta)
-		State.ATTACK_SWIPE:
-			_do_swipe(delta)
-		State.ATTACK_TAIL:
-			_do_tail_whip(delta)
-		State.ATTACK_LUNGE:
-			_do_lunge(delta)
-		State.ATTACK_SPRINT_SLASH:
-			_do_sprint_slash(delta)
-		State.ATTACK_HOP_UP:
-			_do_hop_up(delta)
-		State.ATTACK_GRAB:
-			_do_grab(delta)
-		State.ATTACK_LEAP_PLAN:
-			_do_leap_plan(delta)
-		State.ATTACK_LEAP_WINDUP:
-			_do_leap_windup(delta)
-		State.ATTACK_LEAP_AIRBORNE:
-			_do_leap_airborne(delta)
-		State.ATTACK_LEAP_STRIKE:
-			_do_leap_strike(delta)
-		State.ATTACK_LEAP_THRASH:
-			_do_leap_thrash(delta)
-		State.PRECOGNITION:
-			_do_precognition(delta)
-		State.TRANSITION_BIPEDAL:
-			_do_transition_bipedal(delta)
-		State.TRANSITION_QUADRUPED:
-			_do_transition_quadruped(delta)
-		State.STANDDOWN:
-			pass  # No AI — just idle in place, skeleton still runs
-		State.CHAIN_DAZE:
-			_do_chain_daze(delta)
+	if _controller:
+		_controller.update(self, delta)
+	else:
+		# Fallback: inline AI state machine (legacy — use set_controller() instead)
+		match _state:
+			State.PATROL:
+				_do_patrol(delta)
+			State.CHASE:
+				_do_chase(delta)
+			State.ATTACK_BITE:
+				_do_bite(delta)
+			State.ATTACK_SWIPE:
+				_do_swipe(delta)
+			State.ATTACK_TAIL:
+				_do_tail_whip(delta)
+			State.ATTACK_LUNGE:
+				_do_lunge(delta)
+			State.ATTACK_SPRINT_SLASH:
+				_do_sprint_slash(delta)
+			State.ATTACK_HOP_UP:
+				_do_hop_up(delta)
+			State.ATTACK_GRAB:
+				_do_grab(delta)
+			State.ATTACK_LEAP_PLAN:
+				_do_leap_plan(delta)
+			State.ATTACK_LEAP_WINDUP:
+				_do_leap_windup(delta)
+			State.ATTACK_LEAP_AIRBORNE:
+				_do_leap_airborne(delta)
+			State.ATTACK_LEAP_STRIKE:
+				_do_leap_strike(delta)
+			State.ATTACK_LEAP_THRASH:
+				_do_leap_thrash(delta)
+			State.PRECOGNITION:
+				_do_precognition(delta)
+			State.TRANSITION_BIPEDAL:
+				_do_transition_bipedal(delta)
+			State.TRANSITION_QUADRUPED:
+				_do_transition_quadruped(delta)
+			State.STANDDOWN:
+				pass  # No AI — just idle in place, skeleton still runs
+			State.CHAIN_DAZE:
+				_do_chain_daze(delta)
+
+	# Ball mode handles its own physics entirely — skip everything else
+	if _state == State.BALL:
+		_do_ball(delta)
+		_enforce_spine_rigid()
+		_update_hitbox_positions()
+		_update_blood_particles(delta)
+		return
 
 	# Leap/precog/daze states handle their own skeleton — skip normal locomotion/pose
 	var in_leap_flight: bool = (_state == State.ATTACK_LEAP_WINDUP
@@ -1329,12 +1395,22 @@ func _solve_pose(delta: float) -> void:
 	var neck_rest_target: Vector2 = _spine[0] + _get_facing_offset(_neck_rest)
 	var skull_rest_target: Vector2 = neck_rest_target + _get_facing_offset(_skull_rest)
 
-	if is_instance_valid(_target) and not _head_severed:
+	# Head look: player controller override takes priority, then AI target
+	var has_look_target: bool = false
+	var look_world_pos: Vector2 = Vector2.ZERO
+	if _head_look_pos != Vector2.ZERO:
+		has_look_target = true
+		look_world_pos = _head_look_pos
+	elif is_instance_valid(_target):
+		has_look_target = true
+		look_world_pos = _target.global_position
+
+	if has_look_target and not _head_severed:
 		# Skull aims at target. During turns, the neck/skull rest targets jump
 		# (via _get_facing_offset), so we override them entirely with aim-driven
 		# positions when tracking. The aim direction is from body center (stable,
 		# no feedback loop from skull oscillation).
-		var to_target: Vector2 = _target.global_position - global_position
+		var to_target: Vector2 = look_world_pos - global_position
 		var aim_dir: Vector2 = to_target.normalized()
 
 		# Place skull along the aim direction from the neck base (spine[0]).
@@ -5005,6 +5081,159 @@ func _do_chain_daze(delta: float) -> void:
 				_change_state(State.CHASE)
 
 
+# -- Ball Mode -----------------------------------------------------------------
+# Uses the same curling pose as the grab attack (spine arcs, legs clasp, tail
+# spirals) but tighter, centered on self, and with rolling/bouncing physics.
+
+func _enter_ball() -> void:
+	_ball_radius = sc(25.0)  # Tighter than grab's 40
+	_ball_rotation = 0.0
+	_ball_curl = 0.0
+	_ball_was_on_floor = is_on_floor()
+	# Small upward pop on entry
+	velocity.y -= sc(120.0)
+	_jaw_open = 0.0
+	_tail_whipping = true  # Loosen tail for wrapping
+
+
+func _exit_ball() -> void:
+	_ball_curl = 0.0
+	_tail_whipping = false
+	_jaw_open = 0.0
+	# Replant feet at floor level
+	for li in range(4):
+		if _leg_severed[li]:
+			continue
+		var hip_x: float = _legs[li][0].x
+		_foot_world[li] = global_position + Vector2(hip_x, _raycast_floor(Vector2(hip_x, 0)))
+		_foot_planted[li] = true
+
+
+func _do_ball(delta: float) -> void:
+	## Ball mode: grab-style curling pose + soccer ball physics.
+	# -- Physics --
+	velocity.y += cfg("gravity", GRAVITY) * delta
+
+	# Player stick input pushes the ball
+	if is_player_controlled() and _controller:
+		velocity.x += _want_direction * BALL_PUSH_FORCE * delta
+
+	# Friction
+	if is_on_floor():
+		velocity.x *= BALL_FRICTION
+		if absf(velocity.x) < 5.0:
+			velocity.x = 0.0
+	else:
+		velocity.x *= BALL_AIR_FRICTION
+
+	# Bounce
+	var pre_vy: float = velocity.y
+	move_and_slide()
+	if is_on_floor() and pre_vy > 50.0 and not _ball_was_on_floor:
+		velocity.y = -pre_vy * BALL_BOUNCE
+	_ball_was_on_floor = is_on_floor()
+
+	# Rolling spin
+	_ball_rotation += (velocity.x * delta) / maxf(_ball_radius, 1.0)
+
+	# -- Curl transition (fast: 0.17s to fully curled, same as grab) --
+	_ball_curl = minf(_ball_curl + delta * 6.0, 1.0)
+	var curl: float = _ball_curl
+	var blend_rate: float = curl * 20.0 * delta
+	var set_direct: bool = curl >= 1.0
+
+	# -- Skeleton pose (grab-style, centered on self) --
+	var center := Vector2(0, -_ball_radius)
+	var spin: float = _ball_rotation  # Use rolling angle for the body spin
+	var r: float = _ball_radius
+
+	# SPINE: arc across the ball
+	var sp0 := center + Vector2(cos(spin + 0.9), sin(spin + 0.9)) * r
+	var sp1 := center + Vector2(cos(spin), sin(spin)) * (r - sc(5))
+	var sp2 := center + Vector2(cos(spin - 0.9), sin(spin - 0.9)) * r
+	if set_direct:
+		_spine[0] = sp0; _spine[1] = sp1; _spine[2] = sp2
+	else:
+		_spine[0] = _spine[0].lerp(sp0, blend_rate)
+		_spine[1] = _spine[1].lerp(sp1, blend_rate)
+		_spine[2] = _spine[2].lerp(sp2, blend_rate)
+
+	# HEAD: skull tucked inward
+	_neck[0] = _spine[0]
+	var skull_pos := center + Vector2(cos(spin + 1.6), sin(spin + 1.6)) * (r * 0.4)
+	var neck_pos := (_spine[0] + skull_pos) * 0.5
+	_jaw_open = 0.0
+	var jaw_pos := skull_pos + Vector2(cos(spin + 1.6), sin(spin + 1.6)) * sc(6)
+	if set_direct:
+		_neck[1] = neck_pos; _skull = skull_pos; _jaw = jaw_pos
+	else:
+		_neck[1] = _neck[1].lerp(neck_pos, blend_rate)
+		_skull = _skull.lerp(skull_pos, blend_rate)
+		_jaw = _jaw.lerp(jaw_pos, blend_rate)
+
+	# FRONT LEGS: clasp inward (grip pose)
+	for li in [0, 1]:
+		if _leg_severed[li]:
+			continue
+		_foot_planted[li] = false
+		var grip_angle: float = spin + PI * 0.5 + float(li) * 0.7
+		var foot_pos := center + Vector2(cos(grip_angle), sin(grip_angle)) * sc(5)
+		var hip_pos := _spine[0] + Vector2(0, sc(3))
+		if set_direct:
+			_legs[li][0] = hip_pos; _legs[li][2] = foot_pos
+		else:
+			_legs[li][0] = _legs[li][0].lerp(hip_pos, blend_rate)
+			_legs[li][2] = _legs[li][2].lerp(foot_pos, blend_rate)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+
+	# REAR LEGS: tucked tight against the ball
+	for li in [2, 3]:
+		if _leg_severed[li]:
+			continue
+		_foot_planted[li] = false
+		var tuck_angle: float = spin - PI * 0.5 + float(li - 2) * 0.6
+		var foot_pos := center + Vector2(cos(tuck_angle), sin(tuck_angle)) * sc(5)
+		var hip_pos := _spine[2] + Vector2(0, sc(3))
+		if set_direct:
+			_legs[li][0] = hip_pos; _legs[li][2] = foot_pos
+		else:
+			_legs[li][0] = _legs[li][0].lerp(hip_pos, blend_rate)
+			_legs[li][2] = _legs[li][2].lerp(foot_pos, blend_rate)
+		_legs[li][1] = (_legs[li][0] + _legs[li][2]) * 0.5
+
+	# TAIL: spirals outward from spine[2] (same as grab)
+	if not _tail_severed:
+		var spine2_angle: float = (_spine[2] - center).angle()
+		for i in range(_tail.size()):
+			var tail_angle: float = spine2_angle - float(i + 1) * 0.5
+			var tail_r: float = r + float(i + 1) * (sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * 0.5)
+			var tail_pos := center + Vector2(cos(tail_angle) * tail_r, sin(tail_angle) * tail_r)
+			if set_direct:
+				_tail[i] = tail_pos
+			else:
+				_tail[i] = _tail[i].lerp(tail_pos, curl * 15.0 * delta)
+
+	# Clavicles + hip bones follow spine
+	_clavicles[0] = _spine[0]; _clavicles[1] = _spine[0]
+	_hip_bones[0] = _spine[2]; _hip_bones[1] = _spine[2]
+
+	queue_redraw()
+
+
+func _draw_ball_overlay() -> void:
+	## Faint boundary ring around the curled ball.
+	if _state != State.BALL or _ball_curl < 0.3:
+		return
+	var center := Vector2(0, -_ball_radius)
+	var alpha: float = _ball_curl * 0.25
+	# Outer ring
+	draw_arc(center, _ball_radius + sc(2), 0, TAU, 32, Color(0.6, 0.5, 0.3, alpha), 1.5)
+	# Tail spiral boundary (slightly larger)
+	if not _tail_severed:
+		var outer_r: float = _ball_radius + _tail.size() * sc(cfg("tail_seg_len", TAIL_SEG_LEN)) * 0.5
+		draw_arc(center, outer_r, 0, TAU, 32, Color(0.5, 0.4, 0.2, alpha * 0.4), 1.0)
+
+
 func _draw_chain_daze_stars() -> void:
 	## Draw sparkly stars circling the monster's head during chain daze.
 	## Stars circle in an elliptical, undulating pattern.
@@ -5218,13 +5447,23 @@ func _spawn_blood_spatter(local_pos: Vector2) -> void:
 
 # -- Hit detection -------------------------------------------------------------
 
+func _register_attack_zone(local_pos: Vector2, radius: float, col: Color, aspect: String) -> void:
+	## Register an attack zone for debug drawing. Shows a fading circle at the hit area.
+	if DebugOverlay.should_draw(aspect, self):
+		_debug_attack_zones.append({"pos": local_pos, "radius": radius, "color": col, "ttl": 0.3})
+	DebugOverlay.log(aspect, self, "HIT ZONE: pos=(%.0f,%.0f) r=%.0f", [
+		global_position.x + local_pos.x, global_position.y + local_pos.y, radius])
+
+
 func _check_bite_hit() -> void:
 	var bite_pos: Vector2 = global_position + _skull
+	_register_attack_zone(_skull, 50.0, Color(1.0, 0.3, 0.2, 0.5), "attack_zones/bite")
 	_damage_players_in_range(bite_pos, 50.0, int(cfg("bite_damage", BITE_DAMAGE)))
 
 
 func _check_swipe_hit(leg_idx: int) -> void:
 	var claw_pos: Vector2 = global_position + _legs[leg_idx][2]
+	_register_attack_zone(_legs[leg_idx][2], 25.0, Color(1.0, 0.8, 0.2, 0.5), "attack_zones/swipe")
 	_damage_players_in_range(claw_pos, 25.0, int(cfg("swipe_damage", SWIPE_DAMAGE) * get_slash_damage_multiplier()))
 
 
@@ -5232,15 +5471,18 @@ func _check_tail_hit() -> void:
 	# Check last 2 tail segments
 	for i in range(3, _tail.size()):
 		var tail_pos: Vector2 = global_position + _tail[i]
+		_register_attack_zone(_tail[i], 20.0, Color(0.6, 0.3, 1.0, 0.5), "attack_zones/tail")
 		_damage_players_in_range(tail_pos, 20.0, int(cfg("tail_damage", TAIL_DAMAGE)))
 
 
 func _check_lunge_hit() -> void:
+	_register_attack_zone(Vector2.ZERO, 35.0, Color(1.0, 0.5, 0.1, 0.5), "attack_zones/lunge")
 	_damage_players_in_range(global_position, 35.0, int(cfg("lunge_damage", LUNGE_DAMAGE)))
 
 
 func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) -> void:
-	for node in get_tree().get_nodes_in_group("players"):
+	var targets: Array[Node] = Factions.get_hostile_targets(self)
+	for node in targets:
 		if not node is CharacterBody2D:
 			continue
 		if world_pos.distance_to(node.global_position) < radius:
@@ -5266,6 +5508,39 @@ func _damage_players_in_range(world_pos: Vector2, radius: float, damage: int) ->
 			# Knockback
 			var kb_dir: Vector2 = (node.global_position - world_pos).normalized()
 			node.velocity += kb_dir * 250.0
+	# Also damage chains in range
+	_damage_chains_in_range(world_pos, radius, damage)
+
+
+func _damage_chains_in_range(world_pos: Vector2, radius: float, damage: int) -> void:
+	## Check all chain segments within attack radius and deal damage.
+	for chain in get_tree().get_nodes_in_group("chains"):
+		if not is_instance_valid(chain) or chain._severed:
+			continue
+		# Check proximity to each chain segment
+		for i in range(chain._point_count - 1):
+			var dist: float = _point_to_segment_dist(world_pos, chain._points[i], chain._points[i + 1])
+			if dist < radius:
+				# Scale damage: monster attacks are powerful against chains
+				var chain_dmg: int = maxi(damage / 10, 3)
+				chain.current_hp -= chain_dmg
+				chain._shake_timer = 0.3
+				chain._shake_intensity = clampf(float(chain_dmg) / 3.0, 1.0, 3.0)
+				DebugOverlay.log("attack_zones/bite", self, "CHAIN HIT: dmg=%d hp=%d/%d",
+					[chain_dmg, chain.current_hp, chain.CHAIN_MAX_HP])
+				if chain.current_hp <= 0:
+					chain.sever()
+				return  # One hit per chain per attack
+
+
+func _point_to_segment_dist(point: Vector2, seg_a: Vector2, seg_b: Vector2) -> float:
+	var ab: Vector2 = seg_b - seg_a
+	var ap: Vector2 = point - seg_a
+	var ab_len_sq: float = ab.length_squared()
+	if ab_len_sq < 0.01:
+		return ap.length()
+	var t: float = clampf(ap.dot(ab) / ab_len_sq, 0.0, 1.0)
+	return point.distance_to(seg_a + ab * t)
 
 
 # -- Target tracking ----------------------------------------------------------
@@ -5306,6 +5581,8 @@ func _pick_target() -> void:
 
 func _find_nearest_rival() -> Node2D:
 	## Find the nearest other monster (for territorial mode).
+	## Only targets entities in the same faction (monster vs monster).
+	var my_faction: String = Factions.get_faction(self)
 	var best: Node2D = null
 	var best_dist: float = INF
 	for node in get_tree().get_nodes_in_group("enemies"):
@@ -5319,6 +5596,9 @@ func _find_nearest_rival() -> Node2D:
 			continue
 		if "_asleep" in node and node._asleep:
 			continue
+		# Only rival with same faction (monster vs monster, not monster vs player-monster)
+		if Factions.get_faction(node) != my_faction:
+			continue
 		var d: float = global_position.distance_to(node.global_position)
 		if d < best_dist:
 			best_dist = d
@@ -5327,10 +5607,14 @@ func _find_nearest_rival() -> Node2D:
 
 
 func _find_nearest_player() -> Node2D:
+	## Find the nearest hostile target based on faction.
 	var best: Node2D = null
 	var best_dist: float = INF
-	for node in get_tree().get_nodes_in_group("players"):
+	var targets: Array[Node] = Factions.get_hostile_targets(self)
+	for node in targets:
 		if not node is CharacterBody2D:
+			continue
+		if "_standdown" in node and node._standdown:
 			continue
 		var d: float = global_position.distance_to(node.global_position)
 		if d < best_dist:
@@ -5664,6 +5948,7 @@ func _draw() -> void:
 	_draw_tail()
 	_draw_legs_subset(near_legs)
 	_draw_neck_head()
+	_draw_ball_overlay()
 	_draw_blood_particles()
 	_draw_chain_daze_stars()
 	# Chain barrier visualization: candy-striped red circle showing reach limit
@@ -5678,6 +5963,18 @@ func _draw() -> void:
 				var a2: float = TAU * float(si + 1) / float(stripe_count)
 				var col: Color = Color(1.0, 0.2, 0.1, 0.4) if si % 2 == 0 else Color(0.5, 0.1, 0.05, 0.3)
 				draw_arc(center_local, radius, a1, a2, 4, col, 3.0)
+
+	# Leap arc preview (player-controlled: shows aimed trajectory while charging)
+	if not _leap_preview_arc.is_empty():
+		var arc_col := Color(1.0, 0.7, 0.2, 0.7)  # Orange-gold
+		var dot_col := Color(1.0, 0.9, 0.3, 0.9)
+		for i in range(_leap_preview_arc.size() - 1):
+			var alpha: float = 1.0 - float(i) / float(_leap_preview_arc.size())
+			var col := Color(arc_col.r, arc_col.g, arc_col.b, arc_col.a * alpha)
+			draw_line(_leap_preview_arc[i], _leap_preview_arc[i + 1], col, 2.0)
+		# Landing dot
+		if _leap_preview_arc.size() > 1:
+			draw_circle(_leap_preview_arc[_leap_preview_arc.size() - 1], 4.0, dot_col)
 
 	# Selection indicator: pulsing cyan ring when TAB-selected
 	# Selection indicator is now drawn generically by the debug drawer's world overlay
@@ -5858,6 +6155,52 @@ func _draw_debug() -> void:
 	var cyan := Color(0, 0.9, 1, 0.7)
 	var yellow := Color(1, 1, 0, 0.6)
 	var font: Font = ThemeDB.fallback_font
+
+	# -- Faction label --
+	if DebugOverlay.should_draw("factions/labels", self):
+		var faction: String = Factions.get_faction(self)
+		var faction_col: Color
+		match faction:
+			"players": faction_col = Color(0.3, 0.9, 0.3)
+			"monsters": faction_col = Color(1.0, 0.3, 0.2)
+			"animals": faction_col = Color(0.9, 0.7, 0.2)
+			_: faction_col = Color(0.5, 0.5, 0.5)
+		draw_string(font, _spine[1] + Vector2(-sc(15), -sc(45)), faction.to_upper(), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, faction_col)
+
+	# -- Attack zone indicators (fading hit circles) --
+	var delta_approx: float = 1.0 / maxf(Engine.get_frames_per_second(), 30.0)
+	var zi: int = _debug_attack_zones.size() - 1
+	while zi >= 0:
+		var zone: Dictionary = _debug_attack_zones[zi]
+		zone["ttl"] -= delta_approx
+		if zone["ttl"] <= 0:
+			_debug_attack_zones.remove_at(zi)
+		else:
+			var alpha: float = zone["ttl"] / 0.3
+			var col: Color = zone["color"]
+			col.a *= alpha
+			draw_arc(zone["pos"], zone["radius"], 0, TAU, 24, col, 2.0)
+			# Crosshair at center
+			var cx: float = 4.0
+			draw_line(zone["pos"] - Vector2(cx, 0), zone["pos"] + Vector2(cx, 0), col, 1.0)
+			draw_line(zone["pos"] - Vector2(0, cx), zone["pos"] + Vector2(0, cx), col, 1.0)
+		zi -= 1
+
+	# -- Persistent attack zone (shows the live hit area during the attack state) --
+	if _state == State.ATTACK_BITE and DebugOverlay.should_draw("attack_zones/bite", self):
+		draw_arc(_skull, 50.0, 0, TAU, 24, Color(1.0, 0.3, 0.2, 0.15), 1.5)
+	if _state == State.ATTACK_SWIPE and DebugOverlay.should_draw("attack_zones/swipe", self):
+		var sl: int = 0 if not _leg_severed[0] else 1
+		draw_arc(_legs[sl][2], 25.0, 0, TAU, 24, Color(1.0, 0.8, 0.2, 0.15), 1.5)
+	if _state == State.ATTACK_TAIL and DebugOverlay.should_draw("attack_zones/tail", self):
+		for ti in range(3, _tail.size()):
+			draw_arc(_tail[ti], 20.0, 0, TAU, 24, Color(0.6, 0.3, 1.0, 0.15), 1.5)
+	if _state == State.ATTACK_LUNGE and DebugOverlay.should_draw("attack_zones/lunge", self):
+		draw_arc(Vector2.ZERO, 35.0, 0, TAU, 24, Color(1.0, 0.5, 0.1, 0.15), 1.5)
+	if _state == State.ATTACK_GRAB and DebugOverlay.should_draw("attack_zones/grab", self):
+		if is_instance_valid(_grab_target_node):
+			var grab_local: Vector2 = _grab_target_node.global_position - global_position
+			draw_arc(grab_local, 30.0, 0, TAU, 24, Color(1.0, 0.1, 0.1, 0.15), 1.5)
 
 	# -- Origin crosshair --
 	if DebugOverlay.should_draw("body_mechanics/origin_marker", self):

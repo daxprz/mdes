@@ -62,6 +62,7 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.BALLOONIST,
 	PlayerManager.CharacterClass.GUITARIST,
 	PlayerManager.CharacterClass.WEREWOLF,
+	PlayerManager.CharacterClass.MONSTER,
 ]
 
 const HUD_HEIGHT := 80

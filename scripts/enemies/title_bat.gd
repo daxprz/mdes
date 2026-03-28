@@ -46,6 +46,8 @@ func setup(firefly_mgr: Node2D, bounds: Rect2, migration_patterns: Array = []) -
 
 func _ready() -> void:
 	add_to_group("enemies")
+	add_to_group("animals")
+	set_meta("faction", "animals")
 	collision_layer = 8  # Enemy layer
 	collision_mask = 1   # World only
 

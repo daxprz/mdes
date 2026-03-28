@@ -43,6 +43,8 @@ var _health_bar: Node2D = null
 
 func _ready() -> void:
 	add_to_group("enemies")
+	add_to_group("animals")
+	set_meta("faction", "animals")
 	_start_x = global_position.x
 	_start_y = global_position.y
 	if hitbox:

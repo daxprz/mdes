@@ -163,6 +163,23 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.27
+**Playable monster, faction system, ball mode, attack zone debug**
+
+- **Playable monster**: The quadruped monster is now a selectable character class. D-pad Left/Right cycles to MONSTER like any other class. Controller or keyboard input drives movement, attacks, and abilities.
+- **Controller system**: Swappable `MonsterController` architecture — `MonsterAIController` (default) and `MonsterPlayerController` slot into the monster seamlessly. AI logic stays in the monster; controllers set intent variables.
+- **Monster controls**: Left stick=move (analog speed tiers), Cross=jump, Square=bite, Triangle=swipe, L3=tail whip, Circle=ball mode, L1 (hold)=charge leap.
+- **Right thumbstick head aim**: Right stick aims the monster's head in any direction (200px range). Release returns to neutral.
+- **Hold-to-leap (L1)**: Hold L1 to charge, aim with stick, see an orange parabolic arc preview showing the trajectory. Longer hold = more power (400-900 speed over 1.5s). Release fires.
+- **Ball mode (Circle)**: Monster curls into the grab-attack ball pose (tight, no player inside) with rolling/bouncing soccer-ball physics. Left stick pushes. Cross in ball = uncurl + mid-power leap. Circle again = unfurl to walking.
+- **Air slash (R1)**: During any leap, hold R1 for front-claw swipe attacks (up to 3 per flight, 0.25s cooldown).
+- **Faction system**: New `Factions` autoload with hostility matrix. Players hostile to monsters, monsters hostile to players+animals, animals hostile to bugs, bugs passive. AI targeting and damage use faction lookups.
+- **Monster attacks damage chains**: Bite, swipe, tail, and lunge now check chain segment proximity and deal damage (HP/10, min 3 per hit). Chains shake and sever when HP depleted.
+- **Attack zone debug indicators**: New `attack_zones/*` debug aspects show persistent hit-area circles during attacks (faint) and flashing circles at moment of hit (bright, 0.3s fade). Bite=red r50, swipe=gold r25, tail=purple r20, lunge=orange r35.
+- **Faction labels**: `debug on factions/labels` shows color-coded faction name above each monster.
+- **Spawn commands**: `spawn player_monster [x y] [device=N]` via RCON. `Shift+M` (keyboard) or `Select+Triangle` (controller) on title screen.
+- **MONSTER class stats**: HP 300, speed 200, no mana.
+
 ### v0.10.26
 **Debug drawer UI fixes, level editor tree/rock selection**
 

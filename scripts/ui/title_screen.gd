@@ -431,10 +431,19 @@ func _input(event: InputEvent) -> void:
 		if DebugOverlay.global_enabled:
 			_debug_regenerate_nearest_scenery()
 
-	# Debug: M key spawns a quadruped monster
+	# Debug: M key spawns a quadruped monster, Shift+M spawns player-controlled
 	if event is InputEventKey and event.pressed and event.keycode == KEY_M:
 		if DebugOverlay.global_enabled:
-			_debug_spawn_monster()
+			if event.shift_pressed:
+				_debug_spawn_player_monster(-1)
+			else:
+				_debug_spawn_monster()
+
+	# Debug: Select+Triangle on controller spawns player-controlled monster
+	if event is InputEventJoypadButton and event.pressed and DebugOverlay.global_enabled:
+		if event.button_index == JOY_BUTTON_Y:  # Triangle/Y
+			if Input.is_joy_button_pressed(event.device, JOY_BUTTON_BACK):  # Select held
+				_debug_spawn_player_monster(event.device)
 
 
 func _toggle_help() -> void:
@@ -484,6 +493,7 @@ func _toggle_help() -> void:
 			["SPACE", "Dump skeleton JSON (debug)"],
 			["I", "Toggle debug draw on all enemies"],
 			["M", "Spawn monster (debug)"],
+			["Shift+M", "Spawn player monster (debug)"],
 			["G", "Regen nearest tree (debug)"],
 			["", ""],
 			["LEVEL EDITOR", ""],
@@ -555,7 +565,7 @@ func _toggle_help() -> void:
 		panel.draw_string(font, Vector2(col3, y), "RCON (port 9999)", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col_h)
 		y += lh + 4
 		var rcon := [
-			"spawn monster|dummy|attacker [x y]",
+			"spawn monster|dummy|attacker|player_monster [x y]",
 			"clear / clearplayers / enablejoins",
 			"standdown [on|off]",
 			"territorial [on|off]",
@@ -675,6 +685,25 @@ func _debug_spawn_monster() -> void:
 	print("Spawned quadruped monster at (960, 750)")
 
 
+func _debug_spawn_player_monster(use_device_id: int = -1) -> void:
+	## Spawn a player-controlled quadruped monster.
+	## device_id -1 = keyboard, 0+ = controller.
+	var monster_script := load("res://scripts/enemies/quadruped_monster.gd")
+	var monster := CharacterBody2D.new()
+	monster.set_script(monster_script)
+	monster.global_position = Vector2(960, 750)
+	# Set player controller before add_child so _ready() doesn't assign AI
+	var PlayerCtrlScript: GDScript = load("res://scripts/enemies/monster_player_controller.gd")
+	var ctrl: RefCounted = PlayerCtrlScript.new()
+	ctrl.device_id = use_device_id
+	ctrl.player_index = 0
+	monster._controller = ctrl
+	players_container.add_child(monster)
+	var input_str: String = "keyboard" if use_device_id == -1 else "controller %d" % use_device_id
+	print("Spawned PLAYER-CONTROLLED monster at (960, 750) — %s" % input_str)
+	print("  Controls: Left Stick/WASD=move, Cross/J=bite, Triangle/K=swipe, Block/L3=tail, L1/G=leap, Circle/F=lunge")
+
+
 # -- Profile Creation ----------------------------------------------------------
 
 func _on_create_profile_requested(device_id: int) -> void:
@@ -745,13 +774,28 @@ func _on_class_changed(player_index: int, new_class: PlayerManager.CharacterClas
 	if p_data.is_empty():
 		return
 
-	var player_node: CharacterBody2D = PLAYER_SIDE_SCENE.instantiate()
-	player_node.player_index = player_index
-	player_node.device_id = p_data["device_id"]
-	player_node.character_class = new_class
-	player_node.global_position = pos
-	player_node.modulate = Color(1, 1, 1, 0.4)  # Ghost
-	players_container.add_child(player_node)
+	var player_node: CharacterBody2D
+	if new_class == PlayerManager.CharacterClass.MONSTER:
+		# Spawn a player-controlled quadruped monster
+		var monster_script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
+		player_node = CharacterBody2D.new()
+		player_node.set_script(monster_script)
+		var PlayerCtrlScript: GDScript = load("res://scripts/enemies/monster_player_controller.gd")
+		var ctrl: RefCounted = PlayerCtrlScript.new()
+		ctrl.device_id = p_data["device_id"]
+		ctrl.player_index = player_index
+		player_node._controller = ctrl
+		player_node.global_position = pos
+		player_node.modulate = Color(1, 1, 1, 0.4)  # Ghost
+		players_container.add_child(player_node)
+	else:
+		player_node = PLAYER_SIDE_SCENE.instantiate()
+		player_node.player_index = player_index
+		player_node.device_id = p_data["device_id"]
+		player_node.character_class = new_class
+		player_node.global_position = pos
+		player_node.modulate = Color(1, 1, 1, 0.4)  # Ghost
+		players_container.add_child(player_node)
 	_spawned_players[player_index] = player_node
 
 	# Mark as ghost
@@ -838,19 +882,33 @@ func _spawn_lobby_player(player_index: int) -> void:
 	if p_data.is_empty():
 		return
 
-	var player_node: CharacterBody2D = PLAYER_SIDE_SCENE.instantiate()
-	player_node.player_index = player_index
-	player_node.device_id = p_data["device_id"]
-	player_node.character_class = p_data["character_class"]
-
 	# Spawn on assigned platform (config overrides default)
 	var spawns: Array = _config_spawn_positions if not _config_spawn_positions.is_empty() else SPAWN_POSITIONS
+	var spawn_pos: Vector2
 	if player_index < spawns.size():
-		player_node.global_position = spawns[player_index]
+		spawn_pos = spawns[player_index]
 	else:
-		player_node.global_position = spawn_point.global_position
+		spawn_pos = spawn_point.global_position
 
-	players_container.add_child(player_node)
+	var player_node: CharacterBody2D
+	if p_data["character_class"] == PlayerManager.CharacterClass.MONSTER:
+		var monster_script: GDScript = load("res://scripts/enemies/quadruped_monster.gd")
+		player_node = CharacterBody2D.new()
+		player_node.set_script(monster_script)
+		var PlayerCtrlScript: GDScript = load("res://scripts/enemies/monster_player_controller.gd")
+		var ctrl: RefCounted = PlayerCtrlScript.new()
+		ctrl.device_id = p_data["device_id"]
+		ctrl.player_index = player_index
+		player_node._controller = ctrl
+		player_node.global_position = spawn_pos
+		players_container.add_child(player_node)
+	else:
+		player_node = PLAYER_SIDE_SCENE.instantiate()
+		player_node.player_index = player_index
+		player_node.device_id = p_data["device_id"]
+		player_node.character_class = p_data["character_class"]
+		player_node.global_position = spawn_pos
+		players_container.add_child(player_node)
 	_spawned_players[player_index] = player_node
 
 

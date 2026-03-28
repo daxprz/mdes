@@ -211,6 +211,8 @@ func _execute(command: String) -> String:
 						spawn_scale = float(kv[1])
 					elif kv[0] == "pathing_radius":
 						spawn_pathing_radius = float(kv[1])
+					else:
+						spawn_config[kv[0]] = kv[1]
 				elif state.is_empty():
 					state = arg.to_lower()
 			return _cmd_spawn(what, x, y, state, spawn_scale, spawn_pathing_radius, spawn_config)
@@ -831,6 +833,31 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			container.add_child(dummy)
 			return "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
 
+		"player_monster":
+			# Spawn a player-controlled monster. device=-1 for keyboard, 0+ for controller.
+			# Pass device=N via key=value args (parsed into spawn_config by caller)
+			var pm_device: int = int(spawn_config.get("device", "-1"))
+			var script := load("res://scripts/enemies/quadruped_monster.gd")
+			var monster := CharacterBody2D.new()
+			monster.set_script(script)
+			monster.creature_scale = spawn_scale
+			monster.pathing_radius = spawn_pathing_radius
+			monster.global_position = Vector2(x, y)
+			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
+			monster.entity_id = "player_monster_%d" % monster_count
+			# Set up player controller BEFORE add_child (which calls _ready)
+			var PlayerCtrlScript: GDScript = load("res://scripts/enemies/monster_player_controller.gd")
+			var ctrl: RefCounted = PlayerCtrlScript.new()
+			ctrl.device_id = pm_device
+			ctrl.player_index = 0
+			monster._controller = ctrl  # Pre-set so _ready() doesn't override with AI
+			container.add_child(monster)
+			if not spawn_config.is_empty():
+				monster.apply_config(spawn_config)
+			var scale_str: String = " scale=%.1f" % spawn_scale if spawn_scale != 1.0 else ""
+			var device_str: String = "keyboard" if pm_device == -1 else "controller %d" % pm_device
+			return "OK: spawned player_monster '%s' at (%.0f, %.0f)%s (%s)" % [monster.entity_id, x, y, scale_str, device_str]
+
 		"attacker":
 			var script := load("res://scripts/testing/attack_dummy.gd")
 			var attacker := CharacterBody2D.new()
@@ -841,7 +868,7 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			return "OK: spawned attacker at (%.0f, %.0f)" % [x, y]
 
 		_:
-			return "ERR: unknown spawn type '%s'. Try: monster, dummy, attacker" % what
+			return "ERR: unknown spawn type '%s'. Try: monster, dummy, attacker, player_monster" % what
 
 
 func _cmd_key(key_str: String) -> String:

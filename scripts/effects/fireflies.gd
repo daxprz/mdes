@@ -60,6 +60,8 @@ func _dist_to_rect(point: Vector2, rect: Rect2) -> float:
 
 
 func _ready() -> void:
+	add_to_group("bugs")
+	set_meta("faction", "bugs")
 	z_index = 3
 	# Defer spawning so zones can be set up first
 	call_deferred("_initial_spawn")
