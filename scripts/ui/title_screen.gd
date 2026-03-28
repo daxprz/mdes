@@ -199,9 +199,8 @@ func _setup_background_trees_from_config(tree_configs: Array) -> void:
 	for cfg in tree_configs:
 		var tree := Node2D.new()
 		tree.set_script(tree_script)
-		tree.trunk_weight = cfg.get("trunk_weight", 20.0)
-		tree.trunk_length = cfg.get("trunk_length", 200.0)
-		tree.seed_value = int(cfg.get("seed", randi()))
+		# Apply all config keys (seed, trunk_weight, trunk_length, plus any shape tuning)
+		tree.apply_config(cfg)
 		tree.z_index = -5
 		add_child(tree)
 		var pos_arr: Array = cfg.get("pos", [960, 900])

@@ -4,7 +4,41 @@ extends CanvasLayer
 ## Respects the debug drawer — limits width to the area right of the drawer.
 ## Game viewport resizes to fit above the console and right of the drawer.
 ## Accepts RCON commands directly. Supports test runner via `run` and `suite` commands.
-## Input line supports cursor movement, text selection, and clipboard (cut/copy/paste).
+##
+## Keybindings:
+##   Navigation:
+##     Ctrl+A          — beginning of line (at start: select all)
+##     Ctrl+E          — end of line
+##     Left / Right    — move caret one character
+##     Ctrl+Left/Right — move caret one word
+##     Home / End      — beginning / end of line
+##     Up / Down       — command history previous / next
+##   Selection:
+##     Shift + any movement key — extend selection
+##   Editing:
+##     Type            — insert at caret (replaces selection if active)
+##     Backspace       — delete character before caret
+##     Shift+Backspace — delete word backward
+##     Ctrl+Backspace  — delete word backward
+##     Delete          — delete character after caret
+##     Ctrl+Delete     — delete word forward
+##   Clipboard (OS):
+##     Ctrl+C          — copy selection (or whole line if no selection)
+##     Ctrl+X          — cut selection (or whole line if no selection)
+##     Ctrl+V          — paste from system clipboard at caret
+##   Kill ring (emacs):
+##     Ctrl+K          — kill from caret to end of line
+##     Ctrl+U          — kill from caret to beginning of line
+##     Ctrl+W          — kill word backward
+##     Ctrl+Y          — yank (paste from kill buffer)
+##   Scrolling:
+##     Mouse wheel     — scroll output history
+##     PgUp / PgDn     — scroll output history (5 lines)
+##   Other:
+##     Tab             — autocomplete (cycles through matches)
+##     Enter           — execute command
+##     Escape          — close console
+##     Backtick (`)    — toggle console open/close
 
 const SLIDE_SPEED := 800.0  # Pixels per second for slide animation
 const MAX_HISTORY := 50     # Command history size
@@ -26,6 +60,7 @@ var _cursor_pos: int = 0        # Caret position within _current_input
 var _select_start: int = -1     # Selection anchor (-1 = no selection)
 var _scroll_offset: int = 0
 var _cursor_blink: float = 0.0
+var _kill_buffer: String = ""  # Ctrl+K kill ring / Ctrl+Y yank
 
 # Autocomplete
 var _tab_completions: Array[String] = []
@@ -107,8 +142,12 @@ func _get_drawer_right_edge() -> float:
 
 
 func _process(delta: float) -> void:
-	# Update layout based on debug drawer state
-	_panel_x = _get_drawer_right_edge()
+	# Smoothly lerp _panel_x toward the drawer's right edge
+	var target_x: float = _get_drawer_right_edge()
+	if absf(_panel_x - target_x) > 1.0:
+		_panel_x = lerpf(_panel_x, target_x, delta * 8.0)
+	else:
+		_panel_x = target_x
 	_update_target_y()
 
 	# Slide animation
@@ -207,6 +246,15 @@ func _input(event: InputEvent) -> void:
 			KEY_BACKSPACE:
 				if _has_selection():
 					_delete_selection()
+				elif ctrl or shift:
+					# Ctrl+Backspace / Shift+Backspace: delete word backward
+					var p: int = _cursor_pos - 1
+					while p > 0 and _current_input[p - 1] == " ":
+						p -= 1
+					while p > 0 and _current_input[p - 1] != " ":
+						p -= 1
+					_current_input = _current_input.substr(0, p) + _current_input.substr(_cursor_pos)
+					_cursor_pos = p
 				elif _cursor_pos > 0:
 					_current_input = _current_input.substr(0, _cursor_pos - 1) + _current_input.substr(_cursor_pos)
 					_cursor_pos -= 1
@@ -216,6 +264,15 @@ func _input(event: InputEvent) -> void:
 			KEY_DELETE:
 				if _has_selection():
 					_delete_selection()
+				elif ctrl:
+					# Ctrl+Delete: delete word forward
+					var p: int = _cursor_pos
+					var slen: int = _current_input.length()
+					while p < slen and _current_input[p] == " ":
+						p += 1
+					while p < slen and _current_input[p] != " ":
+						p += 1
+					_current_input = _current_input.substr(0, _cursor_pos) + _current_input.substr(p)
 				elif _cursor_pos < _current_input.length():
 					_current_input = _current_input.substr(0, _cursor_pos) + _current_input.substr(_cursor_pos + 1)
 				_tab_completions.clear()
@@ -223,27 +280,14 @@ func _input(event: InputEvent) -> void:
 
 			KEY_LEFT:
 				if ctrl:
-					# Jump to previous word boundary
-					var p: int = _cursor_pos - 1
-					while p > 0 and _current_input[p - 1] == " ":
-						p -= 1
-					while p > 0 and _current_input[p - 1] != " ":
-						p -= 1
-					_move_cursor(p, shift)
+					_move_cursor(_word_boundary_left(), shift)
 				else:
 					_move_cursor(maxi(0, _cursor_pos - 1), shift)
 				get_viewport().set_input_as_handled()
 
 			KEY_RIGHT:
 				if ctrl:
-					# Jump to next word boundary
-					var p: int = _cursor_pos
-					var len: int = _current_input.length()
-					while p < len and _current_input[p] != " ":
-						p += 1
-					while p < len and _current_input[p] == " ":
-						p += 1
-					_move_cursor(p, shift)
+					_move_cursor(_word_boundary_right(), shift)
 				else:
 					_move_cursor(mini(_current_input.length(), _cursor_pos + 1), shift)
 				get_viewport().set_input_as_handled()
@@ -275,13 +319,58 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 
 			_:
-				# Ctrl+A/C/X/V — must be here (not in separate match cases) so
-				# plain a/c/x/v without ctrl still fall through to character typing
 				if ctrl:
 					match event.keycode:
 						KEY_A:
-							_select_start = 0
-							_cursor_pos = _current_input.length()
+							# Ctrl+A: beginning of line (emacs) — or select all if already at start
+							if _cursor_pos == 0:
+								_select_start = 0
+								_cursor_pos = _current_input.length()
+							else:
+								_move_cursor(0, shift)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_E:
+							# Ctrl+E: end of line (emacs)
+							_move_cursor(_current_input.length(), shift)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_K:
+							# Ctrl+K: kill from cursor to end of line
+							_kill_buffer = _current_input.substr(_cursor_pos)
+							_current_input = _current_input.substr(0, _cursor_pos)
+							_tab_completions.clear()
+							get_viewport().set_input_as_handled()
+							return
+						KEY_U:
+							# Ctrl+U: kill from cursor to beginning of line
+							_kill_buffer = _current_input.substr(0, _cursor_pos)
+							_current_input = _current_input.substr(_cursor_pos)
+							_cursor_pos = 0
+							_tab_completions.clear()
+							get_viewport().set_input_as_handled()
+							return
+						KEY_Y:
+							# Ctrl+Y: yank (paste kill buffer)
+							if not _kill_buffer.is_empty():
+								if _has_selection():
+									_delete_selection()
+								_current_input = _current_input.substr(0, _cursor_pos) + _kill_buffer + _current_input.substr(_cursor_pos)
+								_cursor_pos += _kill_buffer.length()
+								_tab_completions.clear()
+							get_viewport().set_input_as_handled()
+							return
+						KEY_W:
+							# Ctrl+W: delete word backward (alt emacs binding)
+							if _has_selection():
+								_kill_buffer = _get_selected_text()
+								_delete_selection()
+							else:
+								var p: int = _word_boundary_left()
+								_kill_buffer = _current_input.substr(p, _cursor_pos - p)
+								_current_input = _current_input.substr(0, p) + _current_input.substr(_cursor_pos)
+								_cursor_pos = p
+							_tab_completions.clear()
 							get_viewport().set_input_as_handled()
 							return
 						KEY_C:
@@ -294,6 +383,12 @@ func _input(event: InputEvent) -> void:
 							if _has_selection():
 								DisplayServer.clipboard_set(_get_selected_text())
 								_delete_selection()
+							else:
+								# No selection: cut entire line
+								DisplayServer.clipboard_set(_current_input)
+								_current_input = ""
+								_cursor_pos = 0
+							_tab_completions.clear()
 							get_viewport().set_input_as_handled()
 							return
 						KEY_V:
@@ -307,7 +402,7 @@ func _input(event: InputEvent) -> void:
 								_tab_completions.clear()
 							get_viewport().set_input_as_handled()
 							return
-				# Type character
+				# Type character at cursor
 				if event.unicode > 0 and event.keycode != KEY_QUOTELEFT and not ctrl:
 					if _has_selection():
 						_delete_selection()
@@ -316,6 +411,15 @@ func _input(event: InputEvent) -> void:
 					_cursor_pos += 1
 					_tab_completions.clear()
 					get_viewport().set_input_as_handled()
+
+	# Mouse wheel scrolling (output history)
+	if _active and event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			_scroll_offset = mini(_scroll_offset + 3, maxi(0, _output_lines.size() - 5))
+			get_viewport().set_input_as_handled()
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			_scroll_offset = maxi(_scroll_offset - 3, 0)
+			get_viewport().set_input_as_handled()
 
 
 # -- Selection helpers ---------------------------------------------------------
@@ -341,6 +445,27 @@ func _delete_selection() -> void:
 	_current_input = _current_input.substr(0, from) + _current_input.substr(to)
 	_cursor_pos = from
 	_select_start = -1
+
+
+func _word_boundary_left() -> int:
+	## Find the position of the start of the previous word.
+	var p: int = _cursor_pos - 1
+	while p > 0 and _current_input[p - 1] == " ":
+		p -= 1
+	while p > 0 and _current_input[p - 1] != " ":
+		p -= 1
+	return maxi(0, p)
+
+
+func _word_boundary_right() -> int:
+	## Find the position past the end of the next word.
+	var p: int = _cursor_pos
+	var slen: int = _current_input.length()
+	while p < slen and _current_input[p] != " ":
+		p += 1
+	while p < slen and _current_input[p] == " ":
+		p += 1
+	return p
 
 
 func _move_cursor(new_pos: int, extend_selection: bool) -> void:
@@ -389,7 +514,7 @@ func _execute_input() -> void:
 			if rcon2:
 				# Close console so editor is visible
 				_active = false
-				_target_y = -_panel_height
+				_update_target_y()
 				var result2: String = rcon2._execute(cmd)
 				_log_result(result2)
 		_:
@@ -423,7 +548,7 @@ func _run_test_in_editor(test_name: String) -> void:
 		editor.toggle()
 	# Close the console so it doesn't cover the editor
 	_active = false
-	_target_y = -_panel_height
+	_update_target_y()
 	# Load and run (deferred so the editor is ready)
 	editor._load_test(test_name)
 	editor.call_deferred("_run_test")
@@ -446,7 +571,7 @@ func _run_suite_in_editor(suite_name: String) -> void:
 	if not editor._active:
 		editor.toggle()
 	_active = false
-	_target_y = -_panel_height
+	_update_target_y()
 	editor.run_suite(suite_name)
 	_log("Running suite '%s' in editor..." % suite_name, Color(0.5, 0.9, 0.5))
 

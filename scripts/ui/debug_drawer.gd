@@ -55,7 +55,8 @@ var _ct_selected_type: String = "splays"  # "splays" or "trees"
 
 const CT_SUB_MIN := {
 	"ct_types":     30.0,
-	"ct_instances": 60.0,
+	"ct_instances": 36.0,
+	"ct_editor":    60.0,
 }
 
 # Cached level names
@@ -682,6 +683,10 @@ func _input(event: InputEvent) -> void:
 			_le_prop_dragging_key = ""
 			get_viewport().set_input_as_handled()
 			return
+		if not _ct_tree_prop_dragging.is_empty():
+			_ct_tree_prop_dragging = ""
+			get_viewport().set_input_as_handled()
+			return
 
 	# Mouse clicks (left button only — not scroll wheel)
 	if _active and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -755,6 +760,9 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif not _le_prop_dragging_key.is_empty():
 			_handle_le_prop_drag(event.position.x)
+			get_viewport().set_input_as_handled()
+		elif not _ct_tree_prop_dragging.is_empty():
+			_handle_ct_tree_prop_drag(event.position.x)
 			get_viewport().set_input_as_handled()
 		elif event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
 			if _current_section == Section.TEST_RUNNER:
@@ -3256,13 +3264,19 @@ func _le_get_current_actions() -> Array:
 func _le_get_action_buttons() -> Array:
 	## Returns Array of [label, color, action_id] for the current mode.
 	match _le_get_editor_mode_value():
-		5: return [
+		2: return [  # Seeds (trees)
+			["+Tree", Color(0.3, 0.8, 0.3), "tree_add"],
+			["Del", Color(0.8, 0.3, 0.3), "tree_delete"],
+			["Type", Color(0.3, 0.6, 1.0), "tree_cycle_blueprint"],
+			["Seed", Color(0.8, 0.6, 0.3), "tree_randomize_seed"],
+		]
+		5: return [  # Migration
 			["+Phase", Color(0.3, 0.8, 0.3), "mig_add_phase"],
 			["-Phase", Color(0.8, 0.3, 0.3), "mig_del_phase"],
 			["+Zone", Color(0.3, 0.6, 1.0), "mig_add_zone"],
 			["Species", Color(0.8, 0.6, 0.3), "mig_cycle_species"],
 		]
-		6: return [
+		6: return [  # Splay
 			["Add", Color(0.3, 0.8, 0.3), "splay_add"],
 			["Del", Color(0.8, 0.3, 0.3), "splay_delete"],
 			["Pose", Color(0.3, 0.6, 1.0), "splay_cycle_pose"],
@@ -3277,6 +3291,14 @@ func _le_execute_action(action: String) -> void:
 	if not le:
 		return
 	match action:
+		"tree_add":
+			_le_tree_add()
+		"tree_delete":
+			_le_tree_delete()
+		"tree_cycle_blueprint":
+			_le_tree_cycle_blueprint()
+		"tree_randomize_seed":
+			_le_tree_randomize_seed()
 		"mig_add_phase": if le.has_method("_migration_add_phase"): le._migration_add_phase()
 		"mig_del_phase": if le.has_method("_migration_delete_last_phase"): le._migration_delete_last_phase()
 		"mig_add_zone": if le.has_method("_migration_add_zone"): le._migration_add_zone()
@@ -3286,6 +3308,85 @@ func _le_execute_action(action: String) -> void:
 		"splay_cycle_pose": if le.has_method("_splay_cycle_pose"): le._splay_cycle_pose(1)
 		"splay_cycle_behavior": if le.has_method("_splay_cycle_behavior"): le._splay_cycle_behavior()
 		"splay_library": if le.has_method("_splay_open_library"): le._splay_open_library()
+
+
+func _le_tree_add() -> void:
+	## Add a new tree to the level config with default blueprint.
+	var config: Dictionary = _le_get_config()
+	if not config.has("scenery"):
+		config["scenery"] = {}
+	if not config["scenery"].has("trees"):
+		config["scenery"]["trees"] = []
+	var trees: Array = config["scenery"]["trees"]
+	var blueprints: Array[String] = _ct_get_tree_blueprint_names()
+	var bp_name: String = blueprints[0] if not blueprints.is_empty() else "oak"
+	trees.append({
+		"pos": [960, 900],
+		"seed": randi(),
+		"blueprint": bp_name,
+		"trunk_weight": 20.0,
+		"trunk_length": 200.0,
+	})
+	var le: Node = _get_level_editor()
+	if le:
+		le._selected_idx = trees.size() - 1
+		le._drag_item_type = "tree"
+		le.config_changed.emit(config)
+		le._update_display()
+
+
+func _le_tree_delete() -> void:
+	## Delete the selected tree from the level config.
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	var sel: int = le._selected_idx
+	var config: Dictionary = _le_get_config()
+	var trees: Array = config.get("scenery", {}).get("trees", [])
+	if sel >= 0 and sel < trees.size():
+		trees.remove_at(sel)
+		le._selected_idx = -1
+		le.config_changed.emit(config)
+		le._update_display()
+
+
+func _le_tree_cycle_blueprint() -> void:
+	## Cycle the selected tree through available blueprints.
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	var sel: int = le._selected_idx
+	var config: Dictionary = _le_get_config()
+	var trees: Array = config.get("scenery", {}).get("trees", [])
+	if sel < 0 or sel >= trees.size():
+		return
+	var blueprints: Array[String] = _ct_get_tree_blueprint_names()
+	if blueprints.is_empty():
+		return
+	var current_bp: String = trees[sel].get("blueprint", "")
+	var idx: int = blueprints.find(current_bp)
+	var next_idx: int = (idx + 1) % blueprints.size()
+	trees[sel]["blueprint"] = blueprints[next_idx]
+	le.config_changed.emit(config)
+
+
+func _le_tree_randomize_seed() -> void:
+	## Assign a new random seed to the selected tree.
+	var le: Node = _get_level_editor()
+	if not le:
+		return
+	var sel: int = le._selected_idx
+	var config: Dictionary = _le_get_config()
+	var trees: Array = config.get("scenery", {}).get("trees", [])
+	if sel >= 0 and sel < trees.size():
+		trees[sel]["seed"] = randi()
+		le.config_changed.emit(config)
+
+
+func _ct_get_tree_blueprint_names() -> Array[String]:
+	## Scan tree_blueprints directories for available blueprint JSON files.
+	var TreeScript: GDScript = load("res://scripts/effects/procedural_tree.gd")
+	return TreeScript.get_blueprint_names()
 
 
 func _le_execute_scene_action(cmd: String) -> void:
@@ -4057,10 +4158,15 @@ const CT_TYPE_COLORS: Array[Color] = [Color(0.9, 0.4, 0.2), Color(0.3, 0.8, 0.4)
 var _ct_sandbox_active: bool = false
 var _ct_sandbox_return_level: String = ""  # Level to return to when exiting sandbox
 
+# Tree blueprint editing state
+var _ct_tree_preview: Node2D = null       # Live preview tree in the sandbox
+var _ct_tree_blueprint_name: String = ""  # Currently editing blueprint name
+var _ct_tree_prop_dragging: String = ""   # Which tree property slider is being dragged
+
 
 func _init_ct_subsections() -> void:
 	_ct_subsections = []
-	for sid in ["ct_types", "ct_instances"]:
+	for sid in ["ct_types", "ct_instances", "ct_editor"]:
 		_ct_subsections.append({
 			"id": sid,
 			"title": sid.substr(3).capitalize(),
@@ -4109,8 +4215,8 @@ func _auto_snap_ct() -> void:
 		var delta: float = preferred - sub["height"]
 		sub["height"] = preferred
 		last["height"] -= delta
-	if last["height"] < CT_SUB_MIN.get("ct_instances", 60.0):
-		last["height"] = CT_SUB_MIN.get("ct_instances", 60.0)
+	if last["height"] < CT_SUB_MIN.get("ct_editor", 60.0):
+		last["height"] = CT_SUB_MIN.get("ct_editor", 60.0)
 
 
 func _get_ct_preferred_height(sid: String) -> float:
@@ -4119,7 +4225,11 @@ func _get_ct_preferred_height(sid: String) -> float:
 			return SUB_HEADER_H + CT_TYPE_NAMES.size() * ROW_HEIGHT + 4.0
 		"ct_instances":
 			var count: int = _ct_get_instance_count()
-			return SUB_HEADER_H + clampi(count, 3, 15) * 16.0 + 4.0
+			return SUB_HEADER_H + clampi(count, 3, 10) * 16.0 + 4.0
+		"ct_editor":
+			if _ct_selected_type == "trees" and is_instance_valid(_ct_tree_preview):
+				return SUB_HEADER_H + _ct_get_tree_properties().size() * 18.0 + 30.0
+			return SUB_HEADER_H + 40.0
 	return SUB_HEADER_H + 40.0
 
 
@@ -4155,15 +4265,13 @@ func _ct_get_splay_pose_names() -> Array[String]:
 func _ct_get_instance_count() -> int:
 	match _ct_selected_type:
 		"splays": return _ct_get_splay_pose_names().size()
-		"trees":
-			var config: Dictionary = _le_get_config()
-			return config.get("scenery", {}).get("trees", []).size()
+		"trees": return _ct_get_tree_blueprint_names().size()
 	return 0
 
 
 func _ct_build_instance_list() -> Array:
 	## Build the list of blueprint definitions (not level instances).
-	## Splays: lists available pose files. Trees: lists tree definitions.
+	## Splays: lists available pose files. Trees: lists tree blueprint files.
 	var items: Array = []
 	match _ct_selected_type:
 		"splays":
@@ -4171,10 +4279,9 @@ func _ct_build_instance_list() -> Array:
 			for i in range(poses.size()):
 				items.append({"label": poses[i], "color": Color(0.9, 0.4, 0.2), "idx": i})
 		"trees":
-			var config: Dictionary = _le_get_config()
-			for i in range(config.get("scenery", {}).get("trees", []).size()):
-				var t: Dictionary = config["scenery"]["trees"][i]
-				items.append({"label": "Tree #%d  seed:%d" % [i+1, int(t.get("seed", 0))], "color": Color(0.3, 0.8, 0.4), "idx": i})
+			var blueprints: Array[String] = _ct_get_tree_blueprint_names()
+			for i in range(blueprints.size()):
+				items.append({"label": blueprints[i], "color": Color(0.3, 0.8, 0.4), "idx": i})
 	return items
 
 
@@ -4220,7 +4327,7 @@ func _handle_ct_click(lx: float, my: float) -> void:
 
 		var body_y: float = header_end
 		var body_end: float = y + sub["height"]
-		if sub["id"] == "ct_instances":
+		if sub["id"] == "ct_editor":
 			body_end = maxf(body_end, 9999.0)
 
 		if my >= body_y and my < body_end:
@@ -4234,6 +4341,8 @@ func _handle_ct_click(lx: float, my: float) -> void:
 				"ct_instances":
 					var idx: int = int(local_y / 16.0) + _ct_instances_scroll_offset
 					_ct_select_instance(idx)
+				"ct_editor":
+					_handle_ct_editor_click(lx, local_y)
 			return
 		y += sub["height"]
 
@@ -4294,22 +4403,17 @@ func _ct_select_instance(idx: int) -> void:
 
 	match _ct_selected_type:
 		"splays":
-			# Build list of available pose names
 			var poses: Array[String] = _ct_get_splay_pose_names()
 			if idx >= 0 and idx < poses.size():
 				var pose_name: String = poses[idx]
-				# Activate level editor in SPLAY_EDIT mode for this pose
 				le._active = true
 				le.visible = true
 				if le._overlay:
 					le._overlay.visible = true
-				# Set up for splay edit — need a splay instance referencing this pose
 				le._mode = 6  # SPLAY first
-				# Create a temporary splay config pointing to this pose
 				if not le._config.has("splays"):
 					le._config["splays"] = []
 				var splays: Array = le._config["splays"]
-				# Find or create a splay for this pose
 				var found_idx: int = -1
 				for si in range(splays.size()):
 					if splays[si].get("pose", "") == pose_name:
@@ -4323,6 +4427,94 @@ func _ct_select_instance(idx: int) -> void:
 				le._mode = 7  # SPLAY_EDIT
 				le._enter_splay_edit()
 				le._update_display()
+		"trees":
+			var blueprints: Array[String] = _ct_get_tree_blueprint_names()
+			if idx >= 0 and idx < blueprints.size():
+				var bp_name: String = blueprints[idx]
+				_ct_edit_tree_blueprint(bp_name)
+
+
+func _ct_edit_tree_blueprint(bp_name: String) -> void:
+	## Spawn a preview tree in the sandbox and enter tree editing mode.
+	_ct_tree_blueprint_name = bp_name
+
+	# Remove any existing preview tree
+	if is_instance_valid(_ct_tree_preview):
+		_ct_tree_preview.queue_free()
+		_ct_tree_preview = null
+
+	# Spawn a preview tree
+	var tree_script: GDScript = load("res://scripts/effects/procedural_tree.gd")
+	var tree := Node2D.new()
+	tree.set_script(tree_script)
+	tree.load_blueprint(bp_name)
+	tree.seed_value = 42  # Fixed seed for consistent preview
+	tree.z_index = 5
+	tree.regenerate()
+
+	var scene: Node = get_tree().current_scene
+	if scene:
+		scene.add_child(tree)
+		tree.global_position = Vector2(960, 880)
+	_ct_tree_preview = tree
+
+
+func _ct_get_tree_properties() -> Array:
+	## Returns configurable properties for the currently-editing tree blueprint.
+	if not is_instance_valid(_ct_tree_preview):
+		return []
+	var t: Node2D = _ct_tree_preview
+	return [
+		{"key": "trunk_weight", "label": "Trunk Width", "value": t.trunk_weight, "type": "slider", "min": 5.0, "max": 50.0},
+		{"key": "trunk_length", "label": "Trunk Height", "value": t.trunk_length, "type": "slider", "min": 50.0, "max": 500.0},
+		{"key": "max_depth", "label": "Max Depth", "value": float(t.max_depth), "type": "slider", "min": 1.0, "max": 8.0},
+		{"key": "min_weight", "label": "Min Weight", "value": t.min_weight, "type": "slider", "min": 1.0, "max": 10.0},
+		{"key": "wobble", "label": "Wobble", "value": t.wobble, "type": "slider", "min": 0.0, "max": 1.0},
+		{"key": "spread", "label": "Spread", "value": t.spread, "type": "slider", "min": 0.2, "max": 2.0},
+		{"key": "decay_min", "label": "Decay Min", "value": t.decay_min, "type": "slider", "min": 0.2, "max": 0.9},
+		{"key": "decay_max", "label": "Decay Max", "value": t.decay_max, "type": "slider", "min": 0.3, "max": 1.0},
+		{"key": "split_min", "label": "Split Min", "value": float(t.split_min), "type": "slider", "min": 1.0, "max": 5.0},
+		{"key": "split_max", "label": "Split Max", "value": float(t.split_max), "type": "slider", "min": 1.0, "max": 6.0},
+		{"key": "bend_min", "label": "Bend Min", "value": float(t.bend_min), "type": "slider", "min": 1.0, "max": 6.0},
+		{"key": "bend_max", "label": "Bend Max", "value": float(t.bend_max), "type": "slider", "min": 1.0, "max": 8.0},
+		{"key": "canopy_offset", "label": "Canopy Offset", "value": t.canopy_offset, "type": "slider", "min": 0.5, "max": 2.5},
+		{"key": "seed_value", "label": "Preview Seed", "value": float(t.seed_value), "type": "slider", "min": 0.0, "max": 9999.0},
+	]
+
+
+func _ct_set_tree_property(key: String, value: float) -> void:
+	## Set a tree property on the preview and regenerate.
+	if not is_instance_valid(_ct_tree_preview):
+		return
+	var t: Node2D = _ct_tree_preview
+	match key:
+		"trunk_weight": t.trunk_weight = value
+		"trunk_length": t.trunk_length = value
+		"max_depth": t.max_depth = int(value)
+		"min_weight": t.min_weight = value
+		"wobble": t.wobble = value
+		"spread": t.spread = value
+		"decay_min": t.decay_min = value
+		"decay_max": t.decay_max = value
+		"split_min": t.split_min = int(value)
+		"split_max": t.split_max = int(value)
+		"bend_min": t.bend_min = int(value)
+		"bend_max": t.bend_max = int(value)
+		"canopy_offset": t.canopy_offset = value
+		"seed_value": t.seed_value = int(value)
+	t.regenerate()
+
+
+func _ct_save_tree_blueprint() -> void:
+	## Save the current preview tree's settings as the active blueprint.
+	if not is_instance_valid(_ct_tree_preview) or _ct_tree_blueprint_name.is_empty():
+		return
+	if Version.is_source_mode():
+		_ct_tree_preview.save_blueprint(_ct_tree_blueprint_name, true)
+	else:
+		_ct_tree_preview.save_blueprint(_ct_tree_blueprint_name, false)
+	_le_scene_flash = "Saved: %s" % _ct_tree_blueprint_name
+	_le_scene_flash_timer = 2.0
 
 
 func _handle_ct_scroll(my: float, delta: int) -> void:
@@ -4364,6 +4556,47 @@ func _handle_ct_hover(my: float) -> void:
 				"ct_instances": _ct_hover_instance_idx = int(local_y / 16.0) + _ct_instances_scroll_offset
 			return
 		y += sub["height"]
+
+
+func _handle_ct_editor_click(lx: float, local_y: float) -> void:
+	## Click in the editor sub-section — tree property sliders or save button.
+	if _ct_selected_type == "trees" and is_instance_valid(_ct_tree_preview):
+		var props: Array = _ct_get_tree_properties()
+		var row_h: float = 18.0
+		var idx: int = int(local_y / row_h)
+		if idx >= 0 and idx < props.size():
+			var prop: Dictionary = props[idx]
+			var pw: float = _content_width
+			if lx > pw * 0.45:
+				_ct_tree_prop_dragging = prop["key"]
+				# Set value from click position
+				var slider_x: float = pw * 0.47
+				var slider_w: float = pw * 0.35
+				var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+				var new_val: float = lerpf(prop.get("min", 0.0), prop.get("max", 100.0), t)
+				_ct_set_tree_property(prop["key"], new_val)
+			return
+		# Save button (below properties)
+		var save_y: float = props.size() * row_h + 4
+		if local_y >= save_y and local_y < save_y + 22:
+			_ct_save_tree_blueprint()
+
+
+func _handle_ct_tree_prop_drag(mx: float) -> void:
+	## Drag a tree property slider.
+	if _ct_tree_prop_dragging.is_empty() or not is_instance_valid(_ct_tree_preview):
+		_ct_tree_prop_dragging = ""
+		return
+	var lx: float = mx - _panel_x - ICON_BAR_WIDTH - 4
+	var pw: float = _content_width
+	var slider_x: float = pw * 0.47
+	var slider_w: float = pw * 0.35
+	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+	for prop in _ct_get_tree_properties():
+		if prop["key"] == _ct_tree_prop_dragging:
+			var new_val: float = lerpf(prop.get("min", 0.0), prop.get("max", 100.0), t)
+			_ct_set_tree_property(prop["key"], new_val)
+			return
 
 
 func _handle_ct_sub_resize_drag(my: float) -> void:
@@ -4415,8 +4648,8 @@ func _draw_blueprints_section(content_x: float, font: Font, ph: float) -> void:
 
 		var body_y: float = y + SUB_HEADER_H
 		var body_h: float
-		if sub["id"] == "ct_instances":
-			body_h = maxf(CT_SUB_MIN["ct_instances"] - SUB_HEADER_H, ph - body_y)
+		if sub["id"] == "ct_editor":
+			body_h = maxf(CT_SUB_MIN["ct_editor"] - SUB_HEADER_H, ph - body_y)
 		else:
 			body_h = sub["height"] - SUB_HEADER_H
 
@@ -4424,9 +4657,10 @@ func _draw_blueprints_section(content_x: float, font: Font, ph: float) -> void:
 			match sub["id"]:
 				"ct_types":     _draw_ct_sub_types(x, body_y, pw, body_h, font)
 				"ct_instances": _draw_ct_sub_instances(x, body_y, pw, body_h, font)
+				"ct_editor":    _draw_ct_sub_editor(x, body_y, pw, body_h, font)
 
 		# Snap indicator
-		if _ct_sub_resize_idx == si and sub["id"] != "ct_instances":
+		if _ct_sub_resize_idx == si and sub["id"] != "ct_editor":
 			var snap_h: float = _get_ct_preferred_height(sub["id"])
 			var snap_y: float = y + snap_h
 			var near: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
@@ -4436,12 +4670,12 @@ func _draw_blueprints_section(content_x: float, font: Font, ph: float) -> void:
 				_panel.draw_line(Vector2(x + dx, snap_y), Vector2(x + minf(dx + 6, pw - 16), snap_y), scol, 1.0)
 				dx += 10.0
 
-		if sub["id"] == "ct_instances":
+		if sub["id"] == "ct_editor":
 			y += body_h + SUB_HEADER_H
 		else:
 			y += sub["height"]
 
-		if sub["id"] != "ct_instances":
+		if sub["id"] != "ct_editor":
 			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.2, 0.15, 0.4), 1.0)
 
 
@@ -4471,6 +4705,10 @@ func _draw_ct_sub_header(x: float, y: float, pw: float, font: Font, sub: Diction
 				ctx_col = Color(1.0, 0.7, 0.3)
 		"ct_instances":
 			ctx = "%d blueprints" % _ct_get_instance_count()
+		"ct_editor":
+			if _ct_selected_type == "trees" and not _ct_tree_blueprint_name.is_empty():
+				ctx = _ct_tree_blueprint_name
+				ctx_col = Color(0.3, 0.8, 0.4)
 	if not ctx.is_empty():
 		_panel.draw_string(font, Vector2(x + 98, y + 14), ctx, HORIZONTAL_ALIGNMENT_LEFT, pw - 130, 9, ctx_col)
 
@@ -4552,3 +4790,63 @@ func _draw_ct_sub_instances(x: float, y: float, pw: float, h: float, font: Font)
 		var pct: float = float(_ct_instances_scroll_offset) / float(max_scroll)
 		var bar_h: float = maxf(16.0, h * float(visible_count) / float(items.size()))
 		_panel.draw_rect(Rect2(x + pw - 12, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.25, 0.2, 0.5))
+
+
+func _draw_ct_sub_editor(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw the blueprint editor — tree property sliders + save button,
+	## or splay edit status when editing a splay pose.
+	if _ct_selected_type == "trees" and is_instance_valid(_ct_tree_preview):
+		_draw_ct_tree_editor(x, y, pw, h, font)
+	elif _ct_selected_type == "splays":
+		var le: Node = _get_level_editor()
+		if le and "_mode" in le and le._mode == 7:
+			_panel.draw_string(font, Vector2(x + 4, y + 14), "Editing: %s" % _ct_tree_blueprint_name if not _ct_tree_blueprint_name.is_empty() else "Splay Edit active", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.9, 0.4, 0.2))
+			_panel.draw_string(font, Vector2(x + 4, y + 30), "Use world handles to adjust pose", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.5, 0.5, 0.45))
+		else:
+			_panel.draw_string(font, Vector2(x + 4, y + 14), "(click a blueprint above to edit)", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.4, 0.4, 0.35))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "(click a blueprint above to edit)", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.4, 0.4, 0.35))
+
+
+func _draw_ct_tree_editor(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw tree blueprint property sliders with live preview.
+	var props: Array = _ct_get_tree_properties()
+	var row_h: float = 18.0
+	var ry: float = y
+
+	for i in range(props.size()):
+		if ry > y + h - 30:
+			break
+		var prop: Dictionary = props[i]
+		# Label
+		_panel.draw_string(font, Vector2(x + 4, ry + 13), prop["label"], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 9, Color(0.6, 0.6, 0.55))
+		# Slider
+		var slider_x: float = x + pw * 0.47
+		var slider_w: float = pw * 0.35
+		var slider_y: float = ry + 8
+		_panel.draw_rect(Rect2(slider_x, slider_y - 2, slider_w, 4), Color(0.2, 0.2, 0.18))
+		var min_v: float = prop.get("min", 0.0)
+		var max_v: float = prop.get("max", 100.0)
+		var cur_v: float = float(prop.get("value", 0))
+		var t: float = clampf((cur_v - min_v) / (max_v - min_v), 0.0, 1.0) if max_v != min_v else 0.0
+		var thumb_col := Color(0.3, 0.8, 0.4) if _ct_tree_prop_dragging == prop["key"] else Color(0.3, 0.7, 0.35)
+		_panel.draw_circle(Vector2(slider_x + t * slider_w, slider_y), 5.0, thumb_col)
+		# Value text
+		var val_str: String = "%d" % int(cur_v) if prop["key"] in ["max_depth", "split_min", "split_max", "bend_min", "bend_max", "seed_value"] else "%.2f" % cur_v
+		_panel.draw_string(font, Vector2(slider_x + slider_w + 4, ry + 13), val_str, HORIZONTAL_ALIGNMENT_LEFT, 50, 8, Color(0.7, 0.7, 0.6))
+		ry += row_h
+
+	# Save button
+	ry += 4
+	if ry < y + h:
+		var btn_w: float = pw * 0.5
+		var btn_col := Color(0.3, 0.8, 0.3)
+		_panel.draw_rect(Rect2(x + 4, ry, btn_w, 20), btn_col * Color(1, 1, 1, 0.1))
+		_panel.draw_rect(Rect2(x + 4, ry, btn_w, 20), btn_col * Color(1, 1, 1, 0.5), false, 1.0)
+		var save_label: String = "Save: %s" % _ct_tree_blueprint_name if not _ct_tree_blueprint_name.is_empty() else "Save"
+		_panel.draw_string(font, Vector2(x + 12, ry + 14), save_label, HORIZONTAL_ALIGNMENT_LEFT, btn_w - 16, 9, btn_col)
+
+	# Flash feedback
+	if _le_scene_flash_timer > 0:
+		var alpha: float = clampf(_le_scene_flash_timer / 0.5, 0.0, 1.0)
+		_panel.draw_string(font, Vector2(x + pw * 0.55, ry + 14), _le_scene_flash, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.4, 9, Color(0.3, 1.0, 0.5, alpha))

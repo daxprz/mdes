@@ -163,6 +163,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.25
+**Tree blueprint system, tree placement in level editor, console keybindings**
+
+- **Tree blueprints**: All procedural tree generation parameters now configurable. Blueprint JSON files in `data/tree_blueprints/` (oak, pine shipped). Trees in levels can reference a `"blueprint"` key to inherit shape settings.
+- **Tree placement**: Seeds mode in level editor now has action buttons: +Tree, Delete, Type (cycle blueprint), Seed (randomize). New trees auto-reference a blueprint.
+- **Blueprint tree editor**: Blueprints panel shows tree blueprint files. Clicking one spawns a live preview in the sandbox with 14 property sliders (trunk, branching, canopy, colors). Changes regenerate instantly. Save button writes to disk.
+- **Configurable tree parameters**: trunk weight/length, max depth, min weight, wobble, spread, decay range, split/bend ranges, canopy offset/layers, bark and leaf colors.
+- **Console emacs keybindings**: Ctrl+A (beginning of line), Ctrl+E (end of line), Ctrl+K (kill to end), Ctrl+U (kill to start), Ctrl+W (kill word), Ctrl+Y (yank).
+- **Console word operations**: Shift+Backspace and Ctrl+Backspace delete word backward. Ctrl+Delete deletes word forward. Ctrl+Left/Right for word navigation.
+- **Console mouse wheel scrolling**: Scroll output history with mouse wheel (in addition to PgUp/PgDn).
+- **Console smooth slide**: Panel X position lerps smoothly when the debug drawer opens/closes (no more jump).
+- **Backward compatible**: Existing level JSONs with inline tree config work unchanged — all new parameters use original values as defaults.
+
 ### v0.10.24
 **Level Editor and Blueprints integrated into debug drawer — Ctrl+E removed**
 

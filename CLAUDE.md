@@ -42,6 +42,8 @@ Do NOT use tumu when:
 | `scripts/ui/debug_drawer.gd` | Debug panel: debug aspects, test runner, config, level editor, blueprints |
 | `scripts/ui/level_editor.gd` | Level editor world-space overlay (handles, zones, splay edit) |
 | `scripts/ui/game_console.gd` | Bottom-slide console (backtick), respects drawer width |
+| `scripts/effects/procedural_tree.gd` | Configurable procedural tree (blueprint system) |
+| `data/tree_blueprints/` | Tree blueprint JSON files (oak, pine, etc.) |
 | `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
 | `scripts/systems/chain.gd` | Chain physics + scaled rendering |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
