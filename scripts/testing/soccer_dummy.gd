@@ -12,6 +12,7 @@ const BOUNCE_FACTOR := 0.5    # How much velocity is retained on bounce
 
 var player_index: int = 0
 var entity_id: String = ""
+var mass: float = 20.0  # Light — a soccer ball
 var health: int = 1000
 var max_health: int = 1000
 var damage_taken: int = 0

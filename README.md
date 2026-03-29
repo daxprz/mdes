@@ -163,6 +163,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.31
+**Absolute mass system, entity YEET, RELEASE mode**
+
+- **Absolute mass**: Ball, player, and all entities now use real mass values (kg) instead of ratios. Ball=140, player=70, soccer ball=20, enemies range 3-200+. YEET physics use actual masses from both entities in the elastic collision.
+- **Entity YEET (RELEASE mode)**: When shackle is attached to an entity and ball is thrown, the ball's momentum YEETs the shackled entity (not the player). Player is free to move. Chain connects entity↔ball.
+- **3-mode throw system planned**: THROW-RELEASE, THROW-HOLD+RELEASE, THROW-HOLD+HOLD. Currently implements RELEASE mode for second throw.
+- **Soccer ball mass**: Soccer dummy now has `mass=20.0` for proper YEET physics.
+- **Tuning popup**: Ball Mass slider replaces Mass Ratio (range 10-1000 kg).
+
 ### v0.10.30
 **Shackle attaches to any entity, R1 always recalls, no stuck states**
 

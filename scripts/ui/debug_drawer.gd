@@ -2932,7 +2932,7 @@ func _build_player_config_groups(entity: Node2D) -> Array[Array]:
 	elif char_class == PlayerManager.CharacterClass.RANGED:
 		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
 	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
-		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass_ratio", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
+		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
 		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
 		groups.append(["# Executioner Axe", ["exec_axe_damage", "exec_axe_cooldown"]])
 		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
@@ -2990,7 +2990,7 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 		"exec_ball_gravity": 900.0,
 		"exec_ball_throw_speed": 1200.0,
 		"exec_ball_max_throw_speed": 6000.0,
-		"exec_ball_mass_ratio": 2.0,
+		"exec_ball_mass": 140.0,
 		"exec_chain_elasticity": 0.25,
 		"exec_chain_total_len": 600.0,
 		"exec_chain_adjust_speed": 0.5,

@@ -56,7 +56,7 @@ const CONFIG_BOUNDS := {
 	"exec_ball_gravity": Vector2(100, 2000),
 	"exec_ball_throw_speed": Vector2(200, 2000),
 	"exec_ball_max_throw_speed": Vector2(400, 10000),
-	"exec_ball_mass_ratio": Vector2(1, 20),
+	"exec_ball_mass": Vector2(10, 1000),
 	"exec_chain_elasticity": Vector2(0, 1.0),
 	"exec_chain_total_len": Vector2(200, 1500),
 	"exec_chain_split_default": Vector2(0.1, 0.9),
@@ -4830,10 +4830,11 @@ func _check_out_of_bounds() -> void:
 	# Skip during YEET launch — player is flying on the chain
 	if _exec_yeet_immunity > 0.0:
 		return
-	# Skip while executioner ball is active (thrown/stuck) — chain constrains player
+	# Skip while executioner ball is active AND player is chained (not entity-yeet mode)
 	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
-		if _exec_ball_state in [ExecEndState.THROWN, ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
-			return
+		if not _exec_is_entity_yeet_mode():
+			if _exec_ball_state in [ExecEndState.THROWN, ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
+				return
 	var cam := get_viewport().get_camera_2d()
 	if not cam:
 		return
@@ -7252,7 +7253,7 @@ const EXEC_BALL_SPIKE_COUNT := 12
 const EXEC_BALL_SPIKE_LEN := 8.0
 const EXEC_BALL_DAMAGE := 35
 const EXEC_BALL_STUN_DURATION := 3.0      # Seconds enemies are stunned on ball impact
-const EXEC_BALL_MASS_RATIO := 2.0         # Ball is 2x player mass (configurable)
+const EXEC_BALL_MASS := 140.0             # Absolute mass of the spike ball (kg)
 const EXEC_CHAIN_ELASTICITY := 0.25       # 25% elastic chain-pull (1.0 = perfect elastic)
 
 # Shackle throw (other end — only sticks to enemies)
@@ -7375,7 +7376,7 @@ var _exec_tuning_dragging: String = ""     # Which slider is being dragged
 
 const EXEC_TUNING_KEYS: Array[Array] = [
 	# [key, label, default, min, max]
-	["exec_ball_mass_ratio", "Mass Ratio", 2.0, 1.0, 20.0],
+	["exec_ball_mass", "Ball Mass", 140.0, 10.0, 1000.0],
 	["exec_chain_elasticity", "Elasticity", 0.25, 0.0, 1.0],
 	["exec_ball_throw_speed", "Throw Min", 1200.0, 100.0, 3000.0],
 	["exec_ball_max_throw_speed", "Throw Max", 6000.0, 400.0, 10000.0],
@@ -7396,6 +7397,9 @@ func _exec_apply_chain_constraint() -> void:
 	if character_class != PlayerManager.CharacterClass.EXECUTIONER:
 		return
 	if _exec_ball_state not in [ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
+		return
+	# In entity-yeet mode, the player is FREE — chain connects ball to entity, not player
+	if _exec_is_entity_yeet_mode():
 		return
 
 	var ball_pos: Vector2 = _exec_get_ball_world_pos()
@@ -7447,34 +7451,75 @@ func _exec_shackle_chain_len() -> float:
 
 # -- YEET Physics (shared by thrown + stuck states) ----------------------------
 
+func _exec_is_entity_yeet_mode() -> bool:
+	## True when shackle is attached to an entity — ball YEETs the entity, not the player.
+	return _exec_shackle_state == ExecEndState.ATTACHED_ENEMY and \
+		_exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body)
+
+
 func _exec_try_yeet(chain_dir: Vector2) -> void:
-	## Partially elastic collision along the chain axis.
-	## Fires ONCE per slack→taut transition. chain_dir = player → ball (unit vector).
-	## Works for both thrown ball (ball has velocity) and stuck ball (ball stationary,
-	## player moving away — kinetic energy still transfers via the rigid chain).
+	## Partially elastic collision along the chain axis using ABSOLUTE masses.
+	## Fires ONCE per slack→taut transition.
+	##
+	## Two modes:
+	##   Normal: ball vs player (player gets YEETed)
+	##   Entity mode: ball vs shackled entity (entity gets YEETed, player is free)
 	if _exec_chain_taut:
 		return
 	_exec_chain_taut = true
 
-	# Project both velocities onto the chain axis
+	var m_ball: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
+	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
+
+	if _exec_is_entity_yeet_mode():
+		# ENTITY YEET: ball momentum transfers to the shackled entity
+		var entity: Node2D = _exec_shackle_anchor_body
+		var m_entity: float = entity.mass if "mass" in entity else 50.0
+		var entity_vel: Vector2 = entity.velocity if "velocity" in entity else Vector2.ZERO
+
+		var v_b: float = _exec_ball_vel.dot(chain_dir)
+		var v_e: float = entity_vel.dot(chain_dir)
+		var relative_v: float = v_b - v_e
+
+		if absf(relative_v) < 10.0:
+			return
+
+		var impulse_to_entity: float = (1.0 + e) * m_ball / (m_ball + m_entity) * relative_v
+		var impulse_to_ball: float = (1.0 + e) * m_entity / (m_ball + m_entity) * relative_v
+
+		# Apply impulse to entity
+		var yeet_vec: Vector2 = chain_dir * impulse_to_entity
+		if entity.has_method("apply_knockback"):
+			entity.apply_knockback(yeet_vec)
+		elif "velocity" in entity:
+			entity.velocity += yeet_vec
+		_exec_ball_vel -= chain_dir * impulse_to_ball
+
+		_exec_yeet_immunity = 1.5
+		AudioManager.play("grapple_hit", 2.0, 0.6)
+		_rumble(0.7, 1.0, 0.2)
+
+		print("=== ENTITY YEET ===")
+		print("  entity: %s  mass=%.1f" % [entity.name, m_entity])
+		print("  ball_mass=%.1f  impulse=%.1f  dir=(%.2f,%.2f)" % [m_ball, impulse_to_entity, chain_dir.x, chain_dir.y])
+
+		DebugOverlay.log("executioner/ball", self,
+			"ENTITY YEET! %s impulse=%.0f dir=(%.2f,%.2f)",
+			[entity.name, impulse_to_entity, chain_dir.x, chain_dir.y])
+		return
+
+	# NORMAL YEET: ball vs player
+	var m_player: float = mass
 	var v_b: float = _exec_ball_vel.dot(chain_dir)
 	var v_p: float = velocity.dot(chain_dir)
-	var relative_v: float = v_b - v_p  # Positive = ball pulling away from player
+	var relative_v: float = v_b - v_p
 
-	# YEET if there's meaningful relative motion (either direction)
-	# v_b > v_p means ball pulls player toward ball
-	# v_p > v_b means player pulls themselves toward ball (they ran past and snapped back)
 	if absf(relative_v) < 10.0:
 		return
 
-	var m_b: float = cfg("exec_ball_mass_ratio", EXEC_BALL_MASS_RATIO)
-	var m_p: float = 1.0
-	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 	var pre_vel: Vector2 = velocity
-
-	# Elastic collision: new chain-axis velocities
-	var impulse_to_player: float = (1.0 + e) * m_b / (m_b + m_p) * relative_v
-	var impulse_to_ball: float = (1.0 + e) * m_p / (m_b + m_p) * relative_v
+	var impulse_to_player: float = (1.0 + e) * m_ball / (m_ball + m_player) * relative_v
+	var impulse_to_ball: float = (1.0 + e) * m_player / (m_ball + m_player) * relative_v
 
 	velocity += chain_dir * impulse_to_player
 	_exec_ball_vel -= chain_dir * impulse_to_ball
@@ -7488,7 +7533,7 @@ func _exec_try_yeet(chain_dir: Vector2) -> void:
 	print("  player BEFORE: (%.1f, %.1f)" % [pre_vel.x, pre_vel.y])
 	print("  player AFTER:  (%.1f, %.1f)  speed=%.1f" % [velocity.x, velocity.y, velocity.length()])
 	print("  chain_axis: v_b=%.1f v_p=%.1f relative=%.1f" % [v_b, v_p, relative_v])
-	print("  impulse:    %.1f  mass=%.1f  elast=%.2f" % [impulse_to_player, m_b, e])
+	print("  impulse:    %.1f  ball_mass=%.1f  player_mass=%.1f  elast=%.2f" % [impulse_to_player, m_ball, m_player, e])
 
 	DebugOverlay.log("executioner/ball", self,
 		"YEET! vel=(%.0f,%.0f)->(%.0f,%.0f) impulse=%.0f dir=(%.2f,%.2f)",
@@ -7717,7 +7762,7 @@ func _exec_update_preview(launch_vel: Vector2) -> void:
 	## Reality should always fall between the two.
 	var R: float = _exec_ball_chain_len()
 	var g: float = cfg("exec_ball_gravity", EXEC_BALL_GRAVITY)
-	var mb: float = cfg("exec_ball_mass_ratio", EXEC_BALL_MASS_RATIO)
+	var mb: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
 	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 	var space := get_world_2d().direct_space_state
 
@@ -7755,7 +7800,7 @@ func _exec_sim_arc(launch_vel: Vector2, R: float, g: float, mb: float, e: float,
 	## vel_retain: velocity multiplier per frame (1.0 = no damping, 0.99 = light damping)
 	var dt: float = 0.016
 	var max_steps: int = 600
-	var mp: float = 1.0
+	var mp: float = mass  # Player's absolute mass
 	var bp := Vector2.ZERO
 	var bv := launch_vel
 	var pp := Vector2.ZERO
@@ -7929,7 +7974,7 @@ func _exec_tick_ball(delta: float) -> void:
 			#   chain_dir = unit vector from player → ball (direction of tension)
 			#   v_b = ball velocity component along chain_dir
 			#   v_p = player velocity component along chain_dir
-			#   m_b = EXEC_BALL_MASS_RATIO (default 8x player mass)
+			#   m_b = EXEC_BALL_MASS (absolute mass of spike ball)
 			#   m_p = 1.0
 			#   e = EXEC_CHAIN_ELASTICITY (0.75 = 75% elastic)
 			#
@@ -7939,12 +7984,21 @@ func _exec_tick_ball(delta: float) -> void:
 			# The player gets YEETED in the chain direction. With m_b=8, e=0.75:
 			#   coefficient = 1.75 * 8/9 = 1.556 — player gets 155% of the
 			#   relative velocity slammed into them along the chain vector.
-			var ball_len: float = _exec_ball_chain_len()
-			var chain_vec: Vector2 = _exec_ball_pos - global_position
+			# Chain anchor: entity (if shackled) or player
+			var chain_anchor_pos: Vector2
+			var chain_max: float
+			if _exec_is_entity_yeet_mode():
+				# Ball is tethered to the shackled entity — full chain length
+				chain_anchor_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
+				chain_max = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+			else:
+				chain_anchor_pos = global_position
+				chain_max = _exec_ball_chain_len()
+			var chain_vec: Vector2 = _exec_ball_pos - chain_anchor_pos
 			var chain_dist: float = chain_vec.length()
-			if chain_dist > ball_len:
+			if chain_dist > chain_max:
 				var chain_dir: Vector2 = chain_vec.normalized()
-				_exec_ball_pos = global_position + chain_dir * ball_len
+				_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
 				_exec_try_yeet(chain_dir)
 				var outward_v: float = _exec_ball_vel.dot(chain_dir)
 				if outward_v > 0.0:
@@ -7953,7 +8007,7 @@ func _exec_tick_ball(delta: float) -> void:
 				_exec_chain_taut = false
 
 			# Chain clanking sound as links flow out during throw
-			if chain_dist < ball_len * 0.95:
+			if chain_dist < chain_max * 0.95:
 				_exec_chain_clank_timer -= delta
 				if _exec_chain_clank_timer <= 0.0:
 					_exec_chain_clank_timer = EXEC_CHAIN_CLANK_INTERVAL
@@ -8059,20 +8113,28 @@ func _exec_tick_ball(delta: float) -> void:
 
 
 func _exec_spawn_chain() -> void:
-	## Spawn a real chain.gd between player and ball — identical to splay chain.
-	## Rigid, breakable, proper Verlet physics, surface collision.
-	## The chain tracks the ball position via anchor_b["pos"] updated each frame.
+	## Spawn chain.gd for the ball side.
+	## In entity-yeet mode: chain connects entity ↔ ball (full length).
+	## Normal mode: chain connects player ↔ ball (ball's share of split).
 	if _exec_chain_node and is_instance_valid(_exec_chain_node):
 		_exec_chain_node.queue_free()
 	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
 	_exec_chain_node = Node2D.new()
 	_exec_chain_node.set_script(ChainScript)
-	var anchor_a: Dictionary = ChainScript.make_anchor_body(self)
-	# Use wall anchor for ball end — we manually update the position each frame
+	var anchor_a: Dictionary
+	var chain_len: float
+	if _exec_is_entity_yeet_mode():
+		# Chain from shackled entity to ball — full chain length, player is free
+		anchor_a = ChainScript.make_anchor_body(_exec_shackle_anchor_body)
+		chain_len = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	else:
+		anchor_a = ChainScript.make_anchor_body(self)
+		chain_len = _exec_ball_chain_len()
 	var anchor_b: Dictionary = ChainScript.make_anchor_wall(_exec_ball_pos)
-	_exec_chain_node.setup(anchor_a, anchor_b, _exec_ball_chain_len(), player_index)
+	_exec_chain_node.setup(anchor_a, anchor_b, chain_len, player_index)
 	get_parent().add_child(_exec_chain_node)
-	DebugOverlay.log("executioner/ball", self, "BALL CHAIN: len=%.0f (split=%.0f%%)", [_exec_ball_chain_len(), _exec_chain_split * 100])
+	DebugOverlay.log("executioner/ball", self, "BALL CHAIN: len=%.0f entity_mode=%s",
+		[chain_len, str(_exec_is_entity_yeet_mode())])
 
 
 func _exec_spawn_shackle_chain() -> void:
