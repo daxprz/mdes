@@ -88,7 +88,18 @@
       "Bash(curl -sL \"http://upload.wikimedia.org/wikipedia/en/e/ec/Soccer_ball.svg\" -o /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.svg)",
       "Bash(rsvg-convert -w 64 -h 64 /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.svg -o /Users/jeremy/dev/dax/test123/assets/sprites/soccer_ball.png)",
       "Bash(for suite:*)",
-      "Bash(nc -w3 localhost 9999)"
+      "Bash(nc -w3 localhost 9999)",
+      "Bash(while read:*)",
+      "Bash(nc -w1 localhost 9999)",
+      "Bash(tools/mocap/run.sh)",
+      "Read(//Users/jeremy/**)",
+      "Bash(nc -w2 localhost 9999 sleep 1 echo \"spawn monster 400 850 standdown scale=4.0\")",
+      "Bash(nc -w1 localhost 9999 echo \"spawn dummy 1500 860\")",
+      "Bash(nc -w1 localhost 9999 sleep 0.5 echo \"tab\")",
+      "Bash(nc -w1 localhost 9999 sleep 0.5 echo \"debug on body_mechanics/spine_debug\")",
+      "Bash(nc -w1 localhost 9999 echo \"debug on body_mechanics/leg_debug\")",
+      "Bash(nc -w1 localhost 9999 echo \"mocap connect\")",
+      "Bash(nc -w1 localhost 9999 sleep 2 echo \"mocap status\")"
     ]
   }
 }

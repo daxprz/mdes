@@ -34,7 +34,7 @@ const TPOSE_ARM_EXTENDED_THRESHOLD := 0.15    # Min X distance from shoulder to 
 const TPOSE_HOLD_TIME := 1.5                   # Seconds of T-pose before countdown starts
 
 # -- Configuration (adjustable via debug drawer sliders) --
-var cfg_stance_angle: float = 0.0  # 0=horizontal (quadruped), 90=vertical (standing). Default 0
+var cfg_stance_angle: float = 0.0  # 0=vertical (standing), 90=horizontal (quadruped). Default 0
 var cfg_smooth_weight: float = 0.15  # Temporal smoothing blend
 var cfg_x_scale: float = 1.0  # Horizontal extent multiplier
 var cfg_y_scale: float = 1.0  # Vertical extent multiplier
@@ -148,7 +148,10 @@ func disconnect_bridge() -> String:
 	if _stream:
 		_stream.disconnect_from_host()
 		_stream = null
+	if is_instance_valid(_target_monster) and "_physics_frozen" in _target_monster:
+		_target_monster._physics_frozen = false
 	_target_monster = null
+	_pinned = false
 	_destroy_hud()
 	set_process(false)
 	return "OK: disconnected"
@@ -480,7 +483,7 @@ func _draw_cal_hud() -> void:
 # -- Config Panel (pop-out sliders) --------------------------------------------
 
 const CFG_SLIDERS: Array = [
-	{"key": "angle", "label": "Spine Angle", "min": 0.0, "max": 90.0, "field": "cfg_stance_angle"},
+	{"key": "angle", "label": "Spine (0=up 90=flat)", "min": 0.0, "max": 90.0, "field": "cfg_stance_angle"},
 	{"key": "smooth", "label": "Smoothing", "min": 0.01, "max": 0.5, "field": "cfg_smooth_weight"},
 	{"key": "xscale", "label": "X Scale", "min": 0.1, "max": 3.0, "field": "cfg_x_scale"},
 	{"key": "yscale", "label": "Y Scale", "min": 0.1, "max": 3.0, "field": "cfg_y_scale"},
@@ -825,6 +828,8 @@ func _apply_to_monster() -> void:
 		var r_sh_pin: Vector3 = _v3(lm["right_shoulder"])
 		var sh_c_pin: Vector3 = (l_sh_pin + r_sh_pin) * 0.5 - hip_c_pin
 		_pin_scale = m.sc(56.0) / maxf(sh_c_pin.length(), 0.01)
+		# Freeze monster's own physics so it doesn't fight the mocap
+		m._physics_frozen = true
 		_pinned = true
 		print("MOCAP: pinned S2=(%.0f,%.0f) S1=(%.0f,%.0f) facing=%.0f scale=%.1f" % [
 			_pin_spine2.x, _pin_spine2.y, _pin_spine1.x, _pin_spine1.y, _pin_facing, _pin_scale])
@@ -833,97 +838,137 @@ func _apply_to_monster() -> void:
 	m._facing_target = _pin_facing
 	m._facing = _pin_facing
 	m._spine[2] = _pin_spine2
-	m._hip_bones[0] = m._hip_bones[0]  # Don't modify
-	m._hip_bones[1] = m._hip_bones[1]
 
-	# -- Extract mocap points --
-	var l_hip: Vector3 = _v3(lm["left_hip"])
-	var r_hip: Vector3 = _v3(lm["right_hip"])
-	var hip_center: Vector3 = (l_hip + r_hip) * 0.5
+	# -- Extract all 3D mocap points relative to hip center --
+	var l_hip_3: Vector3 = _v3(lm["left_hip"])
+	var r_hip_3: Vector3 = _v3(lm["right_hip"])
+	var hip_c: Vector3 = (l_hip_3 + r_hip_3) * 0.5
 
-	var l_sh: Vector3 = _v3(lm.get("left_shoulder", [0,0,0,0])) - hip_center
-	var r_sh: Vector3 = _v3(lm.get("right_shoulder", [0,0,0,0])) - hip_center
-	var sh_center: Vector3 = (l_sh + r_sh) * 0.5
+	# All points in 3D, relative to hip center
+	var mc: Dictionary = {}  # name → Vector3
+	for key in ["left_shoulder", "right_shoulder", "left_elbow", "right_elbow",
+				 "left_wrist", "right_wrist", "nose"]:
+		if lm.has(key):
+			mc[key] = _v3(lm[key]) - hip_c
 
 	_detect_tpose(lm, get_process_delta_time())
 
-	# -- Compute arm Y position (normalized: -1=fully up, +1=fully down) --
-	# Use wrist Y relative to shoulder Y. In mocap space, Y increases downward.
-	var l_arm_y: float = 0.0  # -1=up, +1=down
-	var r_arm_y: float = 0.0
-	if lm.has("left_wrist") and lm.has("left_shoulder"):
-		var lw_y: float = lm["left_wrist"][1]
-		var ls_y: float = lm["left_shoulder"][1]
-		l_arm_y = clampf((lw_y - ls_y) / 0.25, -1.0, 1.0)  # 0.25 = rough arm length in norm
-	if lm.has("right_wrist") and lm.has("right_shoulder"):
-		var rw_y: float = lm["right_wrist"][1]
-		var rs_y: float = lm["right_shoulder"][1]
-		r_arm_y = clampf((rw_y - rs_y) / 0.25, -1.0, 1.0)
+	# -- 2.5D Projection Setup --
+	# The monster's spine runs at cfg_stance_angle from horizontal.
+	# Mocap "up" (negative Y) maps along the spine direction.
+	# Mocap "lateral" (X and Z) maps in game-plane perpendicular to spine.
+	#
+	# The monster is always viewed from the SIDE. The actor is at ~45° to camera.
+	# Mocap X = actor's left-right = partly game-X, partly game-Z(depth)
+	# Mocap Z = actor's depth = partly game-X (the visible lateral axis)
+	# Mocap Y = actor's up-down = game along-spine
+	#
+	# 2.5D projection for each 3D point:
+	#   game_lateral = mocap_z * facing  (depth → horizontal, main component)
+	#                + mocap_x * depth_blend  (sideways bleeds in slightly)
+	#   game_along_spine = -mocap_y  (up in mocap = forward along spine)
+	#
+	# Arms pointing purely into mocap-Z with no Y:
+	#   game_lateral = large, game_along_spine = 0 → extends sideways from body
+	# Arms pointing purely into mocap-X (toward/away from camera):
+	#   game_lateral = small (only depth_blend), → nearly zero visible length ← 2.5D!
 
-	# Smooth
-	l_arm_y = lerpf(_smooth_points.get("l_arm_y_f", l_arm_y) as float, l_arm_y, cfg_smooth_weight)
-	_smooth_points["l_arm_y_f"] = l_arm_y
-	r_arm_y = lerpf(_smooth_points.get("r_arm_y_f", r_arm_y) as float, r_arm_y, cfg_smooth_weight)
-	_smooth_points["r_arm_y_f"] = r_arm_y
+	var scale: float = _pin_scale
 
-	# -- FL/FR leg angle from arm position --
-	# Forward apex (arm up, arm_y=-1) → leg swings FORWARD (toward target)
-	# Backward apex (arm down, arm_y=+1) → leg swings BACKWARD
-	# The leg pivots from the clavicle, constrained by FABRIK bone lengths
-	var upper_len: float = m.sc(m.cfg("leg_upper_len", 20.0)) * cfg_arm_scale
-	var lower_len: float = m.sc(m.cfg("leg_lower_len", 22.0)) * cfg_arm_scale
-	var total_reach: float = upper_len + lower_len
+	# Spine direction (for reference — spine itself is LOCKED)
+	# 0° = vertical (0, -1), 90° = horizontal (facing, 0)
+	# Angle measured from vertical: rotate (0,-1) clockwise by stance_angle
+	var spine_angle_rad: float = deg_to_rad(cfg_stance_angle)
+	var spine_dir: Vector2 = Vector2(sin(spine_angle_rad) * _pin_facing, -cos(spine_angle_rad))
+	var spine_perp: Vector2 = Vector2(spine_dir.y, -spine_dir.x) * _pin_facing
 
-	# Spine direction for "forward"
-	var spine_dir: Vector2 = (m._spine[0] - _pin_spine2).normalized()
-	if spine_dir.length() < 0.01:
-		spine_dir = Vector2(_pin_facing, 0)
-	var spine_perp: Vector2 = Vector2(-spine_dir.y, spine_dir.x)  # "up" relative to spine
+	# -- Spine: ALL PINNED -- computed once from pin values + spine_dir
+	var seg_len: float = m.sc(m.cfg("spine_seg_len", 28.0))
+	# spine[0] = head end, placed along spine_dir from spine[2]
+	m._spine[0] = _pin_spine2 + spine_dir * seg_len * 2.0
+	# spine[1] = midpoint
+	m._spine[1] = _pin_spine2 + spine_dir * seg_len
+	# spine[2] = pinned (already set above)
 
-	# Right arm → leg 0 (attached at clavicle[1])
-	var r_swing: float = -r_arm_y  # Negate: arm up = forward swing
-	var r_foot_dir: Vector2 = (spine_dir * r_swing + spine_perp * 0.3).normalized()
-	var r_foot_target: Vector2 = m._clavicles[1] + r_foot_dir * total_reach * 0.8
-	m._legs[0][0] = m._clavicles[1]
-	m._legs[0][2] = _smooth("r_foot", r_foot_target)
-	m._legs[0][1] = (m._legs[0][0] + m._legs[0][2]) * 0.5 + spine_perp * upper_len * 0.3
-	_fabrik_chain(m._legs[0], upper_len, lower_len)
+	# -- Project all mocap points to game 2D --
+	# _proj_25d returns offset from hip-center in game pixels.
+	# The hip center in monster local space = _pin_spine2 (rear anchor).
+	# So: game_pos = _pin_spine2 + _proj_25d(mocap_3d_relative_to_hip)
+	var hip_anchor: Vector2 = _pin_spine2  # Everything maps outward from here
 
-	# Left arm → leg 1 (attached at clavicle[0])
-	var l_swing: float = -l_arm_y
-	var l_foot_dir: Vector2 = (spine_dir * l_swing + spine_perp * 0.3).normalized()
-	var l_foot_target: Vector2 = m._clavicles[0] + l_foot_dir * total_reach * 0.8
-	m._legs[1][0] = m._clavicles[0]
-	m._legs[1][2] = _smooth("l_foot", l_foot_target)
-	m._legs[1][1] = (m._legs[1][0] + m._legs[1][2]) * 0.5 + spine_perp * upper_len * 0.3
-	_fabrik_chain(m._legs[1], upper_len, lower_len)
+	# Helper: project a mocap point to monster local coords
+	# mocap_pt is relative to hip_center in 3D
+
+	# -- Clavicles (shoulders) --
+	# In 2.5D side-view, the two shoulders sit at different Z depths.
+	# The monster's existing system: near-side clavicle is more visible,
+	# far-side is partially hidden behind the body.
+	# We place clavicles at spine[0] offset by shoulder_z_depth projected through facing.
+	var shoulder_z: float = m.sc(m.cfg("shoulder_z_depth", 12.0))
+	# Near-side shoulder (toward viewer) projects forward in game-X
+	# Far-side shoulder projects backward
+	m._clavicles[0] = m._spine[0] + Vector2(-shoulder_z * _pin_facing, 0)  # Far side
+	m._clavicles[1] = m._spine[0] + Vector2(shoulder_z * _pin_facing, 0)   # Near side
+
+	# -- Arms: FABRIK in 3D, project RELATIVE to shoulder, attach at clavicle --
+	var upper_arm_3d: float = _cal_upper_arm if _calibrated else 0.15
+	var lower_arm_3d: float = _cal_lower_arm if _calibrated else 0.13
+	var upper_len_2d: float = m.sc(m.cfg("leg_upper_len", 20.0)) * cfg_arm_scale
+	var lower_len_2d: float = m.sc(m.cfg("leg_lower_len", 22.0)) * cfg_arm_scale
+
+	# RIGHT arm: project elbow/wrist RELATIVE TO right shoulder in 3D
+	var r_sh_3d: Vector3 = mc.get("right_shoulder", Vector3.ZERO)
+	var r_el_3d: Vector3 = mc.get("right_elbow", r_sh_3d)
+	var r_wr_3d: Vector3 = mc.get("right_wrist", r_el_3d)
+	# FABRIK in 3D (constrains bone lengths in mocap space)
+	var r_arm: Array = _fabrik_chain_3d(r_sh_3d, r_el_3d, r_wr_3d, upper_arm_3d, lower_arm_3d)
+	# Project each joint RELATIVE to its shoulder → offset from clavicle in game
+	var r_el_rel: Vector3 = r_arm[1] - r_arm[0]  # Elbow relative to shoulder
+	var r_wr_rel: Vector3 = r_arm[2] - r_arm[0]  # Wrist relative to shoulder
+	m._legs[0][0] = m._clavicles[1]  # Right arm attaches at near-side clavicle
+	m._legs[0][1] = _smooth("r_elbow", m._clavicles[1] + _proj_25d(r_el_rel, spine_dir, spine_perp, scale))
+	m._legs[0][2] = _smooth("r_wrist", m._clavicles[1] + _proj_25d(r_wr_rel, spine_dir, spine_perp, scale))
+	_fabrik_chain_25d(m._legs[0], upper_len_2d, lower_len_2d)
+
+	# LEFT arm: same, but attached at far-side clavicle
+	var l_sh_3d: Vector3 = mc.get("left_shoulder", Vector3.ZERO)
+	var l_el_3d: Vector3 = mc.get("left_elbow", l_sh_3d)
+	var l_wr_3d: Vector3 = mc.get("left_wrist", l_el_3d)
+	var l_arm: Array = _fabrik_chain_3d(l_sh_3d, l_el_3d, l_wr_3d, upper_arm_3d, lower_arm_3d)
+	var l_el_rel: Vector3 = l_arm[1] - l_arm[0]
+	var l_wr_rel: Vector3 = l_arm[2] - l_arm[0]
+	m._legs[1][0] = m._clavicles[0]  # Left arm at far-side clavicle
+	m._legs[1][1] = _smooth("l_elbow", m._clavicles[0] + _proj_25d(l_el_rel, spine_dir, spine_perp, scale))
+	m._legs[1][2] = _smooth("l_wrist", m._clavicles[0] + _proj_25d(l_wr_rel, spine_dir, spine_perp, scale))
+	_fabrik_chain_25d(m._legs[1], upper_len_2d, lower_len_2d)
 
 	m._foot_planted[0] = false
 	m._foot_planted[1] = false
 	m._posture = m.Posture.BIPEDAL
 	m._posture_blend = 1.0
 
-	# -- Rear legs: STAY at their current positions, FABRIK-constrained --
+	# -- Rear legs: PINNED --
 	m._legs[2][0] = m._hip_bones[0]
 	m._legs[3][0] = m._hip_bones[1]
-	# Keep rear feet planted
 	for li in [2, 3]:
 		m._foot_planted[li] = true
 
-	# -- Head: simple forward gaze --
+	# -- Head --
 	var neck_len: float = m.sc(m.cfg("neck_len", 18.0))
-	var head_fwd: Vector2 = spine_dir
+	var head_target: Vector2
+	if mc.has("nose"):
+		head_target = hip_anchor + _proj_25d(mc["nose"], spine_dir, spine_perp, scale)
+	else:
+		head_target = m._spine[0] + spine_dir * neck_len
+	var head_dir: Vector2 = (head_target - m._spine[0])
+	if head_dir.length() > 0.01:
+		head_dir = head_dir.normalized()
+	else:
+		head_dir = spine_dir
 	m._neck[0] = m._spine[0]
-	m._neck[1] = _smooth("neck1", m._spine[0] + head_fwd * neck_len * 0.6)
-	m._skull = _smooth("skull", m._spine[0] + head_fwd * neck_len)
-	m._jaw = _smooth("jaw", m._skull + head_fwd.rotated(0.2) * m.sc(8.0))
-
-	# -- Spine[0] stays at rest relative to spine[1] pin --
-	# Don't let mocap drive spine[0] anymore — keep it FABRIK-constrained
-	var seg_len: float = m.sc(m.cfg("spine_seg_len", 28.0))
-	var spine0_target: Vector2 = _pin_spine1 + spine_dir * seg_len
-	m._spine[0] = _smooth("spine0", spine0_target)
-	m._spine[1] = _fabrik_mid(m._spine[0], _pin_spine2, seg_len)
+	m._neck[1] = _smooth("neck1", m._spine[0] + head_dir * neck_len * 0.6)
+	m._skull = _smooth("skull", m._spine[0] + head_dir * neck_len)
+	m._jaw = _smooth("jaw", m._skull + head_dir.rotated(0.2) * m.sc(8.0))
 
 	m.queue_redraw()
 
@@ -991,6 +1036,50 @@ func _v3(arr: Array) -> Vector3:
 	return Vector3(arr[0], arr[1], arr[2] if arr.size() > 2 else 0.0)
 
 
+func _proj_25d(pt: Vector3, spine_dir: Vector2, spine_perp: Vector2, scale: float) -> Vector2:
+	## Project a 3D mocap point (relative to hip center) into game 2D.
+	##
+	## COORDINATE MAPPING (mocap → game):
+	##   The HUMAN faces the CAMERA. The MONSTER faces RIGHT (+X in game).
+	##
+	##   Mocap coords (MediaPipe, relative to hip center):
+	##     mocap x = left-right in camera image (human's right = positive x)
+	##     mocap y = up-down (positive = downward)
+	##     mocap z = depth (negative = toward camera, positive = away)
+	##
+	##   In-game coords (monster faces right, side-view):
+	##     game X = forward/backward (right = +X = toward camera = -mocap_z)
+	##     game Y = up/down (down = +Y = +mocap_y)
+	##     game Z = depth into/out of screen = mocap_x (INVISIBLE in 2D render)
+	##
+	##   Mapping:
+	##     game_x = -mocap_z  (toward camera = forward = +X in game)
+	##     game_y = mocap_y   (down = down)
+	##     game_z = mocap_x   (human's left-right = depth in game, NOT rendered)
+	##
+	##   2.5D rendering: game_z is NOT drawn. Only game_x and game_y are visible.
+	##   So a T-POSE (arms in pure mocap_x) → pure game_z → INVISIBLE arms. Correct!
+	##   Arms reaching toward camera (-mocap_z) → +game_x → visible forward extension.
+	##
+	## Body size normalization: scale converts normalized mocap units to monster pixels.
+	## The spine_dir/spine_perp rotate the game XY into the monster's angled spine frame.
+
+	# Map mocap → game 3D
+	# Z mapping: apply dead zone to filter MediaPipe monocular depth noise.
+	# Small Z differences (< ~0.05 normalized) are noise, not real depth.
+	var z_raw: float = pt.z
+	var z_dead: float = 0.05  # Dead zone: Z within this range → 0 visible extension
+	var z_mapped: float = 0.0
+	if absf(z_raw) > z_dead:
+		z_mapped = (z_raw - z_dead * signf(z_raw))  # Subtract dead zone, keep sign
+
+	var game_x: float = -z_mapped * scale * cfg_x_scale   # Toward camera = forward
+	var game_y: float = pt.y * scale * cfg_y_scale         # Down = down
+	# game_z = pt.x * scale  ← depth into screen, NOT rendered
+
+	return Vector2(game_x * _pin_facing, game_y)
+
+
 func _project_and_tilt(pt: Vector3, facing: float, scale: float) -> Vector2:
 	## Project mocap 3D point to game 2D.
 	## Mocap coords (relative to hip center):
@@ -1041,7 +1130,50 @@ func _fabrik_mid(a: Vector2, b: Vector2, seg_len: float) -> Vector2:
 	return mid + perp * sqrt(maxf(0.0, seg_len * seg_len - half * half)) * 0.3
 
 
+func _fabrik_chain_3d(sh: Vector3, el: Vector3, wr: Vector3,
+					   upper_len: float, lower_len: float) -> Array:
+	## FABRIK in 3D mocap space. Constrains bone lengths while preserving
+	## the arm's 3D direction. Returns [shoulder, elbow, wrist] as Vector3.
+	var pin: Vector3 = sh
+	for _i in range(FABRIK_ITERS):
+		# Forward: wrist pinned, pull back
+		var d1: Vector3 = el - wr
+		if d1.length() > 0.01:
+			el = wr + d1.normalized() * lower_len
+		var d0: Vector3 = sh - el
+		if d0.length() > 0.01:
+			sh = el + d0.normalized() * upper_len
+		# Backward: shoulder pinned
+		sh = pin
+		d0 = el - sh
+		if d0.length() > 0.01:
+			el = sh + d0.normalized() * upper_len
+		d1 = wr - el
+		if d1.length() > 0.01:
+			wr = el + d1.normalized() * lower_len
+	return [sh, el, wr]
+
+
+func _fabrik_chain_25d(joints: Array, max_upper: float, max_lower: float) -> void:
+	## 2.5D FABRIK: enforce MAXIMUM rendered bone lengths only.
+	## Arms foreshortened by depth projection are allowed to be SHORT.
+	## But they must not exceed their max bone length (no stretching).
+	## Shoulder (joint[0]) is pinned.
+	var shoulder: Vector2 = joints[0]
+
+	# Clamp upper bone: shoulder→elbow. Must not exceed max, can be shorter.
+	var d0: Vector2 = joints[1] - shoulder
+	if d0.length() > max_upper:
+		joints[1] = shoulder + d0.normalized() * max_upper
+
+	# Clamp lower bone: elbow→wrist. Same — max only.
+	var d1: Vector2 = joints[2] - joints[1]
+	if d1.length() > max_lower:
+		joints[2] = joints[1] + d1.normalized() * max_lower
+
+
 func _fabrik_chain(joints: Array, upper_len: float, lower_len: float) -> void:
+	## Legacy exact-length 2D FABRIK (used for rear legs).
 	var shoulder: Vector2 = joints[0]
 	for _i in range(FABRIK_ITERS):
 		var d1: Vector2 = joints[1] - joints[2]

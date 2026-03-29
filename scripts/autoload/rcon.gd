@@ -456,6 +456,27 @@ func _execute(command: String) -> String:
 		"mocap":
 			return _cmd_mocap(parts)
 
+		"skeleton":
+			var sel: Node2D = PlayerHUD.debug_selected_enemy if is_instance_valid(PlayerHUD.debug_selected_enemy) else null
+			if not sel or not "creature_scale" in sel:
+				return "ERR: no quadruped selected (TAB to select)"
+			var m: Node2D = sel
+			var lines: Array[String] = ["skeleton: %s at (%.0f,%.0f) scale=%.1f facing=%.1f" % [
+				m.entity_id, m.global_position.x, m.global_position.y, m.creature_scale, m._facing]]
+			lines.append("  spine[0]=(%.0f,%.0f) [1]=(%.0f,%.0f) [2]=(%.0f,%.0f)" % [
+				m._spine[0].x, m._spine[0].y, m._spine[1].x, m._spine[1].y, m._spine[2].x, m._spine[2].y])
+			lines.append("  skull=(%.0f,%.0f) neck1=(%.0f,%.0f)" % [m._skull.x, m._skull.y, m._neck[1].x, m._neck[1].y])
+			lines.append("  clav[0]=(%.0f,%.0f) clav[1]=(%.0f,%.0f)" % [
+				m._clavicles[0].x, m._clavicles[0].y, m._clavicles[1].x, m._clavicles[1].y])
+			for li in range(4):
+				var label: String = ["FL","FR","RL","RR"][li]
+				lines.append("  %s: hip=(%.0f,%.0f) knee=(%.0f,%.0f) foot=(%.0f,%.0f) planted=%s" % [
+					label, m._legs[li][0].x, m._legs[li][0].y,
+					m._legs[li][1].x, m._legs[li][1].y,
+					m._legs[li][2].x, m._legs[li][2].y,
+					str(m._foot_planted[li])])
+			return "\n".join(lines)
+
 		"chain":
 			return _cmd_chain(parts)
 
@@ -1294,6 +1315,26 @@ func _cmd_mocap(parts: Array) -> String:
 		"reset":
 			client._reset_scene()
 			return "OK: mocap scene reset"
+		"raw":
+			# Dump raw mocap 3D data for current frame
+			var lm: Dictionary = client._last_frame.get("landmarks", {})
+			if lm.is_empty():
+				return "ERR: no mocap data"
+			var lines: Array[String] = ["Raw mocap (x,y,z):"]
+			for key in ["left_shoulder","right_shoulder","left_elbow","right_elbow","left_wrist","right_wrist","nose"]:
+				if lm.has(key):
+					var v: Array = lm[key]
+					lines.append("  %s: (%.3f, %.3f, %.3f)" % [key, v[0], v[1], v[2]])
+			# Also show relative elbow-shoulder
+			if lm.has("right_shoulder") and lm.has("right_elbow"):
+				var rs: Array = lm["right_shoulder"]
+				var re: Array = lm["right_elbow"]
+				lines.append("  R_elbow_rel: (%.3f, %.3f, %.3f)" % [re[0]-rs[0], re[1]-rs[1], re[2]-rs[2]])
+			if lm.has("left_shoulder") and lm.has("left_elbow"):
+				var ls: Array = lm["left_shoulder"]
+				var le: Array = lm["left_elbow"]
+				lines.append("  L_elbow_rel: (%.3f, %.3f, %.3f)" % [le[0]-ls[0], le[1]-ls[1], le[2]-ls[2]])
+			return "\n".join(lines)
 		"status":
 			return client.get_status()
 		"set":
