@@ -129,6 +129,7 @@ var _config_slider_provider: Variant = null  # Single DictProvider for all slide
 var _config_slider_data: Dictionary = {}     # The data dict inside the provider
 var _config_filter_text: String = ""         # Search filter for config keys
 var _config_filter_focused: bool = false     # Whether the config filter field has focus
+var _game_config_rects: Dictionary = {}      # Key -> Rect2 for clickable game settings
 
 # Test runner section state — sub-section framework
 var _test_scroll_offset: int = 0
@@ -1464,11 +1465,25 @@ func _handle_sub_resize_release() -> void:
 
 
 func _handle_config_click(lx: float, my: float) -> void:
-	## Click in the config section — filter, entity list, or slider drag.
+	## Click in the config section — game settings, filter, entity list, or slider drag.
 	var pw: float = _content_width
 	var y: float = 8.0
 
-	# Title
+	# "Game Settings" title
+	y += 20
+
+	# Game config toggle rows
+	for key in _game_config_rects:
+		var rect: Rect2 = _game_config_rects[key]
+		if my >= rect.position.y and my < rect.position.y + rect.size.y:
+			# Toggle this game config setting
+			if key == "multiple_players_same_class":
+				GameManager.multiple_players_same_class = not GameManager.multiple_players_same_class
+			return
+	y += 18  # game config row
+	y += 10  # separator + gap
+
+	# "Entity Config" title
 	y += 22
 
 	# Filter field (y to y+20)
@@ -1511,9 +1526,9 @@ func _handle_config_click(lx: float, my: float) -> void:
 	# Entity info header (type + props line)
 	y += 16
 
-	# Slider area — only for monsters with cfg()
-	var monster: Node2D = _get_selected_monster()
-	if not monster or _config_keys.is_empty():
+	# Slider area — for any entity with cfg()
+	var cfg_entity: Node2D = _get_selected_entity()
+	if not cfg_entity or not cfg_entity.has_method("cfg") or _config_keys.is_empty():
 		return
 
 	var slider_h: float = 16.0
@@ -1523,17 +1538,20 @@ func _handle_config_click(lx: float, my: float) -> void:
 		var key: String = _config_keys[row]
 		if lx > pw * 0.47 and lx < pw * 0.82:
 			_config_dragging_key = key
-			_handle_config_drag_at(lx, monster)
+			_handle_config_drag_at(lx, cfg_entity)
 
 
 func _handle_config_drag(mx: float) -> void:
 	## Drag a config slider.
-	var monster: Node2D = _get_selected_monster()
-	if not monster or _config_dragging_key.is_empty():
+	var entity: Node2D = _get_selected_entity()
+	if not entity or _config_dragging_key.is_empty():
+		return
+	# Entity must have push_config to accept slider changes
+	if not entity.has_method("push_config"):
 		return
 	var content_x: float = _panel_x + ICON_BAR_WIDTH + 4
 	var lx: float = mx - content_x
-	_handle_config_drag_at(lx, monster)
+	_handle_config_drag_at(lx, entity)
 
 
 func _handle_config_drag_at(lx: float, monster: Node2D) -> void:
@@ -2506,10 +2524,29 @@ func _test_cmd_color(cmd: String) -> Color:
 
 
 func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
-	## Entity config: search filter, entity list, config sliders.
+	## Game settings + Entity config: search filter, entity list, config sliders.
 	var x: float = content_x
 	var y: float = 8.0
 	var pw: float = _content_width
+
+	# -- Game Settings (always visible, above entity config) --
+	_panel.draw_string(font, Vector2(x, y + 14), "Game Settings", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.9, 0.7))
+	y += 20
+
+	# game/multiple_players_same_class toggle
+	var mpc_val: bool = GameManager.multiple_players_same_class
+	var mpc_label: String = "multiple_players_same_class"
+	var mpc_col: Color = Color(0.3, 1.0, 0.3) if mpc_val else Color(0.6, 0.4, 0.4)
+	var mpc_text: String = "ON" if mpc_val else "OFF"
+	_panel.draw_string(font, Vector2(x + 4, y + 11), mpc_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.7, 9, Color(0.7, 0.7, 0.7))
+	_panel.draw_string(font, Vector2(x + pw - 44, y + 11), mpc_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 9, mpc_col)
+	# Clickable area stored for _handle_config_click
+	_game_config_rects["multiple_players_same_class"] = Rect2(x, y, pw - 16, 16)
+	y += 18
+
+	y += 4
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.3, 0.3, 0.3), 1.0)
+	y += 6
 
 	_panel.draw_string(font, Vector2(x, y + 14), "Entity Config", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.7, 0.3))
 	y += 22
@@ -2548,15 +2585,30 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 	for ei in range(entities.size()):
 		var e: Node2D = entities[ei]
 		var is_sel: bool = (e == selected_entity)
-		# Entity ID
+		# Entity ID — show player name for players, entity_id or node name otherwise
 		var eid: String = ""
-		if "entity_id" in e and not str(e.entity_id).is_empty():
+		var is_player_entity: bool = "player_index" in e and "character_class" in e
+		if is_player_entity:
+			# Show player name: profile name or "P1", "P2", etc.
+			var pi: int = e.player_index
+			var profile: Dictionary = ProfileManager.get_active_profile(pi)
+			if not profile.is_empty() and profile.has("name"):
+				eid = profile["name"]
+			else:
+				eid = "P%d" % (pi + 1)
+			# Append class name
+			var cls_name: String = PlayerHUD.CLASS_NAMES.get(e.character_class, "")
+			if not cls_name.is_empty():
+				eid += " (%s)" % cls_name
+		elif "entity_id" in e and not str(e.entity_id).is_empty():
 			eid = str(e.entity_id)
 		else:
 			eid = e.name
 		# Entity type
 		var etype: String = "unknown"
-		if e.get_script():
+		if is_player_entity:
+			etype = "player"
+		elif e.get_script():
 			var script_path: String = e.get_script().resource_path
 			var fname: String = script_path.get_file().get_basename()
 			etype = fname  # e.g. "quadruped_monster", "skeleton", "gummy_bear"
@@ -2605,13 +2657,13 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 		_panel.draw_string(font, Vector2(x + pw * 0.5, y + 12), props_text, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, Color(0.6, 0.6, 0.6))
 	y += 16
 
-	# Only show config sliders for entities that have cfg() (monsters)
+	# Show config sliders for entities that have cfg() (monsters AND players)
 	if not has_cfg:
-		# For non-monster entities, show their exported/public properties
+		# For entities without cfg(), show their exported/public properties
 		_draw_entity_properties(x, y, pw, ph, font, selected_entity)
 		return
 
-	var monster: Node2D = selected_entity
+	var monster: Node2D = selected_entity  # Works for any entity with cfg()
 	# Build sorted config key list (once, or when monster changes)
 	if _config_keys.is_empty():
 		_rebuild_config_keys(monster)
@@ -2809,34 +2861,82 @@ func _draw_entity_properties(x: float, y: float, pw: float, ph: float, font: Fon
 		y += prop_h
 
 
-func _rebuild_config_keys(_monster: Node2D) -> void:
+func _rebuild_config_keys(entity: Node2D) -> void:
 	## Build grouped list of config keys. Keys are prefixed with group headers
 	## (lines starting with "#") for the draw function to render as section dividers.
+	## Detects whether entity is a monster or player and builds appropriate keys.
 	_config_keys.clear()
-	var groups: Array[Array] = [
-		["# Mode", ["peaceful"]],
-		["# Physics", ["gravity", "mass"]],
-		["# Skeleton", ["spine_seg_len", "neck_len", "leg_upper_len", "leg_lower_len", "leg_foot_len", "tail_seg_len", "jaw_len", "clavicle_len", "hip_bone_len", "limb_flex", "tail_flex"]],
-		["# Pose", ["stiffness", "tail_stiffness", "tail_whip_stiffness", "head_track_speed"]],
-		["# Movement", ["turn_speed", "accel_rate", "decel_rate", "speed_slow", "speed_medium", "speed_fast", "sprint_speed"]],
-		["# Gait", ["gait_stride_rate", "gait_knee_swing", "step_threshold", "step_duration", "step_height", "step_overshoot", "foot_push_force", "foot_grip"]],
-		["# Blend", ["landing_recovery_time", "landing_compress", "fall_threshold", "shoulder_z_depth"]],
-		["# Combat", ["attack_cooldown", "bite_damage", "bite_range", "bite_windup", "bite_strike", "bite_recover", "swipe_damage", "swipe_coil", "swipe_raise", "swipe_strike", "swipe_recover", "tail_damage", "tail_range", "tail_coil", "tail_whip", "tail_recover", "lunge_damage", "lunge_speed", "lunge_coil", "lunge_launch", "lunge_slide"]],
-		["# Leap", ["leap_range", "leap_windup_time", "leap_launch_speed", "leap_cooldown", "leap_slash_damage", "leap_slash_raise", "leap_slash_strike", "leap_slash_pause", "leap_bite_damage", "leap_thrash_count", "leap_strike_reach", "leap_body_radius"]],
-		["# Grab", ["grab_range", "grab_duration", "grab_kick_damage", "grab_bite_damage", "grab_eject_speed", "grab_kick_interval"]],
-		["# Sprint Slash", ["sprint_slash_damage", "sprint_slash_range", "sprint_slash_interval"]],
-		["# Hop Up", ["hop_up_max_height", "hop_up_duration", "hop_up_damage"]],
-		["# Health", ["max_health", "head_health", "tail_health", "leg_health"]],
-		["# Precog", ["precog_trigger_time", "precog_grid_spacing", "aggro_switch_hits"]],
-	]
+
+	# Detect entity type by script path
+	var is_player: bool = false
+	if entity.get_script():
+		var script_path: String = entity.get_script().resource_path
+		is_player = script_path.ends_with("player_side.gd")
+
+	var groups: Array[Array] = []
+	if is_player:
+		groups = _build_player_config_groups(entity)
+	else:
+		groups = [
+			["# Mode", ["peaceful"]],
+			["# Physics", ["gravity", "mass"]],
+			["# Skeleton", ["spine_seg_len", "neck_len", "leg_upper_len", "leg_lower_len", "leg_foot_len", "tail_seg_len", "jaw_len", "clavicle_len", "hip_bone_len", "limb_flex", "tail_flex"]],
+			["# Pose", ["stiffness", "tail_stiffness", "tail_whip_stiffness", "head_track_speed"]],
+			["# Movement", ["turn_speed", "accel_rate", "decel_rate", "speed_slow", "speed_medium", "speed_fast", "sprint_speed"]],
+			["# Gait", ["gait_stride_rate", "gait_knee_swing", "step_threshold", "step_duration", "step_height", "step_overshoot", "foot_push_force", "foot_grip"]],
+			["# Blend", ["landing_recovery_time", "landing_compress", "fall_threshold", "shoulder_z_depth"]],
+			["# Combat", ["attack_cooldown", "bite_damage", "bite_range", "bite_windup", "bite_strike", "bite_recover", "swipe_damage", "swipe_coil", "swipe_raise", "swipe_strike", "swipe_recover", "tail_damage", "tail_range", "tail_coil", "tail_whip", "tail_recover", "lunge_damage", "lunge_speed", "lunge_coil", "lunge_launch", "lunge_slide"]],
+			["# Leap", ["leap_range", "leap_windup_time", "leap_launch_speed", "leap_cooldown", "leap_slash_damage", "leap_slash_raise", "leap_slash_strike", "leap_slash_pause", "leap_bite_damage", "leap_thrash_count", "leap_strike_reach", "leap_body_radius"]],
+			["# Grab", ["grab_range", "grab_duration", "grab_kick_damage", "grab_bite_damage", "grab_eject_speed", "grab_kick_interval"]],
+			["# Sprint Slash", ["sprint_slash_damage", "sprint_slash_range", "sprint_slash_interval"]],
+			["# Hop Up", ["hop_up_max_height", "hop_up_duration", "hop_up_damage"]],
+			["# Health", ["max_health", "head_health", "tail_health", "leg_health"]],
+			["# Precog", ["precog_trigger_time", "precog_grid_spacing", "aggro_switch_hits"]],
+		]
+
 	for group in groups:
 		_config_keys.append(group[0])  # Header
 		for key in group[1]:
 			_config_keys.append(key)
 
 
-func _get_config_default(monster: Node2D, key: String) -> float:
-	## Get the default value for a config key from the JSON defaults.
+func _build_player_config_groups(entity: Node2D) -> Array[Array]:
+	## Build config key groups for a player character.
+	## Shows shared keys plus class-specific keys.
+	var groups: Array[Array] = [
+		["# Physics", ["gravity", "jump_velocity", "speed"]],
+		["# Combat", ["attack_cooldown", "special_cooldown", "attack_damage_mult", "special_damage_mult", "charge_damage_mult", "knockback_mult"]],
+		["# Health", ["max_health", "max_mana", "mana_regen"]],
+	]
+
+	# Class-specific config groups
+	var char_class = entity.get("character_class")
+	if char_class == PlayerManager.CharacterClass.MELEE:
+		groups.append(["# Melee", ["melee_combo_window", "melee_enrage_duration", "melee_enrage_cooldown"]])
+	elif char_class == PlayerManager.CharacterClass.ROGUE:
+		groups.append(["# Rogue", ["rogue_stealth_duration", "rogue_stealth_cooldown", "rogue_stealth_damage_mult"]])
+	elif char_class == PlayerManager.CharacterClass.RANGED:
+		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
+	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
+		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_mass_ratio", "exec_chain_elasticity"]])
+		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
+		groups.append(["# Executioner Axe", ["exec_axe_damage", "exec_axe_cooldown"]])
+		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
+
+	return groups
+
+
+func _get_config_default(entity: Node2D, key: String) -> float:
+	## Get the default value for a config key.
+	## For monsters: reads from monster_defaults.json
+	## For players: reads from hardcoded defaults matching player_side.gd constants
+	var is_player: bool = false
+	if entity.get_script():
+		is_player = entity.get_script().resource_path.ends_with("player_side.gd")
+
+	if is_player:
+		return _get_player_config_default(entity, key)
+
 	var path: String = "res://data/config/monster_defaults.json"
 	if FileAccess.file_exists(path):
 		var file := FileAccess.open(path, FileAccess.READ)
@@ -2848,9 +2948,53 @@ func _get_config_default(monster: Node2D, key: String) -> float:
 	return 0.0
 
 
+func _get_player_config_default(_entity: Node2D, key: String) -> float:
+	## Default values for player config keys, matching player_side.gd constants.
+	var defaults := {
+		"gravity": 900.0,
+		"jump_velocity": -550.0,
+		"speed": 110.0,
+		"attack_cooldown": 0.4,
+		"special_cooldown": 1.5,
+		"attack_damage_mult": 1.0,
+		"special_damage_mult": 1.0,
+		"charge_damage_mult": 1.0,
+		"knockback_mult": 1.0,
+		"max_health": 100.0,
+		"max_mana": 50.0,
+		"mana_regen": 1.0,
+		"melee_combo_window": 0.6,
+		"melee_enrage_duration": 10.0,
+		"melee_enrage_cooldown": 45.0,
+		"rogue_stealth_duration": 5.0,
+		"rogue_stealth_cooldown": 20.0,
+		"rogue_stealth_damage_mult": 3.75,
+		"ranger_max_arrows": 10.0,
+		"ranger_reload_time": 1.5,
+		"exec_ball_damage": 35.0,
+		"exec_ball_stun_duration": 3.0,
+		"exec_ball_gravity": 900.0,
+		"exec_ball_throw_speed": 700.0,
+		"exec_ball_mass_ratio": 8.0,
+		"exec_chain_elasticity": 0.75,
+		"exec_swing_max_damage": 80.0,
+		"exec_swing_slam_radius": 60.0,
+		"exec_axe_damage": 30.0,
+		"exec_axe_cooldown": 0.6,
+		"exec_cleave_max_damage": 150.0,
+		"exec_cleave_charge_time": 2.0,
+		"exec_cleave_knockback": 500.0,
+	}
+	return defaults.get(key, 0.0)
+
+
 func _get_config_range(key: String, default_val: float) -> Vector2:
-	## Return (min, max) range for a config slider. Uses the monster's
+	## Return (min, max) range for a config slider. Uses the entity's
 	## CONFIG_BOUNDS if available, otherwise heuristic.
+	var entity: Node2D = _get_selected_entity()
+	if entity and entity.get("CONFIG_BOUNDS") and entity.CONFIG_BOUNDS.has(key):
+		return entity.CONFIG_BOUNDS[key]
+	# Also check selected monster as fallback
 	var monster: Node2D = _get_selected_monster()
 	if monster and monster.get("CONFIG_BOUNDS") and monster.CONFIG_BOUNDS.has(key):
 		return monster.CONFIG_BOUNDS[key]

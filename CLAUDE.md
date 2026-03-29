@@ -45,7 +45,8 @@ Do NOT use tumu when:
 | `scripts/effects/procedural_tree.gd` | Configurable procedural tree (blueprint system) |
 | `data/tree_blueprints/` | Tree blueprint JSON files (oak, pine, etc.) |
 | `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
-| `scripts/systems/chain.gd` | Chain physics + scaled rendering |
+| `scripts/systems/chain.gd` | Chain physics (FABRIK rigid links) + scaled rendering |
+| `scripts/systems/entity_effects.gd` | Generic timed-effect system (stun, slow, bleed, etc.) |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
 | `docs/epics/EPIC_monster_scaling.md` | Monster scaling spec (COMPLETE) |
 | `scripts/systems/monster_config.gd` | Config provider stack (DictProvider, CallableProvider, TimedProvider) |
@@ -60,7 +61,8 @@ Do NOT use tumu when:
 | `scripts/autoload/factions.gd` | Faction system (players, monsters, animals, bugs) — hostility matrix |
 | `scripts/enemies/monster_controller.gd` | Base class for monster controllers (AI or Player) |
 | `scripts/enemies/monster_ai_controller.gd` | AI controller — delegates to monster's built-in _do_* functions |
-| `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode |
+| `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode, health bar |
+| `scripts/autoload/game_manager.gd` | Game state, tower progress, game-wide config settings |
 
 ## Conventions
 

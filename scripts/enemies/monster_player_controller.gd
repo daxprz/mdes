@@ -39,6 +39,9 @@ var _air_slash_cooldown: float = 0.0
 const AIR_SLASH_INTERVAL := 0.25  # Min time between air slashes
 
 
+const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
+var _health_bar: Node2D = null
+
 func on_attach(monster: CharacterBody2D) -> void:
 	# Start in a neutral state (not patrol/chase)
 	monster._standdown = false
@@ -50,10 +53,29 @@ func on_attach(monster: CharacterBody2D) -> void:
 	monster.set_meta("faction", "players")
 	monster.set_meta("player_controlled", true)
 	monster.add_to_group("players")  # So other systems (camera, HUD) can find us
+	# Add player-style health bar (same as other characters)
+	_setup_monster_health_bar(monster)
+
+
+func _setup_monster_health_bar(monster: CharacterBody2D) -> void:
+	_health_bar = HEALTH_BAR_SCENE.instantiate()
+	_health_bar.bar_width = 40.0  # Wider for big monster
+	_health_bar.bar_height = 4.0
+	_health_bar.bar_offset = Vector2(0, -monster.sc(60.0))  # Above the monster
+	_health_bar.hide_when_full = false
+	monster.add_child(_health_bar)
+	_update_monster_health_bar(monster)
+
+
+func _update_monster_health_bar(monster: CharacterBody2D) -> void:
+	if _health_bar and is_instance_valid(_health_bar):
+		var max_hp: int = monster._part_health.get("body", {}).get("max_hp", 1000)
+		_health_bar.set_health(monster.health, max_hp)
 
 
 func update(monster: CharacterBody2D, delta: float) -> void:
 	_attack_buffer_timer -= delta
+	_update_monster_health_bar(monster)
 
 	# -- Movement --
 	var move_x: float = _get_axis("move_left", "move_right")

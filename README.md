@@ -163,6 +163,23 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.28
+**Executioner class, entity effects system, player config, chain physics overhaul**
+
+- **Executioner class**: New heavy melee character with ball-and-chain, shackle, and axe. Dark hooded sprite with red eyes.
+- **Ball-and-chain**: L1 throws a massive spiked ball on a rigid FABRIK chain. Trajectory preview (like monster leap) shows during windup. Right thumbstick aims with priority over left stick.
+- **YEET physics**: When the chain goes taut, momentum transfers via partially elastic collision (configurable mass ratio 8x, 75% elasticity). The player gets launched along the chain direction — works as a traversal tool.
+- **Spike ball behavior**: Sticks to walls (drags slowly down), sticks to floors (drags if pulled), cannot stick to ceilings (drags out and falls). 3-second stun on enemy hit.
+- **Shackle**: Only attaches to enemies (snaps to hitbox within 40px), bounces off world surfaces. Looks like splay-chain shackle.
+- **Executioner attacks**: Square=overhead swing slam (hold to spin, release to slam with dust puff), Circle=quick axe chop, Triangle=charged cleave (2s power-up, massive semicircle sweep, player knockback from impact).
+- **Chain physics overhaul**: Replaced Jakobsen solver with FABRIK — each link is an exact rigid rod. Flexible joints but zero stretch. Every-4th-link collision for performance. Chain cannot pass through walls (segment raycast + point probe).
+- **Entity effects system**: New `EntityEffects` static class for timed effects on any entity (stun, slow, bleed, burn, etc.). Used by executioner ball stun.
+- **Player Entity Config**: Players now have `cfg()` / `push_config()` / `CONFIG_BOUNDS` like monsters. Debug drawer shows class-specific config sliders (physics, combat, health, class abilities).
+- **Game config**: `game/multiple_players_same_class` toggle (default OFF). Accessible via debug drawer, RCON (`gameconfig` command), and debug aspects.
+- **Monster-as-player improvements**: Health bar added, ghost on death (no disappear), revive mechanics (solo jump or teammate proximity).
+- **Player names in debug drawer**: Entity list shows profile name + class instead of node name.
+- **Chain clanking**: Audible chain-link sound as the ball's chain flows out during throw.
+
 ### v0.10.27
 **Playable monster, faction system, ball mode, attack zone debug**
 

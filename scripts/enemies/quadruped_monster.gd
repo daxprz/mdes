@@ -438,6 +438,7 @@ var _step_center: Array[Vector2] = []    # Bezier control point (world)
 var health: int = int(cfg("max_health", MAX_HEALTH))  # Overridden in _ready() via cfg()
 var mass: float = MASS  # Overridden in _ready() via cfg()
 var _dead := false
+var _ghost_revive_progress: float = 0.0  # Player-monster ghost revive timer
 var _standdown := false  # Stand-down mode: passive, receives damage, no AI
 var _asleep := false     # Asleep mode: dormant until damaged, then becomes active
 var _breakaway_immune: float = 0.0  # Brief invincibility after breakaway
@@ -1060,6 +1061,10 @@ func _input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	if _dead:
+		if is_player_controlled():
+			# Player-controlled ghost: allow minimal floating movement + revive check
+			_handle_ghost_movement(delta)
+			queue_redraw()
 		return
 	if _physics_frozen:
 		velocity = Vector2.ZERO
@@ -5885,10 +5890,88 @@ func _die() -> void:
 	velocity = Vector2.ZERO
 	died.emit(global_position)
 
-	# Death: collapse and fade
-	var tween := create_tween()
-	tween.tween_property(self, "modulate:a", 0.0, 1.0)
-	tween.tween_callback(queue_free)
+	if is_player_controlled():
+		# Player-controlled monster: become a ghost like any other player character
+		# Don't disappear — stay as a translucent ghost, awaiting revive
+		modulate = Color(0.5, 0.5, 0.8, 0.4)
+		collision_layer = 0  # Can't be hit
+		remove_from_group("players")
+		# Add revive prompt
+		var revive_label := Label.new()
+		revive_label.name = "ReviveLabel"
+		revive_label.text = "PRESS JUMP TO REVIVE"
+		revive_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		revive_label.add_theme_font_size_override("font_size", 8)
+		revive_label.position = Vector2(-50, -36)
+		revive_label.modulate = Color.YELLOW
+		add_child(revive_label)
+		_ghost_revive_progress = 0.0
+		DebugOverlay.log("monster/state", self, "PLAYER MONSTER DIED: now ghost, awaiting revive")
+	else:
+		# AI monster: collapse and fade out
+		var tween := create_tween()
+		tween.tween_property(self, "modulate:a", 0.0, 1.0)
+		tween.tween_callback(queue_free)
+
+
+func _handle_ghost_movement(delta: float) -> void:
+	## Player-controlled monster ghost: float around and check for revive.
+	## Same revive mechanics as player_side.gd — nearby alive player or solo self-revive.
+	if not _controller or not _controller.has_method("_get_axis"):
+		return
+
+	# Ghost can float freely (no gravity, reduced speed)
+	var move_x: float = _controller._get_axis("move_left", "move_right")
+	var move_y: float = _controller._get_axis("move_up", "move_down")
+	velocity = Vector2(move_x, move_y) * 80.0
+	move_and_slide()
+
+	# Ghost bobbing effect
+	modulate.a = 0.3 + sin(Time.get_ticks_msec() * 0.003) * 0.1
+
+	# Revive check: nearby alive player, or solo self-revive
+	var alive_teammates: int = 0
+	var nearby_alive: bool = false
+	for p in get_tree().get_nodes_in_group("players"):
+		if p == self:
+			continue
+		if p is CharacterBody2D and not p.get("_is_dead") and not p.get("_dead"):
+			alive_teammates += 1
+			if global_position.distance_to(p.global_position) < 60.0:
+				nearby_alive = true
+
+	# Solo self-revive: press jump
+	if alive_teammates == 0:
+		if _controller._is_just_pressed("jump"):
+			_revive_monster()
+	elif nearby_alive:
+		# Teammate nearby: auto-revive progress
+		_ghost_revive_progress += delta
+		if _ghost_revive_progress >= 3.0:
+			_revive_monster()
+
+	# Update health bar
+	if _controller.has_method("_update_monster_health_bar"):
+		_controller._update_monster_health_bar(self)
+
+
+func _revive_monster() -> void:
+	_dead = false
+	_ghost_revive_progress = 0.0
+	# Restore to half health
+	var max_hp: int = _part_health.get("body", {}).get("max_hp", 1000)
+	health = max_hp / 2
+	_part_health["body"]["current_hp"] = health
+	# Re-enable
+	collision_layer = 1
+	modulate = Color.WHITE
+	add_to_group("players")
+	_change_state(State.PATROL)
+	# Remove revive label
+	var label := get_node_or_null("ReviveLabel")
+	if label:
+		label.queue_free()
+	DebugOverlay.log("monster/state", self, "PLAYER MONSTER REVIVED: hp=%d/%d", [health, max_hp])
 
 
 func apply_knockback(force: Vector2) -> void:

@@ -1,8 +1,9 @@
 extends Node2D
 
 ## Chain — rigid fixed-length connection between two anchor points.
-## Position-based constraint solving (Jakobsen method) — no RigidBody2D.
-## Zero stretch: hard position correction every frame.
+## FABRIK constraint solving — each link is an exact fixed-length rigid rod.
+## Flexible (links rotate freely) but NEVER stretches or compresses.
+## Verlet integration for gravity/momentum, FABRIK for rigid link enforcement.
 ## Visually rendered as alternating thin/thick dark grey segments.
 ## Shackles at creature end, peg+ring at wall end.
 
@@ -130,36 +131,91 @@ func _physics_process(delta: float) -> void:
 	for i in range(1, _point_count - 1):
 		var current: Vector2 = _points[i]
 		var prev: Vector2 = _prev_points[i]
-		var velocity: Vector2 = (current - prev) * damping
+		var vel: Vector2 = (current - prev) * damping
 		_prev_points[i] = current
-		_points[i] = current + velocity + gravity * delta * delta
+		_points[i] = current + vel + gravity * delta * delta
 
 	# Surface collision: push points out of world geometry
 	_collide_with_surfaces()
 
-	# Jakobsen constraint solving: enforce fixed distances
-	# Iterations scale with chain length for convergence
-	var iterations: int = clampi(_point_count * 2, 20, 100)
-	for _pass in range(iterations):
-		# Pin endpoints every pass
-		_points[0] = pos_a
-		_points[_point_count - 1] = pos_b
-		# Correct all consecutive pairs
-		for i in range(_point_count - 1):
-			var p1: Vector2 = _points[i]
-			var p2: Vector2 = _points[i + 1]
-			var dir: Vector2 = p2 - p1
-			var dist: float = dir.length()
-			if dist < 0.001:
-				dir = Vector2(0, 1)
-				dist = 0.001
-			var diff: float = (dist - _link_len) / dist
-			var offset: Vector2 = dir * diff * 0.5
-			# Don't move pinned endpoints
-			if i > 0:
-				_points[i] += offset
-			if i + 1 < _point_count - 1:
-				_points[i + 1] -= offset
+	# FABRIK constraint solving — enforces EXACT rigid link lengths.
+	# The chain is flexible (links can rotate freely) but each link is a fixed
+	# length rod. No stretching, no compression. Two alternating passes pin each
+	# endpoint and propagate exact distances through the chain.
+	var total_chain_len: float = _link_len * float(_point_count - 1)
+	var anchor_dist: float = pos_a.distance_to(pos_b)
+
+	if anchor_dist >= total_chain_len:
+		# Chain is taut — lay points along the line, but check for wall obstruction.
+		# If the line between anchors crosses geometry, don't just lerp through it;
+		# instead, keep the existing draped shape and let FABRIK + collision handle it.
+		var space_check := get_world_2d().direct_space_state
+		var obstructed: bool = false
+		if space_check:
+			var los_query := PhysicsRayQueryParameters2D.create(pos_a, pos_b, 1)
+			obstructed = not space_check.intersect_ray(los_query).is_empty()
+		if not obstructed:
+			# Clear line of sight — safe to go taut (straight line)
+			for i in range(_point_count):
+				var t: float = float(i) / float(_point_count - 1)
+				_points[i] = pos_a.lerp(pos_b, t)
+		else:
+			# Obstructed taut chain: use FABRIK to find a path around surfaces
+			var fabrik_iterations_taut: int = clampi(_point_count / 2, 3, 8)
+			for _pass in range(fabrik_iterations_taut):
+				_points[0] = pos_a
+				for i in range(1, _point_count):
+					var dir: Vector2 = _points[i] - _points[i - 1]
+					var dist: float = dir.length()
+					if dist < 0.001:
+						dir = Vector2(0, 1)
+						dist = 0.001
+					_points[i] = _points[i - 1] + (dir / dist) * _link_len
+				_points[_point_count - 1] = pos_b
+				for i in range(_point_count - 2, -1, -1):
+					var dir: Vector2 = _points[i] - _points[i + 1]
+					var dist: float = dir.length()
+					if dist < 0.001:
+						dir = Vector2(0, -1)
+						dist = 0.001
+					_points[i] = _points[i + 1] + (dir / dist) * _link_len
+				# Collide every other iteration to save raycasts
+				if _pass % 2 == 0:
+					_collide_with_surfaces()
+	else:
+		# Chain has slack — FABRIK drapes it naturally with rigid links.
+		# Surface collision is applied between iterations so the chain wraps
+		# around platforms and walls instead of passing through them.
+		var fabrik_iterations: int = clampi(_point_count / 2, 3, 8)
+		for _pass in range(fabrik_iterations):
+			# Forward pass: pin A, place each successive point at exactly
+			# _link_len from the previous, in the direction of its current position
+			_points[0] = pos_a
+			for i in range(1, _point_count):
+				var dir: Vector2 = _points[i] - _points[i - 1]
+				var dist: float = dir.length()
+				if dist < 0.001:
+					dir = Vector2(0, 1)
+					dist = 0.001
+				_points[i] = _points[i - 1] + (dir / dist) * _link_len
+
+			# Backward pass: pin B, place each point backward at exactly _link_len
+			_points[_point_count - 1] = pos_b
+			for i in range(_point_count - 2, -1, -1):
+				var dir: Vector2 = _points[i] - _points[i + 1]
+				var dist: float = dir.length()
+				if dist < 0.001:
+					dir = Vector2(0, -1)
+					dist = 0.001
+				_points[i] = _points[i + 1] + (dir / dist) * _link_len
+
+			# Collide every other iteration to save raycasts
+			if _pass % 2 == 0:
+				_collide_with_surfaces()
+
+	# Final pin: endpoints are exactly at anchors
+	_points[0] = pos_a
+	_points[_point_count - 1] = pos_b
 
 	# Re-apply surface collision after constraints (may have pushed points inside)
 	_collide_with_surfaces()
@@ -176,61 +232,77 @@ func _physics_process(delta: float) -> void:
 
 
 func _collide_with_surfaces() -> void:
-	## For each intermediate chain point, check if it's inside world geometry.
-	## If so, push it to the nearest surface. Uses short raycasts in 4 directions.
+	## Chain collision with world geometry. Only checks every 4th link for
+	## performance — FABRIK propagates corrections to neighbors each iteration.
+	## Endpoints and the midpoint are always checked.
 	var space := get_world_2d().direct_space_state
 	if not space:
 		return
+	var mid: int = _point_count / 2
 
+	# Pass 1: Segment collision — raycast along every 4th link to catch pass-through
+	for i in range(0, _point_count - 1, 4):
+		var p1: Vector2 = _points[i]
+		var p2: Vector2 = _points[mini(i + 4, _point_count - 1)]
+		if p1.distance_squared_to(p2) < 1.0:
+			continue
+		var query := PhysicsRayQueryParameters2D.create(p1, p2, 1)
+		var result: Dictionary = space.intersect_ray(query)
+		if result:
+			var hit_pos: Vector2 = result["position"]
+			var normal: Vector2 = result["normal"]
+			# Push the nearest interior point to the surface
+			var push_i: int = clampi(i + 2, 1, _point_count - 2)
+			_points[push_i] = hit_pos + normal * 2.0
+			if push_i < _prev_points.size():
+				_prev_points[push_i] = _points[push_i]
+
+	# Pass 2: Point probe — only every 4th point + endpoints + midpoint
 	for i in range(1, _point_count - 1):
-		var pt: Vector2 = _points[i]
-
-		# Raycast downward — most common collision (chain resting on platform)
-		var query_down := PhysicsRayQueryParameters2D.create(
-			pt + Vector2(0, -2), pt + Vector2(0, 4), 1  # World layer only
-		)
-		var result: Dictionary = space.intersect_ray(query_down)
-		if result:
-			# Point is at or below a surface — push it up
-			_points[i].y = result["position"].y - 1.0
-			# Kill downward velocity (friction)
-			if i < _prev_points.size():
-				_prev_points[i].y = _points[i].y
-				# Add friction to horizontal movement on surfaces
-				_prev_points[i].x = lerpf(_prev_points[i].x, _points[i].x, 0.1)
+		if i != mid and i % 4 != 0:
 			continue
+		_collide_point(i, space)
 
-		# Raycast upward — ceiling collision
-		var query_up := PhysicsRayQueryParameters2D.create(
-			pt + Vector2(0, 2), pt + Vector2(0, -4), 1
-		)
-		result = space.intersect_ray(query_up)
-		if result:
-			_points[i].y = result["position"].y + 1.0
-			if i < _prev_points.size():
-				_prev_points[i].y = _points[i].y
-			continue
 
-		# Raycast left — wall collision
-		var query_left := PhysicsRayQueryParameters2D.create(
-			pt + Vector2(2, 0), pt + Vector2(-4, 0), 1
-		)
-		result = space.intersect_ray(query_left)
-		if result:
-			_points[i].x = result["position"].x + 1.0
-			if i < _prev_points.size():
-				_prev_points[i].x = _points[i].x
-			continue
+func _collide_point(i: int, space: PhysicsDirectSpaceState2D) -> void:
+	## Push a single chain point out of world geometry (4-direction probe).
+	var pt: Vector2 = _points[i]
 
-		# Raycast right — wall collision
-		var query_right := PhysicsRayQueryParameters2D.create(
-			pt + Vector2(-2, 0), pt + Vector2(4, 0), 1
-		)
-		result = space.intersect_ray(query_right)
-		if result:
-			_points[i].x = result["position"].x - 1.0
-			if i < _prev_points.size():
-				_prev_points[i].x = _points[i].x
+	# Down (floor)
+	var query := PhysicsRayQueryParameters2D.create(pt + Vector2(0, -3), pt + Vector2(0, 5), 1)
+	var result: Dictionary = space.intersect_ray(query)
+	if result:
+		_points[i].y = result["position"].y - 1.0
+		if i < _prev_points.size():
+			_prev_points[i].y = _points[i].y
+			_prev_points[i].x = lerpf(_prev_points[i].x, _points[i].x, 0.1)
+		return
+
+	# Up (ceiling)
+	query = PhysicsRayQueryParameters2D.create(pt + Vector2(0, 3), pt + Vector2(0, -5), 1)
+	result = space.intersect_ray(query)
+	if result:
+		_points[i].y = result["position"].y + 1.0
+		if i < _prev_points.size():
+			_prev_points[i].y = _points[i].y
+		return
+
+	# Left (wall)
+	query = PhysicsRayQueryParameters2D.create(pt + Vector2(3, 0), pt + Vector2(-5, 0), 1)
+	result = space.intersect_ray(query)
+	if result:
+		_points[i].x = result["position"].x + 1.0
+		if i < _prev_points.size():
+			_prev_points[i].x = _points[i].x
+		return
+
+	# Right (wall)
+	query = PhysicsRayQueryParameters2D.create(pt + Vector2(-3, 0), pt + Vector2(5, 0), 1)
+	result = space.intersect_ray(query)
+	if result:
+		_points[i].x = result["position"].x - 1.0
+		if i < _prev_points.size():
+			_prev_points[i].x = _points[i].x
 
 
 func _check_projectile_hits() -> void:

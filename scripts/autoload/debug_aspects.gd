@@ -109,3 +109,18 @@ func _register_all() -> void:
 	r.call("player/archer_arcs", "Archer aim arc trajectory and debug trails")
 	r.call("player/reticle_info", "Reticle position text overlay")
 	r.call("player/button_state", "Controller/keyboard button state labels on HUD")
+
+	# -- Executioner --
+	r.call("executioner/throw", "Ball/shackle throw mode toggle, windup, and release")
+	r.call("executioner/ball", "Spike ball hit, stick, wall drag, platform drag")
+	r.call("executioner/swing", "Swing slam: hold time, spin speed, damage, dust")
+	r.call("executioner/axe", "Axe chop: damage, cooldown")
+	r.call("executioner/cleave", "Charged cleave: charge time, damage, knockback")
+
+	# -- Game Config --
+	r.call("game/multiple_players_same_class", "Allow multiple players to pick the same class")
+
+	# -- Entity Effects --
+	r.call("effects/applied", "Effect applied to entity (name, duration, value)")
+	r.call("effects/expired", "Effect expired on entity")
+	r.call("effects/active", "Currently active effects overlay per entity")

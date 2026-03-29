@@ -17,6 +17,7 @@ const CLASS_NAMES := {
 	PlayerManager.CharacterClass.BALLOONIST: "Balloonist",
 	PlayerManager.CharacterClass.GUITARIST: "Guitarist",
 	PlayerManager.CharacterClass.WEREWOLF: "Werewolf",
+	PlayerManager.CharacterClass.EXECUTIONER: "Executioner",
 }
 
 const CLASS_COLORS := {
@@ -32,6 +33,7 @@ const CLASS_COLORS := {
 	PlayerManager.CharacterClass.BALLOONIST: Color(0.9, 0.4, 0.7),
 	PlayerManager.CharacterClass.GUITARIST: Color(0.9, 0.7, 0.2),
 	PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
+	PlayerManager.CharacterClass.EXECUTIONER: Color(0.15, 0.1, 0.1),
 }
 
 const CLASS_SPRITE_PATHS := {
@@ -47,6 +49,7 @@ const CLASS_SPRITE_PATHS := {
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_side.png",
 	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_side.png",
 	PlayerManager.CharacterClass.WEREWOLF: "res://assets/sprites/characters/werewolf_side.png",
+	PlayerManager.CharacterClass.EXECUTIONER: "res://assets/sprites/characters/executioner_side.png",
 }
 
 const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
@@ -62,6 +65,7 @@ const ALL_CLASSES: Array[PlayerManager.CharacterClass] = [
 	PlayerManager.CharacterClass.BALLOONIST,
 	PlayerManager.CharacterClass.GUITARIST,
 	PlayerManager.CharacterClass.WEREWOLF,
+	PlayerManager.CharacterClass.EXECUTIONER,
 	PlayerManager.CharacterClass.MONSTER,
 ]
 
@@ -936,16 +940,18 @@ func _cycle_class(player_index: int, direction: int, ignore_rift: bool = false) 
 
 	var current_class: PlayerManager.CharacterClass = p_data["character_class"]
 
-	# Get classes not taken by other players
-	var taken: Array[PlayerManager.CharacterClass] = []
-	for pi in PlayerManager.players:
-		if pi != player_index:
-			taken.append(PlayerManager.players[pi]["character_class"])
-
+	# Get classes not taken by other players (unless duplicates allowed)
 	var available: Array[PlayerManager.CharacterClass] = []
-	for c in ALL_CLASSES:
-		if c not in taken:
-			available.append(c)
+	if GameManager.multiple_players_same_class:
+		available.assign(ALL_CLASSES)
+	else:
+		var taken: Array[PlayerManager.CharacterClass] = []
+		for pi in PlayerManager.players:
+			if pi != player_index:
+				taken.append(PlayerManager.players[pi]["character_class"])
+		for c in ALL_CLASSES:
+			if c not in taken:
+				available.append(c)
 
 	if available.is_empty():
 		return

@@ -17,6 +17,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_side.png",
 	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_side.png",
 	PlayerManager.CharacterClass.WEREWOLF: "res://assets/sprites/characters/werewolf_side.png",
+	PlayerManager.CharacterClass.EXECUTIONER: "res://assets/sprites/characters/executioner_side.png",
 }
 
 enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 = 5 }
@@ -25,6 +26,63 @@ enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 
 @export var device_id: int = -1
 @export var character_class: PlayerManager.CharacterClass = PlayerManager.CharacterClass.MELEE
 var mass := 70.0
+
+# -- Config provider stack (same pattern as quadruped_monster) -----------------
+var _config_stack: Array = []  # Array[MonsterConfigProvider-compatible]
+
+const CONFIG_BOUNDS := {
+	"gravity": Vector2(100, 2000),
+	"jump_velocity": Vector2(-1000, -100),
+	"speed": Vector2(10, 400),
+	"attack_cooldown": Vector2(0.05, 3.0),
+	"special_cooldown": Vector2(0.1, 10.0),
+	"attack_damage_mult": Vector2(0.1, 5.0),
+	"special_damage_mult": Vector2(0.1, 5.0),
+	"charge_damage_mult": Vector2(0.1, 5.0),
+	"max_health": Vector2(1, 1000),
+	"max_mana": Vector2(0, 500),
+	"mana_regen": Vector2(0, 20),
+	"knockback_mult": Vector2(0, 5.0),
+	"melee_combo_window": Vector2(0.1, 2.0),
+	"melee_enrage_duration": Vector2(1, 30),
+	"melee_enrage_cooldown": Vector2(5, 120),
+	"rogue_stealth_duration": Vector2(1, 20),
+	"rogue_stealth_cooldown": Vector2(5, 60),
+	"rogue_stealth_damage_mult": Vector2(1, 10),
+	"ranger_max_arrows": Vector2(1, 50),
+	"ranger_reload_time": Vector2(0.1, 5.0),
+	"exec_ball_damage": Vector2(1, 200),
+	"exec_ball_stun_duration": Vector2(0.5, 10),
+	"exec_ball_gravity": Vector2(100, 2000),
+	"exec_ball_throw_speed": Vector2(200, 2000),
+	"exec_ball_mass_ratio": Vector2(1, 20),
+	"exec_chain_elasticity": Vector2(0, 1.0),
+	"exec_swing_max_damage": Vector2(10, 300),
+	"exec_swing_slam_radius": Vector2(20, 200),
+	"exec_axe_damage": Vector2(1, 200),
+	"exec_axe_cooldown": Vector2(0.1, 3.0),
+	"exec_cleave_max_damage": Vector2(10, 500),
+	"exec_cleave_charge_time": Vector2(0.5, 5.0),
+	"exec_cleave_knockback": Vector2(50, 1000),
+}
+
+func cfg(key: String, default_val: float) -> float:
+	var val: float = default_val
+	for provider in _config_stack:
+		var pval: Variant = provider.get_value(key)
+		if pval != null:
+			val = float(pval)
+			break
+	if CONFIG_BOUNDS.has(key):
+		var bounds: Vector2 = CONFIG_BOUNDS[key]
+		val = clampf(val, bounds.x, bounds.y)
+	return val
+
+func push_config(provider: Variant) -> void:
+	_config_stack.insert(0, provider)
+
+func remove_config(provider: Variant) -> void:
+	_config_stack.erase(provider)
 
 # Jump height = v^2 / (2*g). With v=550, g=900: max height ~168px
 const GRAVITY := 900.0
@@ -319,6 +377,7 @@ func setup(p_index: int, p_device_id: int, p_class: PlayerManager.CharacterClass
 func _draw() -> void:
 	_draw_grapple()
 	_draw_archer_aim()
+	_draw_executioner()
 	_draw_hud_popup_indicator()
 	_draw_debug()
 	# Hitbox: show attack area when active
@@ -621,6 +680,7 @@ func _physics_process(delta: float) -> void:
 	_handle_mage_airwalk(delta)
 	_handle_guitarist_amp_up(delta)
 	_handle_werewolf_frenzy(delta)
+	_handle_executioner(delta)
 	_handle_rogue_stealth_toggle()
 	_handle_rogue_stealth(delta)
 	_handle_ranger_reload(delta)
@@ -647,6 +707,7 @@ func _physics_process(delta: float) -> void:
 	_handle_special()
 	_update_animation(delta)
 	move_and_slide()
+	_exec_apply_chain_constraint()
 
 	# Clear AFTER all checks so button presses are actually read
 	_controller_just_pressed.clear()
@@ -669,6 +730,7 @@ func _apply_gravity(delta: float) -> void:
 	if _balloonist_floating:
 		return  # Balloon carries us up
 	if not is_on_floor():
+		var grav: float = cfg("gravity", GRAVITY)
 		# Count attached balloons - reduce gravity per balloon
 		var balloon_count: int = 0
 		for dart in get_tree().get_nodes_in_group("balloon_darts"):
@@ -677,10 +739,10 @@ func _apply_gravity(delta: float) -> void:
 		if balloon_count > 0:
 			# Each balloon reduces gravity by 30%, fall slower
 			var gravity_mult: float = maxf(0.1, 1.0 - balloon_count * 0.3)
-			velocity.y += GRAVITY * delta * gravity_mult
+			velocity.y += grav * delta * gravity_mult
 			velocity.y = min(velocity.y, 600.0 * gravity_mult)
 		else:
-			velocity.y += GRAVITY * delta
+			velocity.y += grav * delta
 			velocity.y = min(velocity.y, 600.0)
 
 
@@ -690,6 +752,11 @@ func _handle_movement() -> void:
 	if _grapple_launch_immunity > 0.0:
 		if not is_on_floor():
 			_grapple_launch_immunity = maxf(_grapple_launch_immunity, 0.05)  # Keep alive while airborne
+		return
+	# YEET launch immunity — don't override velocity after chain YEET
+	if _exec_yeet_immunity > 0.0:
+		if not is_on_floor():
+			_exec_yeet_immunity = maxf(_exec_yeet_immunity, 0.05)  # Keep alive while airborne
 		return
 	# Healer cannot move while channeling
 	if _is_charging and character_class == PlayerManager.CharacterClass.HEALER:
@@ -737,7 +804,7 @@ func _handle_jump() -> void:
 		return
 
 	if is_on_floor():
-		var jump_vel: float = JUMPER_JUMP_VELOCITY if character_class == PlayerManager.CharacterClass.NINJA else JUMP_VELOCITY
+		var jump_vel: float = JUMPER_JUMP_VELOCITY if character_class == PlayerManager.CharacterClass.NINJA else cfg("jump_velocity", JUMP_VELOCITY)
 		velocity.y = jump_vel
 		AudioManager.play("jump", -5.0)
 		if character_class == PlayerManager.CharacterClass.DEMOLITIONIST:
@@ -1174,7 +1241,7 @@ func _handle_attack(_delta: float) -> void:
 	if not _is_device_action_just_pressed("attack"):
 		return
 
-	_attack_cooldown = ATTACK_COOLDOWN_TIME
+	_attack_cooldown = cfg("attack_cooldown", ATTACK_COOLDOWN_TIME)
 	_is_attacking = true
 	_attack_timer = ATTACK_DURATION
 	_perform_attack()
@@ -1206,6 +1273,8 @@ func _perform_attack() -> void:
 			_attack_guitarist()
 		PlayerManager.CharacterClass.WEREWOLF:
 			_attack_werewolf()
+		PlayerManager.CharacterClass.EXECUTIONER:
+			_attack_executioner()
 
 
 func _attack_melee() -> void:
@@ -1908,7 +1977,7 @@ func _handle_special() -> void:
 
 	# Apply special cooldown reduction from skill level
 	var cooldown_reduction: float = PlayerManager.get_skill_level_for(player_index, "special") * 0.02
-	_special_cooldown = SPECIAL_COOLDOWN_TIME * (1.0 - cooldown_reduction)
+	_special_cooldown = cfg("special_cooldown", SPECIAL_COOLDOWN_TIME) * (1.0 - cooldown_reduction)
 	PlayerManager.add_skill_xp(player_index, "special", 7)
 	_perform_special()
 
@@ -1939,6 +2008,8 @@ func _perform_special() -> void:
 			_special_guitarist_blast_wave()
 		PlayerManager.CharacterClass.WEREWOLF:
 			_special_werewolf_roar_push()
+		PlayerManager.CharacterClass.EXECUTIONER:
+			_special_executioner_cleave()
 
 
 var _shield_charging: bool = false
@@ -2919,6 +2990,7 @@ func _update_controller_led() -> void:
 		PlayerManager.CharacterClass.BALLOONIST: Color(0.9, 0.4, 0.7),
 		PlayerManager.CharacterClass.GUITARIST: Color(0.9, 0.7, 0.2),
 		PlayerManager.CharacterClass.WEREWOLF: Color(0.5, 0.3, 0.15),
+		PlayerManager.CharacterClass.EXECUTIONER: Color(0.15, 0.1, 0.1),
 	}
 	var led_color: Color = colors.get(character_class, Color.WHITE)
 	# Use call() to avoid parse error if set_joy_light doesn't exist in this build
@@ -4662,6 +4734,13 @@ func _exit_delegate_mode() -> void:
 
 func _check_out_of_bounds() -> void:
 	## Teleport player back in-bounds if they escape the playable area
+	# Skip during YEET launch — player is flying on the chain
+	if _exec_yeet_immunity > 0.0:
+		return
+	# Skip while executioner ball is active (thrown/stuck) — chain constrains player
+	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
+		if _exec_ball_state in [ExecEndState.THROWN, ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
+			return
 	var cam := get_viewport().get_camera_2d()
 	if not cam:
 		return
@@ -5396,7 +5475,7 @@ func _handle_charge(delta: float) -> void:
 			sprite.scale.y = 1.0
 		if _charge_time >= CHARGE_MIN:
 			# Fire charged attack
-			_attack_cooldown = ATTACK_COOLDOWN_TIME
+			_attack_cooldown = cfg("attack_cooldown", ATTACK_COOLDOWN_TIME)
 			_is_attacking = true
 			_attack_timer = ATTACK_DURATION
 			PlayerManager.add_skill_xp(player_index, "charge", 5)
@@ -5434,6 +5513,8 @@ func _perform_charged_attack() -> void:
 			_charged_guitarist_power_chord(charge_ratio)
 		PlayerManager.CharacterClass.WEREWOLF:
 			_charged_werewolf_pounce(charge_ratio)
+		PlayerManager.CharacterClass.EXECUTIONER:
+			_charged_executioner_overhead(charge_ratio)
 
 
 func _charged_tank_shockwave(charge_ratio: float) -> void:
@@ -7055,3 +7136,978 @@ func _handle_werewolf_frenzy(delta: float) -> void:
 			_werewolf_frenzy_cooldown = WEREWOLF_FRENZY_COOLDOWN
 			modulate = Color.WHITE
 			AudioManager.play("player_hurt", -4.0, 0.8)
+
+
+# ==============================================================================
+# EXECUTIONER — Ball-and-chain + Shackle + Axe
+# ==============================================================================
+
+# -- Configurable Constants (debug menu: executioner/*) ------------------------
+
+# Ball-and-chain throw (spike ball end)
+const EXEC_BALL_RADIUS := 14.0
+const EXEC_BALL_THROW_SPEED := 700.0      # Base throw speed (fast, heavy projectile)
+const EXEC_BALL_MAX_THROW_SPEED := 1400.0 # Max throw speed at full charge
+const EXEC_BALL_SPIN_SPEED := 4.0         # rad/s windup spin (much slower than grapple)
+const EXEC_BALL_SPIN_ACCEL := 3.0
+const EXEC_BALL_MAX_SPIN := 10.0
+const EXEC_BALL_GRAVITY := 900.0          # Very heavy — same as player gravity, no air drag
+const EXEC_BALL_WALL_DRAG := 12.0         # px/s drag when stuck to wall (slides down slowly)
+const EXEC_BALL_PLAT_DRAG := 15.0         # px/s drag when stuck to platform (slides if pulled)
+const EXEC_BALL_CEILING_DRAG := 20.0      # px/s — drags out of ceiling and falls
+const EXEC_BALL_SPIKE_COUNT := 12
+const EXEC_BALL_SPIKE_LEN := 8.0
+const EXEC_BALL_DAMAGE := 35
+const EXEC_BALL_STUN_DURATION := 3.0      # Seconds enemies are stunned on ball impact
+const EXEC_BALL_MASS_RATIO := 8.0         # Ball is 8x player mass (configurable)
+const EXEC_CHAIN_ELASTICITY := 0.75       # 75% elastic chain-pull (1.0 = perfect elastic)
+
+# Shackle throw (other end — only sticks to enemies)
+const EXEC_SHACKLE_THROW_SPEED := 400.0
+const EXEC_SHACKLE_MAX_THROW_SPEED := 700.0
+const EXEC_SHACKLE_SPIN_SPEED := 8.0
+const EXEC_SHACKLE_SPIN_ACCEL := 6.0
+const EXEC_SHACKLE_MAX_SPIN := 20.0
+const EXEC_SHACKLE_GRAVITY := 600.0
+const EXEC_SHACKLE_DRAG := 0.97
+const EXEC_SHACKLE_DAMAGE := 15
+const EXEC_SHACKLE_SNAP_RANGE := 40.0     # Hitbox proximity snap range
+
+# Chain (uses chain.gd physics — identical to splay chain, breakable)
+const EXEC_CHAIN_MAX_LEN := 600.0
+const EXEC_CHAIN_CLANK_INTERVAL := 0.08   # Seconds between chain clanks during throw
+
+# Swing slam (Square — hold to spin, release to slam)
+const EXEC_SWING_SPIN_SPEED := 3.0
+const EXEC_SWING_SPIN_ACCEL := 4.0
+const EXEC_SWING_MAX_SPIN := 18.0
+const EXEC_SWING_MIN_HOLD := 0.3
+const EXEC_SWING_BASE_DAMAGE := 20
+const EXEC_SWING_MAX_DAMAGE := 80
+const EXEC_SWING_SLAM_RADIUS := 60.0
+const EXEC_SWING_DUST_COUNT := 16
+const EXEC_SWING_DUST_SPEED := 200.0
+const EXEC_SWING_KNOCKBACK := 300.0
+
+# Axe (Circle — quick chop)
+const EXEC_AXE_DAMAGE := 30
+const EXEC_AXE_RANGE := 35.0
+const EXEC_AXE_COOLDOWN := 0.6
+const EXEC_AXE_SWING_ARC := 2.5
+
+# Cleave (Triangle — charged massive strike)
+const EXEC_CLEAVE_CHARGE_TIME := 2.0
+const EXEC_CLEAVE_MIN_CHARGE := 0.5
+const EXEC_CLEAVE_BASE_DAMAGE := 40
+const EXEC_CLEAVE_MAX_DAMAGE := 150
+const EXEC_CLEAVE_RANGE := 50.0
+const EXEC_CLEAVE_ARC := PI
+const EXEC_CLEAVE_KNOCKBACK := 500.0      # Player self-knockback
+const EXEC_CLEAVE_ENEMY_KB := 400.0
+
+# -- State Variables -----------------------------------------------------------
+
+enum ExecThrowMode { BALL_FIRST, SHACKLE_FIRST }
+enum ExecEndState { HELD, WINDUP, THROWN, STUCK_WALL, STUCK_PLATFORM, STUCK_CEILING, ATTACHED_ENEMY, RETRACTING }
+
+var _exec_throw_mode: ExecThrowMode = ExecThrowMode.BALL_FIRST
+var _exec_throw_step: int = 0
+
+var _exec_ball_state: ExecEndState = ExecEndState.HELD
+var _exec_ball_pos: Vector2 = Vector2.ZERO
+var _exec_ball_vel: Vector2 = Vector2.ZERO
+var _exec_ball_anchor_body: Node2D = null
+var _exec_ball_anchor_offset: Vector2 = Vector2.ZERO
+var _exec_ball_spin_angle: float = 0.0
+var _exec_ball_angular_vel: float = 0.0
+var _exec_ball_hold_time: float = 0.0
+var _exec_ball_rotation: float = 0.0
+
+var _exec_shackle_state: ExecEndState = ExecEndState.HELD
+var _exec_shackle_pos: Vector2 = Vector2.ZERO
+var _exec_shackle_vel: Vector2 = Vector2.ZERO
+var _exec_shackle_anchor_body: Node2D = null       # The enemy we're attached to
+var _exec_shackle_anchor_offset: Vector2 = Vector2.ZERO
+var _exec_shackle_spin_angle: float = 0.0
+var _exec_shackle_angular_vel: float = 0.0
+var _exec_shackle_hold_time: float = 0.0
+
+# Real chain node (chain.gd instance — splay-chain physics, breakable)
+var _exec_chain_node: Node2D = null
+
+# Trajectory preview (like monster leap)
+var _exec_preview_arc: PackedVector2Array = PackedVector2Array()
+
+var _exec_swing_active: bool = false
+var _exec_swing_time: float = 0.0
+var _exec_swing_angle: float = 0.0
+var _exec_swing_angular_vel: float = 0.0
+
+var _exec_axe_cooldown: float = 0.0
+var _exec_axe_slash_timer: float = 0.0
+
+var _exec_cleave_charging: bool = false
+var _exec_cleave_charge_time: float = 0.0
+var _exec_cleave_flash_timer: float = 0.0
+
+var _exec_r1_was_pressed: bool = false
+var _exec_chain_clank_timer: float = 0.0  # Timer for chain clanking during throw
+var _exec_chain_taut: bool = false        # True once chain has gone taut (YEET fires once)
+var _exec_yeet_immunity: float = 0.0     # Seconds to skip OOB check after YEET
+
+
+# -- Chain Constraint on Player (same as monster chain pull) -------------------
+
+func _exec_apply_chain_constraint() -> void:
+	## When the ball is stuck (wall/platform/ceiling) and the chain is active,
+	## the player CANNOT move beyond the chain's max length from the ball.
+	## Hard position clamp + velocity kill — identical to monster chain constraint.
+	if character_class != PlayerManager.CharacterClass.EXECUTIONER:
+		return
+	if _exec_ball_state not in [ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
+		return
+
+	var ball_pos: Vector2 = _exec_get_ball_world_pos()
+	var to_ball: Vector2 = ball_pos - global_position
+	var dist: float = to_ball.length()
+
+	if dist <= EXEC_CHAIN_MAX_LEN:
+		return
+
+	# Hard clamp — player cannot exceed chain radius from ball anchor
+	var dir_from_ball: Vector2 = (global_position - ball_pos).normalized()
+
+	if is_on_floor():
+		# On floor: only constrain horizontal movement (don't yank vertically)
+		# Same approach as monster: compute max horizontal distance at current Y
+		var dy: float = global_position.y - ball_pos.y
+		var max_dx_sq: float = EXEC_CHAIN_MAX_LEN * EXEC_CHAIN_MAX_LEN - dy * dy
+		if max_dx_sq < 0.0:
+			# Player is above/below chain reach — clamp to closest point
+			global_position = ball_pos + dir_from_ball * EXEC_CHAIN_MAX_LEN
+			velocity = Vector2.ZERO
+		else:
+			var max_dx: float = sqrt(max_dx_sq)
+			var horizontal_dist: float = absf(global_position.x - ball_pos.x)
+			if horizontal_dist > max_dx:
+				var sign_x: float = signf(global_position.x - ball_pos.x)
+				global_position.x = ball_pos.x + sign_x * max_dx
+				# Kill horizontal velocity moving away from ball
+				if (velocity.x > 0 and sign_x > 0) or (velocity.x < 0 and sign_x < 0):
+					velocity.x = 0
+	else:
+		# In air: full radial clamp
+		global_position = ball_pos + dir_from_ball * EXEC_CHAIN_MAX_LEN
+		# Kill velocity component moving away from ball
+		var outward_vel: float = velocity.dot(dir_from_ball)
+		if outward_vel > 0.0:
+			velocity -= dir_from_ball * outward_vel
+
+
+# -- Main Tick -----------------------------------------------------------------
+
+func _handle_executioner(delta: float) -> void:
+	if character_class != PlayerManager.CharacterClass.EXECUTIONER:
+		return
+	_exec_handle_mode_toggle()
+	_exec_handle_throw(delta)
+	_exec_tick_swing(delta)
+	_exec_handle_axe()
+	_exec_tick_cleave(delta)
+	_exec_tick_ball(delta)
+	_exec_tick_shackle(delta)
+	_exec_check_chain_severed()
+	if _exec_axe_cooldown > 0.0:
+		_exec_axe_cooldown -= delta
+	if _exec_axe_slash_timer > 0.0:
+		_exec_axe_slash_timer -= delta
+	if _exec_cleave_flash_timer > 0.0:
+		_exec_cleave_flash_timer -= delta
+	if _exec_yeet_immunity > 0.0:
+		_exec_yeet_immunity -= delta
+	_exec_ball_rotation += delta * 1.5
+	queue_redraw()
+
+
+func _exec_handle_mode_toggle() -> void:
+	var r1_pressed: bool = false
+	if device_id >= 0:
+		r1_pressed = Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_SHOULDER)
+	else:
+		r1_pressed = Input.is_key_pressed(KEY_R)
+	if r1_pressed and not _exec_r1_was_pressed:
+		if _exec_throw_step == 0:
+			if _exec_throw_mode == ExecThrowMode.BALL_FIRST:
+				_exec_throw_mode = ExecThrowMode.SHACKLE_FIRST
+			else:
+				_exec_throw_mode = ExecThrowMode.BALL_FIRST
+			DebugOverlay.log("executioner/throw", self, "MODE TOGGLE: %s",
+				["BALL_FIRST" if _exec_throw_mode == ExecThrowMode.BALL_FIRST else "SHACKLE_FIRST"])
+	_exec_r1_was_pressed = r1_pressed
+
+
+func _exec_handle_throw(delta: float) -> void:
+	if _exec_swing_active:
+		return
+	var is_throwing_ball: bool = (
+		(_exec_throw_step == 0 and _exec_throw_mode == ExecThrowMode.BALL_FIRST) or
+		(_exec_throw_step == 1 and _exec_throw_mode == ExecThrowMode.SHACKLE_FIRST))
+	if _exec_throw_step >= 2:
+		if _is_device_action_just_pressed("grapple"):
+			_exec_retract_all()
+		return
+	if _is_device_action_just_pressed("grapple"):
+		if is_throwing_ball and _exec_ball_state == ExecEndState.HELD:
+			_exec_ball_state = ExecEndState.WINDUP
+			_exec_ball_hold_time = 0.0
+			_exec_ball_angular_vel = EXEC_BALL_SPIN_SPEED
+			_exec_ball_spin_angle = 0.0
+		elif not is_throwing_ball and _exec_shackle_state == ExecEndState.HELD:
+			_exec_shackle_state = ExecEndState.WINDUP
+			_exec_shackle_hold_time = 0.0
+			_exec_shackle_angular_vel = EXEC_SHACKLE_SPIN_SPEED
+			_exec_shackle_spin_angle = 0.0
+	if _exec_ball_state == ExecEndState.WINDUP:
+		_exec_ball_hold_time += delta
+		_exec_ball_angular_vel = minf(_exec_ball_angular_vel + EXEC_BALL_SPIN_ACCEL * delta, EXEC_BALL_MAX_SPIN)
+		var dir_sign: float = 1.0 if _facing_right else -1.0
+		_exec_ball_spin_angle += _exec_ball_angular_vel * delta * dir_sign
+		velocity.x *= 0.6
+		# Show trajectory preview (like monster leap) — right stick priority for aiming
+		var aim := _get_aim_direction_analog()
+		var charge_t: float = clampf(_exec_ball_hold_time / 1.5, 0.0, 1.0)
+		var speed: float = lerpf(EXEC_BALL_THROW_SPEED, EXEC_BALL_MAX_THROW_SPEED, charge_t)
+		_exec_update_preview(aim * speed)
+		if not _is_device_action_pressed("grapple"):
+			_exec_preview_arc.clear()
+			_exec_throw_ball()
+	else:
+		if not _exec_preview_arc.is_empty():
+			_exec_preview_arc.clear()
+	if _exec_shackle_state == ExecEndState.WINDUP:
+		_exec_shackle_hold_time += delta
+		_exec_shackle_angular_vel = minf(_exec_shackle_angular_vel + EXEC_SHACKLE_SPIN_ACCEL * delta, EXEC_SHACKLE_MAX_SPIN)
+		var dir_sign: float = 1.0 if _facing_right else -1.0
+		_exec_shackle_spin_angle += _exec_shackle_angular_vel * delta * dir_sign
+		if not _is_device_action_pressed("grapple"):
+			_exec_throw_shackle()
+
+
+func _exec_update_preview(launch_vel: Vector2) -> void:
+	## Simulate the heavy ball's parabolic arc to show trajectory (like monster leap).
+	## No air drag — rigid physics, pure gravity arc.
+	var dt: float = 0.02
+	var max_steps: int = 80  # ~1.6 seconds of flight
+	var pos := Vector2.ZERO  # Local space from player
+	var vel := launch_vel
+	_exec_preview_arc.clear()
+	_exec_preview_arc.append(pos)
+	for _i in range(max_steps):
+		vel.y += EXEC_BALL_GRAVITY * dt
+		pos += vel * dt
+		_exec_preview_arc.append(pos)
+		# Stop at chain max length
+		if pos.length() > EXEC_CHAIN_MAX_LEN:
+			break
+		# Stop if ball would be far below launch
+		if pos.y > 400.0:
+			break
+
+
+func _exec_throw_ball() -> void:
+	var aim := _get_aim_direction_analog()
+	var charge_t: float = clampf(_exec_ball_hold_time / 1.5, 0.0, 1.0)
+	var speed: float = lerpf(EXEC_BALL_THROW_SPEED, EXEC_BALL_MAX_THROW_SPEED, charge_t)
+	_exec_ball_vel = aim * speed
+	_exec_ball_pos = global_position + aim * 20.0
+	_exec_ball_state = ExecEndState.THROWN
+	_exec_throw_step += 1
+	_exec_ball_anchor_body = null
+	_exec_chain_clank_timer = 0.0
+	_exec_chain_taut = false  # Reset — YEET hasn't fired yet
+	# Spawn chain immediately — it's always rigid, even during flight
+	_exec_spawn_chain()
+	AudioManager.play("grapple_throw", 2.0, 0.5)
+	_rumble(0.4, 0.7, 0.15)
+	DebugOverlay.log("executioner/throw", self, "BALL THROWN: speed=%.0f aim=(%.2f,%.2f)", [speed, aim.x, aim.y])
+
+
+func _exec_throw_shackle() -> void:
+	var aim := _get_aim_direction_analog()
+	var charge_t: float = clampf(_exec_shackle_hold_time / 1.0, 0.0, 1.0)
+	var speed: float = lerpf(EXEC_SHACKLE_THROW_SPEED, EXEC_SHACKLE_MAX_THROW_SPEED, charge_t)
+	_exec_shackle_vel = aim * speed
+	_exec_shackle_pos = global_position + aim * 15.0
+	_exec_shackle_state = ExecEndState.THROWN
+	_exec_throw_step += 1
+	_exec_shackle_anchor_body = null
+	AudioManager.play("grapple_throw", 0.0, 0.8)
+	_rumble(0.3, 0.5, 0.1)
+	DebugOverlay.log("executioner/throw", self, "SHACKLE THROWN: speed=%.0f", [speed])
+
+
+func _exec_retract_all() -> void:
+	_exec_ball_state = ExecEndState.RETRACTING
+	_exec_shackle_state = ExecEndState.RETRACTING
+	_exec_throw_step = 0
+	# Destroy the chain node
+	if _exec_chain_node and is_instance_valid(_exec_chain_node):
+		_exec_chain_node.queue_free()
+		_exec_chain_node = null
+	DebugOverlay.log("executioner/throw", self, "RETRACT ALL")
+
+
+func _exec_tick_ball(delta: float) -> void:
+	match _exec_ball_state:
+		ExecEndState.HELD, ExecEndState.WINDUP:
+			pass
+		ExecEndState.THROWN:
+			# Pure gravity — no air drag. Ball freefalls like a heavy object.
+			_exec_ball_vel.y += EXEC_BALL_GRAVITY * delta
+			var prev_pos: Vector2 = _exec_ball_pos
+			_exec_ball_pos += _exec_ball_vel * delta
+
+			# RIGID chain constraint + YEET physics.
+			# The chain is a rigid rod. When the ball reaches max length, momentum
+			# transfers along the chain as tension (partially elastic collision).
+			#
+			# Physics model (1D elastic collision along chain axis):
+			#   chain_dir = unit vector from player → ball (direction of tension)
+			#   v_b = ball velocity component along chain_dir
+			#   v_p = player velocity component along chain_dir
+			#   m_b = EXEC_BALL_MASS_RATIO (default 8x player mass)
+			#   m_p = 1.0
+			#   e = EXEC_CHAIN_ELASTICITY (0.75 = 75% elastic)
+			#
+			#   v_p' = v_p + (1+e) * m_b/(m_b+m_p) * (v_b - v_p)
+			#   v_b' = v_b - (1+e) * m_p/(m_b+m_p) * (v_b - v_p)
+			#
+			# The player gets YEETED in the chain direction. With m_b=8, e=0.75:
+			#   coefficient = 1.75 * 8/9 = 1.556 — player gets 155% of the
+			#   relative velocity slammed into them along the chain vector.
+			var chain_vec: Vector2 = _exec_ball_pos - global_position
+			var chain_dist: float = chain_vec.length()
+			if chain_dist > EXEC_CHAIN_MAX_LEN:
+				var chain_dir: Vector2 = chain_vec.normalized()
+				# Hard clamp ball position — rigid rod, no stretch
+				_exec_ball_pos = global_position + chain_dir * EXEC_CHAIN_MAX_LEN
+
+				# YEET fires ONCE when the chain first goes taut
+				if not _exec_chain_taut:
+					_exec_chain_taut = true
+
+					# Project both velocities onto the chain axis
+					var v_b: float = _exec_ball_vel.dot(chain_dir)
+					var v_p: float = velocity.dot(chain_dir)
+					var relative_v: float = v_b - v_p
+					var pre_vel: Vector2 = velocity
+
+					# Only YEET if the ball is pulling away (chain under tension)
+					if relative_v > 10.0:
+						var m_b: float = EXEC_BALL_MASS_RATIO  # 8.0 default
+						var m_p: float = 1.0
+						var e: float = EXEC_CHAIN_ELASTICITY   # 0.75 default
+
+						# Elastic collision: new chain-axis velocities
+						var impulse_to_player: float = (1.0 + e) * m_b / (m_b + m_p) * relative_v
+						var impulse_to_ball: float = (1.0 + e) * m_p / (m_b + m_p) * relative_v
+
+						# YEET the player along the chain direction
+						velocity += chain_dir * impulse_to_player
+						# Ball loses momentum along chain (it transferred to player)
+						_exec_ball_vel -= chain_dir * impulse_to_ball
+
+						# Debug output — velocity vectors before/after
+						print("=== YEET ===")
+						print("  ball_pos:     (%.1f, %.1f)  player_pos: (%.1f, %.1f)" % [_exec_ball_pos.x, _exec_ball_pos.y, global_position.x, global_position.y])
+						print("  chain_dir:    (%.1f, %.1f)  <-- direction player gets YEETED" % [chain_dir.x, chain_dir.y])
+						print("  ball_vel:     (%.1f, %.1f)  speed=%.1f" % [_exec_ball_vel.x + chain_dir.x * impulse_to_ball, _exec_ball_vel.y + chain_dir.y * impulse_to_ball, _exec_ball_vel.length()])
+						print("  player BEFORE: (%.1f, %.1f)" % [pre_vel.x, pre_vel.y])
+						print("  player AFTER:  (%.1f, %.1f)  speed=%.1f" % [velocity.x, velocity.y, velocity.length()])
+						print("  chain_axis: v_b=%.1f v_p=%.1f relative=%.1f" % [v_b, v_p, relative_v])
+						print("  impulse:    %.1f  mass_ratio=%.1f  elasticity=%.2f" % [impulse_to_player, m_b, e])
+						print("  YEET vector: (%.1f, %.1f)" % [chain_dir.x * impulse_to_player, chain_dir.y * impulse_to_player])
+
+						DebugOverlay.log("executioner/ball", self,
+							"YEET! vel=(%.0f,%.0f)->(%.0f,%.0f) impulse=%.0f dir=(%.2f,%.2f)",
+							[pre_vel.x, pre_vel.y, velocity.x, velocity.y, impulse_to_player,
+							 chain_dir.x, chain_dir.y])
+
+					_exec_yeet_immunity = 1.5  # Don't OOB-teleport for 1.5s after YEET
+					AudioManager.play("grapple_hit", 2.0, 0.6)
+					_rumble(0.7, 1.0, 0.2)
+
+				# After taut: kill outward ball velocity (rigid constraint, pendulum only)
+				var outward_v: float = _exec_ball_vel.dot(chain_dir)
+				if outward_v > 0.0:
+					_exec_ball_vel -= chain_dir * outward_v
+
+			# Chain clanking sound as links flow out during throw
+			if chain_dist < EXEC_CHAIN_MAX_LEN * 0.95:
+				_exec_chain_clank_timer -= delta
+				if _exec_chain_clank_timer <= 0.0:
+					_exec_chain_clank_timer = EXEC_CHAIN_CLANK_INTERVAL
+					AudioManager.play("grapple_hit", -12.0, randf_range(1.2, 1.8))
+
+			# Raycast for collision with world and enemies
+			var space := get_world_2d().direct_space_state
+			var query := PhysicsRayQueryParameters2D.create(prev_pos, _exec_ball_pos, 1 | 8)
+			query.exclude = [get_rid()]
+			var result: Dictionary = space.intersect_ray(query)
+			if result:
+				_exec_ball_pos = result["position"]
+				var collider: Node = result["collider"]
+				var normal: Vector2 = result["normal"]
+				# Damage + stun on enemy hit (same stagger as chain-yank on monster)
+				if collider.has_method("take_damage"):
+					collider.take_damage(EXEC_BALL_DAMAGE, player_index)
+					_spawn_blood_particles(result["position"])
+				var EntityEffects := preload("res://scripts/systems/entity_effects.gd")
+				EntityEffects.apply(collider, "stun", EXEC_BALL_STUN_DURATION)
+				if collider.has_method("apply_stun"):
+					collider.apply_stun(EXEC_BALL_STUN_DURATION)
+				elif collider.has_method("apply_slow"):
+					collider.apply_slow(EXEC_BALL_STUN_DURATION)
+				DebugOverlay.log("executioner/ball", self, "BALL HIT: target=%s stunned=%.1fs",
+					[collider.name, EXEC_BALL_STUN_DURATION])
+
+				# Determine surface type by normal direction
+				if collider is Node2D:
+					_exec_ball_anchor_body = collider
+					_exec_ball_anchor_offset = result["position"] - collider.global_position
+
+				if normal.y > 0.7:
+					# Ceiling hit — ball cannot stick, drags out and falls
+					_exec_ball_state = ExecEndState.STUCK_CEILING
+					DebugOverlay.log("executioner/ball", self,
+						"BALL HIT CEILING — will drag out and fall")
+				elif absf(normal.x) > 0.7:
+					# Wall hit — sticks, drags slowly downward
+					_exec_ball_state = ExecEndState.STUCK_WALL
+				else:
+					# Floor/platform hit — sticks, drags slowly if pulled
+					_exec_ball_state = ExecEndState.STUCK_PLATFORM
+
+				AudioManager.play("grapple_hit", 2.0, 0.4)
+				_rumble(0.8, 1.0, 0.25)
+				_exec_ball_vel = Vector2.ZERO
+				# Spawn the rigid chain between player and ball
+				_exec_spawn_chain()
+
+			# Update chain anchor while in flight
+			_exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_WALL:
+			# Ball drags slowly down the wall under its own weight
+			_exec_ball_pos.y += EXEC_BALL_WALL_DRAG * delta
+			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+				_exec_ball_anchor_offset.y += EXEC_BALL_WALL_DRAG * delta
+				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
+			# Rigid chain tension — pull player if beyond max length
+			var dist: float = global_position.distance_to(_exec_ball_pos)
+			if dist > EXEC_CHAIN_MAX_LEN:
+				var pull_dir: Vector2 = (_exec_ball_pos - global_position).normalized()
+				velocity += pull_dir * 200.0 * delta
+			_exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_PLATFORM:
+			# Ball sits on platform. Only drags slowly if player pulls beyond slack.
+			var to_player: Vector2 = global_position - _exec_ball_pos
+			if to_player.length() > EXEC_CHAIN_MAX_LEN * 0.8:
+				_exec_ball_pos += to_player.normalized() * EXEC_BALL_PLAT_DRAG * delta
+				if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+					_exec_ball_anchor_offset += to_player.normalized() * EXEC_BALL_PLAT_DRAG * delta
+			# Rigid chain tension
+			var dist: float = global_position.distance_to(_exec_ball_pos)
+			if dist > EXEC_CHAIN_MAX_LEN:
+				velocity += (_exec_ball_pos - global_position).normalized() * 200.0 * delta
+			_exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_CEILING:
+			# Ball is in ceiling — drags out quickly and then freefalls
+			_exec_ball_pos.y += EXEC_BALL_CEILING_DRAG * delta
+			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+				_exec_ball_anchor_offset.y += EXEC_BALL_CEILING_DRAG * delta
+				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
+			# After dragging ~10px out, the ball pops free and freefalls
+			# Check if we've moved far enough from impact to consider it "popped out"
+			_exec_ball_vel.y += EXEC_BALL_GRAVITY * delta * 0.3  # Partial gravity while dragging
+			if _exec_ball_vel.y > 50.0:
+				# Ball has popped free — back to THROWN state (freefall with chain constraint)
+				_exec_ball_state = ExecEndState.THROWN
+				_exec_ball_vel = Vector2(0, 100.0)  # Falls downward
+				_exec_ball_anchor_body = null
+				DebugOverlay.log("executioner/ball", self, "BALL FELL FROM CEILING")
+			_exec_update_chain_ball_anchor()
+
+		ExecEndState.RETRACTING:
+			var to_player: Vector2 = global_position - _exec_ball_pos
+			if to_player.length() < 20.0:
+				_exec_ball_state = ExecEndState.HELD
+			else:
+				_exec_ball_pos += to_player.normalized() * 600.0 * delta
+
+
+func _exec_spawn_chain() -> void:
+	## Spawn a real chain.gd between player and ball — identical to splay chain.
+	## Rigid, breakable, proper Verlet physics, surface collision.
+	## The chain tracks the ball position via anchor_b["pos"] updated each frame.
+	if _exec_chain_node and is_instance_valid(_exec_chain_node):
+		_exec_chain_node.queue_free()
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	_exec_chain_node = Node2D.new()
+	_exec_chain_node.set_script(ChainScript)
+	var anchor_a: Dictionary = ChainScript.make_anchor_body(self)
+	# Use wall anchor for ball end — we manually update the position each frame
+	var anchor_b: Dictionary = ChainScript.make_anchor_wall(_exec_ball_pos)
+	_exec_chain_node.setup(anchor_a, anchor_b, EXEC_CHAIN_MAX_LEN, player_index)
+	get_parent().add_child(_exec_chain_node)
+	DebugOverlay.log("executioner/ball", self, "CHAIN SPAWNED: max_len=%.0f", [EXEC_CHAIN_MAX_LEN])
+
+
+func _exec_update_chain_ball_anchor() -> void:
+	## Keep the chain's ball-side anchor in sync with the dragging ball position.
+	if _exec_chain_node and is_instance_valid(_exec_chain_node) and not _exec_chain_node._severed:
+		_exec_chain_node.anchor_b["pos"] = _exec_ball_pos
+
+
+func _exec_tick_shackle(delta: float) -> void:
+	match _exec_shackle_state:
+		ExecEndState.HELD, ExecEndState.WINDUP:
+			pass
+		ExecEndState.THROWN:
+			_exec_shackle_vel.y += EXEC_SHACKLE_GRAVITY * delta
+			_exec_shackle_vel *= EXEC_SHACKLE_DRAG
+			_exec_shackle_pos += _exec_shackle_vel * delta
+			# Shackle ONLY connects to enemies — check hitbox proximity
+			var snapped: bool = _exec_try_snap_shackle_to_enemy()
+			if snapped:
+				pass  # State changed to ATTACHED_ENEMY
+			elif global_position.distance_to(_exec_shackle_pos) > EXEC_CHAIN_MAX_LEN * 1.5:
+				_exec_shackle_state = ExecEndState.RETRACTING
+			# If shackle hits the ground (world collision), it just bounces/skids — doesn't stick
+			var space := get_world_2d().direct_space_state
+			var query := PhysicsRayQueryParameters2D.create(
+				_exec_shackle_pos - _exec_shackle_vel.normalized() * 5.0,
+				_exec_shackle_pos, 1)  # World only (layer 1), NOT enemies
+			query.exclude = [get_rid()]
+			var result: Dictionary = space.intersect_ray(query)
+			if result:
+				# Bounce off world surfaces — shackle doesn't stick to walls
+				var normal: Vector2 = result["normal"]
+				_exec_shackle_pos = result["position"] + normal * 2.0
+				_exec_shackle_vel = _exec_shackle_vel.bounce(normal) * 0.4
+				AudioManager.play("grapple_hit", -6.0, 1.5)
+		ExecEndState.ATTACHED_ENEMY:
+			# Track the attached enemy (like splay shackle on monster)
+			if _exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body):
+				_exec_shackle_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
+			else:
+				# Enemy died or was freed — retract
+				_exec_shackle_state = ExecEndState.RETRACTING
+		ExecEndState.RETRACTING:
+			var to_player: Vector2 = global_position - _exec_shackle_pos
+			if to_player.length() < 20.0:
+				_exec_shackle_state = ExecEndState.HELD
+				if _exec_ball_state == ExecEndState.HELD:
+					_exec_throw_step = 0
+			else:
+				_exec_shackle_pos += to_player.normalized() * 700.0 * delta
+
+
+func _exec_try_snap_shackle_to_enemy() -> bool:
+	## Check if the shackle is near any enemy hitbox. If so, snap to it (like splay shackle).
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if not enemy is Node2D:
+			continue
+		# Check hitbox parts if available
+		if "_hitboxes" in enemy:
+			for part_name in enemy._hitboxes:
+				var hitbox: Area2D = enemy._hitboxes[part_name]
+				var hitbox_world: Vector2 = enemy.global_position + hitbox.position
+				var dist: float = _exec_shackle_pos.distance_to(hitbox_world)
+				if dist < EXEC_SHACKLE_SNAP_RANGE:
+					_exec_shackle_state = ExecEndState.ATTACHED_ENEMY
+					_exec_shackle_anchor_body = enemy
+					_exec_shackle_anchor_offset = hitbox.position
+					_exec_shackle_pos = hitbox_world
+					if enemy.has_method("take_damage"):
+						enemy.take_damage(EXEC_SHACKLE_DAMAGE, player_index)
+					AudioManager.play("grapple_hit", 2.0, 0.6)
+					_rumble(0.6, 0.8, 0.2)
+					DebugOverlay.log("executioner/throw", self,
+						"SHACKLE ATTACHED: %s/%s", [enemy.name, part_name])
+					return true
+		else:
+			# Simple distance check for enemies without hitbox parts
+			var dist: float = _exec_shackle_pos.distance_to(enemy.global_position)
+			if dist < EXEC_SHACKLE_SNAP_RANGE:
+				_exec_shackle_state = ExecEndState.ATTACHED_ENEMY
+				_exec_shackle_anchor_body = enemy
+				_exec_shackle_anchor_offset = Vector2.ZERO
+				_exec_shackle_pos = enemy.global_position
+				if enemy.has_method("take_damage"):
+					enemy.take_damage(EXEC_SHACKLE_DAMAGE, player_index)
+				AudioManager.play("grapple_hit", 2.0, 0.6)
+				_rumble(0.6, 0.8, 0.2)
+				DebugOverlay.log("executioner/throw", self,
+					"SHACKLE ATTACHED: %s", [enemy.name])
+				return true
+	return false
+
+
+func _exec_check_chain_severed() -> void:
+	## If the real chain.gd was severed (broken by damage), retract everything.
+	if _exec_chain_node and is_instance_valid(_exec_chain_node):
+		if _exec_chain_node._severed:
+			_exec_chain_node = null
+			_exec_ball_state = ExecEndState.RETRACTING
+			_exec_shackle_state = ExecEndState.RETRACTING
+			_exec_throw_step = 0
+			DebugOverlay.log("executioner/ball", self, "CHAIN BROKEN — retracting")
+
+
+func _exec_get_ball_world_pos() -> Vector2:
+	match _exec_ball_state:
+		ExecEndState.HELD:
+			return global_position + Vector2(20.0 if _facing_right else -20.0, -5.0)
+		ExecEndState.WINDUP:
+			return global_position + Vector2(cos(_exec_ball_spin_angle), sin(_exec_ball_spin_angle)) * 25.0
+		_:
+			return _exec_ball_pos
+
+
+func _exec_get_shackle_world_pos() -> Vector2:
+	match _exec_shackle_state:
+		ExecEndState.HELD:
+			return global_position + Vector2(-15.0 if _facing_right else 15.0, 0.0)
+		ExecEndState.WINDUP:
+			return global_position + Vector2(cos(_exec_shackle_spin_angle), sin(_exec_shackle_spin_angle)) * 20.0
+		_:
+			return _exec_shackle_pos
+
+
+func _exec_tick_swing(delta: float) -> void:
+	if not _exec_swing_active:
+		return
+	_exec_swing_time += delta
+	_exec_swing_angular_vel = minf(_exec_swing_angular_vel + EXEC_SWING_SPIN_ACCEL * delta, EXEC_SWING_MAX_SPIN)
+	var dir_sign: float = 1.0 if _facing_right else -1.0
+	_exec_swing_angle += _exec_swing_angular_vel * delta * dir_sign
+	velocity.x *= 0.85
+	if not _is_device_action_pressed("attack"):
+		_exec_perform_slam()
+		_exec_swing_active = false
+
+
+func _attack_executioner() -> void:
+	if _exec_swing_active:
+		return
+	_exec_swing_active = true
+	_exec_swing_time = 0.0
+	_exec_swing_angle = -PI * 0.5
+	_exec_swing_angular_vel = EXEC_SWING_SPIN_SPEED
+	AudioManager.play("sword_slash", -2.0, 0.5)
+
+
+func _exec_perform_slam() -> void:
+	var hold_t: float = clampf(_exec_swing_time / 2.0, 0.0, 1.0)
+	if _exec_swing_time < EXEC_SWING_MIN_HOLD:
+		DebugOverlay.log("executioner/swing", self, "SWING CANCEL: too short %.2fs", [_exec_swing_time])
+		return
+	var damage: int = int(lerpf(EXEC_SWING_BASE_DAMAGE, EXEC_SWING_MAX_DAMAGE, hold_t))
+	var slam_pos: Vector2 = global_position + Vector2(30.0 if _facing_right else -30.0, 10.0)
+	AudioManager.play("explosion", 2.0, 0.35)
+	_rumble(0.8, 1.0, 0.3)
+	_screen_shake(lerpf(3.0, 10.0, hold_t), 0.25)
+	# Dust puff — fast dissipating radial particles
+	for i in range(EXEC_SWING_DUST_COUNT):
+		var angle: float = float(i) / float(EXEC_SWING_DUST_COUNT) * TAU
+		var dust := ColorRect.new()
+		dust.color = Color(0.6, 0.55, 0.4, 0.7)
+		dust.size = Vector2(randf_range(3, 6), randf_range(3, 6))
+		dust.position = slam_pos
+		dust.z_index = 4
+		get_parent().add_child(dust)
+		var target_pos: Vector2 = slam_pos + Vector2(cos(angle), sin(angle)) * EXEC_SWING_DUST_SPEED * randf_range(0.5, 1.0) * 0.3
+		var dt := dust.create_tween()
+		dt.tween_property(dust, "position", target_pos, 0.3).set_ease(Tween.EASE_OUT)
+		dt.parallel().tween_property(dust, "modulate:a", 0.0, 0.25)
+		dt.tween_callback(dust.queue_free)
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		if slam_pos.distance_to(body.global_position) < EXEC_SWING_SLAM_RADIUS:
+			if body.has_method("take_damage"):
+				body.take_damage(int(damage * attack_bonus), player_index)
+				_spawn_blood_particles(body.global_position)
+			if body.has_method("apply_knockback"):
+				body.apply_knockback((body.global_position - slam_pos).normalized() * EXEC_SWING_KNOCKBACK * hold_t)
+	DebugOverlay.log("executioner/swing", self, "SLAM: hold=%.2fs dmg=%d", [_exec_swing_time, damage])
+	PlayerManager.add_skill_xp(player_index, "attack", 4)
+
+
+func _exec_handle_axe() -> void:
+	if not _is_device_action_just_pressed("interact"):
+		return
+	if _exec_axe_cooldown > 0.0:
+		_spawn_fail_flash()
+		return
+	_exec_axe_cooldown = EXEC_AXE_COOLDOWN
+	_exec_axe_slash_timer = 0.3
+	var aim: Vector2 = _get_aim_direction_analog()
+	AudioManager.play("sword_slash", 1.0, 0.7)
+	_rumble(0.3, 0.5, 0.1)
+	var offset: Vector2 = aim * EXEC_AXE_RANGE
+	attack_area.position = offset
+	attack_area.monitoring = true
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(int(EXEC_AXE_DAMAGE * attack_bonus), player_index)
+			_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			body.apply_knockback(aim * 150.0)
+	await get_tree().create_timer(0.1).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
+	PlayerManager.add_skill_xp(player_index, "attack", 2)
+	DebugOverlay.log("executioner/axe", self, "AXE CHOP: dmg=%d", [EXEC_AXE_DAMAGE])
+
+
+func _special_executioner_cleave() -> void:
+	_exec_cleave_charging = true
+	_exec_cleave_charge_time = 0.0
+	AudioManager.play("shield_charge", -2.0, 0.4)
+
+
+func _exec_tick_cleave(delta: float) -> void:
+	if not _exec_cleave_charging:
+		return
+	_exec_cleave_charge_time += delta
+	velocity.x *= 0.5
+	if _exec_cleave_charge_time > 0.5:
+		position.x += sin(Time.get_ticks_msec() * 0.05) * (_exec_cleave_charge_time * 0.5)
+	if _exec_cleave_charge_time >= EXEC_CLEAVE_CHARGE_TIME or not _is_device_action_pressed("special"):
+		_exec_fire_cleave()
+		_exec_cleave_charging = false
+
+
+func _exec_fire_cleave() -> void:
+	if _exec_cleave_charge_time < EXEC_CLEAVE_MIN_CHARGE:
+		DebugOverlay.log("executioner/cleave", self, "CLEAVE CANCEL: charge=%.2f", [_exec_cleave_charge_time])
+		return
+	var charge_t: float = clampf(
+		(_exec_cleave_charge_time - EXEC_CLEAVE_MIN_CHARGE) /
+		(EXEC_CLEAVE_CHARGE_TIME - EXEC_CLEAVE_MIN_CHARGE), 0.0, 1.0)
+	var damage: int = int(lerpf(EXEC_CLEAVE_BASE_DAMAGE, EXEC_CLEAVE_MAX_DAMAGE, charge_t))
+	var aim: Vector2 = _get_aim_direction_analog()
+	AudioManager.play("explosion", 4.0, 0.25)
+	_rumble(1.0, 1.0, 0.4)
+	_screen_shake(lerpf(5.0, 15.0, charge_t), 0.3)
+	_exec_cleave_flash_timer = 0.15
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		var to_enemy: Vector2 = body.global_position - global_position
+		if to_enemy.length() > EXEC_CLEAVE_RANGE:
+			continue
+		if absf(aim.angle_to(to_enemy.normalized())) > EXEC_CLEAVE_ARC * 0.5:
+			continue
+		if body.has_method("take_damage"):
+			body.take_damage(int(damage * attack_bonus), player_index)
+			_spawn_blood_particles(body.global_position)
+		if body.has_method("apply_knockback"):
+			body.apply_knockback(to_enemy.normalized() * EXEC_CLEAVE_ENEMY_KB * charge_t)
+	# Player self-knockback from impact power
+	velocity += -aim * EXEC_CLEAVE_KNOCKBACK * charge_t
+	velocity.y = minf(velocity.y, -150.0 * charge_t)
+	# Arc flash VFX
+	var arc_start: float = aim.angle() - EXEC_CLEAVE_ARC * 0.5
+	for i in range(8):
+		var a: float = arc_start + (float(i) / 7.0) * EXEC_CLEAVE_ARC
+		var spark := ColorRect.new()
+		spark.color = Color(1.0, 0.95, 0.85, 0.9)
+		spark.size = Vector2(lerpf(4, 8, charge_t), lerpf(4, 8, charge_t))
+		spark.position = global_position + Vector2(cos(a), sin(a)) * EXEC_CLEAVE_RANGE
+		spark.z_index = 10
+		get_parent().add_child(spark)
+		var st := spark.create_tween()
+		st.tween_property(spark, "position", spark.position + Vector2(cos(a), sin(a)) * 30.0, 0.12)
+		st.parallel().tween_property(spark, "modulate:a", 0.0, 0.15)
+		st.tween_callback(spark.queue_free)
+	PlayerManager.add_skill_xp(player_index, "special", 8)
+	DebugOverlay.log("executioner/cleave", self, "CLEAVE: charge=%.2f dmg=%d kb=%.0f",
+		[_exec_cleave_charge_time, damage, EXEC_CLEAVE_KNOCKBACK * charge_t])
+
+
+func _charged_executioner_overhead(charge_ratio: float) -> void:
+	var damage: int = int(lerpf(EXEC_SWING_BASE_DAMAGE * 1.5, EXEC_SWING_MAX_DAMAGE * 1.5, charge_ratio))
+	var slam_pos: Vector2 = global_position + Vector2(35.0 if _facing_right else -35.0, 10.0)
+	AudioManager.play("explosion", 4.0, 0.3)
+	_rumble(1.0, 1.0, 0.4)
+	_screen_shake(lerpf(5.0, 14.0, charge_ratio), 0.3)
+	var dust_count: int = int(EXEC_SWING_DUST_COUNT * 1.5)
+	for i in range(dust_count):
+		var angle: float = float(i) / float(dust_count) * TAU
+		var dust := ColorRect.new()
+		dust.color = Color(0.5, 0.45, 0.3, 0.8)
+		dust.size = Vector2(randf_range(4, 8), randf_range(4, 8))
+		dust.position = slam_pos
+		dust.z_index = 4
+		get_parent().add_child(dust)
+		var dt := dust.create_tween()
+		dt.tween_property(dust, "position", slam_pos + Vector2(cos(angle), sin(angle)) * EXEC_SWING_DUST_SPEED * 0.5, 0.4).set_ease(Tween.EASE_OUT)
+		dt.parallel().tween_property(dust, "modulate:a", 0.0, 0.35)
+		dt.tween_callback(dust.queue_free)
+	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "charge")
+	for body in get_tree().get_nodes_in_group("enemies"):
+		if not body is Node2D:
+			continue
+		if slam_pos.distance_to(body.global_position) < EXEC_SWING_SLAM_RADIUS * 1.3:
+			if body.has_method("take_damage"):
+				body.take_damage(int(damage * attack_bonus), player_index)
+				_spawn_blood_particles(body.global_position)
+			if body.has_method("apply_knockback"):
+				body.apply_knockback((body.global_position - slam_pos).normalized() * EXEC_SWING_KNOCKBACK * 1.5)
+	PlayerManager.add_skill_xp(player_index, "charge", 6)
+	DebugOverlay.log("executioner/swing", self, "CHARGED OVERHEAD: ratio=%.2f dmg=%d", [charge_ratio, damage])
+
+
+func _draw_executioner() -> void:
+	if character_class != PlayerManager.CharacterClass.EXECUTIONER:
+		return
+	# Chain is drawn by chain.gd itself (real splay-chain physics)
+	_draw_exec_ball()
+	_draw_exec_shackle()
+	_draw_exec_trajectory_preview()
+	if _exec_swing_active:
+		_draw_exec_swing()
+	if _exec_axe_slash_timer > 0.0:
+		_draw_exec_axe_slash()
+	if _exec_cleave_charging:
+		_draw_exec_cleave_charge()
+	if _exec_cleave_flash_timer > 0.0:
+		draw_circle(Vector2.ZERO, EXEC_CLEAVE_RANGE * 1.5, Color(1, 1, 1, _exec_cleave_flash_timer / 0.15 * 0.4))
+	_draw_exec_mode_indicator()
+
+
+func _draw_exec_ball() -> void:
+	var ball_local: Vector2 = _exec_get_ball_world_pos() - global_position
+	draw_circle(ball_local, EXEC_BALL_RADIUS, Color(0.08, 0.06, 0.06))
+	draw_circle(ball_local + Vector2(-2, -3), EXEC_BALL_RADIUS * 0.4, Color(0.2, 0.18, 0.18, 0.5))
+	for i in range(EXEC_BALL_SPIKE_COUNT):
+		var spike_angle: float = _exec_ball_rotation + float(i) / float(EXEC_BALL_SPIKE_COUNT) * TAU
+		var base: Vector2 = ball_local + Vector2(cos(spike_angle), sin(spike_angle)) * EXEC_BALL_RADIUS * 0.8
+		var tip: Vector2 = ball_local + Vector2(cos(spike_angle), sin(spike_angle)) * (EXEC_BALL_RADIUS + EXEC_BALL_SPIKE_LEN)
+		var perp := Vector2(-sin(spike_angle), cos(spike_angle)) * 2.5
+		draw_colored_polygon(PackedVector2Array([base - perp, base + perp, tip]), Color(0.12, 0.1, 0.1))
+	if _exec_ball_state == ExecEndState.WINDUP:
+		for j in range(5):
+			var a: float = _exec_ball_spin_angle - float(j) * 0.3
+			draw_circle(Vector2(cos(a), sin(a)) * 25.0, 2.0, Color(0.3, 0.3, 0.3, 0.5 - float(j) * 0.1))
+
+
+func _draw_exec_shackle() -> void:
+	var shackle_local: Vector2 = _exec_get_shackle_world_pos() - global_position
+	var chain_col := Color(0.3, 0.28, 0.26, 0.95)
+	# Splay-style shackle: solid rectangle cuff (like monster splay chain hardware)
+	var hw: float = 5.0
+	var hh: float = 3.5
+	draw_rect(Rect2(shackle_local.x - hw, shackle_local.y - hh, hw * 2, hh * 2), chain_col)
+	# Inner dark
+	draw_rect(Rect2(shackle_local.x - hw + 1, shackle_local.y - hh + 1, hw * 2 - 2, hh * 2 - 2), Color(0.15, 0.12, 0.12))
+	# Rivet dots
+	draw_circle(shackle_local + Vector2(-3, -2), 1.0, chain_col)
+	draw_circle(shackle_local + Vector2(3, -2), 1.0, chain_col)
+	draw_circle(shackle_local + Vector2(-3, 2), 1.0, chain_col)
+	draw_circle(shackle_local + Vector2(3, 2), 1.0, chain_col)
+	# Windup trail
+	if _exec_shackle_state == ExecEndState.WINDUP:
+		for j in range(5):
+			var a: float = _exec_shackle_spin_angle - float(j) * 0.3
+			draw_circle(Vector2(cos(a), sin(a)) * 20.0, 1.5, Color(0.4, 0.35, 0.3, 0.4 - float(j) * 0.08))
+
+
+func _draw_exec_trajectory_preview() -> void:
+	## Draw the ball's predicted arc during windup (like monster leap preview).
+	if _exec_preview_arc.size() < 2:
+		return
+	var arc_color := Color(0.8, 0.3, 0.2, 0.5)
+	var dot_color := Color(0.9, 0.4, 0.3, 0.7)
+	# Draw dotted arc
+	for i in range(_exec_preview_arc.size() - 1):
+		if i % 2 == 0:
+			draw_line(_exec_preview_arc[i], _exec_preview_arc[i + 1], arc_color, 1.5)
+	# Landing dot at end
+	if _exec_preview_arc.size() > 1:
+		var end_pt: Vector2 = _exec_preview_arc[_exec_preview_arc.size() - 1]
+		draw_circle(end_pt, 4.0, dot_color)
+		draw_circle(end_pt, 2.0, Color(1, 0.5, 0.3, 0.9))
+
+
+func _draw_exec_swing() -> void:
+	var swing_radius := 30.0
+	var ball_offset := Vector2(cos(_exec_swing_angle), sin(_exec_swing_angle)) * swing_radius
+	for i in range(6):
+		var trail_angle: float = _exec_swing_angle - float(i) * 0.25 * (1.0 if _facing_right else -1.0)
+		draw_circle(Vector2(cos(trail_angle), sin(trail_angle)) * swing_radius, EXEC_BALL_RADIUS * 0.7,
+			Color(0.1, 0.08, 0.08, (1.0 - float(i) / 6.0) * 0.3))
+	draw_circle(ball_offset, EXEC_BALL_RADIUS, Color(0.08, 0.06, 0.06))
+	for j in range(EXEC_BALL_SPIKE_COUNT):
+		var spike_a: float = _exec_ball_rotation + float(j) / float(EXEC_BALL_SPIKE_COUNT) * TAU
+		var tip: Vector2 = ball_offset + Vector2(cos(spike_a), sin(spike_a)) * (EXEC_BALL_RADIUS + EXEC_BALL_SPIKE_LEN * 0.7)
+		draw_line(ball_offset, tip, Color(0.15, 0.12, 0.12), 1.5)
+	if _exec_swing_angular_vel > EXEC_SWING_MAX_SPIN * 0.5:
+		var intensity: float = (_exec_swing_angular_vel - EXEC_SWING_MAX_SPIN * 0.5) / (EXEC_SWING_MAX_SPIN * 0.5)
+		for k in range(3):
+			var la: float = _exec_swing_angle + float(k) * TAU / 3.0
+			draw_line(Vector2(cos(la), sin(la)) * swing_radius * 0.3,
+				Vector2(cos(la), sin(la)) * swing_radius * 0.8,
+				Color(0.5, 0.5, 0.5, intensity * 0.3), 1.0)
+
+
+func _draw_exec_axe_slash() -> void:
+	var aim: Vector2 = _get_aim_direction_analog()
+	var base_angle: float = aim.angle()
+	var arc_start: float = base_angle - EXEC_AXE_SWING_ARC * 0.5
+	var progress: float = 1.0 - _exec_axe_slash_timer / 0.3
+	var sweep_angle: float = arc_start + EXEC_AXE_SWING_ARC * progress
+	for i in range(8):
+		var t: float = float(i) / 7.0
+		var a: float = lerpf(arc_start, sweep_angle, t)
+		draw_circle(Vector2(cos(a), sin(a)) * EXEC_AXE_RANGE * lerpf(0.5, 1.0, t), 3.0,
+			Color(0.7, 0.65, 0.6, (1.0 - t) * 0.6))
+	draw_line(Vector2(cos(arc_start), sin(arc_start)) * EXEC_AXE_RANGE,
+		Vector2(cos(sweep_angle), sin(sweep_angle)) * EXEC_AXE_RANGE,
+		Color(0.8, 0.75, 0.7, 0.5), 2.0)
+
+
+func _draw_exec_cleave_charge() -> void:
+	var charge_t: float = clampf(_exec_cleave_charge_time / EXEC_CLEAVE_CHARGE_TIME, 0.0, 1.0)
+	var aim: Vector2 = _get_aim_direction_analog()
+	var pulse: float = sin(Time.get_ticks_msec() * 0.01) * 0.2
+	var aura_radius: float = lerpf(10.0, 40.0, charge_t)
+	draw_circle(Vector2.ZERO, aura_radius, Color(0.15, 0.05, 0.05, (0.2 + pulse) * charge_t))
+	draw_circle(Vector2.ZERO, aura_radius * 0.6, Color(0.3, 0.05, 0.0, (0.3 + pulse) * charge_t))
+	var blade_end: Vector2 = aim * lerpf(35.0, 50.0, charge_t)
+	draw_line(aim * 20.0, blade_end, Color(1.0, 0.8, 0.6, charge_t * 0.8), lerpf(2.0, 4.0, charge_t))
+	if charge_t > 0.5:
+		for i in range(int(charge_t * 4)):
+			draw_circle(Vector2(randf_range(-15, 15), randf_range(-15, 15)) * charge_t, 1.5,
+				Color(1.0, 0.9, 0.5, randf_range(0.3, 0.7)))
+
+
+func _draw_exec_mode_indicator() -> void:
+	var p := Vector2(0, -30)
+	if _exec_throw_mode == ExecThrowMode.BALL_FIRST:
+		draw_circle(p, 3.0, Color(0.1, 0.08, 0.08, 0.6))
+		draw_circle(p + Vector2(8, 0), 2.0, Color(0.4, 0.35, 0.3, 0.4))
+	else:
+		draw_circle(p, 2.0, Color(0.4, 0.35, 0.3, 0.6))
+		draw_circle(p + Vector2(8, 0), 3.0, Color(0.1, 0.08, 0.08, 0.4))

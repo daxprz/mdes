@@ -20,6 +20,10 @@ var mini_muffin_counts: Dictionary = {}  # player_index -> int
 var current_tower_id: int = 0
 var _transitioning := false
 
+# -- Debug Config (game/*) -----------------------------------------------------
+# Togglable game-wide settings exposed in the debug drawer.
+var multiple_players_same_class: bool = false  # Allow duplicate class picks
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS

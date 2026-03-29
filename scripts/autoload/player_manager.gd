@@ -8,7 +8,7 @@ signal player_left(player_index: int)
 signal all_players_dead
 signal skill_leveled_up(player_index: int, skill: String, new_level: int)
 
-enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER, TANK, NINJA, BALLOONIST, GUITARIST, WEREWOLF, MONSTER }
+enum CharacterClass { MELEE, RANGED, MAGE, SUMMONER, ROGUE, DEMOLITIONIST, HEALER, TANK, NINJA, BALLOONIST, GUITARIST, WEREWOLF, EXECUTIONER, MONSTER }
 
 const MAX_PLAYERS := 4
 const MAX_SKILL_LEVEL := 20
@@ -92,6 +92,12 @@ const CLASS_STATS := {
 		"max_health": 140,
 		"max_mana": 20,
 		"speed": 135,
+		"mana_regen": 0.5,
+	},
+	CharacterClass.EXECUTIONER: {
+		"max_health": 200,
+		"max_mana": 30,
+		"speed": 85,
 		"mana_regen": 0.5,
 	},
 	CharacterClass.MONSTER: {
@@ -279,7 +285,17 @@ func _pick_random_class() -> CharacterClass:
 		CharacterClass.ROGUE,
 		CharacterClass.DEMOLITIONIST,
 		CharacterClass.HEALER,
+		CharacterClass.TANK,
+		CharacterClass.NINJA,
+		CharacterClass.BALLOONIST,
+		CharacterClass.GUITARIST,
+		CharacterClass.WEREWOLF,
+		CharacterClass.EXECUTIONER,
 	]
+
+	# If duplicate classes allowed, all classes are always available
+	if GameManager.multiple_players_same_class:
+		return all_classes[randi() % all_classes.size()]
 
 	# Prefer classes not yet taken.
 	var taken_classes: Array = []
@@ -304,12 +320,13 @@ func _pick_preferred_or_random_class(device_id: int) -> CharacterClass:
 		var last_class_int: int = profile["last_class"]
 		if last_class_int >= 0 and last_class_int < CharacterClass.values().size():
 			var preferred: CharacterClass = last_class_int as CharacterClass
-			# Check if it's not taken by another player
+			# Check if it's not taken by another player (unless duplicates allowed)
 			var taken := false
-			for p in players.values():
-				if p["character_class"] == preferred:
-					taken = true
-					break
+			if not GameManager.multiple_players_same_class:
+				for p in players.values():
+					if p["character_class"] == preferred:
+						taken = true
+						break
 			if not taken:
 				return preferred
 	return _pick_random_class()

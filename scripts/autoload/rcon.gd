@@ -150,6 +150,7 @@ func _execute(command: String) -> String:
   score                         — show score panel
   grid                          — toggle grid overlay
   debugdraw                     — toggle enemy debug draw
+  gameconfig <key> [value]      — get/set game config (gc shorthand)
   quit                          — quit game"""
 
 		"debug":
@@ -750,8 +751,48 @@ func _execute(command: String) -> String:
 			get_tree().quit()
 			return "OK: quitting"
 
+		"gameconfig", "gc":
+			return _cmd_gameconfig(parts)
+
 		_:
 			return "ERR: unknown command '%s'. Try 'help'" % cmd
+
+
+func _cmd_gameconfig(parts: PackedStringArray) -> String:
+	## Get/set game config values.
+	## Usage: gameconfig <key> [value]
+	##   gameconfig list                        — list all settings
+	##   gameconfig multiple_players_same_class  — show current value
+	##   gameconfig multiple_players_same_class true — set value
+	var GAME_CONFIG_KEYS := {
+		"multiple_players_same_class": {
+			"get": func() -> Variant: return GameManager.multiple_players_same_class,
+			"set": func(v: String) -> void: GameManager.multiple_players_same_class = v.to_lower() in ["true", "1", "on", "yes"],
+			"type": "bool",
+		},
+	}
+
+	if parts.size() < 2 or parts[1] == "list":
+		var lines: PackedStringArray = PackedStringArray(["Game Config:"])
+		for key in GAME_CONFIG_KEYS:
+			var val: Variant = GAME_CONFIG_KEYS[key]["get"].call()
+			lines.append("  %s = %s (%s)" % [key, str(val), GAME_CONFIG_KEYS[key]["type"]])
+		return "\n".join(lines)
+
+	var key: String = parts[1]
+	if not GAME_CONFIG_KEYS.has(key):
+		return "ERR: unknown game config key '%s'. Try 'gameconfig list'" % key
+
+	if parts.size() < 3:
+		# Get
+		var val: Variant = GAME_CONFIG_KEYS[key]["get"].call()
+		return "game/%s = %s" % [key, str(val)]
+
+	# Set
+	var value_str: String = parts[2]
+	GAME_CONFIG_KEYS[key]["set"].call(value_str)
+	var new_val: Variant = GAME_CONFIG_KEYS[key]["get"].call()
+	return "OK: game/%s = %s" % [key, str(new_val)]
 
 
 func _cmd_teleport(parts: PackedStringArray) -> String:

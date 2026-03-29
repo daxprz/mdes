@@ -16,6 +16,7 @@ const CLASS_SPRITES := {
 	PlayerManager.CharacterClass.BALLOONIST: "res://assets/sprites/characters/balloonist_topdown.png",
 	PlayerManager.CharacterClass.GUITARIST: "res://assets/sprites/characters/guitarist_topdown.png",
 	PlayerManager.CharacterClass.WEREWOLF: "res://assets/sprites/characters/werewolf_topdown.png",
+	PlayerManager.CharacterClass.EXECUTIONER: "res://assets/sprites/characters/executioner_topdown.png",
 }
 
 # Direction rows in the spritesheet: down=0, left=1, right=2, up=3
@@ -311,6 +312,11 @@ func _perform_attack() -> void:
 		_attack_balloonist_topdown()
 		return
 
+	# Executioner axe chop (topdown)
+	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
+		_attack_executioner_topdown()
+		return
+
 	# Position the attack area based on facing direction
 	var offset := Vector2.ZERO
 	match _direction:
@@ -380,6 +386,7 @@ func _get_attack_damage() -> int:
 		PlayerManager.CharacterClass.BALLOONIST: return 8
 		PlayerManager.CharacterClass.GUITARIST: return 12
 		PlayerManager.CharacterClass.WEREWOLF: return 15
+		PlayerManager.CharacterClass.EXECUTIONER: return 30
 	return 10
 
 
@@ -421,6 +428,8 @@ func _perform_special() -> void:
 			_special_guitarist_blast_topdown()
 		PlayerManager.CharacterClass.WEREWOLF:
 			_special_werewolf_roar_topdown()
+		PlayerManager.CharacterClass.EXECUTIONER:
+			pass  # Executioner special is side-view only for now
 
 
 func _special_melee() -> void:
@@ -777,6 +786,8 @@ func _handle_circle_abilities(delta: float) -> void:
 			_handle_guitarist_amp_up_topdown(delta)
 		PlayerManager.CharacterClass.WEREWOLF:
 			_handle_werewolf_frenzy_topdown(delta)
+		PlayerManager.CharacterClass.EXECUTIONER:
+			pass  # Executioner Circle is side-view only for now
 
 
 # -- Melee Enrage (Circle) ----------------------------------------------------
@@ -2004,3 +2015,21 @@ func _attack_balloonist_topdown() -> void:
 	dart.owner_index = player_index
 	dart.global_position = global_position + aim * 12.0
 	get_parent().add_child(dart)
+
+
+func _attack_executioner_topdown() -> void:
+	# Heavy axe chop — same pattern as melee but slower, stronger
+	var aim: Vector2 = _get_aim_direction()
+	var offset: Vector2 = aim * 24.0
+	attack_area.position = offset
+	attack_area.monitoring = true
+	AudioManager.play("sword_slash", 1.0, 0.5)
+	await get_tree().physics_frame
+	if not is_inside_tree():
+		return
+	for body in attack_area.get_overlapping_bodies():
+		if body.has_method("take_damage"):
+			body.take_damage(30, player_index)
+	await get_tree().create_timer(0.15).timeout
+	if is_inside_tree():
+		attack_area.monitoring = false
