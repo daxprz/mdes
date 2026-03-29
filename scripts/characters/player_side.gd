@@ -7526,13 +7526,39 @@ func _handle_executioner(delta: float) -> void:
 
 
 func _exec_handle_mode_toggle() -> void:
+	## R1 always works:
+	##   - Nothing out: toggle ball/shackle order
+	##   - Ball out: recall ball, ready for next throw
+	##   - Shackle out: recall shackle, ready for next throw
+	##   - Both out: recall both
+	## No stuck states possible.
 	var r1_pressed: bool = false
 	if device_id >= 0:
 		r1_pressed = Input.is_joy_button_pressed(device_id, JOY_BUTTON_RIGHT_SHOULDER)
 	else:
 		r1_pressed = Input.is_key_pressed(KEY_R)
 	if r1_pressed and not _exec_r1_was_pressed:
-		if _exec_throw_step == 0:
+		var anything_out: bool = _exec_ball_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING] or \
+			_exec_shackle_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING]
+
+		if anything_out:
+			# Recall everything that's out
+			if _exec_ball_state not in [ExecEndState.HELD, ExecEndState.RETRACTING]:
+				_exec_ball_state = ExecEndState.RETRACTING
+				DebugOverlay.log("executioner/throw", self, "R1 RECALL: ball")
+			if _exec_shackle_state not in [ExecEndState.HELD, ExecEndState.RETRACTING]:
+				_exec_shackle_state = ExecEndState.RETRACTING
+				DebugOverlay.log("executioner/throw", self, "R1 RECALL: shackle")
+			_exec_throw_step = 0
+			# Destroy chain nodes
+			if _exec_chain_node and is_instance_valid(_exec_chain_node):
+				_exec_chain_node.queue_free()
+				_exec_chain_node = null
+			if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node):
+				_exec_shackle_chain_node.queue_free()
+				_exec_shackle_chain_node = null
+		else:
+			# Nothing out — toggle throw order
 			if _exec_throw_mode == ExecThrowMode.BALL_FIRST:
 				_exec_throw_mode = ExecThrowMode.SHACKLE_FIRST
 			else:
@@ -8142,8 +8168,16 @@ func _exec_tick_shackle(delta: float) -> void:
 
 
 func _exec_try_snap_shackle_to_enemy() -> bool:
-	## Check if the shackle is near any enemy hitbox. If so, snap to it (like splay shackle).
-	for enemy in get_tree().get_nodes_in_group("enemies"):
+	## Check if the shackle is near any damageable entity. Snaps to hitbox or center.
+	## Checks enemies, attack dummies, and players (but not self).
+	var targets: Array = []
+	targets.append_array(get_tree().get_nodes_in_group("enemies"))
+	targets.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	# Also check other players/dummies (soccer balls are in "players" group)
+	for p in get_tree().get_nodes_in_group("players"):
+		if p != self and p not in targets:
+			targets.append(p)
+	for enemy in targets:
 		if not enemy is Node2D:
 			continue
 		# Check hitbox parts if available

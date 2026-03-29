@@ -163,6 +163,13 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.30
+**Shackle attaches to any entity, R1 always recalls, no stuck states**
+
+- **Shackle targets all entities**: Shackle now snaps to any damageable entity — enemies, attack dummies, soccer balls, other players (not self). Previously only checked "enemies" group.
+- **R1 always works**: R1 recalls everything when anything is deployed (ball, shackle, or both). Only toggles ball/shackle order when nothing is out. No stuck states possible.
+- **L1 recall**: Still works when both ends are thrown.
+
 ### v0.10.29
 **Ball-and-chain physics overhaul, chain split system, AI player, tuning popup**
 
