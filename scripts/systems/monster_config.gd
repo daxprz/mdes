@@ -94,3 +94,80 @@ class TimedProvider:
 	func _to_string() -> String:
 		var remaining: float = _expire_time - Time.get_ticks_msec() / 1000.0
 		return "TimedProvider(%s, %.1fs left)" % [_name, maxf(remaining, 0.0)]
+
+
+## ModifierProvider: applies operations (multiply, add, min, max) to config values
+## instead of overriding them. Multiple modifiers stack — all are applied in order.
+##
+## Usage:
+##   var mods = { "exec_ball_mass_ratio": ["multiply", 1.5],   # 1.5x mass
+##                "exec_ball_damage": ["add", 20],              # +20 damage
+##                "exec_chain_elasticity": ["set", 1.0],        # force to 1.0
+##                "speed": ["min", 50],                         # at least 50
+##                "gravity": ["max", 500] }                     # at most 500
+##   var provider = MCP.ModifierProvider.new(mods, "heavy_ball_artifact")
+##
+## Operations:
+##   ["multiply", x]  — val *= x
+##   ["add", x]       — val += x
+##   ["set", x]       — val = x  (same as DictProvider, but explicit)
+##   ["min", x]       — val = max(val, x)  (floor)
+##   ["max", x]       — val = min(val, x)  (ceiling)
+class ModifierProvider:
+	var _modifiers: Dictionary = {}  # key -> [operation, value]
+	var _name: String = ""
+
+	func _init(modifiers: Dictionary = {}, provider_name: String = "modifier") -> void:
+		_modifiers = modifiers
+		_name = provider_name
+
+	func get_value(_key: String) -> Variant:
+		## ModifierProviders don't participate in the "first non-null wins" lookup.
+		## They are applied separately via apply_modifiers(). Return null here.
+		return null
+
+	func get_modifier(key: String) -> Variant:
+		## Returns [operation, value] for a key, or null if no modifier for this key.
+		if _modifiers.has(key):
+			return _modifiers[key]
+		return null
+
+	func has_modifier(key: String) -> bool:
+		return _modifiers.has(key)
+
+	func is_expired() -> bool:
+		return false
+
+	func is_modifier() -> bool:
+		return true
+
+	func _to_string() -> String:
+		return "ModifierProvider(%s, %d mods)" % [_name, _modifiers.size()]
+
+
+## Apply all modifier providers in a config stack to a base value.
+## Call this after resolving the base value from DictProviders.
+static func apply_modifiers(config_stack: Array, key: String, base_val: float) -> float:
+	var val: float = base_val
+	# Apply modifiers in reverse order (bottom of stack first = lowest priority)
+	for i in range(config_stack.size() - 1, -1, -1):
+		var provider = config_stack[i]
+		if not provider.has_method("is_modifier") or not provider.is_modifier():
+			continue
+		var mod: Variant = provider.get_modifier(key)
+		if mod == null:
+			continue
+		var op: String = mod[0]
+		var operand: float = float(mod[1])
+		match op:
+			"multiply":
+				val *= operand
+			"add":
+				val += operand
+			"set":
+				val = operand
+			"min":
+				val = maxf(val, operand)
+			"max":
+				val = minf(val, operand)
+	return val

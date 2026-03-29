@@ -1508,9 +1508,14 @@ func _handle_config_click(lx: float, my: float) -> void:
 	var entity_row_h: float = 16.0
 	for ei in range(entities_click.size()):
 		if my >= y and my < y + entity_row_h:
-			# Click on an entity — select it directly
-			PlayerHUD.debug_select_entity(entities_click[ei])
-			# Auto-enable state_info
+			var e: Node2D = entities_click[ei]
+			# Check if click is on the "Tune" button (right side)
+			var btn_x: float = pw - 52
+			if lx >= btn_x and lx <= btn_x + 34 and e.has_method("exec_tuning_toggle"):
+				e.exec_tuning_toggle()
+				return
+			# Click on entity name — select it
+			PlayerHUD.debug_select_entity(e)
 			DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
 			DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
 			_config_keys.clear()
@@ -2619,8 +2624,17 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 		var num_col := Color(0.3, 0.9, 1.0) if is_sel else Color(0.4, 0.5, 0.6)
 		# 1-indexed number for visual correlation with the in-world indicator
 		_panel.draw_string(font, Vector2(x + 2, y + 12), "%d" % (ei + 1), HORIZONTAL_ALIGNMENT_LEFT, 14, 9, num_col)
-		_panel.draw_string(font, Vector2(x + 18, y + 12), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 9, id_col)
-		_panel.draw_string(font, Vector2(x + pw * 0.48, y + 12), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, type_col)
+		_panel.draw_string(font, Vector2(x + 18, y + 12), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.35, 9, id_col)
+		_panel.draw_string(font, Vector2(x + pw * 0.40, y + 12), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.25, 8, type_col)
+		# "Tune" button for entities that support tuning popup
+		if e.has_method("exec_tuning_toggle"):
+			var btn_x: float = x + pw - 52
+			var btn_w: float = 34.0
+			var has_tuning: bool = e.get("_exec_tuning_visible") == true
+			var btn_col: Color = Color(0.3, 0.5, 0.2) if has_tuning else Color(0.2, 0.2, 0.25)
+			var btn_text_col: Color = Color(0.8, 1.0, 0.5) if has_tuning else Color(0.5, 0.5, 0.5)
+			_panel.draw_rect(Rect2(btn_x, y + 1, btn_w, entity_row_h - 3), btn_col)
+			_panel.draw_string(font, Vector2(btn_x + 3, y + 11), "Tune", HORIZONTAL_ALIGNMENT_LEFT, btn_w, 8, btn_text_col)
 		y += entity_row_h
 
 	if entities.is_empty():
@@ -2918,7 +2932,7 @@ func _build_player_config_groups(entity: Node2D) -> Array[Array]:
 	elif char_class == PlayerManager.CharacterClass.RANGED:
 		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
 	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
-		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_mass_ratio", "exec_chain_elasticity"]])
+		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass_ratio", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
 		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
 		groups.append(["# Executioner Axe", ["exec_axe_damage", "exec_axe_cooldown"]])
 		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
@@ -2974,9 +2988,12 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 		"exec_ball_damage": 35.0,
 		"exec_ball_stun_duration": 3.0,
 		"exec_ball_gravity": 900.0,
-		"exec_ball_throw_speed": 700.0,
-		"exec_ball_mass_ratio": 8.0,
-		"exec_chain_elasticity": 0.75,
+		"exec_ball_throw_speed": 1200.0,
+		"exec_ball_max_throw_speed": 6000.0,
+		"exec_ball_mass_ratio": 2.0,
+		"exec_chain_elasticity": 0.25,
+		"exec_chain_total_len": 600.0,
+		"exec_chain_adjust_speed": 0.5,
 		"exec_swing_max_damage": 80.0,
 		"exec_swing_slam_radius": 60.0,
 		"exec_axe_damage": 30.0,

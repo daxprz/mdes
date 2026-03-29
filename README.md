@@ -163,6 +163,23 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.29
+**Ball-and-chain physics overhaul, chain split system, AI player, tuning popup**
+
+- **Chain split system**: One total chain length shared between ball and shackle. L2/R2 adjusts the split ratio (default 50/50). Double-tap snaps to max. Visual shows two radius rings (golden=ball, blue=shackle) with percentage labels.
+- **YEET physics**: Partially elastic collision when chain goes taut. Ball mass ratio (2x) and elasticity (0.25) are configurable. Fires on every slack-to-taut transition — player and ball exchange momentum back and forth with degrading energy.
+- **String simulation**: Chain modeled as a string (max distance only, no compression). Player overshoots ball after YEET, chain goes slack, gravity pulls ball, chain goes taut again from new direction.
+- **Probability cone preview**: Two coupled two-body simulations (optimistic + pessimistic) form a cone showing where the ball will land. Outer arc = no damping, inner arc = aggressive damping. Reality falls between them.
+- **Shackle chain**: Shackle now has its own chain.gd instance with rigid constraint. Only attaches to enemy hitboxes, bounces off walls. Chain severs independently from ball chain.
+- **AI player system**: `ai_spawn` creates a joystick-free player. `exec_test <angle> <hold> [x y]` spawns an AI Executioner, aims, throws, and records results. Used for automated physics testing.
+- **Player AI input system**: Generic command queue (`ai_queue_cmd`) injects actions into the player's input system. Supports hold duration, aim direction override. Works for any player class.
+- **Tuning popup**: `et` command toggles a live slider panel for all ball/chain settings. Click-drag to adjust mass ratio, elasticity, throw speed, gravity, chain length in real-time.
+- **ModifierProvider**: New config provider type for artifacts — supports multiply, add, set, min, max operations on any config key. Stacks with existing DictProvider/CallableProvider.
+- **Chain reel sound**: Clinky chain sound when adjusting split with L2/R2 while chain is deployed. Higher pitch for reeling in, lower for letting out.
+- **Throw arc improvements**: Ball cone extends to viewport edge or physics body. Shackle shows narrow precise line. Ball preview stops at wall hits. Physics collision checks every 3rd step for performance.
+- **R1 mode indicator**: Shackle-first mode shows dangling chain links with shackle cuff in front of player. Ball-first shows the spike ball.
+- **`/godot restart --level`**: Slash command now accepts `--level <name>` to auto-load a level after restart.
+
 ### v0.10.28
 **Executioner class, entity effects system, player config, chain physics overhaul**
 

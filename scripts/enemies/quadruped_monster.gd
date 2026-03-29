@@ -108,12 +108,16 @@ const CONFIG_BOUNDS: Dictionary = {
 ## Falls back to default_val (the GDScript const) if no provider has the key.
 ## Result is clamped to CONFIG_BOUNDS if the key has defined bounds.
 func cfg(key: String, default_val: float) -> float:
+	## Resolve a config value: base override (first non-null) → modifiers → bounds clamp.
 	var val: float = default_val
 	for provider in _config_stack:
 		var pval: Variant = provider.get_value(key)
 		if pval != null:
 			val = float(pval)
 			break
+	# Apply modifier providers (multiply, add, min, max, etc.)
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	val = MCP.apply_modifiers(_config_stack, key, val)
 	if CONFIG_BOUNDS.has(key):
 		var bounds: Vector2 = CONFIG_BOUNDS[key]
 		val = clampf(val, bounds.x, bounds.y)

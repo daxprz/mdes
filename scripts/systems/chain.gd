@@ -104,9 +104,43 @@ func _build_chain() -> void:
 		_prev_points.append(pt)  # No initial velocity
 
 
+func _update_chain_length() -> void:
+	## Recalculate link length and add/remove points when target_length changes.
+	## Points are added/removed at the anchor_a end (player end — chain reels in/out from player).
+	var desired_count: int = clampi(int(ceil(target_length / CHAIN_LINK_LENGTH)) + 1, 3, 100)
+	var pos_a: Vector2 = _get_anchor_world_pos(anchor_a)
+
+	if desired_count > _point_count:
+		# Chain got longer — add points at anchor_a end (index 0)
+		var to_add: int = desired_count - _point_count
+		for _i in range(to_add):
+			_points.insert(0, pos_a)
+			_prev_points.insert(0, pos_a)
+		_point_count = desired_count
+	elif desired_count < _point_count:
+		# Chain got shorter — remove points from anchor_a end (index 0)
+		var to_remove: int = _point_count - desired_count
+		for _i in range(to_remove):
+			if _points.size() > 3:
+				_points.remove_at(0)
+				_prev_points.remove_at(0)
+		_point_count = _points.size()
+
+	# Recalculate link length for the new target
+	_link_len = target_length / float(maxi(_point_count - 1, 1))
+
+
 func _physics_process(delta: float) -> void:
 	if _severed:
 		return
+
+	# Update chain geometry if target_length was changed externally
+	var expected_count: int = clampi(int(ceil(target_length / CHAIN_LINK_LENGTH)) + 1, 3, 100)
+	if expected_count != _point_count:
+		_update_chain_length()
+	else:
+		# Even if point count unchanged, recalc link_len for smooth adjustment
+		_link_len = target_length / float(maxi(_point_count - 1, 1))
 
 	# Check anchor validity
 	if not anchor_a.get("is_wall", false) and not is_instance_valid(anchor_a.get("body")):

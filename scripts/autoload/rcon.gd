@@ -151,6 +151,8 @@ func _execute(command: String) -> String:
   grid                          — toggle grid overlay
   debugdraw                     — toggle enemy debug draw
   gameconfig <key> [value]      — get/set game config (gc shorthand)
+  exec_tuning (et)              — toggle ball/chain tuning popup
+  exec_set <key> <value>        — set executioner tuning value
   quit                          — quit game"""
 
 		"debug":
@@ -754,6 +756,93 @@ func _execute(command: String) -> String:
 		"gameconfig", "gc":
 			return _cmd_gameconfig(parts)
 
+		"exec_tuning", "et":
+			# Toggle the executioner tuning popup on the first player
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("exec_tuning_toggle"):
+					p.exec_tuning_toggle()
+					return "OK: exec tuning %s" % ("ON" if p._exec_tuning_visible else "OFF")
+			return "ERR: no executioner player found"
+
+		"exec_set":
+			# Set a tuning value: exec_set <key> <value>
+			if parts.size() < 3:
+				return "ERR: usage: exec_set <key> <value>"
+			var key: String = parts[1]
+			var val: float = float(parts[2])
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("exec_tuning_set"):
+					p.exec_tuning_set(key, val)
+					return "OK: %s = %.2f" % [key, val]
+			return "ERR: no executioner player found"
+
+		"ai_spawn":
+			# Spawn an AI-controlled Executioner player at a position.
+			# ai_spawn [x y]  — defaults to (960, 876)
+			var spawn_x: float = 960.0
+			var spawn_y: float = 876.0
+			if parts.size() >= 3:
+				spawn_x = float(parts[1])
+				spawn_y = float(parts[2])
+			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y))
+
+		"exec_test":
+			# AI throw test: exec_test [angle_deg] [hold_secs] [x y]
+			# Spawns AI player if needed, aims, holds L1, releases.
+			var angle_deg: float = 45.0
+			var hold_time: float = 1.5
+			var test_pos := Vector2(960, 876)
+			if parts.size() >= 2:
+				angle_deg = float(parts[1])
+			if parts.size() >= 3:
+				hold_time = float(parts[2])
+			if parts.size() >= 5:
+				test_pos = Vector2(float(parts[3]), float(parts[4]))
+			return _cmd_exec_test(angle_deg, hold_time, test_pos)
+
+		"ai_cmd":
+			# Queue an AI command: ai_cmd <action> <duration> [aim_x aim_y]
+			if parts.size() < 3:
+				return "ERR: usage: ai_cmd <action> <duration> [aim_x aim_y]"
+			var action: String = parts[1]
+			var duration: float = float(parts[2])
+			var aim := Vector2.ZERO
+			if parts.size() >= 5:
+				aim = Vector2(float(parts[3]), float(parts[4]))
+			var actions: Array = [action] if action != "none" else []
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("ai_queue_cmd") and p._ai_active:
+					p.ai_queue_cmd(actions, duration, aim)
+					return "OK: queued %s for %.1fs" % [action, duration]
+			return "ERR: no AI player"
+
+		"ai_off":
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("ai_set_active"):
+					p.ai_set_active(false)
+					p.ai_clear()
+			return "OK: AI disabled"
+
+		"exec_get":
+			# Read current tuning values: exec_get [key]
+			for p in get_tree().get_nodes_in_group("players"):
+				if not p.has_method("cfg"):
+					continue
+				if parts.size() >= 2:
+					var key: String = parts[1]
+					return "%s = %.2f" % [key, p.cfg(key, 0.0)]
+				# Dump all tuning values
+				var lines: PackedStringArray = PackedStringArray(["Executioner Tuning:"])
+				if "EXEC_TUNING_KEYS" in p:
+					for entry in p.EXEC_TUNING_KEYS:
+						var k: String = entry[0]
+						var def: float = entry[2]
+						var cur: float = p.cfg(k, def)
+						var changed: String = " *" if absf(cur - def) > 0.01 else ""
+						lines.append("  %s = %.2f (default %.2f)%s" % [k, cur, def, changed])
+				return "\n".join(lines)
+			return "ERR: no player found"
+
 		_:
 			return "ERR: unknown command '%s'. Try 'help'" % cmd
 
@@ -993,6 +1082,99 @@ func _key_name_to_code(name: String) -> int:
 		"delete": return KEY_DELETE
 		"backspace": return KEY_BACKSPACE
 		_: return 0
+
+
+func _cmd_ai_spawn(pos: Vector2) -> String:
+	## Spawn an AI-controlled Executioner player. No joystick needed.
+	var scene_path: String = "res://scenes/characters/player_side.tscn"
+	if not ResourceLoader.exists(scene_path):
+		return "ERR: player_side.tscn not found"
+
+	# Register in PlayerManager with a fake device_id
+	var fake_device: int = 9999
+	var player_index: int = 0
+	# Find next available slot
+	for i in range(PlayerManager.MAX_PLAYERS):
+		if not PlayerManager.players.has(i):
+			player_index = i
+			break
+
+	var stats: Dictionary = PlayerManager.CLASS_STATS[PlayerManager.CharacterClass.EXECUTIONER]
+	PlayerManager.players[player_index] = {
+		"device_id": fake_device,
+		"player_index": player_index,
+		"character_class": PlayerManager.CharacterClass.EXECUTIONER,
+		"health": stats["max_health"],
+		"max_health": stats["max_health"],
+		"mana": stats["max_mana"],
+		"max_mana": stats["max_mana"],
+		"speed": stats["speed"],
+		"mana_regen": stats["mana_regen"],
+		"muffin_count": 0,
+		"artifacts": [],
+		"is_alive": true,
+		"skill_xp": { "attack": 0, "special": 0, "charge": 0, "block": 0 },
+		"total_kills": 0, "session_kills": 0, "session_damage_dealt": 0,
+	}
+
+	# Instantiate the player node
+	var player_scene: PackedScene = load(scene_path)
+	var player_node: CharacterBody2D = player_scene.instantiate()
+	player_node.name = "AIPlayer_%d" % player_index
+	player_node.player_index = player_index
+	player_node.device_id = fake_device
+	player_node.character_class = PlayerManager.CharacterClass.EXECUTIONER
+	player_node.global_position = pos
+	get_tree().current_scene.add_child(player_node)
+
+	# Enable AI mode
+	player_node.ai_set_active(true)
+	player_node._facing_right = true
+
+	return "OK: AI Executioner spawned at (%.0f, %.0f) slot=%d" % [pos.x, pos.y, player_index]
+
+
+func _cmd_exec_test(angle_deg: float, hold_time: float, pos: Vector2 = Vector2(960, 876)) -> String:
+	## Find or spawn an AI player, then run a throw test.
+	var ai_player: CharacterBody2D = null
+	for p in get_tree().get_nodes_in_group("players"):
+		if p.has_method("ai_queue_cmd") and p._ai_active:
+			ai_player = p
+			break
+
+	if ai_player == null:
+		var spawn_result: String = _cmd_ai_spawn(pos)
+		if not spawn_result.begins_with("OK"):
+			return spawn_result
+		for p in get_tree().get_nodes_in_group("players"):
+			if p.has_method("ai_queue_cmd") and p._ai_active:
+				ai_player = p
+				break
+
+	if ai_player == null:
+		return "ERR: could not create AI player"
+
+	ai_player.global_position = pos
+	ai_player.velocity = Vector2.ZERO
+	ai_player._facing_right = true
+	if ai_player._exec_ball_state != ai_player.ExecEndState.HELD:
+		ai_player._exec_retract_all()
+	ai_player._exec_ball_state = ai_player.ExecEndState.HELD
+	ai_player._exec_shackle_state = ai_player.ExecEndState.HELD
+	ai_player._exec_throw_step = 0
+
+	# Set aim and queue commands
+	var aim := Vector2(cos(deg_to_rad(angle_deg)), -sin(deg_to_rad(angle_deg)))
+	ai_player.ai_clear()
+	ai_player.ai_set_aim(aim)
+	# Hold grapple (L1) for hold_time → windup + throw on release
+	ai_player.ai_queue_cmd(["grapple"], hold_time, aim)
+	# Then idle for 5 seconds to observe the result
+	ai_player.ai_queue_cmd([], 5.0)
+
+	print("=== AI TEST: angle=%.0f hold=%.1fs aim=(%.2f,%.2f) pos=(960,876) ===" %
+		[angle_deg, hold_time, aim.x, aim.y])
+	return "OK: exec_test angle=%.0f hold=%.1fs (AI player)" % [angle_deg, hold_time]
 
 
 func _cmd_eval(expr_text: String) -> String:

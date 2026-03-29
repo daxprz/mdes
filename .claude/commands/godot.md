@@ -8,12 +8,21 @@ Control the running Godot instance.
 
 Kill and relaunch Godot, wait for RCON to respond.
 
+Options:
+- `--level <name>` — after launch, load this level and clear enemies
+
 ```bash
 pkill -f "Godot.*test123" 2>/dev/null
 sleep 1
 nohup /Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 > /tmp/godot_debug.log 2>&1 &
 sleep 3
 echo "status" | nc -w2 localhost 9999
+```
+
+If `--level <name>` was provided, also run:
+```bash
+echo "level <name>" | nc -w1 localhost 9999
+echo "clear" | nc -w1 localhost 9999
 ```
 
 Report the status response when ready.
