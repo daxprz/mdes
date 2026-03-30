@@ -106,7 +106,8 @@ func _execute(command: String) -> String:
   help                          — this list
   status                        — debug state, enemy/player counts
   debug [list|on|off|log|...]   — debug overlay aspects
-  spawn <monster|dummy|attacker> [x y] — spawn entity
+  spawn <type> [x y] [name=id]         — spawn entity (name= sets entity_id)
+  kick <entity> <vx> <vy>             — apply velocity impulse to entity
   kill                          — kill all enemies (damage to death)
   clear                         — remove all enemies (instant)
   clearplayers                  — remove all players
@@ -131,6 +132,12 @@ func _execute(command: String) -> String:
   tether ...                    — tether commands
   attach/detach                 — attachment system
   buff <key=val ...> <duration> — apply config overrides
+  mod <blueprint> [entity]      — apply modifier blueprint
+  mods                          — list active modifiers
+  unmod <name> [entity]         — remove modifier by name
+  smod <blueprint>              — apply modifier to shackle config
+  smods                         — list shackle modifiers
+  unsmod <name>                 — remove shackle modifier
   attacker ...                  — attacker dummy commands
   territorial                   — toggle territorial mode
   portal [on|off]               — toggle class-change portal
@@ -274,8 +281,14 @@ func _execute(command: String) -> String:
 		"clearplayers":
 			var cleared_p: int = 0
 			for p in get_tree().get_nodes_in_group("players"):
+				# Reset state first to destroy chain nodes
+				if p.has_method("reset_state"):
+					p.reset_state()
 				p.queue_free()
 				cleared_p += 1
+			# Also clean up any orphaned chains/tethers from executioner
+			for chain in get_tree().get_nodes_in_group("chains"):
+				chain.queue_free()
 			# Block controller re-joins and clear device tracking
 			PlayerManager.join_disabled = true
 			PlayerManager._joined_devices.clear()
@@ -285,6 +298,29 @@ func _execute(command: String) -> String:
 			PlayerManager.join_disabled = false
 			PlayerManager._joined_devices.clear()
 			return "OK: joins enabled"
+
+		"kick":
+			# Apply velocity impulse to a named entity
+			# Usage: kick <entity_name> <vx> <vy>
+			if parts.size() < 4:
+				return "ERR: usage: kick <entity_name> <vx> <vy>"
+			var kick_name: String = parts[1]
+			var kick_vx: float = float(parts[2])
+			var kick_vy: float = float(parts[3])
+			var kick_target: Node2D = null
+			for e in _get_all_entities():
+				if e.name == kick_name or ("entity_id" in e and str(e.entity_id) == kick_name):
+					kick_target = e
+					break
+			if not kick_target:
+				return "ERR: entity '%s' not found" % kick_name
+			if kick_target.has_method("apply_knockback"):
+				kick_target.apply_knockback(Vector2(kick_vx, kick_vy))
+			elif "velocity" in kick_target:
+				kick_target.velocity += Vector2(kick_vx, kick_vy)
+			else:
+				return "ERR: entity '%s' has no velocity or apply_knockback" % kick_name
+			return "OK: kicked '%s' by (%.0f, %.0f)" % [kick_name, kick_vx, kick_vy]
 
 		"kill":
 			# Kill all monsters by dealing massive damage (triggers death sequence)
@@ -539,6 +575,171 @@ func _execute(command: String) -> String:
 					e.apply_timed_config(buff_overrides, buff_duration, "buff_%.0fs" % buff_duration)
 					buff_count += 1
 			return "OK: applied %d overrides for %.0fs to %d monsters" % [buff_overrides.size(), buff_duration, buff_count]
+
+		"mod":
+			# Apply a modifier blueprint to an entity
+			# Usage: mod <blueprint_name> [entity_name]
+			# If no entity specified, applies to selected entity
+			if parts.size() < 2:
+				return "ERR: usage: mod <blueprint_name> [entity_name]"
+			var bp_name: String = parts[1]
+			# Load blueprint
+			var bp_data: Dictionary = {}
+			for base in ["user://modifier_blueprints/", "res://data/modifier_blueprints/"]:
+				var bp_path: String = base + bp_name + ".json"
+				if FileAccess.file_exists(bp_path):
+					var bp_file := FileAccess.open(bp_path, FileAccess.READ)
+					if bp_file:
+						var bp_json := JSON.new()
+						if bp_json.parse(bp_file.get_as_text()) == OK and bp_json.data is Dictionary:
+							bp_data = bp_json.data
+					break
+			if bp_data.is_empty():
+				return "ERR: blueprint '%s' not found" % bp_name
+			# Find target entity
+			var target: Node2D = null
+			if parts.size() >= 3:
+				var tname: String = parts[2]
+				for e in _get_all_entities():
+					if e.name == tname or ("entity_id" in e and str(e.entity_id) == tname):
+						target = e
+						break
+				if not target:
+					return "ERR: entity '%s' not found" % tname
+			else:
+				target = PlayerHUD.debug_selected_enemy if is_instance_valid(PlayerHUD.debug_selected_enemy) else null
+				if not target:
+					# Try first player
+					var players = get_tree().get_nodes_in_group("players")
+					if not players.is_empty():
+						target = players[0]
+			if not target:
+				return "ERR: no entity selected/found"
+			if not target.has_method("push_config"):
+				return "ERR: entity '%s' doesn't support config stack" % target.name
+			# Build modifiers
+			var modifiers: Dictionary = {}
+			for key in bp_data:
+				if key.begins_with("_"):
+					continue
+				var val = bp_data[key]
+				if val is Array and val.size() == 2:
+					modifiers[key] = val
+			if modifiers.is_empty():
+				return "ERR: blueprint '%s' has no modifiers" % bp_name
+			var MCP = load("res://scripts/systems/monster_config.gd")
+			var provider = MCP.ModifierProvider.new(modifiers, bp_name)
+			target.push_config(provider)
+			return "OK: applied '%s' (%d mods) to %s" % [bp_name, modifiers.size(), target.name]
+
+		"mods":
+			# List all active modifier providers across entities
+			var lines: Array[String] = []
+			for e in _get_all_entities():
+				if not e.has_method("cfg") or not "_config_stack" in e:
+					continue
+				for provider in e._config_stack:
+					if provider.has_method("is_modifier") and provider.is_modifier():
+						var pname: String = provider._name if "_name" in provider else str(provider)
+						var eid: String = e.name
+						if "entity_id" in e and not str(e.entity_id).is_empty():
+							eid = str(e.entity_id)
+						lines.append("  %s → %s (%d mods)" % [pname, eid, provider._modifiers.size()])
+			if lines.is_empty():
+				return "No active modifiers"
+			return "Active modifiers:\n" + "\n".join(lines)
+
+		"unmod":
+			# Remove a modifier by name from an entity (or all entities)
+			if parts.size() < 2:
+				return "ERR: usage: unmod <modifier_name> [entity_name]"
+			var mod_name: String = parts[1]
+			var removed: int = 0
+			for e in _get_all_entities():
+				if parts.size() >= 3 and e.name != parts[2]:
+					continue
+				if not e.has_method("cfg") or not "_config_stack" in e:
+					continue
+				for provider in e._config_stack.duplicate():
+					if provider.has_method("is_modifier") and provider.is_modifier():
+						if "_name" in provider and provider._name == mod_name:
+							e.remove_config(provider)
+							removed += 1
+			if removed == 0:
+				return "ERR: no modifier named '%s' found" % mod_name
+			return "OK: removed %d instance(s) of '%s'" % [removed, mod_name]
+
+		"smod":
+			# Apply a modifier blueprint to the shackle config stack
+			# Usage: smod <blueprint_name>
+			if parts.size() < 2:
+				return "ERR: usage: smod <blueprint_name>"
+			var sbp_name: String = parts[1]
+			var sbp_data: Dictionary = {}
+			for base in ["user://modifier_blueprints/", "res://data/modifier_blueprints/"]:
+				var sbp_path: String = base + sbp_name + ".json"
+				if FileAccess.file_exists(sbp_path):
+					var sbp_file := FileAccess.open(sbp_path, FileAccess.READ)
+					if sbp_file:
+						var sbp_json := JSON.new()
+						if sbp_json.parse(sbp_file.get_as_text()) == OK and sbp_json.data is Dictionary:
+							sbp_data = sbp_json.data
+					break
+			if sbp_data.is_empty():
+				return "ERR: blueprint '%s' not found" % sbp_name
+			# Find executioner player
+			var exec_player: Node2D = null
+			for p in get_tree().get_nodes_in_group("players"):
+				if "character_class" in p and p.character_class == PlayerManager.CharacterClass.EXECUTIONER:
+					if p.has_method("push_shackle_config"):
+						exec_player = p
+						break
+			if not exec_player:
+				return "ERR: no Executioner player found"
+			var s_modifiers: Dictionary = {}
+			for key in sbp_data:
+				if key.begins_with("_"):
+					continue
+				var val = sbp_data[key]
+				if val is Array and val.size() == 2:
+					s_modifiers[key] = val
+			if s_modifiers.is_empty():
+				return "ERR: blueprint '%s' has no modifiers" % sbp_name
+			var MCP = load("res://scripts/systems/monster_config.gd")
+			var s_provider = MCP.ModifierProvider.new(s_modifiers, sbp_name)
+			exec_player.push_shackle_config(s_provider)
+			return "OK: applied '%s' (%d mods) to shackle" % [sbp_name, s_modifiers.size()]
+
+		"smods":
+			# List shackle modifiers on all executioner players
+			var s_lines: Array[String] = []
+			for p in get_tree().get_nodes_in_group("players"):
+				if not "_exec_shackle_config_stack" in p:
+					continue
+				for provider in p._exec_shackle_config_stack:
+					if provider.has_method("is_modifier") and provider.is_modifier():
+						s_lines.append("  %s (%d mods)" % [provider._name, provider._modifiers.size()])
+			if s_lines.is_empty():
+				return "No shackle modifiers"
+			return "Shackle modifiers:\n" + "\n".join(s_lines)
+
+		"unsmod":
+			# Remove a shackle modifier by name
+			if parts.size() < 2:
+				return "ERR: usage: unsmod <modifier_name>"
+			var us_name: String = parts[1]
+			var us_removed: int = 0
+			for p in get_tree().get_nodes_in_group("players"):
+				if not "_exec_shackle_config_stack" in p or not p.has_method("remove_shackle_config"):
+					continue
+				for provider in p._exec_shackle_config_stack.duplicate():
+					if provider.has_method("is_modifier") and provider.is_modifier():
+						if "_name" in provider and provider._name == us_name:
+							p.remove_shackle_config(provider)
+							us_removed += 1
+			if us_removed == 0:
+				return "ERR: no shackle modifier named '%s' found" % us_name
+			return "OK: removed %d instance(s) of '%s' from shackle" % [us_removed, us_name]
 
 		"attacker":
 			return _cmd_attacker(parts)
@@ -802,9 +1003,16 @@ func _execute(command: String) -> String:
 
 		"ai_cmd":
 			# Queue an AI command: ai_cmd <action> <duration> [aim_x aim_y]
+			# Special: ai_cmd reset 0 — resets player state
 			if parts.size() < 3:
 				return "ERR: usage: ai_cmd <action> <duration> [aim_x aim_y]"
 			var action: String = parts[1]
+			if action == "reset":
+				for p in get_tree().get_nodes_in_group("players"):
+					if p.has_method("reset_state"):
+						p.reset_state()
+						return "OK: player reset"
+				return "ERR: no player"
 			var duration: float = float(parts[2])
 			var aim := Vector2.ZERO
 			if parts.size() >= 5:
@@ -822,6 +1030,15 @@ func _execute(command: String) -> String:
 					p.ai_set_active(false)
 					p.ai_clear()
 			return "OK: AI disabled"
+
+		"reset", "player_reset":
+			# Reset all players (or specific index) to default start state
+			var count: int = 0
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("reset_state"):
+					p.reset_state()
+					count += 1
+			return "OK: reset %d players" % count
 
 		"exec_get":
 			# Read current tuning values: exec_get [key]
@@ -944,6 +1161,10 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 	if not scene_root:
 		return "ERR: no current scene"
 
+	# Extract optional name= from config (used to name the entity)
+	var custom_name: String = spawn_config.get("name", "")
+	spawn_config.erase("name")
+
 	var container: Node = scene_root.get_node_or_null("Players")
 	if not container:
 		container = scene_root
@@ -958,7 +1179,7 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			monster.pathing_radius = spawn_pathing_radius
 			monster.global_position = Vector2(x, y)
 			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
-			monster.entity_id = "monster_%d" % monster_count
+			monster.entity_id = custom_name if not custom_name.is_empty() else "monster_%d" % monster_count
 			container.add_child(monster)
 			# Apply optional initial state
 			if state == "standdown":
@@ -977,13 +1198,14 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			var dummy := CharacterBody2D.new()
 			dummy.set_script(dummy_script)
 			var dummy_count: int = get_tree().get_nodes_in_group("players").size()
-			dummy.name = "DummyPlayer_%d" % dummy_count
+			var dummy_id: String = custom_name if not custom_name.is_empty() else "dummy_%d" % dummy_count
+			dummy.name = dummy_id
 			dummy.add_to_group("players")
 			dummy.global_position = Vector2(x, y)
 			dummy.player_index = 0
 			dummy.collision_layer = 2  # Player layer
 			dummy.collision_mask = 1   # World
-			dummy.entity_id = "dummy_%d" % dummy_count
+			dummy.entity_id = dummy_id
 			container.add_child(dummy)
 			return "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
 
@@ -998,7 +1220,7 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			monster.pathing_radius = spawn_pathing_radius
 			monster.global_position = Vector2(x, y)
 			var monster_count: int = get_tree().get_nodes_in_group("enemies").size()
-			monster.entity_id = "player_monster_%d" % monster_count
+			monster.entity_id = custom_name if not custom_name.is_empty() else "player_monster_%d" % monster_count
 			# Set up player controller BEFORE add_child (which calls _ready)
 			var PlayerCtrlScript: GDScript = load("res://scripts/enemies/monster_player_controller.gd")
 			var ctrl: RefCounted = PlayerCtrlScript.new()
@@ -2714,3 +2936,18 @@ func _cmd_list_tests() -> String:
 					lines.append("  %s" % fname.get_basename())
 				fname = dir.get_next()
 	return "\n".join(lines)
+
+
+func _get_all_entities() -> Array:
+	## Returns a deduplicated list of all entities (enemies + players + dummies).
+	var all: Array = []
+	all.append_array(get_tree().get_nodes_in_group("enemies"))
+	all.append_array(get_tree().get_nodes_in_group("players"))
+	all.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	var seen: Dictionary = {}
+	var result: Array = []
+	for e in all:
+		if is_instance_valid(e) and not seen.has(e.get_instance_id()):
+			seen[e.get_instance_id()] = true
+			result.append(e)
+	return result

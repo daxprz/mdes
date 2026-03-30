@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dx8exec1top"
-path="res://.godot/imported/executioner_topdown.png-65491555d39050cc987e0a0186348625.ctex"
+uid="uid://duuh6gcxbq47u"
+path="res://.godot/imported/soccer_ball.svg-5f84c51aa85083fa46cd4589fdf32ec2.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/characters/executioner_topdown.png"
-dest_files=["res://.godot/imported/executioner_topdown.png-65491555d39050cc987e0a0186348625.ctex"]
+source_file="res://assets/sprites/soccer_ball.svg"
+dest_files=["res://.godot/imported/soccer_ball.svg-5f84c51aa85083fa46cd4589fdf32ec2.ctex"]
 
 [params]
 
@@ -38,3 +38,6 @@ process/hdr_as_srgb=false
 process/hdr_clamp_exposure=false
 process/size_limit=0
 detect_3d/compress_to=1
+svg/scale=1.0
+editor/scale_with_editor_scale=false
+editor/convert_colors_with_editor_theme=false

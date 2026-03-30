@@ -1,0 +1,7 @@
+{
+  "_name": "Ghost Shackle",
+  "_description": "Nearly zero mass — ball flies completely unaffected by shackle",
+  "mass": ["set", 0.5],
+  "gravity": ["multiply", 0.3],
+  "chain_elasticity": ["set", 0.1]
+}

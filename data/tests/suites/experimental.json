@@ -1,0 +1,8 @@
+{
+  "name": "experimental",
+  "description": "Experimental tests — physics demos, visual scenarios, tuning aids",
+  "tests": [
+    "soccer_back_and_forth",
+    "exec_bs_yeet"
+  ]
+}

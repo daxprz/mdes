@@ -1,0 +1,9 @@
+{
+  "_name": "Monster Rage",
+  "_description": "Enraged monster — faster attacks, higher damage, less health",
+  "bite_damage": ["multiply", 1.8],
+  "swipe_damage": ["multiply", 1.8],
+  "attack_cooldown": ["multiply", 0.5],
+  "speed_fast": ["multiply", 1.3],
+  "max_health": ["multiply", 0.6]
+}

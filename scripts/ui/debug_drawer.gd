@@ -131,6 +131,52 @@ var _config_filter_text: String = ""         # Search filter for config keys
 var _config_filter_focused: bool = false     # Whether the config filter field has focus
 var _game_config_rects: Dictionary = {}      # Key -> Rect2 for clickable game settings
 
+# Config sub-section framework (same pattern as LE/CT)
+var _cfg_subsections: Array[Dictionary] = []
+var _cfg_subsections_initialized: bool = false
+var _cfg_sub_resize_idx: int = -1
+var _cfg_sub_resize_start_y: float = 0.0
+var _cfg_sub_resize_start_h: float = 0.0
+var _cfg_sub_resize_next_h: float = 0.0
+var _cfg_grip_last_click_idx: int = -1
+var _cfg_grip_last_click_time: float = 0.0
+
+# Config sub-section scroll/hover state
+var _cfg_entities_scroll_offset: int = 0
+var _cfg_blueprints_scroll_offset: int = 0
+var _cfg_instances_scroll_offset: int = 0
+var _cfg_hover_entity_idx: int = -1
+var _cfg_hover_blueprint_idx: int = -1
+var _cfg_hover_instance_idx: int = -1
+
+# Blueprint filter
+var _cfg_bp_filter_text: String = ""
+var _cfg_bp_filter_focused: bool = false
+
+# Modifier instance filter
+var _cfg_mod_filter_text: String = ""
+var _cfg_mod_filter_focused: bool = false
+
+# Selected blueprint for editing
+var _cfg_selected_blueprint: String = ""
+var _cfg_bp_edit_key: String = ""       # Key being edited in blueprint editor
+var _cfg_bp_edit_text: String = ""      # Text being typed
+var _cfg_bp_edit_focused: bool = false
+var _cfg_bp_dragging_key: String = ""   # Which blueprint slider is being dragged
+var _cfg_bp_cached_data: Dictionary = {}  # Cached loaded blueprint data (for live editing)
+var _cfg_bp_editor_scroll: int = 0       # Scroll offset in the blueprint editor area
+
+# Cached blueprint names
+var _cfg_cached_bp_names: Array[String] = []
+var _cfg_bp_names_dirty: bool = true
+
+const CFG_SUB_MIN := {
+	"cfg_settings":   30.0,
+	"cfg_entities":   60.0,
+	"cfg_blueprints": 36.0,
+	"cfg_instances":  36.0,
+}
+
 # Test runner section state — sub-section framework
 var _test_scroll_offset: int = 0
 var _test_hover_item: String = ""  # Hovered suite or test name
@@ -632,13 +678,19 @@ func _input(event: InputEvent) -> void:
 			_config_keys.clear()  # Force rebuild when filter changes
 			get_viewport().set_input_as_handled()
 			return
+		if _cfg_bp_filter_focused or _cfg_mod_filter_focused:
+			_handle_cfg_text_input(event)
+			get_viewport().set_input_as_handled()
+			return
 
 		# Escape closes drawer or unfocuses
 		if event.keycode == KEY_ESCAPE:
-			if _filter_focused or _id_filter_focused or _config_filter_focused:
+			if _filter_focused or _id_filter_focused or _config_filter_focused or _cfg_bp_filter_focused or _cfg_mod_filter_focused:
 				_filter_focused = false
 				_id_filter_focused = false
 				_config_filter_focused = false
+				_cfg_bp_filter_focused = false
+				_cfg_mod_filter_focused = false
 			else:
 				toggle()
 			get_viewport().set_input_as_handled()
@@ -662,6 +714,10 @@ func _input(event: InputEvent) -> void:
 			_config_dragging_key = ""
 			get_viewport().set_input_as_handled()
 			return
+		if not _cfg_bp_dragging_key.is_empty():
+			_cfg_bp_dragging_key = ""
+			get_viewport().set_input_as_handled()
+			return
 		if _sub_resize_idx >= 0:
 			_handle_sub_resize_release()
 			_sub_resize_idx = -1
@@ -678,6 +734,10 @@ func _input(event: InputEvent) -> void:
 			_handle_ct_sub_resize_release()
 			_ct_sub_resize_idx = -1
 			_save_ct_layout()
+			get_viewport().set_input_as_handled()
+			return
+		if _cfg_sub_resize_idx >= 0:
+			_handle_cfg_sub_resize_release()
 			get_viewport().set_input_as_handled()
 			return
 		if not _le_prop_dragging_key.is_empty():
@@ -725,7 +785,7 @@ func _input(event: InputEvent) -> void:
 				elif _current_section == Section.BLUEPRINTS:
 					_handle_ct_scroll(event.position.y, -3)
 				elif _current_section == Section.CONFIG:
-					_config_scroll_offset = maxi(0, _config_scroll_offset - 3)
+					_handle_cfg_scroll(event.position.y, -3)
 				else:
 					_scroll_offset = maxi(0, _scroll_offset - 3)
 				get_viewport().set_input_as_handled()
@@ -737,7 +797,7 @@ func _input(event: InputEvent) -> void:
 				elif _current_section == Section.BLUEPRINTS:
 					_handle_ct_scroll(event.position.y, 3)
 				elif _current_section == Section.CONFIG:
-					_config_scroll_offset += 3
+					_handle_cfg_scroll(event.position.y, 3)
 				else:
 					_scroll_offset += 3
 				get_viewport().set_input_as_handled()
@@ -750,6 +810,10 @@ func _input(event: InputEvent) -> void:
 		elif not _config_dragging_key.is_empty():
 			_handle_config_drag(event.position.x)
 			get_viewport().set_input_as_handled()
+		elif not _cfg_bp_dragging_key.is_empty():
+			var bp_lx: float = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
+			_cfg_bp_drag_at(bp_lx)
+			get_viewport().set_input_as_handled()
 		elif _sub_resize_idx >= 0:
 			_handle_sub_resize_drag(event.position.y)
 			get_viewport().set_input_as_handled()
@@ -758,6 +822,9 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif _ct_sub_resize_idx >= 0:
 			_handle_ct_sub_resize_drag(event.position.y)
+			get_viewport().set_input_as_handled()
+		elif _cfg_sub_resize_idx >= 0:
+			_handle_cfg_sub_resize_drag(event.position.y)
 			get_viewport().set_input_as_handled()
 		elif not _le_prop_dragging_key.is_empty():
 			_handle_le_prop_drag(event.position.x)
@@ -772,6 +839,8 @@ func _input(event: InputEvent) -> void:
 				_handle_le_hover(event.position.y)
 			elif _current_section == Section.BLUEPRINTS:
 				_handle_ct_hover(event.position.y)
+			elif _current_section == Section.CONFIG:
+				_handle_cfg_hover(event.position.y)
 			_update_hover(event.position.y)
 
 
@@ -1465,85 +1534,8 @@ func _handle_sub_resize_release() -> void:
 
 
 func _handle_config_click(lx: float, my: float) -> void:
-	## Click in the config section — game settings, filter, entity list, or slider drag.
-	var pw: float = _content_width
-	var y: float = 8.0
-
-	# "Game Settings" title
-	y += 20
-
-	# Game config toggle rows
-	for key in _game_config_rects:
-		var rect: Rect2 = _game_config_rects[key]
-		if my >= rect.position.y and my < rect.position.y + rect.size.y:
-			# Toggle this game config setting
-			if key == "multiple_players_same_class":
-				GameManager.multiple_players_same_class = not GameManager.multiple_players_same_class
-			return
-	y += 18  # game config row
-	y += 10  # separator + gap
-
-	# "Entity Config" title
-	y += 22
-
-	# Filter field (y to y+20)
-	if my >= y and my < y + 20:
-		_config_filter_focused = true
-		return
-	y += 24
-
-	# Entity list — same combined list as drawing
-	var all_entities_click: Array = []
-	all_entities_click.append_array(get_tree().get_nodes_in_group("enemies"))
-	all_entities_click.append_array(get_tree().get_nodes_in_group("players"))
-	all_entities_click.append_array(get_tree().get_nodes_in_group("attack_dummies"))
-	var seen_click: Dictionary = {}
-	var entities_click: Array = []
-	for e in all_entities_click:
-		if not seen_click.has(e.get_instance_id()):
-			seen_click[e.get_instance_id()] = true
-			entities_click.append(e)
-	y += 2  # separator
-	y += 16  # "Entities" header
-	var entity_row_h: float = 16.0
-	for ei in range(entities_click.size()):
-		if my >= y and my < y + entity_row_h:
-			var e: Node2D = entities_click[ei]
-			# Check if click is on the "Tune" button (right side)
-			var btn_x: float = pw - 52
-			if lx >= btn_x and lx <= btn_x + 34 and e.has_method("exec_tuning_toggle"):
-				e.exec_tuning_toggle()
-				return
-			# Click on entity name — select it
-			PlayerHUD.debug_select_entity(e)
-			DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
-			DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
-			_config_keys.clear()
-			_config_filter_focused = false
-			return
-		y += entity_row_h
-	if entities_click.is_empty():
-		y += entity_row_h
-	y += 8  # gap + separator
-
-	_config_filter_focused = false
-
-	# Entity info header (type + props line)
-	y += 16
-
-	# Slider area — for any entity with cfg()
-	var cfg_entity: Node2D = _get_selected_entity()
-	if not cfg_entity or not cfg_entity.has_method("cfg") or _config_keys.is_empty():
-		return
-
-	var slider_h: float = 16.0
-	var slider_gap: float = 2.0
-	var row: int = int((my - y) / (slider_h + slider_gap)) + _config_scroll_offset
-	if row >= 0 and row < _config_keys.size():
-		var key: String = _config_keys[row]
-		if lx > pw * 0.47 and lx < pw * 0.82:
-			_config_dragging_key = key
-			_handle_config_drag_at(lx, cfg_entity)
+	## Route click to the new config sub-section framework.
+	_handle_cfg_click(lx, my)
 
 
 func _handle_config_drag(mx: float) -> void:
@@ -1562,12 +1554,27 @@ func _handle_config_drag(mx: float) -> void:
 func _handle_config_drag_at(lx: float, monster: Node2D) -> void:
 	## Set config value based on slider position. Uses a single persistent
 	## DictProvider for all slider edits — updates in place, never pushes new ones.
+	## Shackle keys (shackle:*) route to the shackle config stack instead.
 	var pw: float = _content_width
 	var slider_x: float = pw * 0.47
 	var slider_w: float = pw * 0.35
 	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
 
 	var key: String = _config_dragging_key
+
+	# Shackle keys route to shackle config stack
+	if key.begins_with("shackle:"):
+		var skey: String = key.substr(8)
+		var default_val: float = _get_shackle_config_default(skey)
+		var range_info: Vector2 = _get_config_range(key, default_val)
+		var new_val: float = lerpf(range_info.x, range_info.y, t)
+		# Update the shackle base config directly
+		if monster.has_method("shackle_cfg") and "_exec_shackle_config_stack" in monster:
+			if monster._exec_shackle_base_config and "_data" in monster._exec_shackle_base_config:
+				monster._exec_shackle_base_config._data[skey] = new_val
+		_panel.queue_redraw()
+		return
+
 	var default_val: float = _get_config_default(monster, key)
 	var range_info: Vector2 = _get_config_range(key, default_val)
 	var new_val: float = lerpf(range_info.x, range_info.y, t)
@@ -2339,6 +2346,9 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 				"running":
 					_panel.draw_string(font, Vector2(x + 24, ry + 14), "●", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 1.0, 0.3))
 					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.1, 0.25, 0.1, 0.3))
+				"looping":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "↻", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.7, 0.2))
+					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.25, 0.18, 0.05, 0.3))
 				"complete":
 					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✓", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.7, 0.5))
 
@@ -2529,220 +2539,60 @@ func _test_cmd_color(cmd: String) -> Color:
 
 
 func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
-	## Game settings + Entity config: search filter, entity list, config sliders.
+	## Config section with sub-sections: Game Settings, Entities, Blueprints, Instances.
+	if not _cfg_subsections_initialized:
+		_init_cfg_subsections()
+
 	var x: float = content_x
-	var y: float = 8.0
 	var pw: float = _content_width
+	var y: float = 0.0
 
-	# -- Game Settings (always visible, above entity config) --
-	_panel.draw_string(font, Vector2(x, y + 14), "Game Settings", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.7, 0.9, 0.7))
-	y += 20
+	for si in range(_cfg_subsections.size()):
+		var sub: Dictionary = _cfg_subsections[si]
+		if y > ph:
+			break
 
-	# game/multiple_players_same_class toggle
-	var mpc_val: bool = GameManager.multiple_players_same_class
-	var mpc_label: String = "multiple_players_same_class"
-	var mpc_col: Color = Color(0.3, 1.0, 0.3) if mpc_val else Color(0.6, 0.4, 0.4)
-	var mpc_text: String = "ON" if mpc_val else "OFF"
-	_panel.draw_string(font, Vector2(x + 4, y + 11), mpc_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.7, 9, Color(0.7, 0.7, 0.7))
-	_panel.draw_string(font, Vector2(x + pw - 44, y + 11), mpc_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 9, mpc_col)
-	# Clickable area stored for _handle_config_click
-	_game_config_rects["multiple_players_same_class"] = Rect2(x, y, pw - 16, 16)
-	y += 18
+		_draw_cfg_sub_header(x, y, pw, font, sub)
 
-	y += 4
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.3, 0.3, 0.3), 1.0)
-	y += 6
-
-	_panel.draw_string(font, Vector2(x, y + 14), "Entity Config", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.9, 0.7, 0.3))
-	y += 22
-
-	# -- Search filter field --
-	var cfg_filter_bg: Color = Color(0.12, 0.12, 0.16) if _config_filter_focused else Color(0.08, 0.08, 0.12)
-	_panel.draw_rect(Rect2(x, y, pw - 16, 20), cfg_filter_bg)
-	var cfg_filter_display: String = _config_filter_text
-	if _config_filter_focused and int(_cursor_blink * 2) % 2 == 0:
-		cfg_filter_display += "_"
-	if cfg_filter_display == "" and not _config_filter_focused:
-		_panel.draw_string(font, Vector2(x + 4, y + 14), "Filter config...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.4, 0.4, 0.4))
-	else:
-		_panel.draw_string(font, Vector2(x + 4, y + 14), cfg_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.8, 0.8, 0.8))
-	y += 24
-
-	# -- Entity list (enemies + players + dummies — anything selectable) --
-	var all_entities: Array = []
-	all_entities.append_array(get_tree().get_nodes_in_group("enemies"))
-	all_entities.append_array(get_tree().get_nodes_in_group("players"))
-	all_entities.append_array(get_tree().get_nodes_in_group("attack_dummies"))
-	# Deduplicate (some may be in multiple groups)
-	var seen: Dictionary = {}
-	var entities: Array = []
-	for e in all_entities:
-		if not seen.has(e.get_instance_id()):
-			seen[e.get_instance_id()] = true
-			entities.append(e)
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.2, 0.3, 0.4), 1.0)
-	y += 2
-	_panel.draw_string(font, Vector2(x, y + 12), "Entities (%d)" % entities.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
-	y += 16
-
-	var entity_row_h: float = 16.0
-	var selected_entity: Node2D = _get_selected_entity()
-	for ei in range(entities.size()):
-		var e: Node2D = entities[ei]
-		var is_sel: bool = (e == selected_entity)
-		# Entity ID — show player name for players, entity_id or node name otherwise
-		var eid: String = ""
-		var is_player_entity: bool = "player_index" in e and "character_class" in e
-		if is_player_entity:
-			# Show player name: profile name or "P1", "P2", etc.
-			var pi: int = e.player_index
-			var profile: Dictionary = ProfileManager.get_active_profile(pi)
-			if not profile.is_empty() and profile.has("name"):
-				eid = profile["name"]
-			else:
-				eid = "P%d" % (pi + 1)
-			# Append class name
-			var cls_name: String = PlayerHUD.CLASS_NAMES.get(e.character_class, "")
-			if not cls_name.is_empty():
-				eid += " (%s)" % cls_name
-		elif "entity_id" in e and not str(e.entity_id).is_empty():
-			eid = str(e.entity_id)
-		else:
-			eid = e.name
-		# Entity type
-		var etype: String = "unknown"
-		if is_player_entity:
-			etype = "player"
-		elif e.get_script():
-			var script_path: String = e.get_script().resource_path
-			var fname: String = script_path.get_file().get_basename()
-			etype = fname  # e.g. "quadruped_monster", "skeleton", "gummy_bear"
-		if is_sel:
-			_panel.draw_rect(Rect2(x, y, pw - 16, entity_row_h - 2), Color(0.15, 0.25, 0.15))
-		var id_col := Color(0.5, 1.0, 0.5) if is_sel else Color(0.7, 0.7, 0.7)
-		var type_col := Color(0.4, 0.8, 0.4) if is_sel else Color(0.5, 0.5, 0.5)
-		var num_col := Color(0.3, 0.9, 1.0) if is_sel else Color(0.4, 0.5, 0.6)
-		# 1-indexed number for visual correlation with the in-world indicator
-		_panel.draw_string(font, Vector2(x + 2, y + 12), "%d" % (ei + 1), HORIZONTAL_ALIGNMENT_LEFT, 14, 9, num_col)
-		_panel.draw_string(font, Vector2(x + 18, y + 12), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.35, 9, id_col)
-		_panel.draw_string(font, Vector2(x + pw * 0.40, y + 12), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.25, 8, type_col)
-		# "Tune" button for entities that support tuning popup
-		if e.has_method("exec_tuning_toggle"):
-			var btn_x: float = x + pw - 52
-			var btn_w: float = 34.0
-			var has_tuning: bool = e.get("_exec_tuning_visible") == true
-			var btn_col: Color = Color(0.3, 0.5, 0.2) if has_tuning else Color(0.2, 0.2, 0.25)
-			var btn_text_col: Color = Color(0.8, 1.0, 0.5) if has_tuning else Color(0.5, 0.5, 0.5)
-			_panel.draw_rect(Rect2(btn_x, y + 1, btn_w, entity_row_h - 3), btn_col)
-			_panel.draw_string(font, Vector2(btn_x + 3, y + 11), "Tune", HORIZONTAL_ALIGNMENT_LEFT, btn_w, 8, btn_text_col)
-		y += entity_row_h
-
-	if entities.is_empty():
-		_panel.draw_string(font, Vector2(x + 6, y + 12), "(no entities in scene)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
-		y += entity_row_h
-
-	y += 4
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 16, y), Color(0.2, 0.3, 0.4), 1.0)
-	y += 4
-
-	# -- Config sliders --
-	if not selected_entity:
-		_panel.draw_string(font, Vector2(x, y + 14), "Click an entity above to configure", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
-		return
-
-	# Show entity info header
-	var has_cfg: bool = selected_entity.has_method("cfg")
-	var entity_type_label: String = ""
-	if selected_entity.get_script():
-		entity_type_label = selected_entity.get_script().resource_path.get_file().get_basename()
-	_panel.draw_string(font, Vector2(x, y + 12), entity_type_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 9, Color(0.9, 0.7, 0.3))
-
-	# Show basic properties for any entity
-	var props_text: String = ""
-	if "health" in selected_entity:
-		props_text += "HP:%d " % selected_entity.health
-	if "creature_scale" in selected_entity:
-		props_text += "scale:%.1f " % selected_entity.creature_scale
-	if "_chained" in selected_entity and selected_entity._chained:
-		props_text += "[chained] "
-	if "_state" in selected_entity:
-		props_text += "state:%d" % selected_entity._state
-	if not props_text.is_empty():
-		_panel.draw_string(font, Vector2(x + pw * 0.5, y + 12), props_text, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, Color(0.6, 0.6, 0.6))
-	y += 16
-
-	# Show config sliders for entities that have cfg() (monsters AND players)
-	if not has_cfg:
-		# For entities without cfg(), show their exported/public properties
-		_draw_entity_properties(x, y, pw, ph, font, selected_entity)
-		return
-
-	var monster: Node2D = selected_entity  # Works for any entity with cfg()
-	# Build sorted config key list (once, or when monster changes)
-	if _config_keys.is_empty():
-		_rebuild_config_keys(monster)
-
-	# Filter config keys
-	var filtered_keys: Array[String] = []
-	if _config_filter_text.is_empty():
-		filtered_keys.assign(_config_keys)
-	else:
-		var ft: String = _config_filter_text.to_lower()
-		for key in _config_keys:
-			if key.begins_with("# ") or ft in key.to_lower():
-				filtered_keys.append(key)
-
-	# Draw sliders
-	var slider_h: float = 16.0
-	var slider_gap: float = 2.0
-	var visible_count: int = int((ph - y - 10) / (slider_h + slider_gap))
-	var max_scroll: int = maxi(0, filtered_keys.size() - visible_count)
-	_config_scroll_offset = clampi(_config_scroll_offset, 0, max_scroll)
-
-	for i in range(_config_scroll_offset, mini(_config_scroll_offset + visible_count, filtered_keys.size())):
-		var key: String = filtered_keys[i]
-
-		# Group header
-		if key.begins_with("# "):
-			_panel.draw_line(Vector2(x, y + 8), Vector2(x + pw - 16, y + 8), Color(0.2, 0.3, 0.4), 1.0)
-			_panel.draw_string(font, Vector2(x, y + 14), key.substr(2), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.75, 1.0))
-			y += slider_h + slider_gap
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
 			continue
 
-		var default_val: float = _get_config_default(monster, key)
-		var current_val: float = monster.cfg(key, default_val)
-		var is_modified: bool = monster._config_stack.size() > 1 and current_val != default_val
+		var body_y: float = y + SUB_HEADER_H
+		var body_h: float
+		if sub["id"] == "cfg_instances":
+			# Last section fills remaining space
+			body_h = maxf(CFG_SUB_MIN["cfg_instances"] - SUB_HEADER_H, ph - body_y)
+		else:
+			body_h = sub["height"] - SUB_HEADER_H
 
-		# Label
-		var label_col: Color = Color(1.0, 0.85, 0.3) if is_modified else Color(0.7, 0.7, 0.7)
-		_panel.draw_string(font, Vector2(x + 8, y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 8, label_col)
+		if body_h > 0:
+			match sub["id"]:
+				"cfg_settings":   _draw_cfg_sub_settings(x, body_y, pw, body_h, font)
+				"cfg_entities":   _draw_cfg_sub_entities(x, body_y, pw, body_h, font)
+				"cfg_blueprints": _draw_cfg_sub_blueprints(x, body_y, pw, body_h, font)
+				"cfg_instances":  _draw_cfg_sub_instances(x, body_y, pw, body_h, font)
 
-		# Slider track
-		var slider_x: float = x + pw * 0.47
-		var slider_w: float = pw * 0.35
-		_panel.draw_rect(Rect2(slider_x, y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
+		# Snap indicator during resize
+		if _cfg_sub_resize_idx == si and sub["id"] != "cfg_instances":
+			var snap_h: float = _get_cfg_preferred_height(sub["id"])
+			var snap_y: float = y + snap_h
+			var near_snap: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
+			var snap_col := Color(0.4, 0.7, 1.0, 0.6) if near_snap else Color(0.4, 0.7, 1.0, 0.25)
+			var dx: float = 0.0
+			while dx < pw - 16:
+				_panel.draw_line(Vector2(x + dx, snap_y), Vector2(x + minf(dx + 6.0, pw - 16), snap_y), snap_col, 1.0)
+				dx += 10.0
+			if near_snap:
+				_panel.draw_string(font, Vector2(x + pw - 40, snap_y - 3), "snap", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, snap_col)
 
-		# Slider fill
-		var range_info: Vector2 = _get_config_range(key, default_val)
-		var t: float = clampf((current_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
-		var fill_col: Color = Color(0.3, 0.6, 1.0) if not is_modified else Color(1.0, 0.7, 0.2)
-		_panel.draw_rect(Rect2(slider_x, y + 4, slider_w * t, 8), fill_col)
+		if sub["id"] == "cfg_instances":
+			y += body_h + SUB_HEADER_H
+		else:
+			y += sub["height"]
 
-		# Handle
-		var handle_x: float = slider_x + slider_w * t
-		_panel.draw_rect(Rect2(handle_x - 2, y + 2, 4, 12), Color.WHITE)
-
-		# Value text
-		_panel.draw_string(font, Vector2(x + pw * 0.84, y + 11), "%.2f" % current_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, label_col)
-
-		y += slider_h + slider_gap
-
-	# Scrollbar
-	if filtered_keys.size() > visible_count:
-		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
-		var bar_h: float = maxf(20.0, ph * float(visible_count) / float(filtered_keys.size()))
-		var bar_y: float = y + pct * (ph - y - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		if sub["id"] != "cfg_instances":
+			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.15, 0.2, 0.3, 0.4), 1.0)
 
 
 func _get_all_entities() -> Array:
@@ -2933,8 +2783,8 @@ func _build_player_config_groups(entity: Node2D) -> Array[Array]:
 		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
 	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
 		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
+		groups.append(["# Executioner Shackle", ["shackle:mass", "shackle:chain_elasticity", "shackle:gravity", "shackle:drag"]])
 		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
-		groups.append(["# Executioner Axe", ["exec_axe_damage", "exec_axe_cooldown"]])
 		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
 
 	return groups
@@ -2996,8 +2846,6 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 		"exec_chain_adjust_speed": 0.5,
 		"exec_swing_max_damage": 80.0,
 		"exec_swing_slam_radius": 60.0,
-		"exec_axe_damage": 30.0,
-		"exec_axe_cooldown": 0.6,
 		"exec_cleave_max_damage": 150.0,
 		"exec_cleave_charge_time": 2.0,
 		"exec_cleave_knockback": 500.0,
@@ -3005,9 +2853,29 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 	return defaults.get(key, 0.0)
 
 
+func _get_shackle_config_default(key: String) -> float:
+	## Default values for shackle config keys, matching SHACKLE_DEFAULT_CONFIG.
+	var defaults := {
+		"mass": 5.0,
+		"chain_elasticity": 0.25,
+		"gravity": 600.0,
+		"drag": 0.97,
+	}
+	return defaults.get(key, 0.0)
+
+
 func _get_config_range(key: String, default_val: float) -> Vector2:
 	## Return (min, max) range for a config slider. Uses the entity's
 	## CONFIG_BOUNDS if available, otherwise heuristic.
+	# Shackle keys have known ranges
+	if key.begins_with("shackle:"):
+		var skey: String = key.substr(8)
+		match skey:
+			"mass": return Vector2(0.1, 200.0)
+			"chain_elasticity": return Vector2(0.0, 1.0)
+			"gravity": return Vector2(0.0, 2000.0)
+			"drag": return Vector2(0.8, 1.0)
+		return Vector2(0.0, maxf(1.0, default_val * 3.0))
 	var entity: Node2D = _get_selected_entity()
 	if entity and entity.get("CONFIG_BOUNDS") and entity.CONFIG_BOUNDS.has(key):
 		return entity.CONFIG_BOUNDS[key]
@@ -3019,6 +2887,1186 @@ func _get_config_range(key: String, default_val: float) -> Vector2:
 	if default_val == 0.0:
 		return Vector2(0.0, 1.0)
 	return Vector2(0.0, default_val * 2.5)
+
+
+# ==============================================================================
+# CONFIG SECTION — sub-section framework (Game Settings, Entities, Blueprints, Instances)
+# ==============================================================================
+
+func _init_cfg_subsections() -> void:
+	_cfg_subsections = []
+	for sid in ["cfg_settings", "cfg_entities", "cfg_blueprints", "cfg_instances"]:
+		_cfg_subsections.append({
+			"id": sid,
+			"title": _cfg_sub_title(sid),
+			"collapsed": false,
+			"height": _get_cfg_preferred_height(sid),
+		})
+	_load_cfg_layout()
+	_auto_snap_cfg()
+	_cfg_subsections_initialized = true
+	_cfg_rebuild_bp_names()
+
+
+func _cfg_sub_title(sid: String) -> String:
+	match sid:
+		"cfg_settings": return "Game Settings"
+		"cfg_entities": return "Entities"
+		"cfg_blueprints": return "Mod Blueprints"
+		"cfg_instances": return "Mod Instances"
+	return sid
+
+
+func _load_cfg_layout() -> void:
+	var path: String = "user://config_panel_layout.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	for sub in _cfg_subsections:
+		if json.data.has(sub["id"]):
+			sub["collapsed"] = json.data[sub["id"]].get("collapsed", sub["collapsed"])
+			sub["height"] = json.data[sub["id"]].get("height", sub["height"])
+
+
+func _save_cfg_layout() -> void:
+	var data: Dictionary = {}
+	for sub in _cfg_subsections:
+		data[sub["id"]] = {"collapsed": sub["collapsed"], "height": sub["height"]}
+	var file := FileAccess.open("user://config_panel_layout.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+
+
+func _auto_snap_cfg() -> void:
+	if _cfg_subsections.is_empty():
+		return
+	var last: Dictionary = _cfg_subsections[_cfg_subsections.size() - 1]
+	for i in range(_cfg_subsections.size() - 1):
+		var sub: Dictionary = _cfg_subsections[i]
+		if sub["collapsed"]:
+			continue
+		var preferred: float = _get_cfg_preferred_height(sub["id"])
+		var delta: float = preferred - sub["height"]
+		sub["height"] = preferred
+		last["height"] -= delta
+	if last["height"] < CFG_SUB_MIN.get("cfg_instances", 36.0):
+		last["height"] = CFG_SUB_MIN.get("cfg_instances", 36.0)
+
+
+func _get_cfg_preferred_height(sid: String) -> float:
+	match sid:
+		"cfg_settings":
+			# 1 toggle row + padding
+			return SUB_HEADER_H + 1 * 18.0 + 8.0
+		"cfg_entities":
+			# Filter + entity list + selected entity sliders
+			var entity_count: int = _get_all_entities().size()
+			var rows: int = maxi(2, entity_count) + 2  # +2 for filter + entity header
+			if _get_selected_entity():
+				rows += 8  # Extra rows for entity info + sliders
+			return SUB_HEADER_H + clampi(rows, 4, 16) * 16.0 + 4.0
+		"cfg_blueprints":
+			var count: int = maxi(2, _cfg_cached_bp_names.size())
+			return SUB_HEADER_H + clampi(count, 2, 6) * 16.0 + 60.0  # +editor area
+		"cfg_instances":
+			var count: int = _cfg_count_active_modifiers()
+			return SUB_HEADER_H + clampi(count, 2, 8) * 16.0 + 4.0
+	return SUB_HEADER_H + 40.0
+
+
+func _snap_cfg_height(sid: String, h: float) -> float:
+	var preferred: float = _get_cfg_preferred_height(sid)
+	if absf(h - preferred) < SUB_SNAP_DISTANCE:
+		return preferred
+	return h
+
+
+# -- Config sub-section helpers ------------------------------------------------
+
+func _cfg_rebuild_bp_names() -> void:
+	## Scan data/modifier_blueprints/ for available blueprint JSON files.
+	_cfg_cached_bp_names.clear()
+	var dir := DirAccess.open("res://data/modifier_blueprints/")
+	if dir:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json"):
+				_cfg_cached_bp_names.append(fname.get_basename())
+			fname = dir.get_next()
+		dir.list_dir_end()
+	# Also check user:// for custom blueprints
+	var udir := DirAccess.open("user://modifier_blueprints/")
+	if udir:
+		udir.list_dir_begin()
+		var fname2: String = udir.get_next()
+		while fname2 != "":
+			if fname2.ends_with(".json"):
+				var bname: String = fname2.get_basename()
+				if bname not in _cfg_cached_bp_names:
+					_cfg_cached_bp_names.append(bname)
+			fname2 = udir.get_next()
+		udir.list_dir_end()
+	_cfg_cached_bp_names.sort()
+	_cfg_bp_names_dirty = false
+
+
+func _cfg_load_blueprint(bp_name: String) -> Dictionary:
+	## Load a modifier blueprint JSON by name. Checks user:// first, then res://.
+	for base in ["user://modifier_blueprints/", "res://data/modifier_blueprints/"]:
+		var path: String = base + bp_name + ".json"
+		if FileAccess.file_exists(path):
+			var file := FileAccess.open(path, FileAccess.READ)
+			if file:
+				var json := JSON.new()
+				if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+					return json.data
+	return {}
+
+
+func _cfg_save_blueprint(bp_name: String, data: Dictionary) -> void:
+	## Save a modifier blueprint to user://modifier_blueprints/.
+	DirAccess.make_dir_recursive_absolute("user://modifier_blueprints")
+	var path: String = "user://modifier_blueprints/" + bp_name + ".json"
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+	_cfg_bp_names_dirty = true
+
+
+func _cfg_bp_slider_range(op: String, current_val: float) -> Vector2:
+	## Return (min, max) range for a blueprint modifier slider based on operation type.
+	match op:
+		"multiply":
+			return Vector2(0.0, maxf(5.0, current_val * 2.0))
+		"add":
+			if current_val >= 0:
+				return Vector2(-absf(current_val) * 2.0, absf(current_val) * 3.0)
+			else:
+				return Vector2(current_val * 3.0, absf(current_val) * 2.0)
+		"set":
+			if current_val == 0.0:
+				return Vector2(0.0, 100.0)
+			elif current_val > 0:
+				return Vector2(0.0, current_val * 3.0)
+			else:
+				return Vector2(current_val * 3.0, 0.0)
+		"min", "max":
+			if current_val == 0.0:
+				return Vector2(0.0, 100.0)
+			return Vector2(0.0, current_val * 3.0)
+	return Vector2(0.0, maxf(1.0, absf(current_val) * 2.5))
+
+
+func _cfg_bp_update_live_instances(bp_name: String, key: String, op: String, value: float) -> void:
+	## Update all live ModifierProvider instances that came from this blueprint.
+	## This makes slider changes take effect immediately in-game.
+	for entity in _get_all_entities():
+		# Check entity config stack
+		if "_config_stack" in entity:
+			for provider in entity._config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					if "_name" in provider and provider._name == bp_name:
+						provider._modifiers[key] = [op, value]
+		# Check shackle config stack
+		if "_exec_shackle_config_stack" in entity:
+			for provider in entity._exec_shackle_config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					if "_name" in provider and provider._name == bp_name:
+						provider._modifiers[key] = [op, value]
+
+
+func _cfg_bp_cycle_operation(key: String) -> void:
+	## Cycle the operation for a modifier key in the selected blueprint.
+	if _cfg_bp_cached_data.is_empty() or not _cfg_bp_cached_data.has(key):
+		return
+	var val = _cfg_bp_cached_data[key]
+	if not val is Array or val.size() != 2:
+		return
+	var ops: Array[String] = ["multiply", "add", "set", "min", "max"]
+	var current_op: String = str(val[0])
+	var idx: int = ops.find(current_op)
+	var next_op: String = ops[(idx + 1) % ops.size()]
+	_cfg_bp_cached_data[key] = [next_op, val[1]]
+	# Update live instances
+	_cfg_bp_update_live_instances(_cfg_selected_blueprint, key, next_op, float(val[1]))
+
+
+func _cfg_bp_drag_at(lx: float) -> void:
+	## Set blueprint modifier value based on slider position.
+	if _cfg_bp_dragging_key.is_empty() or _cfg_bp_cached_data.is_empty():
+		return
+	var key: String = _cfg_bp_dragging_key
+	if not _cfg_bp_cached_data.has(key):
+		return
+	var val = _cfg_bp_cached_data[key]
+	if not val is Array or val.size() != 2:
+		return
+	var pw: float = _content_width
+	var slider_x: float = pw * 0.42
+	var slider_w: float = pw * 0.35
+	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+	var op_str: String = str(val[0])
+	var current_val: float = float(val[1])
+	var range_info: Vector2 = _cfg_bp_slider_range(op_str, current_val)
+	var new_val: float = lerpf(range_info.x, range_info.y, t)
+	# Snap to nice values
+	if absf(new_val) < 0.01:
+		new_val = 0.0
+	elif absf(new_val) > 10.0:
+		new_val = roundf(new_val)
+	elif absf(new_val) > 1.0:
+		new_val = roundf(new_val * 10.0) / 10.0
+	else:
+		new_val = roundf(new_val * 100.0) / 100.0
+	_cfg_bp_cached_data[key] = [op_str, new_val]
+	# Update live instances in real-time
+	_cfg_bp_update_live_instances(_cfg_selected_blueprint, key, op_str, new_val)
+	_panel.queue_redraw()
+
+
+func _cfg_count_active_modifiers() -> int:
+	## Count total active ModifierProviders across all entities and shackle stacks.
+	var count: int = 0
+	for entity in _get_all_entities():
+		if entity.has_method("cfg") and "_config_stack" in entity:
+			for provider in entity._config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					count += 1
+		# Also count shackle config stack modifiers (Executioner)
+		if "_exec_shackle_config_stack" in entity:
+			for provider in entity._exec_shackle_config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					count += 1
+	return count
+
+
+func _cfg_get_active_modifiers() -> Array:
+	## Returns [{entity, provider, name, entity_id, stack}] for all active ModifierProviders.
+	## Includes both entity config stacks and shackle config stacks.
+	var result: Array = []
+	for entity in _get_all_entities():
+		var eid: String = _cfg_entity_id_str(entity)
+		if entity.has_method("cfg") and "_config_stack" in entity:
+			for provider in entity._config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					var pname: String = provider._name if "_name" in provider else str(provider)
+					result.append({"entity": entity, "provider": provider, "name": pname, "entity_id": eid, "stack": "entity"})
+		# Shackle config stack (Executioner)
+		if "_exec_shackle_config_stack" in entity:
+			for provider in entity._exec_shackle_config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier():
+					var pname: String = provider._name if "_name" in provider else str(provider)
+					result.append({"entity": entity, "provider": provider, "name": pname, "entity_id": eid + " [shackle]", "stack": "shackle"})
+	return result
+
+
+func _cfg_entity_id_str(entity: Node2D) -> String:
+	## Short entity ID for display in modifier lists.
+	if "entity_id" in entity and not str(entity.entity_id).is_empty():
+		return str(entity.entity_id)
+	elif "player_index" in entity:
+		return "P%d" % (entity.player_index + 1)
+	return entity.name
+
+
+func _cfg_instantiate_blueprint(bp_name: String, entity: Node2D) -> void:
+	## Create a ModifierProvider from a blueprint and push it onto entity's config stack.
+	var data: Dictionary = _cfg_load_blueprint(bp_name)
+	if data.is_empty():
+		return
+	if not entity.has_method("push_config"):
+		return
+	# Build modifiers dict from blueprint data
+	# Blueprint format: { "key": ["operation", value], ... }
+	# Optional metadata: "_name", "_description" are skipped
+	var modifiers: Dictionary = {}
+	for key in data:
+		if key.begins_with("_"):
+			continue  # Skip metadata keys
+		var val = data[key]
+		if val is Array and val.size() == 2:
+			modifiers[key] = val
+	if modifiers.is_empty():
+		return
+	var MCP = load("res://scripts/systems/monster_config.gd")
+	var provider = MCP.ModifierProvider.new(modifiers, bp_name)
+	entity.push_config(provider)
+
+
+# -- Config sub-section drawing ------------------------------------------------
+
+func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	## Draw sub-section header — same style as LE/CT, blue-ish accent for config.
+	var bg_col := Color(0.06, 0.06, 0.09, 0.95)
+	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.15, 0.25, 0.4, 0.6), 1.0)
+
+	# Collapse triangle
+	var tri_x: float = x + 6
+	var tri_y: float = y + SUB_HEADER_H * 0.5
+	var tri_col := Color(0.45, 0.5, 0.55)
+	if sub["collapsed"]:
+		var pts: PackedVector2Array = [
+			Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+	else:
+		var pts: PackedVector2Array = [
+			Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]
+		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
+
+	# Title
+	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 120, 10, Color(0.5, 0.8, 1.0))
+
+	# Context info on right side
+	match sub["id"]:
+		"cfg_entities":
+			var count: int = _get_all_entities().size()
+			_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d" % count, HORIZONTAL_ALIGNMENT_LEFT, 30, 9, Color(0.4, 0.6, 0.8))
+		"cfg_blueprints":
+			var count: int = _cfg_cached_bp_names.size()
+			_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d" % count, HORIZONTAL_ALIGNMENT_LEFT, 30, 9, Color(0.4, 0.6, 0.8))
+		"cfg_instances":
+			var count: int = _cfg_count_active_modifiers()
+			if count > 0:
+				_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d active" % count, HORIZONTAL_ALIGNMENT_LEFT, 60, 9, Color(0.9, 0.7, 0.3))
+
+	# Resize grip (≡) on the header bar right side — for resizing the section ABOVE
+	if not sub["collapsed"]:
+		var grip_x: float = x + pw - 22
+		var grip_y: float = y + 6
+		for gi in range(3):
+			_panel.draw_line(Vector2(grip_x, grip_y + gi * 4), Vector2(grip_x + 10, grip_y + gi * 4), Color(0.3, 0.4, 0.5, 0.5), 1.0)
+
+
+func _draw_cfg_sub_settings(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	## Game Settings sub-section: toggle rows for global game config.
+	# game/multiple_players_same_class toggle
+	var mpc_val: bool = GameManager.multiple_players_same_class
+	var mpc_label: String = "multiple_players_same_class"
+	var mpc_col: Color = Color(0.3, 1.0, 0.3) if mpc_val else Color(0.6, 0.4, 0.4)
+	var mpc_text: String = "ON" if mpc_val else "OFF"
+	_panel.draw_string(font, Vector2(x + 4, y + 11), mpc_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.7, 9, Color(0.7, 0.7, 0.7))
+	_panel.draw_string(font, Vector2(x + pw - 44, y + 11), mpc_text, HORIZONTAL_ALIGNMENT_LEFT, 40, 9, mpc_col)
+	# Store clickable rect for hit testing
+	_game_config_rects["multiple_players_same_class"] = Rect2(x, y, pw - 16, 16)
+
+
+func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Entities sub-section: filter, entity list, config sliders for selected entity.
+	var local_y: float = 0.0
+
+	# -- Search filter field --
+	var cfg_filter_bg: Color = Color(0.12, 0.12, 0.16) if _config_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y + local_y, pw - 16, 20), cfg_filter_bg)
+	var cfg_filter_display: String = _config_filter_text
+	if _config_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		cfg_filter_display += "_"
+	if cfg_filter_display == "" and not _config_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 14), "Filter config...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 14), cfg_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.8, 0.8, 0.8))
+	local_y += 24
+
+	# -- Entity list --
+	var entities: Array = _get_all_entities()
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
+	local_y += 2
+	_panel.draw_string(font, Vector2(x, y + local_y + 12), "Entities (%d)" % entities.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
+	local_y += 16
+
+	var entity_row_h: float = 16.0
+	var selected_entity: Node2D = _get_selected_entity()
+	var max_entity_rows: int = int((h - local_y - 4) * 0.4 / entity_row_h)  # Use ~40% of remaining space for entity list
+	max_entity_rows = maxi(max_entity_rows, 2)
+	var visible_entities: int = mini(entities.size(), max_entity_rows)
+	var entity_offset: int = clampi(_cfg_entities_scroll_offset, 0, maxi(0, entities.size() - visible_entities))
+	_cfg_entities_scroll_offset = entity_offset
+
+	for ei in range(entity_offset, mini(entity_offset + visible_entities, entities.size())):
+		var e: Node2D = entities[ei]
+		var is_sel: bool = (e == selected_entity)
+		# Entity ID — show player name for players, entity_id or node name otherwise
+		var eid: String = _cfg_get_entity_display_name(e)
+		# Entity type
+		var etype: String = _cfg_get_entity_type(e)
+		if is_sel:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, entity_row_h - 2), Color(0.15, 0.25, 0.15))
+		var id_col := Color(0.5, 1.0, 0.5) if is_sel else Color(0.7, 0.7, 0.7)
+		var type_col := Color(0.4, 0.8, 0.4) if is_sel else Color(0.5, 0.5, 0.5)
+		var num_col := Color(0.3, 0.9, 1.0) if is_sel else Color(0.4, 0.5, 0.6)
+		_panel.draw_string(font, Vector2(x + 2, y + local_y + 12), "%d" % (ei + 1), HORIZONTAL_ALIGNMENT_LEFT, 14, 9, num_col)
+		_panel.draw_string(font, Vector2(x + 18, y + local_y + 12), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.35, 9, id_col)
+		_panel.draw_string(font, Vector2(x + pw * 0.40, y + local_y + 12), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.25, 8, type_col)
+		# "Tune" button for entities that support tuning popup
+		if e.has_method("exec_tuning_toggle"):
+			var btn_x: float = x + pw - 52
+			var btn_w: float = 34.0
+			var has_tuning: bool = e.get("_exec_tuning_visible") == true
+			var btn_col: Color = Color(0.3, 0.5, 0.2) if has_tuning else Color(0.2, 0.2, 0.25)
+			var btn_text_col: Color = Color(0.8, 1.0, 0.5) if has_tuning else Color(0.5, 0.5, 0.5)
+			_panel.draw_rect(Rect2(btn_x, y + local_y + 1, btn_w, entity_row_h - 3), btn_col)
+			_panel.draw_string(font, Vector2(btn_x + 3, y + local_y + 11), "Tune", HORIZONTAL_ALIGNMENT_LEFT, btn_w, 8, btn_text_col)
+		# "Mod+" button for applying modifier blueprints
+		if e.has_method("push_config") and not _cfg_cached_bp_names.is_empty():
+			var mod_btn_x: float = x + pw - 90
+			var mod_btn_w: float = 32.0
+			var mod_btn_col := Color(0.2, 0.25, 0.35)
+			_panel.draw_rect(Rect2(mod_btn_x, y + local_y + 1, mod_btn_w, entity_row_h - 3), mod_btn_col)
+			_panel.draw_string(font, Vector2(mod_btn_x + 3, y + local_y + 11), "Mod+", HORIZONTAL_ALIGNMENT_LEFT, mod_btn_w, 7, Color(0.5, 0.7, 1.0))
+		local_y += entity_row_h
+
+	if entities.is_empty():
+		_panel.draw_string(font, Vector2(x + 6, y + local_y + 12), "(no entities in scene)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		local_y += entity_row_h
+
+	local_y += 4
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
+	local_y += 4
+
+	# -- Config sliders for selected entity --
+	if not selected_entity:
+		_panel.draw_string(font, Vector2(x, y + local_y + 14), "Click an entity to configure", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
+		return
+
+	# Entity info header
+	var has_cfg: bool = selected_entity.has_method("cfg")
+	var entity_type_label: String = ""
+	if selected_entity.get_script():
+		entity_type_label = selected_entity.get_script().resource_path.get_file().get_basename()
+	_panel.draw_string(font, Vector2(x, y + local_y + 12), entity_type_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 9, Color(0.9, 0.7, 0.3))
+
+	var props_text: String = ""
+	if "health" in selected_entity:
+		props_text += "HP:%d " % selected_entity.health
+	if "creature_scale" in selected_entity:
+		props_text += "scale:%.1f " % selected_entity.creature_scale
+	if "_chained" in selected_entity and selected_entity._chained:
+		props_text += "[chained] "
+	if "_state" in selected_entity:
+		props_text += "state:%d" % selected_entity._state
+	if not props_text.is_empty():
+		_panel.draw_string(font, Vector2(x + pw * 0.5, y + local_y + 12), props_text, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, Color(0.6, 0.6, 0.6))
+	local_y += 16
+
+	# Show config sliders for entities that have cfg()
+	if not has_cfg:
+		_draw_entity_properties(x, y + local_y, pw, y + h, font, selected_entity)
+		return
+
+	var monster: Node2D = selected_entity
+	if _config_keys.is_empty():
+		_rebuild_config_keys(monster)
+
+	# Filter config keys
+	var filtered_keys: Array[String] = []
+	if _config_filter_text.is_empty():
+		filtered_keys.assign(_config_keys)
+	else:
+		var ft: String = _config_filter_text.to_lower()
+		for key in _config_keys:
+			if key.begins_with("# ") or ft in key.to_lower():
+				filtered_keys.append(key)
+
+	# Draw sliders
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var remaining_h: float = h - local_y - 10
+	var visible_count: int = int(remaining_h / (slider_h + slider_gap))
+	var max_scroll: int = maxi(0, filtered_keys.size() - visible_count)
+	_config_scroll_offset = clampi(_config_scroll_offset, 0, max_scroll)
+
+	for i in range(_config_scroll_offset, mini(_config_scroll_offset + visible_count, filtered_keys.size())):
+		var key: String = filtered_keys[i]
+
+		# Group header
+		if key.begins_with("# "):
+			_panel.draw_line(Vector2(x, y + local_y + 8), Vector2(x + pw - 16, y + local_y + 8), Color(0.2, 0.3, 0.4), 1.0)
+			_panel.draw_string(font, Vector2(x, y + local_y + 14), key.substr(2), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.75, 1.0))
+			local_y += slider_h + slider_gap
+			continue
+
+		# Resolve value — shackle: prefix routes through shackle_cfg()
+		var display_key: String = key
+		var default_val: float
+		var current_val: float
+		var is_modified: bool
+		if key.begins_with("shackle:"):
+			var skey: String = key.substr(8)
+			display_key = skey
+			default_val = _get_shackle_config_default(skey)
+			current_val = monster.shackle_cfg(skey, default_val) if monster.has_method("shackle_cfg") else default_val
+			is_modified = current_val != default_val
+		else:
+			default_val = _get_config_default(monster, key)
+			current_val = monster.cfg(key, default_val)
+			is_modified = monster._config_stack.size() > 1 and current_val != default_val
+
+		var label_col: Color = Color(1.0, 0.85, 0.3) if is_modified else Color(0.7, 0.7, 0.7)
+		_panel.draw_string(font, Vector2(x + 8, y + local_y + 11), display_key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 8, label_col)
+
+		var slider_x: float = x + pw * 0.47
+		var slider_w: float = pw * 0.35
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
+
+		var range_info: Vector2 = _get_config_range(key, default_val)
+		var t: float = clampf((current_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
+		var fill_col: Color = Color(0.3, 0.6, 1.0) if not is_modified else Color(1.0, 0.7, 0.2)
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
+
+		var handle_x: float = slider_x + slider_w * t
+		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE)
+
+		_panel.draw_string(font, Vector2(x + pw * 0.84, y + local_y + 11), "%.2f" % current_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, label_col)
+
+		local_y += slider_h + slider_gap
+
+	# Scrollbar
+	if filtered_keys.size() > visible_count and visible_count > 0:
+		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
+		var bar_h: float = maxf(20.0, remaining_h * float(visible_count) / float(filtered_keys.size()))
+		var bar_y: float = y + (h - remaining_h) + pct * (remaining_h - bar_h)
+		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+
+
+func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Modifier Blueprints sub-section: list of blueprint templates with editor.
+	var local_y: float = 0.0
+
+	# Filter field
+	var bp_filter_bg: Color = Color(0.12, 0.12, 0.16) if _cfg_bp_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y + local_y, pw - 16, 18), bp_filter_bg)
+	var bp_filter_display: String = _cfg_bp_filter_text
+	if _cfg_bp_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		bp_filter_display += "_"
+	if bp_filter_display == "" and not _cfg_bp_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), "Filter blueprints...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), bp_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8))
+	local_y += 20
+
+	# Blueprint list
+	if _cfg_bp_names_dirty:
+		_cfg_rebuild_bp_names()
+
+	var filtered_bps: Array[String] = []
+	if _cfg_bp_filter_text.is_empty():
+		filtered_bps.assign(_cfg_cached_bp_names)
+	else:
+		var ft: String = _cfg_bp_filter_text.to_lower()
+		for bp in _cfg_cached_bp_names:
+			if ft in bp.to_lower():
+				filtered_bps.append(bp)
+
+	var row_h: float = 16.0
+	var list_h: float = minf(h * 0.45, filtered_bps.size() * row_h + 4.0)
+	var visible: int = int(list_h / row_h)
+	var bp_offset: int = clampi(_cfg_blueprints_scroll_offset, 0, maxi(0, filtered_bps.size() - visible))
+	_cfg_blueprints_scroll_offset = bp_offset
+
+	for bi in range(bp_offset, mini(bp_offset + visible, filtered_bps.size())):
+		var bp_name: String = filtered_bps[bi]
+		var is_sel: bool = (bp_name == _cfg_selected_blueprint)
+		if is_sel:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.25))
+		var col: Color = Color(0.6, 0.8, 1.0) if is_sel else Color(0.5, 0.5, 0.6)
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), bp_name, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.65, 9, col)
+		# Show modifier count
+		var bp_data: Dictionary = _cfg_load_blueprint(bp_name)
+		var mod_count: int = 0
+		for key in bp_data:
+			if not key.begins_with("_"):
+				mod_count += 1
+		_panel.draw_string(font, Vector2(x + pw * 0.7, y + local_y + 11), "%d mods" % mod_count, HORIZONTAL_ALIGNMENT_LEFT, 60, 8, Color(0.4, 0.5, 0.6))
+		local_y += row_h
+
+	if filtered_bps.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "(no blueprints)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		local_y += row_h
+
+	local_y += 4
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
+	local_y += 4
+
+	# Blueprint editor — interactive sliders for live tuning
+	if _cfg_selected_blueprint.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "Click a blueprint to edit", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+
+	# Cache blueprint data for editing (reload only on selection change)
+	if _cfg_bp_cached_data.get("_bp_name", "") != _cfg_selected_blueprint:
+		_cfg_bp_cached_data = _cfg_load_blueprint(_cfg_selected_blueprint)
+		_cfg_bp_cached_data["_bp_name"] = _cfg_selected_blueprint
+
+	# Header: blueprint name + buttons
+	_panel.draw_string(font, Vector2(x, y + local_y + 11), _cfg_selected_blueprint, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.38, 9, Color(0.9, 0.7, 0.3))
+
+	# [Apply] button — applies to selected entity's config stack
+	var sel_entity: Node2D = _get_selected_entity()
+	if sel_entity and sel_entity.has_method("push_config"):
+		var apply_x: float = x + pw * 0.40
+		_panel.draw_rect(Rect2(apply_x, y + local_y, 38, 14), Color(0.2, 0.35, 0.2))
+		_panel.draw_string(font, Vector2(apply_x + 3, y + local_y + 10), "Apply", HORIZONTAL_ALIGNMENT_LEFT, 34, 7, Color(0.5, 1.0, 0.5))
+
+	# [Shackle] button — applies to shackle config stack
+	if sel_entity and sel_entity.has_method("push_shackle_config"):
+		var shk_x: float = x + pw * 0.53
+		_panel.draw_rect(Rect2(shk_x, y + local_y, 44, 14), Color(0.2, 0.25, 0.35))
+		_panel.draw_string(font, Vector2(shk_x + 3, y + local_y + 10), "Shackle", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.7, 1.0))
+
+	# [Save] button
+	var save_x: float = x + pw - 44
+	_panel.draw_rect(Rect2(save_x, y + local_y, 30, 14), Color(0.25, 0.2, 0.15))
+	_panel.draw_string(font, Vector2(save_x + 3, y + local_y + 10), "Save", HORIZONTAL_ALIGNMENT_LEFT, 28, 7, Color(0.9, 0.8, 0.4))
+	local_y += 18
+
+	# Editable modifier rows: [key] [op] [===slider===] [value]
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var mod_keys: Array[String] = []
+	for key in _cfg_bp_cached_data:
+		if not key.begins_with("_"):
+			mod_keys.append(key)
+
+	for key in mod_keys:
+		if y + local_y > y + h - 4:
+			break
+		var val = _cfg_bp_cached_data[key]
+		var op_str: String = "?"
+		var num_val: float = 0.0
+		if val is Array and val.size() == 2:
+			op_str = str(val[0])
+			num_val = float(val[1])
+
+		# Operation label (clickable to cycle)
+		var op_col := Color(0.6, 0.8, 0.4)
+		match op_str:
+			"multiply": op_col = Color(0.8, 0.6, 1.0)
+			"add": op_col = Color(0.4, 0.8, 0.6)
+			"set": op_col = Color(1.0, 0.7, 0.3)
+			"min": op_col = Color(0.4, 0.7, 1.0)
+			"max": op_col = Color(1.0, 0.5, 0.4)
+
+		# Key name
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.28, 8, Color(0.7, 0.7, 0.7))
+
+		# Operation badge
+		var op_badge_x: float = x + pw * 0.29
+		_panel.draw_rect(Rect2(op_badge_x, y + local_y + 2, pw * 0.11, 12), op_col * 0.3)
+		_panel.draw_string(font, Vector2(op_badge_x + 2, y + local_y + 11), op_str.substr(0, 3), HORIZONTAL_ALIGNMENT_LEFT, pw * 0.11, 7, op_col)
+
+		# Slider track
+		var slider_x: float = x + pw * 0.42
+		var slider_w: float = pw * 0.35
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
+
+		# Slider range depends on operation
+		var range_info: Vector2 = _cfg_bp_slider_range(op_str, num_val)
+		var t: float = clampf((num_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
+
+		# Slider fill
+		var is_dragging: bool = (_cfg_bp_dragging_key == key)
+		var fill_col: Color = Color(0.8, 0.6, 1.0) if is_dragging else op_col * 0.7
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
+
+		# Handle
+		var handle_x: float = slider_x + slider_w * t
+		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE if is_dragging else Color(0.8, 0.8, 0.8))
+
+		# Value text
+		_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 11), "%.2f" % num_val, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.18, 8, Color(0.9, 0.9, 0.9))
+
+		local_y += slider_h + slider_gap
+
+
+func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Modifier Instances sub-section: all active modifiers across entities.
+	var local_y: float = 0.0
+
+	# Filter field
+	var mod_filter_bg: Color = Color(0.12, 0.12, 0.16) if _cfg_mod_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y + local_y, pw - 16, 18), mod_filter_bg)
+	var mod_filter_display: String = _cfg_mod_filter_text
+	if _cfg_mod_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		mod_filter_display += "_"
+	if mod_filter_display == "" and not _cfg_mod_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), "Filter modifiers...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), mod_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8))
+	local_y += 20
+
+	var active_mods: Array = _cfg_get_active_modifiers()
+
+	# Filter
+	var filtered_mods: Array = []
+	if _cfg_mod_filter_text.is_empty():
+		filtered_mods = active_mods
+	else:
+		var ft: String = _cfg_mod_filter_text.to_lower()
+		for mod in active_mods:
+			if ft in mod["name"].to_lower() or ft in mod["entity_id"].to_lower():
+				filtered_mods.append(mod)
+
+	var row_h: float = 16.0
+	var visible: int = int((h - local_y - 4) / row_h)
+	var mod_offset: int = clampi(_cfg_instances_scroll_offset, 0, maxi(0, filtered_mods.size() - visible))
+	_cfg_instances_scroll_offset = mod_offset
+
+	for mi in range(mod_offset, mini(mod_offset + visible, filtered_mods.size())):
+		var mod: Dictionary = filtered_mods[mi]
+		var is_hover: bool = (mi == _cfg_hover_instance_idx)
+		if is_hover:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.2))
+		# Modifier name
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), mod["name"], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.45, 9, Color(0.7, 0.85, 1.0))
+		# Entity it's attached to
+		_panel.draw_string(font, Vector2(x + pw * 0.48, y + local_y + 11), mod["entity_id"], HORIZONTAL_ALIGNMENT_LEFT, pw * 0.25, 8, Color(0.5, 0.7, 0.5))
+		# Remove button [X]
+		var rm_x: float = x + pw - 28
+		_panel.draw_rect(Rect2(rm_x, y + local_y + 2, 16, row_h - 4), Color(0.35, 0.15, 0.15))
+		_panel.draw_string(font, Vector2(rm_x + 3, y + local_y + 11), "X", HORIZONTAL_ALIGNMENT_LEFT, 14, 8, Color(1.0, 0.4, 0.4))
+		local_y += row_h
+
+	if filtered_mods.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "(no active modifiers)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+
+
+func _cfg_get_entity_display_name(e: Node2D) -> String:
+	## Returns display name for an entity in the entity list.
+	var is_player_entity: bool = "player_index" in e and "character_class" in e
+	if is_player_entity:
+		var pi: int = e.player_index
+		var profile: Dictionary = ProfileManager.get_active_profile(pi)
+		var result: String = ""
+		if not profile.is_empty() and profile.has("name"):
+			result = profile["name"]
+		else:
+			result = "P%d" % (pi + 1)
+		var cls_name: String = PlayerHUD.CLASS_NAMES.get(e.character_class, "")
+		if not cls_name.is_empty():
+			result += " (%s)" % cls_name
+		return result
+	elif "entity_id" in e and not str(e.entity_id).is_empty():
+		return str(e.entity_id)
+	else:
+		return e.name
+
+
+func _cfg_get_entity_type(e: Node2D) -> String:
+	## Returns type name for an entity.
+	var is_player_entity: bool = "player_index" in e and "character_class" in e
+	if is_player_entity:
+		return "player"
+	elif e.get_script():
+		return e.get_script().resource_path.get_file().get_basename()
+	return "unknown"
+
+
+# -- Config sub-section input handling -----------------------------------------
+
+func _handle_cfg_click(lx: float, my: float) -> void:
+	## Route click to the appropriate config sub-section.
+	if not _cfg_subsections_initialized:
+		_init_cfg_subsections()
+	var y: float = 0.0
+	for i in range(_cfg_subsections.size()):
+		var sub: Dictionary = _cfg_subsections[i]
+		var header_end: float = y + SUB_HEADER_H
+
+		# Click on header — collapse toggle or resize grip
+		if my >= y and my < header_end:
+			var pw: float = _content_width
+			if lx < 16:
+				sub["collapsed"] = not sub["collapsed"]
+				_save_cfg_layout()
+			elif lx > pw - 28 and i > 0:
+				# Resize grip — double-click snaps, single click starts resize
+				var target_idx: int = i - 1
+				var now: float = Time.get_ticks_msec() / 1000.0
+				if _cfg_grip_last_click_idx == target_idx and (now - _cfg_grip_last_click_time) < 0.4:
+					var sub_above: Dictionary = _cfg_subsections[target_idx]
+					var last_sub: Dictionary = _cfg_subsections[_cfg_subsections.size() - 1]
+					var preferred: float = _get_cfg_preferred_height(sub_above["id"])
+					var delta: float = preferred - sub_above["height"]
+					sub_above["height"] = preferred
+					last_sub["height"] -= delta
+					_save_cfg_layout()
+					_cfg_grip_last_click_idx = -1
+					return
+				_cfg_grip_last_click_idx = target_idx
+				_cfg_grip_last_click_time = now
+				_cfg_sub_resize_idx = target_idx
+				_cfg_sub_resize_start_y = my
+				_cfg_sub_resize_start_h = _cfg_subsections[target_idx]["height"]
+				_cfg_sub_resize_next_h = _cfg_subsections[_cfg_subsections.size() - 1]["height"]
+			return
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = header_end
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "cfg_instances":
+			body_end = maxf(body_end, 9999.0)  # Last section fills remaining space
+
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			_handle_cfg_subsection_click(sub["id"], lx, local_y, body_end - body_y)
+			return
+		y += sub["height"]
+
+
+func _handle_cfg_subsection_click(sub_id: String, lx: float, local_y: float, body_h: float) -> void:
+	## Handle click within a specific config sub-section.
+	match sub_id:
+		"cfg_settings":
+			_handle_cfg_settings_click(lx, local_y)
+		"cfg_entities":
+			_handle_cfg_entities_click(lx, local_y, body_h)
+		"cfg_blueprints":
+			_handle_cfg_blueprints_click(lx, local_y, body_h)
+		"cfg_instances":
+			_handle_cfg_instances_click(lx, local_y, body_h)
+
+
+func _handle_cfg_settings_click(_lx: float, local_y: float) -> void:
+	## Click in game settings sub-section.
+	if local_y >= 0 and local_y < 16:
+		GameManager.multiple_players_same_class = not GameManager.multiple_players_same_class
+
+
+func _handle_cfg_entities_click(lx: float, local_y: float, _body_h: float) -> void:
+	## Click in entities sub-section — filter, entity list, or slider drag.
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	# Filter field (first 20px)
+	if local_y >= y and local_y < y + 20:
+		_config_filter_focused = true
+		_cfg_bp_filter_focused = false
+		_cfg_mod_filter_focused = false
+		return
+	y += 24
+
+	# Entity list
+	y += 2  # separator
+	y += 16  # "Entities" header
+	var entity_row_h: float = 16.0
+	var entities: Array = _get_all_entities()
+
+	for ei in range(entities.size()):
+		if local_y >= y and local_y < y + entity_row_h:
+			var e: Node2D = entities[ei]
+			# Check "Mod+" button click
+			if e.has_method("push_config") and not _cfg_cached_bp_names.is_empty():
+				var mod_btn_x: float = pw - 90
+				if lx >= mod_btn_x and lx <= mod_btn_x + 32:
+					# Apply the selected blueprint to this entity
+					if not _cfg_selected_blueprint.is_empty():
+						_cfg_instantiate_blueprint(_cfg_selected_blueprint, e)
+					return
+			# Check "Tune" button click
+			var btn_x: float = pw - 52
+			if lx >= btn_x and lx <= btn_x + 34 and e.has_method("exec_tuning_toggle"):
+				e.exec_tuning_toggle()
+				return
+			# Click on entity name — select it
+			PlayerHUD.debug_select_entity(e)
+			DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
+			DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
+			_config_keys.clear()
+			_config_filter_focused = false
+			return
+		y += entity_row_h
+	if entities.is_empty():
+		y += entity_row_h
+	y += 8
+
+	_config_filter_focused = false
+
+	# Entity info header
+	y += 16
+
+	# Slider area — for any entity with cfg()
+	var cfg_entity: Node2D = _get_selected_entity()
+	if not cfg_entity or not cfg_entity.has_method("cfg") or _config_keys.is_empty():
+		return
+
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var row: int = int((local_y - y) / (slider_h + slider_gap)) + _config_scroll_offset
+	if row >= 0 and row < _config_keys.size():
+		var key: String = _config_keys[row]
+		if lx > pw * 0.47 and lx < pw * 0.82:
+			_config_dragging_key = key
+			_handle_config_drag_at(lx, cfg_entity)
+
+
+func _handle_cfg_blueprints_click(lx: float, local_y: float, _body_h: float) -> void:
+	## Click in blueprints sub-section — filter, list, buttons, or slider drag.
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	# Filter field (first 18px)
+	if local_y >= y and local_y < y + 18:
+		_cfg_bp_filter_focused = true
+		_config_filter_focused = false
+		_cfg_mod_filter_focused = false
+		return
+	y += 20
+
+	# Blueprint list
+	var filtered_bps: Array[String] = []
+	if _cfg_bp_filter_text.is_empty():
+		filtered_bps.assign(_cfg_cached_bp_names)
+	else:
+		var ft: String = _cfg_bp_filter_text.to_lower()
+		for bp in _cfg_cached_bp_names:
+			if ft in bp.to_lower():
+				filtered_bps.append(bp)
+
+	var row_h: float = 16.0
+	var list_h: float = minf(_body_h * 0.45, filtered_bps.size() * row_h + 4.0)
+	var visible: int = int(list_h / row_h)
+	for bi in range(mini(visible, filtered_bps.size())):
+		if local_y >= y and local_y < y + row_h:
+			_cfg_selected_blueprint = filtered_bps[bi + _cfg_blueprints_scroll_offset]
+			_cfg_bp_cached_data.clear()  # Force reload
+			_cfg_bp_filter_focused = false
+			return
+		y += row_h
+	if filtered_bps.is_empty():
+		y += row_h
+
+	y += 8  # gap + separator
+
+	# Blueprint editor area
+	if _cfg_selected_blueprint.is_empty():
+		_cfg_bp_filter_focused = false
+		return
+
+	# Header row: blueprint name + [Apply] + [Shackle] + [Save]
+	var sel_entity: Node2D = _get_selected_entity()
+
+	# [Apply] button
+	if sel_entity and sel_entity.has_method("push_config"):
+		var apply_x: float = pw * 0.40
+		if local_y >= y and local_y < y + 14 and lx >= apply_x and lx <= apply_x + 38:
+			_cfg_instantiate_blueprint(_cfg_selected_blueprint, sel_entity)
+			return
+
+	# [Shackle] button
+	if sel_entity and sel_entity.has_method("push_shackle_config"):
+		var shk_x: float = pw * 0.53
+		if local_y >= y and local_y < y + 14 and lx >= shk_x and lx <= shk_x + 44:
+			# Instantiate blueprint as shackle modifier
+			var data: Dictionary = _cfg_bp_cached_data.duplicate()
+			var modifiers: Dictionary = {}
+			for key in data:
+				if key.begins_with("_"):
+					continue
+				var val = data[key]
+				if val is Array and val.size() == 2:
+					modifiers[key] = val
+			if not modifiers.is_empty():
+				var MCP = load("res://scripts/systems/monster_config.gd")
+				var provider = MCP.ModifierProvider.new(modifiers, _cfg_selected_blueprint)
+				sel_entity.push_shackle_config(provider)
+			return
+
+	# [Save] button
+	var save_x: float = pw - 44
+	if local_y >= y and local_y < y + 14 and lx >= save_x and lx <= save_x + 30:
+		# Save cached data back to disk
+		var save_data: Dictionary = _cfg_bp_cached_data.duplicate()
+		save_data.erase("_bp_name")
+		_cfg_save_blueprint(_cfg_selected_blueprint, save_data)
+		return
+
+	y += 18
+
+	# Modifier rows — check for operation click or slider drag
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var mod_keys: Array[String] = []
+	for key in _cfg_bp_cached_data:
+		if not key.begins_with("_"):
+			mod_keys.append(key)
+
+	for key in mod_keys:
+		if local_y >= y and local_y < y + slider_h:
+			# Click on operation badge? (pw*0.29 to pw*0.40)
+			if lx >= pw * 0.29 and lx < pw * 0.40:
+				_cfg_bp_cycle_operation(key)
+				return
+			# Click on slider? (pw*0.42 to pw*0.77)
+			if lx >= pw * 0.42 and lx < pw * 0.77:
+				_cfg_bp_dragging_key = key
+				_cfg_bp_drag_at(lx)
+				return
+		y += slider_h + slider_gap
+
+	_cfg_bp_filter_focused = false
+
+
+func _handle_cfg_instances_click(lx: float, local_y: float, _body_h: float) -> void:
+	## Click in instances sub-section — filter, list, or remove button.
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	# Filter field (first 18px)
+	if local_y >= y and local_y < y + 18:
+		_cfg_mod_filter_focused = true
+		_config_filter_focused = false
+		_cfg_bp_filter_focused = false
+		return
+	y += 20
+
+	# Instance list
+	var active_mods: Array = _cfg_get_active_modifiers()
+	var filtered_mods: Array = []
+	if _cfg_mod_filter_text.is_empty():
+		filtered_mods = active_mods
+	else:
+		var ft: String = _cfg_mod_filter_text.to_lower()
+		for mod in active_mods:
+			if ft in mod["name"].to_lower() or ft in mod["entity_id"].to_lower():
+				filtered_mods.append(mod)
+
+	var row_h: float = 16.0
+	for mi in range(filtered_mods.size()):
+		if local_y >= y and local_y < y + row_h:
+			# Check remove button [X]
+			var rm_x: float = pw - 28
+			if lx >= rm_x and lx <= rm_x + 16:
+				# Remove modifier from the appropriate config stack
+				var mod: Dictionary = filtered_mods[mi]
+				var entity: Node2D = mod["entity"]
+				if is_instance_valid(entity):
+					if mod.get("stack", "entity") == "shackle" and entity.has_method("remove_shackle_config"):
+						entity.remove_shackle_config(mod["provider"])
+					elif entity.has_method("remove_config"):
+						entity.remove_config(mod["provider"])
+				return
+			# Click on modifier — could select for inspection later
+			return
+		y += row_h
+	_cfg_mod_filter_focused = false
+
+
+func _handle_cfg_scroll(my: float, delta: int) -> void:
+	## Route scroll to the appropriate config sub-section.
+	if not _cfg_subsections_initialized:
+		return
+	var y: float = 0.0
+	for i in range(_cfg_subsections.size()):
+		var sub: Dictionary = _cfg_subsections[i]
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var sub_end: float = y + sub["height"]
+		if sub["id"] == "cfg_instances":
+			sub_end = 9999.0
+		if my >= y and my < sub_end:
+			match sub["id"]:
+				"cfg_entities":
+					_config_scroll_offset = maxi(0, _config_scroll_offset + delta)
+				"cfg_blueprints":
+					_cfg_blueprints_scroll_offset = maxi(0, _cfg_blueprints_scroll_offset + delta)
+				"cfg_instances":
+					_cfg_instances_scroll_offset = maxi(0, _cfg_instances_scroll_offset + delta)
+			return
+		y += sub["height"]
+
+
+func _handle_cfg_hover(my: float) -> void:
+	## Update hover state for config sub-sections.
+	_cfg_hover_entity_idx = -1
+	_cfg_hover_blueprint_idx = -1
+	_cfg_hover_instance_idx = -1
+	if not _cfg_subsections_initialized:
+		return
+	var y: float = 0.0
+	for i in range(_cfg_subsections.size()):
+		var sub: Dictionary = _cfg_subsections[i]
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var sub_end: float = y + sub["height"]
+		if sub["id"] == "cfg_instances":
+			sub_end = 9999.0
+		if my >= body_y and my < sub_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"cfg_entities":
+					# Hover over entity list (after filter+header = 42px)
+					var entity_local: float = local_y - 42
+					if entity_local >= 0:
+						_cfg_hover_entity_idx = int(entity_local / 16.0) + _cfg_entities_scroll_offset
+				"cfg_blueprints":
+					var bp_local: float = local_y - 20  # After filter
+					if bp_local >= 0:
+						_cfg_hover_blueprint_idx = int(bp_local / 16.0) + _cfg_blueprints_scroll_offset
+				"cfg_instances":
+					var mod_local: float = local_y - 20  # After filter
+					if mod_local >= 0:
+						_cfg_hover_instance_idx = int(mod_local / 16.0) + _cfg_instances_scroll_offset
+			return
+		y += sub["height"]
+
+
+func _handle_cfg_sub_resize_drag(my: float) -> void:
+	## Handle drag to resize config sub-sections.
+	if _cfg_sub_resize_idx < 0 or _cfg_sub_resize_idx >= _cfg_subsections.size():
+		return
+	var sub: Dictionary = _cfg_subsections[_cfg_sub_resize_idx]
+	var last_sub: Dictionary = _cfg_subsections[_cfg_subsections.size() - 1]
+	var delta: float = my - _cfg_sub_resize_start_y
+	var new_h: float = _cfg_sub_resize_start_h + delta
+	var new_next_h: float = _cfg_sub_resize_next_h - delta
+	var min_h: float = CFG_SUB_MIN.get(sub["id"], 30.0)
+	var min_next: float = CFG_SUB_MIN.get(last_sub["id"], 30.0)
+	new_h = maxf(new_h, min_h)
+	new_next_h = maxf(new_next_h, min_next)
+	# Snap to preferred
+	new_h = _snap_cfg_height(sub["id"], new_h)
+	sub["height"] = new_h
+	last_sub["height"] = new_next_h
+
+
+func _handle_cfg_sub_resize_release() -> void:
+	## Finalize config sub-section resize.
+	_cfg_sub_resize_idx = -1
+	_save_cfg_layout()
+
+
+func _handle_cfg_text_input(event: InputEventKey) -> void:
+	## Handle text input for config sub-section filter fields.
+	if _cfg_bp_filter_focused:
+		if event.keycode == KEY_BACKSPACE:
+			if _cfg_bp_filter_text.length() > 0:
+				_cfg_bp_filter_text = _cfg_bp_filter_text.substr(0, _cfg_bp_filter_text.length() - 1)
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_TAB or event.keycode == KEY_ESCAPE:
+			_cfg_bp_filter_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_cfg_bp_filter_text += char(event.unicode)
+		return
+	if _cfg_mod_filter_focused:
+		if event.keycode == KEY_BACKSPACE:
+			if _cfg_mod_filter_text.length() > 0:
+				_cfg_mod_filter_text = _cfg_mod_filter_text.substr(0, _cfg_mod_filter_text.length() - 1)
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_TAB or event.keycode == KEY_ESCAPE:
+			_cfg_mod_filter_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_cfg_mod_filter_text += char(event.unicode)
+		return
 
 
 # ==============================================================================

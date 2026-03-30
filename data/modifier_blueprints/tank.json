@@ -1,0 +1,7 @@
+{
+  "_name": "Tank",
+  "_description": "High health and knockback resistance, slower movement",
+  "max_health": ["multiply", 2.0],
+  "knockback_mult": ["multiply", 0.5],
+  "speed": ["multiply", 0.7]
+}

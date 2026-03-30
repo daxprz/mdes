@@ -1,0 +1,30 @@
+{
+  "name": "exec_bs_yeet",
+  "description": "B-S RELEASE mode: ball+shackle fly as connected pair. Shackle barely affects ball trajectory (mass=5 vs ball=140). Ball thrown right at 45deg.",
+  "debug": {
+    "log": ["executioner/throw", "executioner/ball"]
+  },
+  "script": [
+    "level flat_floor",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "ai_spawn 400 876",
+    "wait 0.5",
+    "comment Cycle to RELEASE mode: default=H_R, 2 presses: H_R->H_H->R",
+    "ai_cmd interact 0.05",
+    "wait 0.3",
+    "ai_cmd interact 0.05",
+    "wait 0.5",
+    "comment Throw ball right and slightly up (45deg)",
+    "ai_cmd grapple 1.5 0.71 -0.71",
+    "wait 0.1",
+    "ai_cmd none 6.0",
+    "wait 6",
+    "ai_off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify observations exec_bs_yeet [\"OK\",\"RETRY\"] 0 editor"
+  ]
+}

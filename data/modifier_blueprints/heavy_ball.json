@@ -1,0 +1,7 @@
+{
+  "_name": "Heavy Ball",
+  "_description": "Increases ball mass and damage, reduces throw speed",
+  "exec_ball_mass": ["multiply", 2.0],
+  "exec_ball_damage": ["add", 20],
+  "exec_ball_throw_speed": ["multiply", 0.75]
+}

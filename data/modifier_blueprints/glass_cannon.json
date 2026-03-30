@@ -1,0 +1,6 @@
+{
+  "_name": "Glass Cannon",
+  "_description": "Massive damage boost but reduced health",
+  "attack_damage_mult": ["multiply", 2.5],
+  "max_health": ["multiply", 0.4]
+}

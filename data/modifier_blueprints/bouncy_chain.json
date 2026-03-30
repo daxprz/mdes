@@ -1,0 +1,6 @@
+{
+  "_name": "Bouncy Chain",
+  "_description": "High elasticity chain — more energetic YEET collisions",
+  "exec_chain_elasticity": ["set", 0.9],
+  "exec_ball_gravity": ["multiply", 0.7]
+}

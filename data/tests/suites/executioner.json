@@ -1,0 +1,8 @@
+{
+	"name": "executioner",
+	"description": "Executioner ball-and-chain mechanics",
+	"gate": false,
+	"tests": [
+		"exec_release_ball_up"
+	]
+}

@@ -41,6 +41,11 @@ const AIR_SLASH_INTERVAL := 0.25  # Min time between air slashes
 
 const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
 var _health_bar: Node2D = null
+var _hud_panel: CanvasLayer = null
+var _hud_icon: Control = null
+var _hud_hp_bar: ProgressBar = null
+var _hud_name_label: Label = null
+var _hud_state_label: Label = null
 
 func on_attach(monster: CharacterBody2D) -> void:
 	# Start in a neutral state (not patrol/chase)
@@ -55,6 +60,8 @@ func on_attach(monster: CharacterBody2D) -> void:
 	monster.add_to_group("players")  # So other systems (camera, HUD) can find us
 	# Add player-style health bar (same as other characters)
 	_setup_monster_health_bar(monster)
+	# Add HUD panel (screen-space icon + HP)
+	_setup_hud_panel(monster)
 
 
 func _setup_monster_health_bar(monster: CharacterBody2D) -> void:
@@ -73,9 +80,160 @@ func _update_monster_health_bar(monster: CharacterBody2D) -> void:
 		_health_bar.set_health(monster.health, max_hp)
 
 
+func _setup_hud_panel(monster: CharacterBody2D) -> void:
+	## Create a screen-space HUD panel with a procedural monster icon.
+	_hud_panel = CanvasLayer.new()
+	_hud_panel.layer = 100  # Above game, below console
+	monster.add_child(_hud_panel)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(160, 56)
+	panel.anchor_left = 0; panel.anchor_top = 0
+	panel.offset_left = 10; panel.offset_top = 10
+	panel.offset_right = 170; panel.offset_bottom = 66
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.08, 0.06, 0.04, 0.85)
+	style.border_color = Color(0.6, 0.3, 0.15)
+	style.set_border_width_all(1)
+	style.set_corner_radius_all(4)
+	style.set_content_margin_all(6)
+	panel.add_theme_stylebox_override("panel", style)
+	_hud_panel.add_child(panel)
+
+	var hbox := HBoxContainer.new()
+	hbox.add_theme_constant_override("separation", 6)
+	panel.add_child(hbox)
+
+	# Procedural monster icon (drawn via _draw)
+	_hud_icon = Control.new()
+	_hud_icon.custom_minimum_size = Vector2(44, 44)
+	_hud_icon.draw.connect(_draw_monster_icon)
+	hbox.add_child(_hud_icon)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 2)
+	hbox.add_child(vbox)
+
+	# Name label
+	_hud_name_label = Label.new()
+	_hud_name_label.text = "P%d Monster" % (player_index + 1)
+	_hud_name_label.add_theme_font_size_override("font_size", 12)
+	_hud_name_label.modulate = Color(0.9, 0.7, 0.3)
+	vbox.add_child(_hud_name_label)
+
+	# State label
+	_hud_state_label = Label.new()
+	_hud_state_label.text = ""
+	_hud_state_label.add_theme_font_size_override("font_size", 9)
+	_hud_state_label.modulate = Color(0.6, 0.6, 0.6)
+	vbox.add_child(_hud_state_label)
+
+	# HP bar
+	_hud_hp_bar = ProgressBar.new()
+	_hud_hp_bar.custom_minimum_size = Vector2(0, 8)
+	_hud_hp_bar.max_value = 1000
+	_hud_hp_bar.value = 1000
+	_hud_hp_bar.show_percentage = false
+	var hp_bg := StyleBoxFlat.new()
+	hp_bg.bg_color = Color(0.2, 0.05, 0.05)
+	hp_bg.set_corner_radius_all(2)
+	_hud_hp_bar.add_theme_stylebox_override("background", hp_bg)
+	var hp_fill := StyleBoxFlat.new()
+	hp_fill.bg_color = Color(0.8, 0.25, 0.1)
+	hp_fill.set_corner_radius_all(2)
+	_hud_hp_bar.add_theme_stylebox_override("fill", hp_fill)
+	vbox.add_child(_hud_hp_bar)
+
+
+func _draw_monster_icon() -> void:
+	## Procedural monster silhouette — drawn into the _hud_icon Control.
+	## Simple quadruped shape: body oval, 4 legs, head, tail, eye.
+	var w: float = _hud_icon.size.x
+	var h: float = _hud_icon.size.y
+	var cx: float = w * 0.5
+	var cy: float = h * 0.5
+
+	# Body bg circle
+	_hud_icon.draw_circle(Vector2(cx, cy), 18.0, Color(0.12, 0.08, 0.06))
+
+	# Body (oval)
+	var body_col := Color(0.35, 0.2, 0.12)
+	_hud_icon.draw_rect(Rect2(cx - 12, cy - 5, 24, 10), body_col)
+	_hud_icon.draw_circle(Vector2(cx - 12, cy), 5.0, body_col)
+	_hud_icon.draw_circle(Vector2(cx + 12, cy), 5.0, body_col)
+
+	# Legs (4 lines)
+	var leg_col := Color(0.3, 0.18, 0.1)
+	_hud_icon.draw_line(Vector2(cx - 9, cy + 4), Vector2(cx - 11, cy + 16), leg_col, 2.0)
+	_hud_icon.draw_line(Vector2(cx - 4, cy + 4), Vector2(cx - 5, cy + 16), leg_col, 2.0)
+	_hud_icon.draw_line(Vector2(cx + 4, cy + 4), Vector2(cx + 5, cy + 16), leg_col, 2.0)
+	_hud_icon.draw_line(Vector2(cx + 9, cy + 4), Vector2(cx + 11, cy + 16), leg_col, 2.0)
+
+	# Head
+	var head_col := Color(0.4, 0.25, 0.15)
+	_hud_icon.draw_circle(Vector2(cx - 16, cy - 4), 5.0, head_col)
+
+	# Jaw
+	var jaw_pts: PackedVector2Array = [
+		Vector2(cx - 22, cy - 3),
+		Vector2(cx - 16, cy - 6),
+		Vector2(cx - 16, cy - 1),
+	]
+	_hud_icon.draw_polygon(jaw_pts, PackedColorArray([head_col, head_col, head_col]))
+
+	# Eye
+	_hud_icon.draw_circle(Vector2(cx - 17, cy - 6), 2.0, Color(0.9, 0.2, 0.1))
+	_hud_icon.draw_circle(Vector2(cx - 17, cy - 6), 1.0, Color(1.0, 0.8, 0.2))
+
+	# Tail
+	var tail_col := Color(0.3, 0.18, 0.1)
+	_hud_icon.draw_line(Vector2(cx + 12, cy - 1), Vector2(cx + 20, cy - 6), tail_col, 2.0)
+	_hud_icon.draw_line(Vector2(cx + 20, cy - 6), Vector2(cx + 22, cy - 3), tail_col, 1.5)
+
+	# Player indicator (small P# badge)
+	var badge_col := Color(0.2, 0.5, 0.9)
+	_hud_icon.draw_circle(Vector2(w - 6, 6), 6.0, badge_col)
+	var font: Font = ThemeDB.fallback_font
+	_hud_icon.draw_string(font, Vector2(w - 10, 9), "P%d" % (player_index + 1), HORIZONTAL_ALIGNMENT_LEFT, 12, 7, Color.WHITE)
+
+
+func _update_hud_panel(monster: CharacterBody2D) -> void:
+	if not _hud_hp_bar:
+		return
+	var max_hp: int = monster._part_health.get("body", {}).get("max_hp", 1000)
+	_hud_hp_bar.max_value = max_hp
+	_hud_hp_bar.value = monster.health
+
+	# State label
+	if _hud_state_label:
+		var state_names := ["Idle", "Patrol", "Chase", "Leap", "Attack", "Grab", "Flinch", "Dead", "Standdown", "Sleep"]
+		var si: int = monster._state
+		_hud_state_label.text = state_names[si] if si < state_names.size() else "?"
+		if _combat_stance:
+			_hud_state_label.text += " [Combat]"
+		if _leap_charging:
+			_hud_state_label.text += " [Aim]"
+
+	# Redraw icon (for animation later if needed)
+	if _hud_icon:
+		_hud_icon.queue_redraw()
+
+
+func on_detach(monster: CharacterBody2D) -> void:
+	## Clean up HUD when controller is removed.
+	if _hud_panel and is_instance_valid(_hud_panel):
+		_hud_panel.queue_free()
+		_hud_panel = null
+	if _health_bar and is_instance_valid(_health_bar):
+		_health_bar.queue_free()
+		_health_bar = null
+
+
 func update(monster: CharacterBody2D, delta: float) -> void:
 	_attack_buffer_timer -= delta
 	_update_monster_health_bar(monster)
+	_update_hud_panel(monster)
 
 	# -- Movement --
 	var move_x: float = _get_axis("move_left", "move_right")

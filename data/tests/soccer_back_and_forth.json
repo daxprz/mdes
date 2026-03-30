@@ -1,0 +1,22 @@
+{
+	"name": "soccer_back_and_forth",
+	"script": [
+		"level flat_floor",
+		"wait 0.3",
+		"clear",
+		"portal off",
+		"clearplayers",
+		"spawn dummy 1470 873 name=ball",
+		"wait 0.5",
+		"set cycles = 10",
+		"while {cycles}",
+		"kick ball -400 -100",
+		"wait 5",
+		"kick ball 400 -100",
+		"wait 5",
+		"set cycles = {cycles}-1",
+		"endwhile",
+		"enablejoins",
+		"notify observations soccer_back_and_forth [\"OK\"] 0 editor"
+	]
+}

@@ -114,7 +114,6 @@ func _register_all() -> void:
 	r.call("executioner/throw", "Ball/shackle throw mode toggle, windup, and release")
 	r.call("executioner/ball", "Spike ball hit, stick, wall drag, platform drag")
 	r.call("executioner/swing", "Swing slam: hold time, spin speed, damage, dust")
-	r.call("executioner/axe", "Axe chop: damage, cooldown")
 	r.call("executioner/cleave", "Charged cleave: charge time, damage, knockback")
 
 	# -- Game Config --

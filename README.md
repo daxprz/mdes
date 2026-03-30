@@ -163,6 +163,27 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.32
+**Config refactor, modifier blueprints, shackle config stack, B-S YEET physics**
+
+- **Config section refactored** into 4 collapsible sub-sections: Game Settings, Entities, Mod Blueprints, Mod Instances
+- **Modifier Blueprint system**: JSON files in `data/modifier_blueprints/` define reusable modifier templates (multiply, add, set, min, max operations)
+- **Interactive blueprint editor**: draggable sliders update live modifier instances in real-time, clickable operation badges cycle through operations, Apply/Shackle/Save buttons
+- **Shackle config stack**: Executioner shackle has its own config stack (`shackle_cfg()`) with defaults for mass, elasticity, gravity, drag — editable via debug drawer sliders
+- **B-S YEET physics**: Ball-Shackle elastic collision now uses same math as Ball-Player and Ball-Entity. Shackle mass=5 means ball barely notices it (3.4% velocity loss)
+- **Unified flight physics**: all YEET modes (B-P, B-S, B-E) use identical elastic collision math, each "other end" provides its own config
+- **Monster player HUD icon**: procedural monster silhouette with player badge, state label, and HP bar in top-left corner
+- **Executioner sprite fix**: deleted fake .import files, opened Godot editor to reimport correctly
+- **RCON: `mod/mods/unmod`** commands for entity modifier management
+- **RCON: `smod/smods/unsmod`** commands for shackle modifier management
+- **RCON: `kick <entity> <vx> <vy>`** applies velocity impulse to any entity
+- **RCON: `spawn ... name=<id>`** allows custom entity naming for stable test references
+- **While loop editor tracking**: loop body lines now highlight correctly during execution, `while` line shows orange ↻ while looping, green ✓ when complete
+- **`set` line tracking**: top-level set commands now show ✓ checkmark in editor
+- **While loop `{var}-1` / `{var}+1`**: simple arithmetic in set expressions for loop counters
+- **8 modifier blueprints**: heavy_ball, bouncy_chain, glass_cannon, tank, long_chain, monster_rage, heavy_shackle, ghost_shackle
+- **Experimental test suite**: `soccer_back_and_forth` (while-loop soccer ball demo), `exec_bs_yeet` (B-S release mode test)
+
 ### v0.10.31
 **Absolute mass system, entity YEET, RELEASE mode**
 

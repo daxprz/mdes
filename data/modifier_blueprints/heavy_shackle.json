@@ -1,0 +1,6 @@
+{
+  "_name": "Heavy Shackle",
+  "_description": "Heavier shackle — drags ball more in B-S mode. Mass 5 -> 50.",
+  "mass": ["set", 50.0],
+  "chain_elasticity": ["set", 0.4]
+}

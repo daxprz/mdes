@@ -49,7 +49,7 @@ Do NOT use tumu when:
 | `scripts/systems/entity_effects.gd` | Generic timed-effect system (stun, slow, bleed, etc.) |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
 | `docs/epics/EPIC_monster_scaling.md` | Monster scaling spec (COMPLETE) |
-| `scripts/systems/monster_config.gd` | Config provider stack (DictProvider, CallableProvider, TimedProvider) |
+| `scripts/systems/monster_config.gd` | Config provider stack (DictProvider, CallableProvider, TimedProvider, ModifierProvider) |
 | `data/config/monster_defaults.json` | Monster default constants (60+ configurable values) |
 | `docs/design/animation_roadmap.md` | Procedural animation roadmap (momentum, attacks, walls) |
 | `docs/design/debug_panel_spec.md` | Debug panel spec (IMPLEMENTED) — sub-sections, modes, caching |
@@ -61,8 +61,9 @@ Do NOT use tumu when:
 | `scripts/autoload/factions.gd` | Faction system (players, monsters, animals, bugs) — hostility matrix |
 | `scripts/enemies/monster_controller.gd` | Base class for monster controllers (AI or Player) |
 | `scripts/enemies/monster_ai_controller.gd` | AI controller — delegates to monster's built-in _do_* functions |
-| `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode, health bar |
+| `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode, health bar, HUD icon |
 | `scripts/autoload/game_manager.gd` | Game state, tower progress, game-wide config settings |
+| `data/modifier_blueprints/` | Modifier blueprint JSON files (heavy_ball, bouncy_chain, ghost_shackle, etc.) |
 
 ## Conventions
 

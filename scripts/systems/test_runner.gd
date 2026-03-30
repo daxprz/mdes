@@ -173,6 +173,8 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 						while_stack[-1]["body_indices"].append(line_idx)
 					else:
 						_test_vars[set_name] = set_val
+						# Mark set line as complete immediately
+						_line_states[line_idx] = "complete"
 			continue
 
 		# While loop: "while {var_name}" — collect body until "endwhile"
@@ -181,7 +183,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 			# Strip braces if present: {var_name} → var_name
 			if while_var.begins_with("{") and while_var.ends_with("}"):
 				while_var = while_var.substr(1, while_var.length() - 2)
-			while_stack.append({"var_name": while_var, "body_lines": [], "body_indices": []})
+			while_stack.append({"var_name": while_var, "body_lines": [], "body_indices": [], "while_line": line_idx})
 			continue
 
 		if l == "endwhile":
@@ -205,6 +207,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 						"var_name": loop["var_name"],
 						"body_lines": loop["body_lines"],
 						"body_indices": loop["body_indices"],
+						"while_line": loop.get("while_line", -1),
 					})
 				else:
 					# Nested while: flatten into parent (not supported yet — just add lines)
@@ -593,24 +596,37 @@ func _advance_queue() -> void:
 			var var_name: String = task["var_name"]
 			var var_val: String = _test_vars.get(var_name, "0")
 			var is_truthy: bool = var_val != "0" and var_val != "false" and var_val != "False" and not var_val.is_empty()
+			var while_line: int = task.get("while_line", -1)
 			if is_truthy:
+				# Mark while line as "looping" (active loop)
+				if while_line >= 0:
+					_line_states[while_line] = "looping"
 				var body: Array = task["body_lines"]
+				var body_idx: Array = task.get("body_indices", [])
 				var rcon_w: Node = get_node_or_null("/root/Rcon")
 				# Build a list of tasks for the entire body, then insert them
 				# all at the front of the queue (in order), followed by the
 				# while task itself for re-evaluation.
 				var body_tasks: Array = []
 				var rcon_batch: Array = []
-				for bl: String in body:
+				var rcon_batch_lines: Array = []  # Track line indices for RCON batches
+				for bi in range(body.size()):
+					var bl: String = body[bi]
+					var bl_line: int = body_idx[bi] if bi < body_idx.size() else -1
 					var resolved: String = bl
 					for vn: String in _test_vars:
 						resolved = resolved.replace("{%s}" % vn, _test_vars[vn])
 					if resolved.begins_with("wait "):
 						# Flush pending RCON batch before the wait
 						if not rcon_batch.is_empty():
-							body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": []})
+							body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": rcon_batch_lines.duplicate()})
 							rcon_batch.clear()
-						body_tasks.append(_parse_wait_line(resolved))
+							rcon_batch_lines.clear()
+						var wait_task: Dictionary = _parse_wait_line(resolved)
+						wait_task["test_name"] = task["test_name"]
+						if bl_line >= 0:
+							wait_task["lines"] = [bl_line]
+						body_tasks.append(wait_task)
 					elif resolved.begins_with("set "):
 						# Set commands execute immediately when encountered
 						var sp := resolved.split(" ", false)
@@ -618,17 +634,25 @@ func _advance_queue() -> void:
 							var eq_i: int = resolved.find("=")
 							if eq_i >= 0:
 								rcon_batch.append("_SET_VAR_%s=%s" % [sp[1], resolved.substr(eq_i + 1).strip_edges()])
+								if bl_line >= 0:
+									rcon_batch_lines.append(bl_line)
 					else:
 						rcon_batch.append(resolved)
+						if bl_line >= 0:
+							rcon_batch_lines.append(bl_line)
 				# Flush final RCON batch
 				if not rcon_batch.is_empty():
-					body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": []})
+					body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": rcon_batch_lines.duplicate()})
 				# Insert: body tasks first, then while re-evaluation at the end
-				var while_task: Dictionary = {"type": TASK_WHILE, "test_name": task["test_name"], "var_name": var_name, "body_lines": body, "body_indices": task["body_indices"]}
+				var while_task: Dictionary = {"type": TASK_WHILE, "test_name": task["test_name"], "var_name": var_name, "body_lines": body, "body_indices": task["body_indices"], "while_line": while_line}
 				# Push in reverse order to front so they execute in correct order
 				_task_queue.push_front(while_task)
 				for i in range(body_tasks.size() - 1, -1, -1):
 					_task_queue.push_front(body_tasks[i])
+			else:
+				# Loop finished — mark while line as complete
+				if while_line >= 0:
+					_line_states[while_line] = "complete"
 			_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
@@ -694,7 +718,17 @@ func _execute_rcon_task(task: Dictionary) -> void:
 			var kv: String = cmd.substr(9)  # Strip "_SET_VAR_"
 			var eq: int = kv.find("=")
 			if eq > 0:
-				_test_vars[kv.substr(0, eq)] = kv.substr(eq + 1)
+				var vname: String = kv.substr(0, eq)
+				var vval: String = kv.substr(eq + 1)
+				# Support simple arithmetic: {var}-1, {var}+1
+				if vval.ends_with("-1") and _test_vars.has(vval.substr(0, vval.length() - 2)):
+					var ref_name: String = vval.substr(0, vval.length() - 2)
+					_test_vars[vname] = str(int(_test_vars[ref_name]) - 1)
+				elif vval.ends_with("+1") and _test_vars.has(vval.substr(0, vval.length() - 2)):
+					var ref_name: String = vval.substr(0, vval.length() - 2)
+					_test_vars[vname] = str(int(_test_vars[ref_name]) + 1)
+				else:
+					_test_vars[vname] = vval
 			continue
 		var result: String = rcon._execute(cmd)
 		_log("  %s → %s" % [cmd, result.substr(0, 60)], Color(0.5, 0.5, 0.5))

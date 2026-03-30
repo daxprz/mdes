@@ -63,8 +63,6 @@ const CONFIG_BOUNDS := {
 	"exec_chain_adjust_speed": Vector2(0.1, 2.0),
 	"exec_swing_max_damage": Vector2(10, 300),
 	"exec_swing_slam_radius": Vector2(20, 200),
-	"exec_axe_damage": Vector2(1, 200),
-	"exec_axe_cooldown": Vector2(0.1, 3.0),
 	"exec_cleave_max_damage": Vector2(10, 500),
 	"exec_cleave_charge_time": Vector2(0.5, 5.0),
 	"exec_cleave_knockback": Vector2(50, 1000),
@@ -91,6 +89,51 @@ func push_config(provider: Variant) -> void:
 
 func remove_config(provider: Variant) -> void:
 	_config_stack.erase(provider)
+
+
+# -- Shackle Config Stack -----------------------------------------------------
+# The shackle is the "other end" in B-S mode. It has its own config stack so
+# modifiers can change its flight characteristics independently.
+# Default: nearly massless (mass=5) so the ball barely notices it.
+# Push modifiers to make the shackle heavier, bouncier, etc.
+
+const SHACKLE_DEFAULT_CONFIG := {
+	"mass": 5.0,
+	"chain_elasticity": 0.25,
+	"gravity": 600.0,
+	"drag": 0.97,
+}
+
+func _init_shackle_config() -> void:
+	## Initialize the shackle's config stack with base defaults.
+	## Called once when executioner class is chosen.
+	if _exec_shackle_base_config != null:
+		return  # Already initialized
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	_exec_shackle_base_config = MCP.DictProvider.new(SHACKLE_DEFAULT_CONFIG, "shackle_defaults")
+	_exec_shackle_config_stack = [_exec_shackle_base_config]
+
+func shackle_cfg(key: String, default_val: float) -> float:
+	## Resolve a config value from the shackle's config stack.
+	## Same pattern as player cfg(): first non-null wins, then modifiers.
+	var val: float = default_val
+	for provider in _exec_shackle_config_stack:
+		var pval: Variant = provider.get_value(key)
+		if pval != null:
+			val = float(pval)
+			break
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	val = MCP.apply_modifiers(_exec_shackle_config_stack, key, val)
+	return val
+
+func push_shackle_config(provider: Variant) -> void:
+	## Push a modifier onto the shackle's config stack.
+	_exec_shackle_config_stack.insert(0, provider)
+
+func remove_shackle_config(provider: Variant) -> void:
+	## Remove a modifier from the shackle's config stack.
+	_exec_shackle_config_stack.erase(provider)
+
 
 # Jump height = v^2 / (2*g). With v=550, g=900: max height ~168px
 const GRAVITY := 900.0
@@ -359,6 +402,51 @@ var _ai_queue: Array = []                     # Array of command dicts
 var _ai_current_cmd: Dictionary = {}          # Currently executing command
 var _ai_cmd_timer: float = 0.0               # Time remaining on current command
 var _ai_cmd_first_frame: bool = false        # True on first frame of a command
+
+
+func reset_state() -> void:
+	## Reset player to default start state. Works for any class.
+	## Recalls all projectiles, clears cooldowns, resets velocity.
+	velocity = Vector2.ZERO
+	_is_attacking = false
+	_attack_timer = 0.0
+	_attack_cooldown = 0.0
+	_special_cooldown = 0.0
+	_is_staggered = false
+	_is_blocking = false
+	_is_charging = false
+	_charge_time = 0.0
+
+	# Executioner-specific reset
+	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
+		_init_shackle_config()
+		_exec_ball_state = ExecEndState.HELD
+		_exec_shackle_state = ExecEndState.HELD
+		_exec_throw_step = 0
+		_exec_ball_vel = Vector2.ZERO
+		_exec_shackle_vel = Vector2.ZERO
+		_exec_ball_pos = global_position
+		_exec_shackle_pos = global_position
+		_exec_swing_active = false
+		_exec_cleave_charging = false
+		_exec_chain_taut = false
+		_exec_shackle_chain_taut = false
+		_exec_yeet_immunity = 0.0
+		_exec_preview_arc.clear()
+		_exec_preview_arc_inner.clear()
+		_exec_shackle_preview_arc.clear()
+		# Destroy all chain nodes (they're scene children, not player children)
+		if _exec_chain_node and is_instance_valid(_exec_chain_node):
+			_exec_chain_node.queue_free()
+			_exec_chain_node = null
+		if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node):
+			_exec_shackle_chain_node.queue_free()
+			_exec_shackle_chain_node = null
+
+	# Grapple reset (Ranger)
+	_grapple_state = GrappleState.IDLE
+
+	DebugOverlay.log("player/velocity_arrows", self, "RESET STATE")
 
 
 func ai_set_active(active: bool) -> void:
@@ -7266,6 +7354,7 @@ const EXEC_SHACKLE_GRAVITY := 600.0
 const EXEC_SHACKLE_DRAG := 0.97
 const EXEC_SHACKLE_DAMAGE := 15
 const EXEC_SHACKLE_SNAP_RANGE := 40.0     # Hitbox proximity snap range
+const EXEC_SHACKLE_MASS := 5.0            # Shackle mass — very light so ball barely notices it in B-S mode
 
 # Chain — ONE total chain, player in middle, ball on one end, shackle on other
 const EXEC_CHAIN_TOTAL_LEN := 600.0       # Total fixed chain length (ball + shackle)
@@ -7288,12 +7377,6 @@ const EXEC_SWING_DUST_COUNT := 16
 const EXEC_SWING_DUST_SPEED := 200.0
 const EXEC_SWING_KNOCKBACK := 300.0
 
-# Axe (Circle — quick chop)
-const EXEC_AXE_DAMAGE := 30
-const EXEC_AXE_RANGE := 35.0
-const EXEC_AXE_COOLDOWN := 0.6
-const EXEC_AXE_SWING_ARC := 2.5
-
 # Cleave (Triangle — charged massive strike)
 const EXEC_CLEAVE_CHARGE_TIME := 2.0
 const EXEC_CLEAVE_MIN_CHARGE := 0.5
@@ -7309,7 +7392,24 @@ const EXEC_CLEAVE_ENEMY_KB := 400.0
 enum ExecThrowMode { BALL_FIRST, SHACKLE_FIRST }
 enum ExecEndState { HELD, WINDUP, THROWN, STUCK_WALL, STUCK_PLATFORM, STUCK_CEILING, ATTACHED_ENEMY, RETRACTING }
 
+# Chain mode: what happens with the chain on each throw
+# Circle button cycles through these
+enum ExecChainMode {
+	RELEASE_RELEASE,  # 1st: throw & release, 2nd: N/A (already free)
+	HOLD_RELEASE,     # 1st: throw & hold, 2nd: throw & release (entity YEET)
+	HOLD_HOLD,        # 1st: throw & hold, 2nd: throw & hold (3-body)
+}
+
+const EXEC_CHAIN_MODE_NAMES := ["Release", "Hold+Release", "Hold+Hold"]
+const EXEC_CHAIN_MODE_COLORS: Array[Color] = [
+	Color(0.9, 0.4, 0.2),   # Release: orange-red
+	Color(0.8, 0.7, 0.2),   # Hold+Release: gold
+	Color(0.3, 0.7, 0.9),   # Hold+Hold: blue
+]
+
 var _exec_throw_mode: ExecThrowMode = ExecThrowMode.BALL_FIRST
+var _exec_chain_mode: ExecChainMode = ExecChainMode.HOLD_RELEASE  # Default
+var _exec_chain_mode_changed_timer: float = 0.0  # Flash timer when mode changes
 var _exec_throw_step: int = 0
 
 var _exec_ball_state: ExecEndState = ExecEndState.HELD
@@ -7348,9 +7448,6 @@ var _exec_swing_time: float = 0.0
 var _exec_swing_angle: float = 0.0
 var _exec_swing_angular_vel: float = 0.0
 
-var _exec_axe_cooldown: float = 0.0
-var _exec_axe_slash_timer: float = 0.0
-
 var _exec_cleave_charging: bool = false
 var _exec_cleave_charge_time: float = 0.0
 var _exec_cleave_flash_timer: float = 0.0
@@ -7360,6 +7457,12 @@ var _exec_chain_clank_timer: float = 0.0  # Timer for chain clanking during thro
 var _exec_chain_taut: bool = false        # True once ball chain goes slack→taut (YEET fires once)
 var _exec_shackle_chain_taut: bool = false # Same for shackle chain
 var _exec_yeet_immunity: float = 0.0     # Seconds to skip OOB check after YEET
+
+# Shackle config stack — same pattern as player/monster config stacks.
+# The shackle is the "other end" in B-S mode. Modifiers here change how the
+# shackle behaves as a flight body (mass, elasticity, gravity, drag).
+var _exec_shackle_config_stack: Array = []
+var _exec_shackle_base_config: Variant = null  # Base DictProvider (set once in _init_shackle_config)
 var _exec_chain_len_changing: bool = false  # True while actively adjusting split
 var _exec_l2_tap_timer: float = 0.0      # Double-tap detection for L2
 var _exec_r2_tap_timer: float = 0.0      # Double-tap detection for R2
@@ -7398,8 +7501,13 @@ func _exec_apply_chain_constraint() -> void:
 		return
 	if _exec_ball_state not in [ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
 		return
-	# In entity-yeet mode, the player is FREE — chain connects ball to entity, not player
+	# Player is FREE if: entity-yeet mode, or no chain to player (RELEASE mode)
 	if _exec_is_entity_yeet_mode():
+		return
+	if not (_exec_chain_node and is_instance_valid(_exec_chain_node)):
+		return
+	# B-S chain (RELEASE mode) doesn't connect to player — skip
+	if _exec_chain_node.anchor_a.get("is_wall", false):
 		return
 
 	var ball_pos: Vector2 = _exec_get_ball_world_pos()
@@ -7451,6 +7559,18 @@ func _exec_shackle_chain_len() -> float:
 
 # -- YEET Physics (shared by thrown + stuck states) ----------------------------
 
+static func entity_cfg(entity: Node, key: String, default_val: float) -> float:
+	## Query a config value from any entity. If the entity has cfg(), use it.
+	## Otherwise return the default. This lets any entity provide overrides
+	## via its own config stack (artifacts, equipment, entity-type defaults).
+	if entity and is_instance_valid(entity) and entity.has_method("cfg"):
+		return entity.cfg(key, default_val)
+	# Check for a simple property match (e.g., entity.mass)
+	if entity and is_instance_valid(entity) and key == "mass" and "mass" in entity:
+		return entity.mass
+	return default_val
+
+
 func _exec_is_entity_yeet_mode() -> bool:
 	## True when shackle is attached to an entity — ball YEETs the entity, not the player.
 	return _exec_shackle_state == ExecEndState.ATTACHED_ENEMY and \
@@ -7468,13 +7588,17 @@ func _exec_try_yeet(chain_dir: Vector2) -> void:
 		return
 	_exec_chain_taut = true
 
+	# Query each participant for its own config (supports per-entity overrides/artifacts)
 	var m_ball: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
 	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 
 	if _exec_is_entity_yeet_mode():
 		# ENTITY YEET: ball momentum transfers to the shackled entity
 		var entity: Node2D = _exec_shackle_anchor_body
-		var m_entity: float = entity.mass if "mass" in entity else 50.0
+		# Entity provides its own mass (via cfg() if it has artifacts, or .mass property)
+		var m_entity: float = entity_cfg(entity, "mass", 50.0)
+		# Entity can override elasticity for its own interactions
+		var e_entity: float = entity_cfg(entity, "chain_elasticity", e)
 		var entity_vel: Vector2 = entity.velocity if "velocity" in entity else Vector2.ZERO
 
 		var v_b: float = _exec_ball_vel.dot(chain_dir)
@@ -7484,10 +7608,9 @@ func _exec_try_yeet(chain_dir: Vector2) -> void:
 		if absf(relative_v) < 10.0:
 			return
 
-		var impulse_to_entity: float = (1.0 + e) * m_ball / (m_ball + m_entity) * relative_v
-		var impulse_to_ball: float = (1.0 + e) * m_entity / (m_ball + m_entity) * relative_v
+		var impulse_to_entity: float = (1.0 + e_entity) * m_ball / (m_ball + m_entity) * relative_v
+		var impulse_to_ball: float = (1.0 + e_entity) * m_entity / (m_ball + m_entity) * relative_v
 
-		# Apply impulse to entity
 		var yeet_vec: Vector2 = chain_dir * impulse_to_entity
 		if entity.has_method("apply_knockback"):
 			entity.apply_knockback(yeet_vec)
@@ -7551,17 +7674,15 @@ func _handle_executioner(delta: float) -> void:
 	_exec_handle_chain_length(delta)
 	_exec_handle_throw(delta)
 	_exec_tick_swing(delta)
-	_exec_handle_axe()
+	_exec_handle_chain_mode()
 	_exec_tick_cleave(delta)
 	_exec_tick_ball(delta)
 	_exec_tick_shackle(delta)
 	_exec_check_chain_severed()
-	if _exec_axe_cooldown > 0.0:
-		_exec_axe_cooldown -= delta
-	if _exec_axe_slash_timer > 0.0:
-		_exec_axe_slash_timer -= delta
 	if _exec_cleave_flash_timer > 0.0:
 		_exec_cleave_flash_timer -= delta
+	if _exec_chain_mode_changed_timer > 0.0:
+		_exec_chain_mode_changed_timer -= delta
 	if _exec_yeet_immunity > 0.0:
 		_exec_yeet_immunity -= delta
 	if _exec_chain_radius_fade > 0.0:
@@ -7904,24 +8025,53 @@ func _exec_update_shackle_preview(launch_vel: Vector2) -> void:
 			break
 
 
+func _exec_should_hold_on_throw() -> bool:
+	## Based on chain mode and throw step, should the player hold the chain?
+	## _exec_throw_step is BEFORE increment (0 = first throw, 1 = second throw)
+	var is_first: bool = (_exec_throw_step == 0)
+	match _exec_chain_mode:
+		ExecChainMode.RELEASE_RELEASE:
+			return false  # Never hold
+		ExecChainMode.HOLD_RELEASE:
+			return is_first  # Hold on first, release on second
+		ExecChainMode.HOLD_HOLD:
+			return true  # Always hold
+	return true
+
+
 func _exec_throw_ball() -> void:
 	var aim := _get_aim_direction_analog()
 	var charge_t: float = clampf(_exec_ball_hold_time / 1.5, 0.0, 1.0)
 	var speed: float = lerpf(cfg("exec_ball_throw_speed", EXEC_BALL_THROW_SPEED), cfg("exec_ball_max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
 	_exec_ball_vel = aim * speed
 	_exec_ball_pos = global_position + aim * 20.0
-	print("ACTUAL THROW: aim=(%.2f,%.2f) speed=%.0f vel=(%.0f,%.0f) hold=%.2f charge_t=%.2f" %
-		[aim.x, aim.y, speed, _exec_ball_vel.x, _exec_ball_vel.y, _exec_ball_hold_time, charge_t])
+	print("ACTUAL THROW: aim=(%.2f,%.2f) speed=%.0f vel=(%.0f,%.0f) hold=%.2f charge_t=%.2f step=%d mode=%s" %
+		[aim.x, aim.y, speed, _exec_ball_vel.x, _exec_ball_vel.y, _exec_ball_hold_time, charge_t,
+		 _exec_throw_step, EXEC_CHAIN_MODE_NAMES[_exec_chain_mode]])
 	_exec_ball_state = ExecEndState.THROWN
-	_exec_throw_step += 1
 	_exec_ball_anchor_body = null
 	_exec_chain_clank_timer = 0.0
-	_exec_chain_taut = false  # Reset — YEET hasn't fired yet
-	# Spawn chain immediately — it's always rigid, even during flight
-	_exec_spawn_chain()
+	_exec_chain_taut = false
+
+	# Decide whether to hold (spawn chain) or release (no chain, ball flies free)
+	var should_hold: bool = _exec_should_hold_on_throw()
+	if should_hold:
+		_exec_spawn_chain()
+	else:
+		# RELEASE mode: B-S flies as a connected pair. Shackle gets dragged behind.
+		_exec_shackle_pos = global_position + aim * 10.0
+		_exec_shackle_vel = aim * speed * 0.05  # Shackle is light — barely launches, gets dragged
+		_exec_shackle_state = ExecEndState.THROWN
+		_exec_spawn_ball_to_shackle_chain()
+		_exec_throw_step = 2  # Both ends deployed — no more throws
+		DebugOverlay.log("executioner/throw", self, "B-S RELEASED: ball + shackle flying free")
+
+	if _exec_throw_step < 2:
+		_exec_throw_step += 1
 	AudioManager.play("grapple_throw", 2.0, 0.5)
 	_rumble(0.4, 0.7, 0.15)
-	DebugOverlay.log("executioner/throw", self, "BALL THROWN: speed=%.0f aim=(%.2f,%.2f)", [speed, aim.x, aim.y])
+	DebugOverlay.log("executioner/throw", self, "BALL THROWN: speed=%.0f step=%d hold=%s",
+		[speed, _exec_throw_step, str(should_hold)])
 
 
 func _exec_throw_shackle() -> void:
@@ -7931,15 +8081,27 @@ func _exec_throw_shackle() -> void:
 	_exec_shackle_vel = aim * speed
 	_exec_shackle_pos = global_position + aim * 15.0
 	_exec_shackle_state = ExecEndState.THROWN
-	_exec_throw_step += 1
 	_exec_shackle_anchor_body = null
 	_exec_shackle_chain_taut = false
-	# Spawn shackle chain (its share of the total chain length)
-	_exec_spawn_shackle_chain()
+
+	var should_hold: bool = _exec_should_hold_on_throw()
+	if should_hold:
+		_exec_spawn_shackle_chain()
+	else:
+		# RELEASE mode: S-B flies as a connected pair. Ball gets dragged behind.
+		_exec_ball_pos = global_position + aim * 10.0
+		_exec_ball_vel = aim * speed * 0.3  # Ball trails behind shackle
+		_exec_ball_state = ExecEndState.THROWN
+		_exec_spawn_ball_to_shackle_chain()
+		_exec_throw_step = 2  # Both ends deployed
+		DebugOverlay.log("executioner/throw", self, "S-B RELEASED: shackle + ball flying free")
+
+	if _exec_throw_step < 2:
+		_exec_throw_step += 1
 	AudioManager.play("grapple_throw", 0.0, 0.8)
 	_rumble(0.3, 0.5, 0.1)
-	DebugOverlay.log("executioner/throw", self, "SHACKLE THROWN: speed=%.0f len=%.0f (split=%.0f%%)",
-		[speed, _exec_shackle_chain_len(), (1.0 - _exec_chain_split) * 100])
+	DebugOverlay.log("executioner/throw", self, "SHACKLE THROWN: speed=%.0f step=%d hold=%s",
+		[speed, _exec_throw_step, str(should_hold)])
 
 
 func _exec_retract_all() -> void:
@@ -7984,34 +8146,71 @@ func _exec_tick_ball(delta: float) -> void:
 			# The player gets YEETED in the chain direction. With m_b=8, e=0.75:
 			#   coefficient = 1.75 * 8/9 = 1.556 — player gets 155% of the
 			#   relative velocity slammed into them along the chain vector.
-			# Chain anchor: entity (if shackled) or player
-			var chain_anchor_pos: Vector2
-			var chain_max: float
-			if _exec_is_entity_yeet_mode():
-				# Ball is tethered to the shackled entity — full chain length
-				chain_anchor_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
-				chain_max = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
-			else:
-				chain_anchor_pos = global_position
-				chain_max = _exec_ball_chain_len()
-			var chain_vec: Vector2 = _exec_ball_pos - chain_anchor_pos
-			var chain_dist: float = chain_vec.length()
-			if chain_dist > chain_max:
-				var chain_dir: Vector2 = chain_vec.normalized()
-				_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
-				_exec_try_yeet(chain_dir)
-				var outward_v: float = _exec_ball_vel.dot(chain_dir)
-				if outward_v > 0.0:
-					_exec_ball_vel -= chain_dir * outward_v
-			else:
-				_exec_chain_taut = false
+			# Chain constraint — only if ball has a chain attached
+			var has_ball_chain: bool = _exec_chain_node and is_instance_valid(_exec_chain_node)
+			# Detect B-S chain (RELEASE mode): both anchors are wall anchors, no player
+			var is_bs_chain: bool = has_ball_chain and _exec_chain_node.anchor_a.get("is_wall", false)
+			if has_ball_chain and is_bs_chain:
+				# B-S chain (RELEASE mode): Ball ↔ Shackle elastic collision.
+				# Shackle has its own config stack — query it for mass/elasticity.
+				# Same YEET math as B-P and B-E: the "other end" provides its config.
+				var total_len: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+				var bs_vec: Vector2 = _exec_ball_pos - _exec_shackle_pos
+				var bs_dist: float = bs_vec.length()
+				if bs_dist > total_len:
+					var bs_dir: Vector2 = bs_vec / bs_dist
+					# Elastic collision once per slack→taut transition
+					if not _exec_chain_taut:
+						_exec_chain_taut = true
+						var m_ball: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
+						var m_other: float = shackle_cfg("mass", EXEC_SHACKLE_MASS)
+						var e_col: float = shackle_cfg("chain_elasticity", EXEC_CHAIN_ELASTICITY)
+						var v_b: float = _exec_ball_vel.dot(bs_dir)
+						var v_s: float = _exec_shackle_vel.dot(bs_dir)
+						var relative_v: float = v_b - v_s
+						if absf(relative_v) > 10.0:
+							var impulse_to_other: float = (1.0 + e_col) * m_ball / (m_ball + m_other) * relative_v
+							var impulse_to_ball: float = (1.0 + e_col) * m_other / (m_ball + m_other) * relative_v
+							_exec_shackle_vel += bs_dir * impulse_to_other
+							_exec_ball_vel -= bs_dir * impulse_to_ball
+							DebugOverlay.log("executioner/ball", self,
+								"B-S YEET: ball_imp=%.1f other_imp=%.1f m_b=%.0f m_s=%.0f e=%.2f",
+								[impulse_to_ball, impulse_to_other, m_ball, m_other, e_col])
+					# Positional constraint: clamp to chain length
+					_exec_ball_pos = _exec_shackle_pos + bs_dir * total_len
+					var outward_v: float = _exec_ball_vel.dot(bs_dir)
+					if outward_v > 0.0:
+						_exec_ball_vel -= bs_dir * outward_v
+				else:
+					_exec_chain_taut = false
+			elif has_ball_chain:
+				# Player↔Ball or Entity↔Ball chain — apply constraint + YEET
+				var chain_anchor_pos: Vector2
+				var chain_max: float
+				if _exec_is_entity_yeet_mode():
+					chain_anchor_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
+					chain_max = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+				else:
+					chain_anchor_pos = global_position
+					chain_max = _exec_ball_chain_len()
+				var chain_vec: Vector2 = _exec_ball_pos - chain_anchor_pos
+				var chain_dist: float = chain_vec.length()
+				if chain_dist > chain_max:
+					var chain_dir: Vector2 = chain_vec.normalized()
+					_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
+					_exec_try_yeet(chain_dir)
+					var outward_v: float = _exec_ball_vel.dot(chain_dir)
+					if outward_v > 0.0:
+						_exec_ball_vel -= chain_dir * outward_v
+				else:
+					_exec_chain_taut = false
 
-			# Chain clanking sound as links flow out during throw
-			if chain_dist < chain_max * 0.95:
-				_exec_chain_clank_timer -= delta
-				if _exec_chain_clank_timer <= 0.0:
-					_exec_chain_clank_timer = EXEC_CHAIN_CLANK_INTERVAL
-					AudioManager.play("grapple_hit", -12.0, randf_range(1.2, 1.8))
+				# Chain clanking sound as links flow out during throw
+				if chain_dist < chain_max * 0.95:
+					_exec_chain_clank_timer -= delta
+					if _exec_chain_clank_timer <= 0.0:
+						_exec_chain_clank_timer = EXEC_CHAIN_CLANK_INTERVAL
+						AudioManager.play("grapple_hit", -12.0, randf_range(1.2, 1.8))
 
 			# Raycast for collision with world and enemies
 			var space := get_world_2d().direct_space_state
@@ -8055,8 +8254,6 @@ func _exec_tick_ball(delta: float) -> void:
 				AudioManager.play("grapple_hit", 2.0, 0.4)
 				_rumble(0.8, 1.0, 0.25)
 				_exec_ball_vel = Vector2.ZERO
-				# Spawn the rigid chain between player and ball
-				_exec_spawn_chain()
 
 			# Update chain anchor while in flight
 			_exec_update_chain_ball_anchor()
@@ -8152,10 +8349,37 @@ func _exec_spawn_shackle_chain() -> void:
 		[_exec_shackle_chain_len(), (1.0 - _exec_chain_split) * 100])
 
 
+func _exec_spawn_ball_to_shackle_chain() -> void:
+	## Spawn a chain.gd between ball and shackle — NO player connection.
+	## Used in RELEASE mode: B-S or S-B flies as a connected pair.
+	# Use the ball chain node for this (player end is the ball, other end is shackle)
+	if _exec_chain_node and is_instance_valid(_exec_chain_node):
+		_exec_chain_node.queue_free()
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	_exec_chain_node = Node2D.new()
+	_exec_chain_node.set_script(ChainScript)
+	# Ball anchor (tracked via _exec_update_chain_ball_anchor)
+	var anchor_a: Dictionary = ChainScript.make_anchor_wall(_exec_ball_pos)
+	# Shackle anchor (tracked via a new update function)
+	var anchor_b: Dictionary = ChainScript.make_anchor_wall(_exec_shackle_pos)
+	var total_len: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	_exec_chain_node.setup(anchor_a, anchor_b, total_len, player_index)
+	get_parent().add_child(_exec_chain_node)
+	DebugOverlay.log("executioner/throw", self, "B-S CHAIN: len=%.0f (no player)", [total_len])
+
+
 func _exec_update_chain_ball_anchor() -> void:
-	## Keep the chain's ball-side anchor in sync with the dragging ball position.
+	## Keep the chain anchors in sync with ball (and shackle if B-S mode).
 	if _exec_chain_node and is_instance_valid(_exec_chain_node) and not _exec_chain_node._severed:
-		_exec_chain_node.anchor_b["pos"] = _exec_ball_pos
+		# In B-S mode (RELEASE), anchor_a = ball, anchor_b = shackle
+		# In normal mode, anchor_a = player (body), anchor_b = ball (wall pos)
+		if _exec_chain_node.anchor_a.get("is_wall", false):
+			# B-S chain: both ends are wall anchors we manually track
+			_exec_chain_node.anchor_a["pos"] = _exec_ball_pos
+			_exec_chain_node.anchor_b["pos"] = _exec_shackle_pos
+		else:
+			# Normal chain: anchor_a is player body, anchor_b is ball
+			_exec_chain_node.anchor_b["pos"] = _exec_ball_pos
 
 
 func _exec_update_chain_shackle_anchor() -> void:
@@ -8169,39 +8393,57 @@ func _exec_tick_shackle(delta: float) -> void:
 		ExecEndState.HELD, ExecEndState.WINDUP:
 			pass
 		ExecEndState.THROWN:
-			# Shackle physics — gravity, no drag
-			_exec_shackle_vel.y += EXEC_SHACKLE_GRAVITY * delta
+			# Shackle physics — gravity from shackle's own config stack
+			_exec_shackle_vel.y += shackle_cfg("gravity", EXEC_SHACKLE_GRAVITY) * delta
+			var prev_shackle_pos: Vector2 = _exec_shackle_pos
 			_exec_shackle_pos += _exec_shackle_vel * delta
 
-			# RIGID chain constraint — shackle can't exceed its share of chain
-			var shackle_len: float = _exec_shackle_chain_len()
-			var chain_vec: Vector2 = _exec_shackle_pos - global_position
-			var chain_dist: float = chain_vec.length()
-			if chain_dist > shackle_len:
-				var chain_dir: Vector2 = chain_vec.normalized()
-				_exec_shackle_pos = global_position + chain_dir * shackle_len
-				# Kill outward velocity (rigid constraint)
-				var outward_v: float = _exec_shackle_vel.dot(chain_dir)
-				if outward_v > 0.0:
-					_exec_shackle_vel -= chain_dir * outward_v
+			# Shackle world collision — cannot pass through floor/walls
+			var s_space := get_world_2d().direct_space_state
+			if s_space:
+				var s_query := PhysicsRayQueryParameters2D.create(prev_shackle_pos, _exec_shackle_pos, 1)
+				s_query.exclude = [get_rid()]
+				var s_result: Dictionary = s_space.intersect_ray(s_query)
+				if s_result:
+					var normal: Vector2 = s_result["normal"]
+					_exec_shackle_pos = s_result["position"] + normal * 2.0
+					_exec_shackle_vel = _exec_shackle_vel.bounce(normal) * 0.4
+					AudioManager.play("grapple_hit", -8.0, 1.5)
+
+			# RIGID chain constraint — only if shackle has a chain attached
+			var has_shackle_chain: bool = _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node)
+			if has_shackle_chain:
+				var shackle_len: float = _exec_shackle_chain_len()
+				var chain_vec: Vector2 = _exec_shackle_pos - global_position
+				var chain_dist: float = chain_vec.length()
+				if chain_dist > shackle_len:
+					var chain_dir: Vector2 = chain_vec.normalized()
+					_exec_shackle_pos = global_position + chain_dir * shackle_len
+					var outward_v: float = _exec_shackle_vel.dot(chain_dir)
+					if outward_v > 0.0:
+						_exec_shackle_vel -= chain_dir * outward_v
 			else:
-				_exec_shackle_chain_taut = false
+				# B-S chain constraint: shackle dragged by ball (RELEASE mode)
+				# YEET impulse is applied on the ball side — here we just enforce
+				# the positional constraint so the shackle can't drift past chain length.
+				var has_bs_chain: bool = _exec_chain_node and is_instance_valid(_exec_chain_node) and \
+					_exec_chain_node.anchor_a.get("is_wall", false)
+				if has_bs_chain:
+					var total_len: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+					var bs_vec: Vector2 = _exec_shackle_pos - _exec_ball_pos
+					var bs_dist: float = bs_vec.length()
+					if bs_dist > total_len:
+						var bs_dir: Vector2 = bs_vec / bs_dist
+						_exec_shackle_pos = _exec_ball_pos + bs_dir * total_len
+						# Only strip outward velocity if YEET hasn't already handled it
+						var outward_v: float = _exec_shackle_vel.dot(bs_dir)
+						if outward_v > 0.0:
+							_exec_shackle_vel -= bs_dir * outward_v
+				else:
+					_exec_shackle_chain_taut = false
 
 			# Shackle ONLY connects to enemies — check hitbox proximity
 			var snapped: bool = _exec_try_snap_shackle_to_enemy()
-			if not snapped:
-				# Bounce off world surfaces — shackle doesn't stick to walls
-				var space := get_world_2d().direct_space_state
-				var query := PhysicsRayQueryParameters2D.create(
-					_exec_shackle_pos - _exec_shackle_vel.normalized() * 5.0,
-					_exec_shackle_pos, 1)
-				query.exclude = [get_rid()]
-				var result: Dictionary = space.intersect_ray(query)
-				if result:
-					var normal: Vector2 = result["normal"]
-					_exec_shackle_pos = result["position"] + normal * 2.0
-					_exec_shackle_vel = _exec_shackle_vel.bounce(normal) * 0.4
-					AudioManager.play("grapple_hit", -6.0, 1.5)
 
 			# Update shackle chain anchor
 			_exec_update_chain_shackle_anchor()
@@ -8373,35 +8615,15 @@ func _exec_perform_slam() -> void:
 	PlayerManager.add_skill_xp(player_index, "attack", 4)
 
 
-func _exec_handle_axe() -> void:
+func _exec_handle_chain_mode() -> void:
+	## Circle toggles chain mode: Release / Hold+Release / Hold+Hold
 	if not _is_device_action_just_pressed("interact"):
 		return
-	if _exec_axe_cooldown > 0.0:
-		_spawn_fail_flash()
-		return
-	_exec_axe_cooldown = EXEC_AXE_COOLDOWN
-	_exec_axe_slash_timer = 0.3
-	var aim: Vector2 = _get_aim_direction_analog()
-	AudioManager.play("sword_slash", 1.0, 0.7)
-	_rumble(0.3, 0.5, 0.1)
-	var offset: Vector2 = aim * EXEC_AXE_RANGE
-	attack_area.position = offset
-	attack_area.monitoring = true
-	await get_tree().physics_frame
-	if not is_inside_tree():
-		return
-	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
-	for body in attack_area.get_overlapping_bodies():
-		if body.has_method("take_damage"):
-			body.take_damage(int(EXEC_AXE_DAMAGE * attack_bonus), player_index)
-			_spawn_blood_particles(body.global_position)
-		if body.has_method("apply_knockback"):
-			body.apply_knockback(aim * 150.0)
-	await get_tree().create_timer(0.1).timeout
-	if is_inside_tree():
-		attack_area.monitoring = false
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
-	DebugOverlay.log("executioner/axe", self, "AXE CHOP: dmg=%d", [EXEC_AXE_DAMAGE])
+	_exec_chain_mode = ((_exec_chain_mode + 1) % 3) as ExecChainMode
+	_exec_chain_mode_changed_timer = 1.5
+	AudioManager.play("grapple_hit", -4.0, 1.0 + _exec_chain_mode * 0.3)
+	DebugOverlay.log("executioner/throw", self, "CHAIN MODE: %s",
+		[EXEC_CHAIN_MODE_NAMES[_exec_chain_mode]])
 
 
 func _special_executioner_cleave() -> void:
@@ -8513,8 +8735,7 @@ func _draw_executioner() -> void:
 	_draw_exec_trajectory_preview()
 	if _exec_swing_active:
 		_draw_exec_swing()
-	if _exec_axe_slash_timer > 0.0:
-		_draw_exec_axe_slash()
+	_draw_exec_chain_mode_indicator()
 	if _exec_cleave_charging:
 		_draw_exec_cleave_charge()
 	if _exec_cleave_flash_timer > 0.0:
@@ -8704,20 +8925,64 @@ func _draw_exec_swing() -> void:
 				Color(0.5, 0.5, 0.5, intensity * 0.3), 1.0)
 
 
-func _draw_exec_axe_slash() -> void:
-	var aim: Vector2 = _get_aim_direction_analog()
-	var base_angle: float = aim.angle()
-	var arc_start: float = base_angle - EXEC_AXE_SWING_ARC * 0.5
-	var progress: float = 1.0 - _exec_axe_slash_timer / 0.3
-	var sweep_angle: float = arc_start + EXEC_AXE_SWING_ARC * progress
-	for i in range(8):
-		var t: float = float(i) / 7.0
-		var a: float = lerpf(arc_start, sweep_angle, t)
-		draw_circle(Vector2(cos(a), sin(a)) * EXEC_AXE_RANGE * lerpf(0.5, 1.0, t), 3.0,
-			Color(0.7, 0.65, 0.6, (1.0 - t) * 0.6))
-	draw_line(Vector2(cos(arc_start), sin(arc_start)) * EXEC_AXE_RANGE,
-		Vector2(cos(sweep_angle), sin(sweep_angle)) * EXEC_AXE_RANGE,
-		Color(0.8, 0.75, 0.7, 0.5), 2.0)
+func _draw_exec_chain_mode_indicator() -> void:
+	## Draw chain mode indicator near the player.
+	## STEADY: small icon showing current mode always visible.
+	## CHANGE: flash animation when mode just changed.
+	var mode_col: Color = EXEC_CHAIN_MODE_COLORS[_exec_chain_mode]
+	var mode_name: String = EXEC_CHAIN_MODE_NAMES[_exec_chain_mode]
+
+	# Flash alpha when recently changed
+	var flash: float = 0.0
+	if _exec_chain_mode_changed_timer > 0.0:
+		flash = clampf(_exec_chain_mode_changed_timer / 1.5, 0.0, 1.0)
+
+	# STEADY indicator: small colored bar under player
+	var bar_y: float = 18.0
+	var bar_w: float = 24.0
+	var steady_alpha: float = 0.4 + flash * 0.4
+	draw_rect(Rect2(-bar_w * 0.5, bar_y, bar_w, 3.0), mode_col * Color(1, 1, 1, steady_alpha))
+
+	# Mode dots: 1, 2, or 3 dots showing which mode
+	for i in range(3):
+		var dot_x: float = -8.0 + i * 8.0
+		var dot_y: float = bar_y + 7.0
+		var is_active: bool = (i == _exec_chain_mode)
+		var dot_alpha: float = 0.7 if is_active else 0.15
+		if flash > 0.0 and is_active:
+			dot_alpha = 1.0
+		draw_circle(Vector2(dot_x, dot_y), 2.0 if is_active else 1.5,
+			mode_col * Color(1, 1, 1, dot_alpha))
+
+	# CHANGE: text label when recently changed
+	if flash > 0.2:
+		var label_alpha: float = (flash - 0.2) / 0.8
+		draw_string(ThemeDB.fallback_font, Vector2(-30, bar_y + 20),
+			mode_name, HORIZONTAL_ALIGNMENT_CENTER, 60, 9,
+			mode_col * Color(1, 1, 1, label_alpha))
+
+		# Ghost animation: show what the throw pattern looks like
+		# Release: broken chain icon. Hold: solid chain. Hold+Hold: double chain.
+		var ghost_alpha: float = label_alpha * 0.3
+		if _exec_chain_mode == ExecChainMode.RELEASE_RELEASE:
+			# Broken chain segments
+			draw_line(Vector2(-10, bar_y + 28), Vector2(-3, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha), 2.0)
+			draw_line(Vector2(3, bar_y + 28), Vector2(10, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha), 2.0)
+		elif _exec_chain_mode == ExecChainMode.HOLD_RELEASE:
+			# Solid chain then broken
+			draw_line(Vector2(-12, bar_y + 28), Vector2(0, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha), 2.0)
+			draw_line(Vector2(4, bar_y + 28), Vector2(8, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha * 0.5), 1.5)
+			draw_line(Vector2(10, bar_y + 28), Vector2(14, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha * 0.3), 1.0)
+		elif _exec_chain_mode == ExecChainMode.HOLD_HOLD:
+			# Double solid chain
+			draw_line(Vector2(-14, bar_y + 28), Vector2(14, bar_y + 28),
+				mode_col * Color(1, 1, 1, ghost_alpha), 2.0)
+			draw_circle(Vector2(0, bar_y + 28), 2.0, mode_col * Color(1, 1, 1, ghost_alpha))
 
 
 func _draw_exec_cleave_charge() -> void:

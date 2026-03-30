@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dx8exec1top"
-path="res://.godot/imported/executioner_topdown.png-65491555d39050cc987e0a0186348625.ctex"
+uid="uid://cgddtub4pkc51"
+path="res://.godot/imported/soccer_ball.png-a03f558e7d66854406a29663588e8369.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/sprites/characters/executioner_topdown.png"
-dest_files=["res://.godot/imported/executioner_topdown.png-65491555d39050cc987e0a0186348625.ctex"]
+source_file="res://assets/sprites/soccer_ball.png"
+dest_files=["res://.godot/imported/soccer_ball.png-a03f558e7d66854406a29663588e8369.ctex"]
 
 [params]
 

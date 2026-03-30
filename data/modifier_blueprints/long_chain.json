@@ -1,0 +1,6 @@
+{
+  "_name": "Long Chain",
+  "_description": "Extended chain reach with slightly heavier ball",
+  "exec_chain_total_len": ["multiply", 1.8],
+  "exec_ball_mass": ["multiply", 1.2]
+}
