@@ -1,8 +1,12 @@
 {
-	"name": "executioner",
-	"description": "Executioner ball-and-chain mechanics",
-	"gate": false,
-	"tests": [
-		"exec_release_ball_up"
-	]
+  "name": "executioner",
+  "description": "Executioner ball-and-chain mechanics",
+  "gate": false,
+  "tests": [
+    "exec_release_ball_up",
+    "exec_bs_yeet",
+    "exec_bs_loop",
+    "exec_shackle_kick",
+    "exec_shackle_drag"
+  ]
 }

@@ -113,6 +113,7 @@ func _register_all() -> void:
 	# -- Executioner --
 	r.call("executioner/throw", "Ball/shackle throw mode toggle, windup, and release")
 	r.call("executioner/ball", "Spike ball hit, stick, wall drag, platform drag")
+	r.call("executioner/chain_radius", "Chain reach radius circle around player")
 	r.call("executioner/swing", "Swing slam: hold time, spin speed, damage, dust")
 	r.call("executioner/cleave", "Charged cleave: charge time, damage, knockback")
 

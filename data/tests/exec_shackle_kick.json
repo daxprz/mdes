@@ -1,0 +1,55 @@
+{
+  "name": "exec_shackle_kick",
+  "description": "Shackle constraint: AI shackles a ball via throw, ball is kicked in 4 directions per cycle. Verify ball stays within chain distance of player.",
+  "debug": {
+    "log": ["executioner/throw", "executioner/chain_radius"],
+    "on": ["executioner/chain_radius"]
+  },
+  "script": [
+    "level flat_floor",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "debug on executioner/chain_radius",
+    "debug log executioner/chain_radius",
+
+    "announce Shackle Kick Test",
+    "ai_spawn 640 876 name=AI",
+    "wait 0.5",
+    "spawn dummy 840 876 name=ball",
+    "wait 0.5",
+
+    "announce Switching to H&H",
+    "ai_cmd interact 0.05",
+    "wait 0.5",
+
+    "announce Throw ball up (held)",
+    "ai_cmd grapple 0.4 0.0 -1.0",
+    "wait 2.5",
+
+    "announce Throw shackle at ball (held)",
+    "ai_cmd grapple 0.4 1.0 0.0",
+    "wait 3",
+
+    "announce Activating verify monitor",
+    "verify @e[name=ball] within circle @e[name=AI] 320 until done",
+
+    "set cycles = 2",
+    "while {cycles}",
+      "kick ball -600 0",
+      "wait 2",
+      "kick ball 600 0",
+      "wait 2",
+      "kick ball -1275 -1275",
+      "wait 2",
+      "kick ball 1275 -1275",
+      "wait 2",
+      "set cycles = {cycles}-1",
+    "endwhile",
+
+    "ai_off",
+    "enablejoins",
+    "notify observations exec_shackle_kick [\"OK\",\"RETRY\"] 0 editor"
+  ]
+}

@@ -108,6 +108,7 @@ func _execute(command: String) -> String:
   debug [list|on|off|log|...]   — debug overlay aspects
   spawn <type> [x y] [name=id]         — spawn entity (name= sets entity_id)
   kick <entity> <vx> <vy>             — apply velocity impulse to entity
+  shackle_attach <target>              — force shackle onto target entity
   kill                          — kill all enemies (damage to death)
   clear                         — remove all enemies (instant)
   clearplayers                  — remove all players
@@ -298,6 +299,56 @@ func _execute(command: String) -> String:
 			PlayerManager.join_disabled = false
 			PlayerManager._joined_devices.clear()
 			return "OK: joins enabled"
+
+		"announce":
+			# Show large announcement text on screen (fades after a few seconds)
+			var ann_text: String = command.substr(command.find(" ") + 1).strip_edges() if command.find(" ") >= 0 else ""
+			if not ann_text.is_empty():
+				PlayerHUD.show_announcement(ann_text)
+			return "OK: %s" % ann_text if not ann_text.is_empty() else "OK"
+
+		"comment":
+			# Silent no-op — inline documentation in test scripts
+			return "OK"
+
+		"shackle_attach":
+			# Force the Executioner's shackle onto a target entity
+			# Usage: shackle_attach <entity_name>
+			if parts.size() < 2:
+				return "ERR: usage: shackle_attach <entity_name>"
+			var sa_target_name: String = parts[1]
+			var sa_target: Node2D = null
+			for e in _get_all_entities():
+				if e.name == sa_target_name or ("entity_id" in e and str(e.entity_id) == sa_target_name):
+					sa_target = e
+					break
+			if not sa_target:
+				return "ERR: entity '%s' not found" % sa_target_name
+			# Find Executioner player
+			var sa_exec: Node2D = null
+			for p in get_tree().get_nodes_in_group("players"):
+				if "_exec_shackle_state" in p:
+					sa_exec = p
+					break
+			if not sa_exec:
+				return "ERR: no Executioner player found"
+			# Force shackle attachment
+			sa_exec._exec_shackle_state = sa_exec.ExecEndState.ATTACHED_ENEMY
+			sa_exec._exec_shackle_anchor_body = sa_target
+			sa_exec._exec_shackle_anchor_offset = Vector2.ZERO
+			sa_exec._exec_shackle_pos = sa_target.global_position
+			# Create shackle chain if not present
+			if not sa_exec._exec_shackle_chain_node or not is_instance_valid(sa_exec._exec_shackle_chain_node):
+				var chain_script: GDScript = load("res://scripts/systems/chain.gd")
+				var chain := Node2D.new()
+				chain.set_script(chain_script)
+				chain.link_count = 8
+				chain.link_length = sa_exec._exec_shackle_chain_len() / 8.0
+				chain.anchor_a = {"node": sa_exec, "offset": Vector2.ZERO, "is_wall": false}
+				chain.anchor_b = {"pos": sa_target.global_position, "is_wall": false}
+				get_tree().current_scene.add_child(chain)
+				sa_exec._exec_shackle_chain_node = chain
+			return "OK: shackle attached to '%s'" % sa_target_name
 
 		"kick":
 			# Apply velocity impulse to a named entity
@@ -979,13 +1030,17 @@ func _execute(command: String) -> String:
 
 		"ai_spawn":
 			# Spawn an AI-controlled Executioner player at a position.
-			# ai_spawn [x y]  — defaults to (960, 876)
+			# ai_spawn [x y] [name=id]  — defaults to (960, 876)
 			var spawn_x: float = 960.0
 			var spawn_y: float = 876.0
+			var ai_name: String = ""
 			if parts.size() >= 3:
 				spawn_x = float(parts[1])
 				spawn_y = float(parts[2])
-			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y))
+			for pi in range(3, parts.size()):
+				if parts[pi].begins_with("name="):
+					ai_name = parts[pi].substr(5)
+			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y), ai_name)
 
 		"exec_test":
 			# AI throw test: exec_test [angle_deg] [hold_secs] [x y]
@@ -1306,7 +1361,7 @@ func _key_name_to_code(name: String) -> int:
 		_: return 0
 
 
-func _cmd_ai_spawn(pos: Vector2) -> String:
+func _cmd_ai_spawn(pos: Vector2, custom_name: String = "") -> String:
 	## Spawn an AI-controlled Executioner player. No joystick needed.
 	var scene_path: String = "res://scenes/characters/player_side.tscn"
 	if not ResourceLoader.exists(scene_path):
@@ -1342,7 +1397,7 @@ func _cmd_ai_spawn(pos: Vector2) -> String:
 	# Instantiate the player node
 	var player_scene: PackedScene = load(scene_path)
 	var player_node: CharacterBody2D = player_scene.instantiate()
-	player_node.name = "AIPlayer_%d" % player_index
+	player_node.name = custom_name if not custom_name.is_empty() else "AIPlayer_%d" % player_index
 	player_node.player_index = player_index
 	player_node.device_id = fake_device
 	player_node.character_class = PlayerManager.CharacterClass.EXECUTIONER

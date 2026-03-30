@@ -7829,6 +7829,9 @@ func _exec_handle_throw(delta: float) -> void:
 			_exec_retract_all()
 		return
 	if _is_device_action_just_pressed("grapple"):
+		DebugOverlay.log("executioner/throw", self,
+			"GRAPPLE PRESSED: step=%d is_ball=%s ball_state=%d shackle_state=%d",
+			[_exec_throw_step, str(is_throwing_ball), _exec_ball_state, _exec_shackle_state])
 		if is_throwing_ball and _exec_ball_state == ExecEndState.HELD:
 			_exec_ball_state = ExecEndState.WINDUP
 			_exec_ball_hold_time = 0.0
@@ -8264,24 +8267,51 @@ func _exec_tick_ball(delta: float) -> void:
 			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
 				_exec_ball_anchor_offset.y += EXEC_BALL_WALL_DRAG * delta
 				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
-			# Rigid chain tension — pull player if beyond ball chain length
-			var b_len: float = _exec_ball_chain_len()
-			var dist: float = global_position.distance_to(_exec_ball_pos)
-			if dist > b_len:
-				var pull_dir: Vector2 = (_exec_ball_pos - global_position).normalized()
-				velocity += pull_dir * 200.0 * delta
+			# Chain tension — bidirectional: ball gets dragged toward player AND player gets tugged
+			var bw_len: float = _exec_ball_chain_len()
+			var bw_vec: Vector2 = _exec_ball_pos - global_position
+			var bw_dist: float = bw_vec.length()
+			if bw_dist > bw_len:
+				var bw_dir: Vector2 = bw_vec / bw_dist
+				var bw_over: float = bw_dist - bw_len
+				# Drag ball toward player (pops off wall when pulled hard enough)
+				var ball_pull: float = bw_over * 8.0
+				_exec_ball_pos -= bw_dir * ball_pull * delta
+				if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+					_exec_ball_anchor_offset -= bw_dir * ball_pull * delta
+				# Tug player toward ball
+				velocity += bw_dir * minf(bw_over * 3.0, 300.0) * delta
+				# If dragged far enough, pop off wall → freefall
+				if bw_over > 30.0:
+					_exec_ball_state = ExecEndState.THROWN
+					_exec_ball_vel = -bw_dir * 100.0
+					_exec_ball_anchor_body = null
+					DebugOverlay.log("executioner/ball", self, "BALL PULLED OFF WALL by chain")
 			_exec_update_chain_ball_anchor()
 
 		ExecEndState.STUCK_PLATFORM:
-			var b_len: float = _exec_ball_chain_len()
-			var to_player: Vector2 = global_position - _exec_ball_pos
-			if to_player.length() > b_len * 0.8:
-				_exec_ball_pos += to_player.normalized() * EXEC_BALL_PLAT_DRAG * delta
+			var bp_len: float = _exec_ball_chain_len()
+			var bp_vec: Vector2 = _exec_ball_pos - global_position
+			var bp_dist: float = bp_vec.length()
+			if bp_dist > bp_len * 0.8:
+				var bp_dir: Vector2 = bp_vec / bp_dist
+				var bp_over: float = bp_dist - bp_len * 0.8
+				# Drag ball along platform toward player
+				var plat_pull: float = bp_over * 6.0
+				_exec_ball_pos -= bp_dir * plat_pull * delta
 				if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
-					_exec_ball_anchor_offset += to_player.normalized() * EXEC_BALL_PLAT_DRAG * delta
-			var dist: float = global_position.distance_to(_exec_ball_pos)
-			if dist > b_len:
-				velocity += (_exec_ball_pos - global_position).normalized() * 200.0 * delta
+					_exec_ball_anchor_offset -= bp_dir * plat_pull * delta
+			if bp_dist > bp_len:
+				var bp_dir2: Vector2 = bp_vec / bp_dist
+				var bp_over2: float = bp_dist - bp_len
+				# Tug player toward ball
+				velocity += bp_dir2 * minf(bp_over2 * 3.0, 300.0) * delta
+				# If very far, pop off platform → freefall
+				if bp_over2 > 30.0:
+					_exec_ball_state = ExecEndState.THROWN
+					_exec_ball_vel = -bp_dir2 * 100.0
+					_exec_ball_anchor_body = null
+					DebugOverlay.log("executioner/ball", self, "BALL PULLED OFF PLATFORM by chain")
 			_exec_update_chain_ball_anchor()
 
 		ExecEndState.STUCK_CEILING:
@@ -8452,6 +8482,51 @@ func _exec_tick_shackle(delta: float) -> void:
 			# Track the attached enemy (shackle locks onto hitbox)
 			if _exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body):
 				_exec_shackle_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
+
+				# Enforce shackle chain constraint on the attached entity.
+				# If entity exceeds chain length from player, pull it back + YEET.
+				var has_shackle_chain_ce: bool = _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node)
+				if has_shackle_chain_ce:
+					var shackle_len: float = _exec_shackle_chain_len()
+					var chain_vec: Vector2 = _exec_shackle_pos - global_position
+					var chain_dist: float = chain_vec.length()
+					if chain_dist > shackle_len:
+						var chain_dir: Vector2 = chain_vec / chain_dist
+						var overshoot: float = chain_dist - shackle_len
+						# YEET: elastic collision between player and entity (once per taut)
+						if not _exec_shackle_chain_taut:
+							_exec_shackle_chain_taut = true
+							var m_player: float = mass
+							var m_entity: float = entity_cfg(_exec_shackle_anchor_body, "mass", 20.0)
+							var e_col: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
+							var entity_vel: Vector2 = _exec_shackle_anchor_body.velocity if "velocity" in _exec_shackle_anchor_body else Vector2.ZERO
+							var v_e: float = entity_vel.dot(chain_dir)
+							var v_p: float = velocity.dot(chain_dir)
+							var relative_v: float = v_e - v_p
+							if absf(relative_v) > 10.0:
+								var impulse_to_player: float = (1.0 + e_col) * m_entity / (m_player + m_entity) * relative_v
+								var impulse_to_entity: float = (1.0 + e_col) * m_player / (m_player + m_entity) * relative_v
+								velocity += chain_dir * impulse_to_player
+								if _exec_shackle_anchor_body.has_method("apply_knockback"):
+									_exec_shackle_anchor_body.apply_knockback(-chain_dir * impulse_to_entity)
+								elif "velocity" in _exec_shackle_anchor_body:
+									_exec_shackle_anchor_body.velocity -= chain_dir * impulse_to_entity
+								DebugOverlay.log("executioner/chain_radius", self,
+									"SHACKLE YEET: entity_imp=%.0f player_imp=%.0f dist=%.0f len=%.0f",
+									[impulse_to_entity, impulse_to_player, chain_dist, shackle_len])
+						# Leash: clamp entity to chain boundary at end of frame.
+						# Uses call_deferred so it runs AFTER the entity's own move_and_slide.
+						var clamped_pos: Vector2 = global_position + chain_dir * shackle_len
+						_exec_shackle_anchor_body.call_deferred("set", "global_position",
+							Vector2(clamped_pos.x - _exec_shackle_anchor_offset.x,
+									_exec_shackle_anchor_body.global_position.y))
+						# Strip outward velocity so entity doesn't fight the leash
+						if "velocity" in _exec_shackle_anchor_body:
+							var outward_v: float = _exec_shackle_anchor_body.velocity.dot(chain_dir)
+							if outward_v > 0.0:
+								_exec_shackle_anchor_body.velocity -= chain_dir * outward_v
+					else:
+						_exec_shackle_chain_taut = false
 			else:
 				_exec_shackle_state = ExecEndState.RETRACTING
 			_exec_update_chain_shackle_anchor()
@@ -8746,60 +8821,96 @@ func _draw_executioner() -> void:
 
 
 func _draw_exec_chain_radius() -> void:
-	## Show chain split extents centered on the player:
-	##   Ball range (golden) and shackle range (blue-grey), with split labels.
+	## Dynamic chain radius visualization based on actual runtime state.
+	## Shows constraint circles where they actually exist:
+	##   - Ball chain held → golden circle around PLAYER (ball can't go beyond)
+	##   - Shackle chain held → blue circle around PLAYER (shackle/entity can't go beyond)
+	##   - Ball stuck + shackle trailing (B-S) → circle around BALL position
+	## Also shows static split preview during windup/adjustment.
 
 	var is_winding: bool = _exec_ball_state == ExecEndState.WINDUP or _exec_shackle_state == ExecEndState.WINDUP
 	var is_adjusting: bool = _exec_chain_len_changing
+	var debug_on: bool = DebugOverlay.should_draw("executioner/chain_radius", self)
 
-	var alpha: float = 0.0
-	var show_label: bool = false
-
+	var show_static: bool = is_winding or is_adjusting or _exec_chain_radius_fade > 0.0
+	var static_alpha: float = 0.0
 	if is_adjusting:
-		alpha = 0.5
-		show_label = true
+		static_alpha = 0.5
 		_exec_chain_radius_fade = 0.6
 	elif _exec_chain_radius_fade > 0.0:
-		var fade_t: float = _exec_chain_radius_fade / 0.6
-		alpha = 0.5 * fade_t
-		show_label = fade_t > 0.3
+		static_alpha = 0.5 * (_exec_chain_radius_fade / 0.6)
 	elif is_winding:
-		alpha = 0.12
+		static_alpha = 0.12
 
-	if alpha < 0.01:
+	# -- Static split preview (centered on player, shows potential range) --
+	if show_static and static_alpha > 0.01:
+		var segments: int = 48
+		var ball_len: float = _exec_ball_chain_len()
+		var shackle_len: float = _exec_shackle_chain_len()
+		_draw_dashed_circle(Vector2.ZERO, ball_len, Color(0.9, 0.65, 0.2, static_alpha), segments)
+		_draw_dashed_circle(Vector2.ZERO, shackle_len, Color(0.4, 0.5, 0.7, static_alpha * 0.8), segments)
+		if static_alpha > 0.15:
+			var ball_pct: int = int(_exec_chain_split * 100.0)
+			draw_string(ThemeDB.fallback_font, Vector2(0, -ball_len - 12),
+				"Ball %d%%" % ball_pct, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.9, 0.65, 0.2, static_alpha))
+			draw_string(ThemeDB.fallback_font, Vector2(0, -shackle_len - 12),
+				"Shackle %d%%" % (100 - ball_pct), HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.4, 0.5, 0.7, static_alpha))
+
+	if not debug_on:
 		return
 
-	var segments: int = 48
-	var ball_len: float = _exec_ball_chain_len()
-	var shackle_len: float = _exec_shackle_chain_len()
+	# -- Dynamic runtime constraint circles (only when debug aspect is on) --
+	var font: Font = ThemeDB.fallback_font
+	var segments_d: int = 48
 
-	# Ball range ring — golden
-	var ball_col := Color(0.9, 0.65, 0.2, alpha)
+	# Ball chain: if ball is out and has a chain connected to player
+	var has_ball_chain: bool = _exec_chain_node and is_instance_valid(_exec_chain_node)
+	var ball_is_held: bool = has_ball_chain and not _exec_chain_node.anchor_a.get("is_wall", false)
+	if ball_is_held and _exec_ball_state in [ExecEndState.THROWN, ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
+		var ball_len: float = _exec_ball_chain_len()
+		_draw_dashed_circle(Vector2.ZERO, ball_len, Color(0.9, 0.65, 0.2, 0.4), segments_d, 2.0)
+		draw_string(font, Vector2(ball_len + 4, 4), "Ball %.0f" % ball_len, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.9, 0.65, 0.2, 0.6))
+		# Log distance
+		var ball_dist: float = (_exec_ball_pos - global_position).length()
+		DebugOverlay.log("executioner/chain_radius", self,
+			"BALL CHAIN: len=%.0f dist=%.0f %s",
+			[ball_len, ball_dist, "OK" if ball_dist <= ball_len + 5 else "BREACH!"])
+
+	# Shackle chain: if shackle is out and has a chain connected to player
+	var has_shackle_chain: bool = _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node)
+	if has_shackle_chain and _exec_shackle_state in [ExecEndState.THROWN, ExecEndState.ATTACHED_ENEMY]:
+		var shackle_len: float = _exec_shackle_chain_len()
+		_draw_dashed_circle(Vector2.ZERO, shackle_len, Color(0.3, 0.6, 1.0, 0.5), segments_d, 2.0)
+		draw_string(font, Vector2(shackle_len + 4, 16), "Shackle %.0f" % shackle_len, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.3, 0.6, 1.0, 0.6))
+		var shackle_dist: float = (_exec_shackle_pos - global_position).length()
+		DebugOverlay.log("executioner/chain_radius", self,
+			"SHACKLE CHAIN: len=%.0f dist=%.0f entity=%s %s",
+			[shackle_len, shackle_dist,
+			 _exec_shackle_anchor_body.name if _exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body) else "none",
+			 "OK" if shackle_dist <= shackle_len + 5 else "BREACH!"])
+
+	# B-S mode: ball stuck somewhere, shackle trailing — show total chain radius around ball
+	if has_ball_chain and _exec_chain_node.anchor_a.get("is_wall", false):
+		var total_len: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+		var ball_local: Vector2 = _exec_ball_pos - global_position
+		_draw_dashed_circle(ball_local, total_len, Color(1.0, 0.4, 0.2, 0.35), segments_d, 1.5)
+		draw_string(font, ball_local + Vector2(total_len + 4, 4), "B-S %.0f" % total_len, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.4, 0.2, 0.5))
+
+	# Shackle attached to entity but NO shackle chain (released) — show as unconnected
+	if _exec_shackle_state == ExecEndState.ATTACHED_ENEMY and not has_shackle_chain:
+		var entity_local: Vector2 = _exec_shackle_pos - global_position
+		draw_string(font, entity_local + Vector2(8, -8), "RELEASED (no chain)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.4, 0.4, 0.7))
+
+
+func _draw_dashed_circle(center: Vector2, radius: float, color: Color, segments: int = 48, width: float = 1.5) -> void:
+	## Draw a dashed circle (every 3rd segment skipped).
 	for i in range(segments):
 		if i % 3 == 0:
 			continue
 		var a1: float = float(i) / float(segments) * TAU
 		var a2: float = float(i + 1) / float(segments) * TAU
-		draw_line(Vector2(cos(a1), sin(a1)) * ball_len,
-			Vector2(cos(a2), sin(a2)) * ball_len, ball_col, 1.5)
-
-	# Shackle range ring — blue-grey
-	var shackle_col := Color(0.4, 0.5, 0.7, alpha * 0.8)
-	for i in range(segments):
-		if i % 3 == 0:
-			continue
-		var a1: float = float(i) / float(segments) * TAU
-		var a2: float = float(i + 1) / float(segments) * TAU
-		draw_line(Vector2(cos(a1), sin(a1)) * shackle_len,
-			Vector2(cos(a2), sin(a2)) * shackle_len, shackle_col, 1.5)
-
-	# Labels
-	if show_label:
-		var ball_pct: int = int(_exec_chain_split * 100.0)
-		draw_string(ThemeDB.fallback_font, Vector2(0, -ball_len - 12),
-			"Ball %d%%" % ball_pct, HORIZONTAL_ALIGNMENT_CENTER, -1, 10, ball_col)
-		draw_string(ThemeDB.fallback_font, Vector2(0, -shackle_len - 12),
-			"Shackle %d%%" % (100 - ball_pct), HORIZONTAL_ALIGNMENT_CENTER, -1, 10, shackle_col)
+		draw_line(center + Vector2(cos(a1), sin(a1)) * radius,
+			center + Vector2(cos(a2), sin(a2)) * radius, color, width)
 
 
 func _draw_exec_ball() -> void:

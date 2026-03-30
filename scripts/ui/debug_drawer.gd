@@ -274,7 +274,7 @@ func _init_world_overlay() -> void:
 		return
 	_world_overlay = Node2D.new()
 	_world_overlay.name = "DebugSelectionOverlay"
-	_world_overlay.z_index = 40
+	_world_overlay.z_index = 4096  # Front-most — debug labels must be on top of everything
 	scene.add_child(_world_overlay)
 	_world_overlay.draw.connect(_draw_selection_overlay)
 
@@ -2336,7 +2336,7 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.4, 0.1, 0.1, 0.3))
 				"info":
 					_panel.draw_string(font, Vector2(x + 24, ry + 14), "·", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
-		elif te._run_running and rcon and rcon._test_runner:
+		elif rcon and rcon._test_runner:
 			var line_state: String = ""
 			if rcon._test_runner._line_states.has(si):
 				line_state = rcon._test_runner._line_states[si]
@@ -2349,8 +2349,31 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 				"looping":
 					_panel.draw_string(font, Vector2(x + 24, ry + 14), "↻", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.7, 0.2))
 					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.25, 0.18, 0.05, 0.3))
+					# Show loop variable value on the right
+					var while_cmd: String = str(te._script[si]).strip_edges()
+					if while_cmd.begins_with("while "):
+						var wvar: String = while_cmd.substr(6).strip_edges()
+						if wvar.begins_with("{") and wvar.ends_with("}"):
+							wvar = wvar.substr(1, wvar.length() - 2)
+						var wval: String = rcon._test_runner._test_vars.get(wvar, "?")
+						_panel.draw_string(font, Vector2(x + pw - 80, ry + 14), "%s=%s" % [wvar, wval], HORIZONTAL_ALIGNMENT_RIGHT, 68, 9, Color(1.0, 0.7, 0.2))
+				"verifying":
+					var pulse: float = 0.5 + 0.3 * sin(Time.get_ticks_msec() / 300.0)
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "◈", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.3, 0.8, 1.0, pulse))
+					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.05, 0.15, 0.25, 0.3))
+				"failed":
+					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✗", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.2, 0.2))
+					_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.3, 0.05, 0.05, 0.3))
 				"complete":
 					_panel.draw_string(font, Vector2(x + 24, ry + 14), "✓", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.7, 0.5))
+					# Show final loop variable value for completed while lines
+					var done_cmd: String = str(te._script[si]).strip_edges()
+					if done_cmd.begins_with("while "):
+						var dvar: String = done_cmd.substr(6).strip_edges()
+						if dvar.begins_with("{") and dvar.ends_with("}"):
+							dvar = dvar.substr(1, dvar.length() - 2)
+						var dval: String = rcon._test_runner._test_vars.get(dvar, "0")
+						_panel.draw_string(font, Vector2(x + pw - 80, ry + 14), "%s=%s" % [dvar, dval], HORIZONTAL_ALIGNMENT_RIGHT, 68, 9, Color(0.5, 0.7, 0.5))
 
 		# Command text with soft-wrap
 		var cmd_text: String = te._script[si]
@@ -2610,11 +2633,22 @@ func _get_all_entities() -> Array:
 	return result
 
 
+func _draw_debug_label(pos: Vector2, text: String, font_size: int, color: Color, font: Font = ThemeDB.fallback_font) -> void:
+	## Draw a debug label with 75% grey background. All debug world-space text uses this.
+	var text_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	var pad := Vector2(3, 2)
+	var bg_rect := Rect2(pos.x - pad.x, pos.y - text_size.y, text_size.x + pad.x * 2, text_size.y + pad.y * 2)
+	_world_overlay.draw_rect(bg_rect, Color(0.15, 0.15, 0.15, 0.75))
+	_world_overlay.draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+
+
 func _draw_selection_overlay() -> void:
-	## Draw selection indicator (pulsing circle + number) on the selected entity.
+	## Draw selection indicator, verify monitors, etc.
 	## This is world-space — drawn by a Node2D child of the scene.
 	if not DebugOverlay.global_enabled:
 		return
+	_draw_verify_monitors()
+
 	var sel: Node2D = _get_selected_entity()
 	if not sel:
 		return
@@ -2633,7 +2667,7 @@ func _draw_selection_overlay() -> void:
 	var entities: Array = _get_all_entities()
 	var idx: int = entities.find(sel)
 	if idx >= 0:
-		_world_overlay.draw_string(font, pos + Vector2(-5, -28), "%d" % (idx + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 12, sel_col)
+		_draw_debug_label(pos + Vector2(-5, -28), "%d" % (idx + 1), 12, sel_col, font)
 
 	# State info panel — draw entity properties in world space
 	if not DebugOverlay.should_draw("state_info/state_text_panel", sel):
@@ -2647,49 +2681,261 @@ func _draw_selection_overlay() -> void:
 	# Line from panel to entity
 	_world_overlay.draw_line(info_pos + Vector2(0, 14), pos, Color(0, 0.9, 1.0, 0.2), 1.5)
 
-	# Background
-	_world_overlay.draw_rect(Rect2(info_pos.x - 4, info_pos.y - 4, 200, 100), Color(0.05, 0.05, 0.08, 0.8))
-
 	var dy: float = 0
 	var line_h: float = 12.0
-	var label_col := Color(0.6, 0.6, 0.6)
 	var val_col := Color(0.8, 0.9, 0.8)
 
 	# Entity type
 	var etype: String = ""
 	if sel.get_script():
 		etype = sel.get_script().resource_path.get_file().get_basename()
-	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), etype, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.9, 0.7, 0.3))
+	_draw_debug_label(info_pos + Vector2(0, dy + 10), etype, 10, Color(0.9, 0.7, 0.3), font)
 	dy += line_h
 
 	# Entity ID
 	var eid: String = sel.name
 	if "entity_id" in sel and not str(sel.entity_id).is_empty():
 		eid = str(sel.entity_id)
-	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "id: " + eid, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+	_draw_debug_label(info_pos + Vector2(0, dy + 10), "id: " + eid, 9, val_col, font)
 	dy += line_h
 
 	# Position
-	_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "pos: (%.0f, %.0f)" % [pos.x, pos.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+	_draw_debug_label(info_pos + Vector2(0, dy + 10), "pos: (%.0f, %.0f)" % [pos.x, pos.y], 9, val_col, font)
 	dy += line_h
 
 	# Common properties
 	if "health" in sel:
 		var max_hp: String = "/%d" % sel.max_health if "max_health" in sel else ""
-		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "hp: %d%s" % [sel.health, max_hp], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "hp: %d%s" % [sel.health, max_hp], 9, val_col, font)
 		dy += line_h
 	if "_state" in sel:
-		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "state: %d" % sel._state, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "state: %d" % sel._state, 9, val_col, font)
 		dy += line_h
 	if "velocity" in sel:
-		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "vel: (%.0f, %.0f)" % [sel.velocity.x, sel.velocity.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "vel: (%.0f, %.0f)" % [sel.velocity.x, sel.velocity.y], 9, val_col, font)
 		dy += line_h
 	if "creature_scale" in sel:
-		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "scale: %.2f" % sel.creature_scale, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, val_col)
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "scale: %.2f" % sel.creature_scale, 9, val_col, font)
 		dy += line_h
 	if "_chained" in sel and sel._chained:
-		_world_overlay.draw_string(font, info_pos + Vector2(0, dy + 10), "[CHAINED]", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.5, 0.2))
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "[CHAINED]", 9, Color(1.0, 0.5, 0.2), font)
 		dy += line_h
+
+
+func _draw_verify_monitors() -> void:
+	## Draw verify monitor boundaries in world space — always visible when active.
+	## 4-zone ring system:
+	##   Zone 1 (inner): transparent→green diagonal stripes, fading in from 80% to boundary
+	##   Zone 2: solid green ring at the boundary
+	##   Zone 3: solid red ring just outside the boundary
+	##   Zone 4 (outer): red horizontal stripes fading out
+	if not _world_overlay:
+		return
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon or not rcon._test_runner:
+		return
+	var monitors: Array = rcon._test_runner.get_all_verify_monitors()
+	var font: Font = ThemeDB.fallback_font
+	for monitor in monitors:
+		var state: String = monitor.get("state", "")
+		if state != "active" and state != "failed":
+			continue
+		var boundary: Dictionary = monitor.get("boundary", {})
+
+		match boundary.get("type", ""):
+			"circle":
+				var center: Vector2 = rcon._test_runner._resolve_boundary_center(boundary)
+				var radius: float = boundary.get("radius", 100.0)
+				_draw_verify_circle(center, radius, state == "active")
+				# Label
+				var label_col: Color = Color(0.3, 1.0, 0.4, 0.9) if state == "active" else Color(1.0, 0.3, 0.2, 0.9)
+				_draw_debug_label(center + Vector2(radius + 10, -4),
+					"verify[%d] r=%.0f" % [monitor["id"], radius], 9, label_col, font)
+				# Line from center to monitored entity + distance label
+				var entities: Array = rcon._test_runner._resolve_entity_selector(monitor.get("selector", {}))
+				for entity in entities:
+					if is_instance_valid(entity):
+						var dist: float = entity.global_position.distance_to(center)
+						var line_col: Color = Color(0.2, 0.9, 0.3, 0.3) if dist <= radius else Color(1.0, 0.2, 0.1, 0.6)
+						_world_overlay.draw_line(center, entity.global_position, line_col, 1.5)
+						_draw_debug_label(entity.global_position + Vector2(10, -14),
+							"%.0f/%.0f" % [dist, radius], 9, label_col, font)
+
+			"rect":
+				var bmin: Vector2 = boundary.get("min", Vector2.ZERO)
+				var bmax: Vector2 = boundary.get("max", Vector2(1920, 1080))
+				var rect_col: Color = Color(0.2, 0.9, 0.3, 0.3) if state == "active" else Color(1.0, 0.2, 0.1, 0.5)
+				_world_overlay.draw_rect(Rect2(bmin, bmax - bmin), rect_col, false, 2.0)
+				var rect_label_col: Color = Color(0.3, 1.0, 0.4, 0.9) if state == "active" else Color(1.0, 0.3, 0.2, 0.9)
+				_draw_debug_label(bmin + Vector2(4, -4),
+					"verify[%d]" % monitor["id"], 9, rect_label_col, font)
+
+
+func _draw_verify_circle(center: Vector2, radius: float, is_ok: bool) -> void:
+	## Draw the 4-zone verify circle boundary with candy-stripe fill.
+	## Zone 1: inner green 45° candy stripes, fading in from 80% to 100% radius
+	## Zone 2: solid green ring at boundary
+	## Zone 3: solid red ring just outside boundary
+	## Zone 4: outer red 45° candy stripes (same direction), fading out to 130% radius
+	##
+	## Stripes are true 45° lines in world-space, clipped to annular regions.
+	var segments: int = 64
+	var stripe_spacing: float = 16.0  # Distance between stripe centers (perpendicular)
+
+	# Determine saturation phase:
+	#   Running:  both zones desaturated
+	#   Passed:   green hyper-saturated, red fully grey
+	#   Failed:   red hyper-saturated + pulsing, green fully grey
+	var test_runner: Node = null
+	var rcon_ref: Node = get_node_or_null("/root/Rcon")
+	if rcon_ref and rcon_ref._test_runner:
+		test_runner = rcon_ref._test_runner
+	var test_done: bool = test_runner and test_runner._test_state in ["COMPLETE", "FINALIZED"]
+
+	var green_sat: float = 0.3   # 0 = full grey, 1 = hyper-saturated
+	var red_sat: float = 0.3
+	if test_done:
+		if is_ok:
+			green_sat = 1.0  # Winner: vivid green
+			red_sat = 0.0    # Loser: full grey
+		else:
+			green_sat = 0.0  # Loser: full grey
+			red_sat = 1.0    # Winner: vivid red
+
+	# Green base: grey at sat=0, desaturated at 0.3, vivid at 1.0
+	var grey := 0.18
+	var green_base := Color(
+		lerpf(grey, 0.05, green_sat),
+		lerpf(grey, 0.6, green_sat),
+		lerpf(grey, 0.05, green_sat))
+	# Red base
+	var red_base := Color(
+		lerpf(grey, 0.7, red_sat),
+		lerpf(grey, 0.04, red_sat),
+		lerpf(grey, 0.02, red_sat))
+	# Ring colors
+	var green_ring := Color(
+		lerpf(grey, 0.1, green_sat),
+		lerpf(grey, 0.9, green_sat),
+		lerpf(grey, 0.15, green_sat),
+		lerpf(0.25, 0.7, green_sat))
+	var red_ring := Color(
+		lerpf(grey, 1.0, red_sat),
+		lerpf(grey, 0.1, red_sat),
+		lerpf(grey, 0.05, red_sat),
+		lerpf(0.25, 0.7, red_sat))
+
+	# If test failed, pulse the red zone
+	if test_done and not is_ok:
+		var pulse: float = 0.7 + 0.3 * sin(Time.get_ticks_msec() / 150.0)
+		red_ring.a = pulse
+		red_base = Color(0.9, 0.05, 0.02)
+
+	# Zone 1: Inner green stripes (80% → 100% radius)
+	_draw_candy_stripe_annulus(center, radius * 0.8, radius,
+		green_base, stripe_spacing, true)
+
+	# Zone 2: Solid green ring at the boundary
+	_draw_circle_ring(center, radius, green_ring, 3.0, segments)
+
+	# Zone 3: Solid red ring just outside the boundary
+	var red_r: float = radius + 4.0
+	_draw_circle_ring(center, red_r, red_ring, 3.0, segments)
+
+	# Zone 4: Outer red stripes (100%+6 → 130% radius)
+	_draw_candy_stripe_annulus(center, radius + 6.0, radius * 1.3,
+		red_base, stripe_spacing, false)
+
+
+func _draw_circle_ring(center: Vector2, radius: float, color: Color, width: float, segments: int) -> void:
+	## Draw a solid circle ring.
+	for i in range(segments):
+		var a1: float = float(i) / float(segments) * TAU
+		var a2: float = float(i + 1) / float(segments) * TAU
+		_world_overlay.draw_line(
+			center + Vector2(cos(a1), sin(a1)) * radius,
+			center + Vector2(cos(a2), sin(a2)) * radius,
+			color, width)
+
+
+func _draw_candy_stripe_annulus(center: Vector2, r_min: float, r_max: float,
+		base_color: Color, spacing: float, fade_inward: bool) -> void:
+	## Draw 45° candy stripes clipped to an annular region (between r_min and r_max).
+	## Each stripe is a true diagonal line, clipped to the two circles.
+	## fade_inward=true: alpha 0 at r_min, 0.5 at r_max (inner zone)
+	## fade_inward=false: alpha 0.4 at r_min, 0 at r_max (outer zone)
+	##
+	## Math: a 45° line has the form x + y = k (constant).
+	## For each stripe, k is spaced by `spacing`. We clip each line to the annulus
+	## by finding intersections with circles r_min and r_max.
+
+	# Stripe lines: x + y = k. Range of k that intersects the outer circle:
+	# |k| <= r_max * sqrt(2)  (the 45° line tangent to the circle)
+	var k_extent: float = r_max * 1.415  # sqrt(2) ≈ 1.414
+	# Quantize k to stripe spacing grid (world-aligned)
+	var k_base: float = center.x + center.y
+	var k_start: float = k_base - k_extent
+	var k_end: float = k_base + k_extent
+	# Snap to grid
+	k_start = floor(k_start / spacing) * spacing
+	var stripe_width: float = spacing * 0.4  # Stripe is 40% of spacing, gap is 60%
+
+	var sub_len: float = 8.0  # Length of each sub-segment for radial alpha gradient
+	var k: float = k_start
+	while k <= k_end:
+		var k_local: float = k - k_base
+		# Clip 45° line (lx + ly = k_local) to outer circle r_max
+		var disc_outer: float = 2.0 * r_max * r_max - k_local * k_local
+		if disc_outer < 0:
+			k += spacing
+			continue
+		var sqrt_outer: float = sqrt(disc_outer)
+		var lx1_outer: float = (k_local - sqrt_outer) / 2.0
+		var lx2_outer: float = (k_local + sqrt_outer) / 2.0
+
+		# Clip to inner circle r_min
+		var disc_inner: float = 2.0 * r_min * r_min - k_local * k_local
+		# Collect drawable spans: segments of the line that are inside the annulus
+		var spans: Array = []  # [[lx_start, lx_end], ...]
+		if disc_inner <= 0:
+			spans.append([lx1_outer, lx2_outer])
+		else:
+			var sqrt_inner: float = sqrt(disc_inner)
+			var lx1_inner: float = (k_local - sqrt_inner) / 2.0
+			var lx2_inner: float = (k_local + sqrt_inner) / 2.0
+			if lx1_outer < lx1_inner - 1.0:
+				spans.append([lx1_outer, lx1_inner])
+			if lx2_inner < lx2_outer - 1.0:
+				spans.append([lx2_inner, lx2_outer])
+
+		# Draw each span as sub-segments with per-point radial alpha
+		for span in spans:
+			var sx: float = span[0]
+			var sx_end: float = span[1]
+			while sx < sx_end:
+				var sx_next: float = minf(sx + sub_len, sx_end)
+				var mid_lx: float = (sx + sx_next) * 0.5
+				var mid_ly: float = k_local - mid_lx
+				var dist: float = sqrt(mid_lx * mid_lx + mid_ly * mid_ly)
+				var alpha: float = _annulus_alpha(dist, r_min, r_max, fade_inward)
+				if alpha > 0.005:
+					var p1 := center + Vector2(sx, k_local - sx)
+					var p2 := center + Vector2(sx_next, k_local - sx_next)
+					_world_overlay.draw_line(p1, p2,
+						Color(base_color.r, base_color.g, base_color.b, alpha), stripe_width)
+				sx = sx_next
+		k += spacing
+
+
+func _annulus_alpha(dist: float, r_min: float, r_max: float, fade_inward: bool) -> float:
+	## Compute alpha for a point at `dist` from center within an annulus.
+	## fade_inward=true: 0 at r_min → 0.5 at r_max (inner green zone)
+	## fade_inward=false: 0.4 at r_min → 0 at r_max (outer red zone)
+	var t: float = clampf((dist - r_min) / maxf(r_max - r_min, 1.0), 0.0, 1.0)
+	if fade_inward:
+		return t * 0.5
+	else:
+		return 0.4 * (1.0 - t)
 
 
 func _draw_entity_properties(x: float, y: float, pw: float, ph: float, font: Font, entity: Node2D) -> void:

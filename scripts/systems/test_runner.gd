@@ -37,6 +37,11 @@ var _breach_conditions: Array = []  # Active breach conditions for current wait
 var _breach_initial_sides: Dictionary = {}  # {entity_name: sign} recorded at wait start
 var _breach_result: Dictionary = {}  # {breached: bool, entity, pos, condition} set on breach
 
+# Verify monitors — background boundary checks that run every frame
+# Each monitor: {id, selector, boundary, until, line_idx, state, log_timer, start_time}
+var _verify_monitors: Array = []
+var _verify_next_id: int = 0
+
 # Bounded leap continuous monitoring — collects matches/violations throughout the test
 var _bleap_monitor_active: bool = false
 var _bleap_monitor_defs: Dictionary = {}       # Bleap check data from RCON (leaps, min_matched)
@@ -117,6 +122,8 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 	_test_vars = {}
 	_state_timestamps = {}
 	_waiting_for_notify = false
+	_verify_monitors.clear()
+	_verify_next_id = 0
 	_set_test_state("INITIALIZING")
 	var rcon: Node = get_node_or_null("/root/Rcon")
 	if rcon:
@@ -175,6 +182,34 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 						_test_vars[set_name] = set_val
 						# Mark set line as complete immediately
 						_line_states[line_idx] = "complete"
+			continue
+
+		# Verify monitor: "verify @e[...] within <boundary> until <condition>"
+		# Non-blocking — registers a background monitor, script continues immediately.
+		if l.begins_with("verify "):
+			if not while_stack.is_empty():
+				while_stack[-1]["body_lines"].append(l)
+				while_stack[-1]["body_indices"].append(line_idx)
+			else:
+				# Flush current batch before registering monitor
+				if not current_batch.is_empty():
+					_task_queue.append({
+						"type": TASK_RCON,
+						"test_name": test_name if first_batch else "",
+						"commands": current_batch.duplicate(),
+						"lines": current_batch_lines.duplicate(),
+					})
+					first_batch = false
+					current_batch = []
+					current_batch_lines = []
+				# Parse and register the verify monitor at queue time
+				# Actual activation happens when this position in the queue is reached
+				_task_queue.append({
+					"type": "verify",
+					"test_name": test_name,
+					"verify_line": l,
+					"lines": [line_idx],
+				})
 			continue
 
 		# While loop: "while {var_name}" — collect body until "endwhile"
@@ -587,6 +622,33 @@ func _advance_queue() -> void:
 			_execute_debug_profile_task(task)
 			_wait_timer = 0.1
 		TASK_RESULTS:
+			# Finalize all verify monitors and add results
+			for monitor in _verify_monitors:
+				if monitor["state"] == "active":
+					var until_type: String = monitor.get("until", {}).get("type", "done")
+					if until_type == "done":
+						monitor["state"] = "passed"
+					# Timer/variable monitors still active at end = passed
+					elif until_type in ["timer", "variable"]:
+						monitor["state"] = "passed"
+				# Add to results
+				if monitor["state"] == "passed":
+					if monitor["line_idx"] >= 0:
+						_line_states[monitor["line_idx"]] = "complete"
+					_log("  VERIFY [%d]: PASSED ✓" % monitor["id"], Color(0.4, 1.0, 0.4))
+					_results.append({
+						"name": "verify[%d]" % monitor["id"],
+						"passed": true,
+						"checks": [{"label": "boundary", "passed": true, "value": 0}]
+					})
+				elif monitor["state"] == "failed":
+					if monitor["line_idx"] >= 0:
+						_line_states[monitor["line_idx"]] = "failed"
+					_results.append({
+						"name": "verify[%d]" % monitor["id"],
+						"passed": false,
+						"checks": [{"label": "boundary", "passed": false, "value": 1}]
+					})
 			_set_test_state("COMPLETE")
 			_show_results()
 			_wait_timer = 0.1
@@ -636,6 +698,14 @@ func _advance_queue() -> void:
 								rcon_batch.append("_SET_VAR_%s=%s" % [sp[1], resolved.substr(eq_i + 1).strip_edges()])
 								if bl_line >= 0:
 									rcon_batch_lines.append(bl_line)
+					elif resolved.begins_with("verify "):
+						# Verify inside a while body — flush batch, add as verify task
+						if not rcon_batch.is_empty():
+							body_tasks.append({"type": TASK_RCON, "test_name": task["test_name"], "commands": rcon_batch.duplicate(), "lines": rcon_batch_lines.duplicate()})
+							rcon_batch.clear()
+							rcon_batch_lines.clear()
+						var v_lines: Array = [bl_line] if bl_line >= 0 else []
+						body_tasks.append({"type": "verify", "test_name": task["test_name"], "verify_line": resolved, "lines": v_lines})
 					else:
 						rcon_batch.append(resolved)
 						if bl_line >= 0:
@@ -653,6 +723,22 @@ func _advance_queue() -> void:
 				# Loop finished — mark while line as complete
 				if while_line >= 0:
 					_line_states[while_line] = "complete"
+			_wait_timer = 0.1
+		"verify":
+			# Register a background verify monitor — non-blocking, script continues
+			var vline: String = task.get("verify_line", "")
+			var monitor: Dictionary = _parse_verify(vline)
+			if not monitor.is_empty():
+				monitor["id"] = _verify_next_id
+				monitor["line_idx"] = task.get("lines", [-1])[0] if not task.get("lines", []).is_empty() else -1
+				monitor["state"] = "active"  # active, passed, failed
+				monitor["log_timer"] = 0.0
+				monitor["start_time"] = Time.get_ticks_msec() / 1000.0
+				_verify_monitors.append(monitor)
+				_verify_next_id += 1
+				if monitor["line_idx"] >= 0:
+					_line_states[monitor["line_idx"]] = "verifying"
+				_log("  VERIFY [%d]: %s" % [monitor["id"], vline.substr(7)], Color(0.4, 0.8, 1.0))
 			_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
@@ -694,6 +780,8 @@ func _process(delta: float) -> void:
 				_waiting_for_notify = false
 				_set_test_state("FINALIZED")
 				rcon_modal._notify_dismissed_button = ""
+		# Check verify monitors every frame
+		_tick_verify_monitors(delta)
 		# Poll bounded leap graph monitoring
 		if _bleap_monitor_active:
 			_bleap_monitor_poll -= delta
@@ -720,15 +808,17 @@ func _execute_rcon_task(task: Dictionary) -> void:
 			if eq > 0:
 				var vname: String = kv.substr(0, eq)
 				var vval: String = kv.substr(eq + 1)
-				# Support simple arithmetic: {var}-1, {var}+1
-				if vval.ends_with("-1") and _test_vars.has(vval.substr(0, vval.length() - 2)):
-					var ref_name: String = vval.substr(0, vval.length() - 2)
-					_test_vars[vname] = str(int(_test_vars[ref_name]) - 1)
-				elif vval.ends_with("+1") and _test_vars.has(vval.substr(0, vval.length() - 2)):
-					var ref_name: String = vval.substr(0, vval.length() - 2)
-					_test_vars[vname] = str(int(_test_vars[ref_name]) + 1)
+				# Try to evaluate as math expression (supports +, -, *, /, parentheses)
+				# Variables are already substituted, so "10-1" evaluates to 9
+				var expr := Expression.new()
+				if expr.parse(vval) == OK:
+					var result_val = expr.execute()
+					if not expr.has_execute_failed():
+						_test_vars[vname] = str(result_val)
+					else:
+						_test_vars[vname] = vval  # Fallback to string
 				else:
-					_test_vars[vname] = vval
+					_test_vars[vname] = vval  # Not a math expression, store as string
 			continue
 		var result: String = rcon._execute(cmd)
 		_log("  %s → %s" % [cmd, result.substr(0, 60)], Color(0.5, 0.5, 0.5))
@@ -1506,3 +1596,325 @@ func _log(text: String, color: Color = Color(0.7, 0.7, 0.7)) -> void:
 		_console._log(text, color)
 	else:
 		print(text)
+
+
+# ==============================================================================
+# VERIFY MONITORS — background boundary checks
+# ==============================================================================
+
+func _parse_verify(line: String) -> Dictionary:
+	## Parse: "verify @e[...] within <boundary> until <condition>"
+	## Returns a monitor dictionary or {} on parse error.
+	var tokens: Array = _tokenize_verify(line.substr(7).strip_edges())  # strip "verify "
+	if tokens.size() < 4:
+		_log("  ERR: verify parse failed: not enough tokens", Color(1, 0.3, 0.3))
+		return {}
+
+	# Token 0: entity selector (@e[...])
+	var selector: Dictionary = _parse_entity_selector(tokens[0])
+	if selector.is_empty():
+		_log("  ERR: verify parse failed: bad selector '%s'" % tokens[0], Color(1, 0.3, 0.3))
+		return {}
+
+	# Token 1: "within"
+	if tokens[1] != "within":
+		_log("  ERR: verify parse failed: expected 'within', got '%s'" % tokens[1], Color(1, 0.3, 0.3))
+		return {}
+
+	# Token 2+: boundary spec, then "until", then condition
+	var boundary: Dictionary = {}
+	var until_idx: int = -1
+	for i in range(2, tokens.size()):
+		if tokens[i] == "until":
+			until_idx = i
+			break
+
+	if until_idx < 0:
+		_log("  ERR: verify parse failed: missing 'until'", Color(1, 0.3, 0.3))
+		return {}
+
+	boundary = _parse_boundary(tokens.slice(2, until_idx))
+	if boundary.is_empty():
+		_log("  ERR: verify parse failed: bad boundary", Color(1, 0.3, 0.3))
+		return {}
+
+	# Until condition
+	var until: Dictionary = _parse_until(tokens.slice(until_idx + 1))
+
+	return {"selector": selector, "boundary": boundary, "until": until}
+
+
+func _tokenize_verify(text: String) -> Array:
+	## Tokenize verify line, keeping @e[...] and @b[...] as single tokens.
+	var tokens: Array = []
+	var i: int = 0
+	while i < text.length():
+		# Skip whitespace
+		while i < text.length() and text[i] == " ":
+			i += 1
+		if i >= text.length():
+			break
+		# Check for @e[...] or @b[...] — grab until matching ]
+		if i + 2 < text.length() and text[i] == "@" and text[i + 2] == "[":
+			var start: int = i
+			var bracket_depth: int = 0
+			while i < text.length():
+				if text[i] == "[":
+					bracket_depth += 1
+				elif text[i] == "]":
+					bracket_depth -= 1
+					if bracket_depth == 0:
+						i += 1
+						break
+				i += 1
+			# Check for tilde offset after the bracket: @e[name=AI]~100~0
+			while i < text.length() and text[i] != " ":
+				i += 1
+			tokens.append(text.substr(start, i - start))
+		else:
+			# Regular token
+			var start: int = i
+			while i < text.length() and text[i] != " ":
+				i += 1
+			tokens.append(text.substr(start, i - start))
+	return tokens
+
+
+func _parse_entity_selector(token: String) -> Dictionary:
+	## Parse @e[key=value,...] into {filters: [{key, value}]}.
+	## Also supports @e[name=foo]~dx~dy for offset.
+	if not token.begins_with("@e["):
+		return {}
+	var bracket_end: int = token.find("]")
+	if bracket_end < 0:
+		return {}
+	var inner: String = token.substr(3, bracket_end - 3)
+	var offset := Vector2.ZERO
+	# Check for tilde offset after ]
+	var after_bracket: String = token.substr(bracket_end + 1)
+	if after_bracket.begins_with("~"):
+		var parts: PackedStringArray = after_bracket.split("~", false)
+		if parts.size() >= 2:
+			offset = Vector2(float(parts[0]), float(parts[1]))
+		elif parts.size() == 1:
+			offset = Vector2(float(parts[0]), 0.0)
+
+	var filters: Array = []
+	for pair in inner.split(","):
+		var eq: int = pair.find("=")
+		if eq > 0:
+			filters.append({"key": pair.substr(0, eq), "value": pair.substr(eq + 1)})
+	return {"filters": filters, "offset": offset}
+
+
+func _parse_boundary(tokens: Array) -> Dictionary:
+	## Parse boundary spec from tokens between "within" and "until".
+	## Formats:
+	##   circle @e[name=AI] 300
+	##   circle 960 876 400
+	##   circle @e[name=AI]~100~0 300
+	##   rect 100 700 1800 900
+	if tokens.is_empty():
+		return {}
+	var btype: String = tokens[0]
+	match btype:
+		"circle":
+			if tokens.size() >= 3:
+				# Check if token 1 is an entity selector or a number
+				if tokens[1].begins_with("@e["):
+					var center_sel: Dictionary = _parse_entity_selector(tokens[1])
+					var radius: float = float(tokens[2])
+					return {"type": "circle", "center_entity": center_sel, "radius": radius}
+				elif tokens.size() >= 4:
+					# Fixed position: circle x y r
+					return {"type": "circle", "center_pos": Vector2(float(tokens[1]), float(tokens[2])), "radius": float(tokens[3])}
+		"rect":
+			if tokens.size() >= 5:
+				return {"type": "rect",
+					"min": Vector2(float(tokens[1]), float(tokens[2])),
+					"max": Vector2(float(tokens[3]), float(tokens[4]))}
+	return {}
+
+
+func _parse_until(tokens: Array) -> Dictionary:
+	## Parse until condition: done, timer <N>, {variable}
+	if tokens.is_empty():
+		return {"type": "done"}
+	match tokens[0]:
+		"done":
+			return {"type": "done"}
+		"timer":
+			var duration: float = float(tokens[1]) if tokens.size() > 1 else 30.0
+			return {"type": "timer", "duration": duration}
+		_:
+			# Check for {variable}
+			var t: String = tokens[0]
+			if t.begins_with("{") and t.ends_with("}"):
+				return {"type": "variable", "name": t.substr(1, t.length() - 2)}
+			return {"type": "done"}
+
+
+func _resolve_entity_selector(selector: Dictionary) -> Array:
+	## Find all entities matching an @e[...] selector.
+	var filters: Array = selector.get("filters", [])
+	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("players")
+	# Deduplicate
+	var seen: Dictionary = {}
+	var unique: Array = []
+	for n in all_nodes:
+		if is_instance_valid(n) and not seen.has(n.get_instance_id()):
+			seen[n.get_instance_id()] = true
+			unique.append(n)
+
+	var result: Array = []
+	for node in unique:
+		var matches: bool = true
+		for f in filters:
+			var key: String = f["key"]
+			var val: String = f["value"]
+			match key:
+				"name":
+					var node_name: String = node.name
+					var node_eid: String = str(node.entity_id) if "entity_id" in node else ""
+					if not _glob_match(node_name, val) and not _glob_match(node_eid, val):
+						matches = false
+				"type":
+					if node.get_script():
+						var script_name: String = node.get_script().resource_path.get_file().get_basename()
+						if not _glob_match(script_name, val):
+							matches = false
+					else:
+						matches = false
+				"group":
+					if not node.is_in_group(val):
+						matches = false
+				"class":
+					if "character_class" in node:
+						var cls_name: String = PlayerHUD.CLASS_NAMES.get(node.character_class, "").to_lower()
+						if cls_name != val.to_lower():
+							matches = false
+					else:
+						matches = false
+				_:
+					matches = false
+		if matches:
+			result.append(node)
+	return result
+
+
+func _resolve_boundary_center(boundary: Dictionary) -> Vector2:
+	## Get the current center position for a boundary (fixed or entity-dynamic).
+	if boundary.has("center_pos"):
+		return boundary["center_pos"]
+	if boundary.has("center_entity"):
+		var sel: Dictionary = boundary["center_entity"]
+		var entities: Array = _resolve_entity_selector(sel)
+		if not entities.is_empty():
+			return entities[0].global_position + sel.get("offset", Vector2.ZERO)
+	return Vector2.ZERO
+
+
+func _is_within_boundary(pos: Vector2, boundary: Dictionary) -> bool:
+	## Check if a position is within the boundary.
+	match boundary.get("type", ""):
+		"circle":
+			var center: Vector2 = _resolve_boundary_center(boundary)
+			var radius: float = boundary.get("radius", 100.0)
+			return pos.distance_to(center) <= radius
+		"rect":
+			var bmin: Vector2 = boundary.get("min", Vector2.ZERO)
+			var bmax: Vector2 = boundary.get("max", Vector2(1920, 1080))
+			return pos.x >= bmin.x and pos.x <= bmax.x and pos.y >= bmin.y and pos.y <= bmax.y
+	return true  # Unknown type = no constraint
+
+
+func _tick_verify_monitors(delta: float) -> void:
+	## Check all active verify monitors. Called every frame from _process.
+	var failed_monitor: Dictionary = {}
+	for monitor in _verify_monitors:
+		if monitor["state"] != "active":
+			continue
+
+		# Check until condition
+		var until: Dictionary = monitor.get("until", {})
+		match until.get("type", "done"):
+			"timer":
+				var elapsed: float = Time.get_ticks_msec() / 1000.0 - monitor["start_time"]
+				if elapsed >= until.get("duration", 30.0):
+					monitor["state"] = "passed"
+					if monitor["line_idx"] >= 0:
+						_line_states[monitor["line_idx"]] = "complete"
+					_log("  VERIFY [%d]: timer expired — PASSED" % monitor["id"], Color(0.4, 1.0, 0.4))
+					continue
+			"variable":
+				var vname: String = until.get("name", "")
+				var vval: String = _test_vars.get(vname, "1")
+				if vval == "0" or vval == "false" or vval.is_empty():
+					monitor["state"] = "passed"
+					if monitor["line_idx"] >= 0:
+						_line_states[monitor["line_idx"]] = "complete"
+					_log("  VERIFY [%d]: variable {%s} falsy — PASSED" % [monitor["id"], vname], Color(0.4, 1.0, 0.4))
+					continue
+
+		# Check boundary
+		var selector: Dictionary = monitor.get("selector", {})
+		var boundary: Dictionary = monitor.get("boundary", {})
+		var entities: Array = _resolve_entity_selector(selector)
+		for entity in entities:
+			if not _is_within_boundary(entity.global_position, boundary):
+				# BREACH — immediate test failure
+				monitor["state"] = "failed"
+				if monitor["line_idx"] >= 0:
+					_line_states[monitor["line_idx"]] = "failed"
+				var center: Vector2 = _resolve_boundary_center(boundary)
+				var dist: float = entity.global_position.distance_to(center)
+				_log("  VERIFY [%d] BREACH: %s at (%.0f,%.0f) dist=%.0f — TEST FAILED" % [
+					monitor["id"], entity.name, entity.global_position.x, entity.global_position.y, dist],
+					Color(1.0, 0.2, 0.2))
+				print("VERIFY BREACH: %s outside boundary — test failed" % entity.name)
+				failed_monitor = monitor
+				break
+
+		if not failed_monitor.is_empty():
+			break
+
+		# Periodic logging (every 0.5s)
+		monitor["log_timer"] -= delta
+		if monitor["log_timer"] <= 0:
+			monitor["log_timer"] = 0.5
+			for entity in entities:
+				var center: Vector2 = _resolve_boundary_center(boundary)
+				var dist: float = entity.global_position.distance_to(center)
+				var radius: float = boundary.get("radius", 0.0)
+				print("VERIFY [%d]: %s dist=%.0f / %.0f %s" % [
+					monitor["id"], entity.name, dist, radius,
+					"OK" if dist <= radius else "CLOSE"])
+
+	# Handle test failure from verify breach
+	if not failed_monitor.is_empty():
+		# Force test to COMPLETE with failure
+		_task_queue.clear()
+		_wait_timer = 0.0
+		_breach_conditions.clear()
+		# Add a failed result
+		_results.append({
+			"name": "verify[%d]" % failed_monitor["id"],
+			"passed": false,
+			"checks": [{"label": "boundary", "passed": false, "value": 1}]
+		})
+		_set_test_state("COMPLETE")
+		_show_results()
+
+
+func get_active_verify_monitors() -> Array:
+	## Returns active verify monitors for visual rendering by the debug drawer.
+	var active: Array = []
+	for monitor in _verify_monitors:
+		if monitor["state"] == "active":
+			active.append(monitor)
+	return active
+
+
+func get_all_verify_monitors() -> Array:
+	## Returns all verify monitors (active + passed + failed) for rendering.
+	return _verify_monitors

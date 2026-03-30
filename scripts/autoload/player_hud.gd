@@ -305,6 +305,7 @@ func _on_player_left(player_index: int) -> void:
 
 
 func _process(delta: float) -> void:
+	_process_announcement(delta)
 	# Cooldowns
 	for key in _cycle_cooldowns.keys():
 		_cycle_cooldowns[key] -= delta
@@ -1159,3 +1160,42 @@ func check_auto_dump_triggers(entity: Node2D) -> void:
 
 func _v2d(v: Vector2) -> Array:
 	return [snappedf(v.x, 0.1), snappedf(v.y, 0.1)]
+
+
+# -- Announcement overlay (large centered text that fades out) -----------------
+
+var _announce_label: Label = null
+var _announce_timer: float = 0.0
+
+func show_announcement(text: String, duration: float = 3.0) -> void:
+	## Show large centered text on screen that fades out.
+	if not _canvas:
+		return
+	if not _announce_label or not is_instance_valid(_announce_label):
+		_announce_label = Label.new()
+		_announce_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		_announce_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		_announce_label.add_theme_font_size_override("font_size", 28)
+		_announce_label.add_theme_color_override("font_color", Color(1.0, 0.9, 0.5))
+		_announce_label.add_theme_color_override("font_shadow_color", Color(0, 0, 0, 0.7))
+		_announce_label.add_theme_constant_override("shadow_offset_x", 2)
+		_announce_label.add_theme_constant_override("shadow_offset_y", 2)
+		_announce_label.anchors_preset = Control.PRESET_CENTER_TOP
+		_announce_label.anchor_left = 0; _announce_label.anchor_right = 1
+		_announce_label.anchor_top = 0.15; _announce_label.anchor_bottom = 0.25
+		_canvas.add_child(_announce_label)
+	_announce_label.text = text
+	_announce_label.modulate = Color(1, 1, 1, 1)
+	_announce_label.visible = true
+	_announce_timer = duration
+
+
+func _process_announcement(delta: float) -> void:
+	if _announce_timer <= 0:
+		return
+	_announce_timer -= delta
+	if _announce_timer <= 0:
+		if _announce_label and is_instance_valid(_announce_label):
+			_announce_label.visible = false
+	elif _announce_timer < 1.0 and _announce_label and is_instance_valid(_announce_label):
+		_announce_label.modulate.a = _announce_timer

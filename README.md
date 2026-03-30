@@ -163,6 +163,26 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.33
+**Verify monitors, candy-stripe boundaries, shackle drag fix, monster HUD, test loops**
+
+- **`verify` statement**: background boundary monitors that run every frame during tests. Breach = immediate test failure. Uses Minecraft-style `@e[name=...]` entity selectors
+- **Candy-stripe boundary rendering**: 4-zone circle visual — inner green 45° stripes fading in, solid green ring, solid red ring, outer red stripes fading out. Radial alpha gradient. Desaturated during test, hyper-saturated at end (winning side vivid, losing side grey)
+- **Boundary types**: `circle` (fixed or entity-relative) and `rect`. Entity-relative circles follow the anchor entity dynamically
+- **Shackle entity constraint fix**: attached entities now properly constrained to shackle chain length. YEET elastic collision fires on taut transition, position leash via `call_deferred`
+- **Ball stuck drag**: ball stuck on walls/platforms now gets dragged toward player when chain is taut. Pops off surface when pulled hard enough
+- **Monster player HUD icon**: procedural monster silhouette with player badge, state label, HP bar in top-left corner
+- **`announce` command**: shows large centered text on screen that fades out (test step announcements)
+- **`comment` command**: silent no-op for test script documentation
+- **`kick` command**: applies velocity impulse to any named entity
+- **`shackle_attach` command**: forces shackle attachment to a target entity
+- **`spawn ... name=<id>`**: custom entity naming for stable test references (also on `ai_spawn`)
+- **While loop editor tracking**: body lines highlight during execution, `while` line shows ↻ with variable value, `set` lines show ✓
+- **While loop math**: `Expression`-based evaluation for `set` — supports `+`, `-`, `*`, `/`, parentheses
+- **Debug labels**: all world-space debug text now renders at front-most Z with 75% grey background
+- **Verify line states**: ◈ pulsing blue diamond while active, ✓ green check on pass, ✗ red X on fail. Results count in test pass/fail (1/1 PASSED)
+- **New tests**: `exec_shackle_kick` (4-direction kicks with verify), `exec_shackle_drag` (player walks, entity follows), `exec_bs_loop` (B-S release flight loop)
+
 ### v0.10.32
 **Config refactor, modifier blueprints, shackle config stack, B-S YEET physics**
 

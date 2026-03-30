@@ -1,0 +1,36 @@
+{
+  "name": "exec_bs_loop",
+  "description": "B-S RELEASE mode: ball+shackle fly as connected pair. Shackle should barely affect ball trajectory. Repeated throws left and right.",
+  "debug": {
+    "log": ["executioner/throw", "executioner/ball"]
+  },
+  "script": [
+    "level flat_floor",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "ai_spawn 960 876",
+    "wait 0.5",
+
+    "announce B-S Release Loop",
+    "comment Switch to Release mode (2 interact presses from H&R default)",
+    "ai_cmd interact 0.05",
+    "wait 0.3",
+    "ai_cmd interact 0.05",
+    "wait 0.5",
+
+    "set cycles = 3",
+    "while {cycles}",
+      "ai_cmd grapple 1.5 0.71 -0.71",
+      "wait 4",
+      "ai_cmd grapple 1.5 -0.71 -0.71",
+      "wait 4",
+      "set cycles = {cycles}-1",
+    "endwhile",
+
+    "ai_off",
+    "enablejoins",
+    "notify observations exec_bs_loop [\"OK\",\"RETRY\"] 0 editor"
+  ]
+}
