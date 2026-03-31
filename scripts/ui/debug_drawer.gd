@@ -2680,6 +2680,7 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 		if y > ph:
 			break
 
+		sub["title"] = _cfg_sub_title(sub["id"])  # Refresh dynamic title each frame
 		_draw_cfg_sub_header(x, y, pw, font, sub)
 
 		if sub["collapsed"]:
@@ -3294,35 +3295,35 @@ func _cfg_sub_title(sid: String) -> String:
 	match sid:
 		"cfg_classes": return "Classes"
 		"cfg_class":
-			if _cfg_selected_class >= 0:
-				var cls_name: String = PlayerHUD.CLASS_NAMES.get(_cfg_selected_class, "")
-				return "Class (%s)" % cls_name if not cls_name.is_empty() else "Class"
+			var cls_display: String = _cfg_resolve_class_name()
+			if not cls_display.is_empty():
+				return "Class: %s" % cls_display
 			return "Class"
 		"cfg_entities": return "Entities"
 		"cfg_entity_mods":
 			var sel: Node2D = _get_selected_entity()
 			if sel:
-				return "Entity Mods (%s)" % _cfg_get_entity_display_name(sel)
+				return "Mods: %s" % _cfg_get_entity_display_name(sel)
 			return "Entity Mods"
 		"cfg_entity_stats":
 			var sel: Node2D = _get_selected_entity()
 			if sel:
-				return "Entity Stats (%s)" % _cfg_get_entity_display_name(sel)
+				return "Stats: %s" % _cfg_get_entity_display_name(sel)
 			return "Entity Stats"
 		"cfg_calculations":
 			if not _cfg_selected_stat.is_empty():
 				var sel: Node2D = _get_selected_entity()
 				var ename: String = _cfg_get_entity_display_name(sel) if sel else ""
-				return "Calc (%s:%s)" % [ename, _cfg_selected_stat]
+				return "Calc: %s.%s" % [ename, _cfg_selected_stat]
 			return "Calculations"
 		"cfg_modifiers": return "Modifiers"
 		"cfg_modifier":
 			if not _cfg_selected_blueprint.is_empty():
-				return "Modifier (%s)" % _cfg_selected_blueprint
+				return "Modifier: %s" % _cfg_selected_blueprint
 			return "Modifier"
 		"cfg_modified_ents":
 			if not _cfg_selected_blueprint.is_empty():
-				return "Modified (%s)" % _cfg_selected_blueprint
+				return "Modified: %s" % _cfg_selected_blueprint
 			return "Modified Entities"
 	return sid
 
