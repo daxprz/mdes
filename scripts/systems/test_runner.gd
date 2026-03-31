@@ -147,7 +147,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 	for line in script:
 		line_idx += 1
 		var l: String = str(line).strip_edges()
-		if l.is_empty() or l.begins_with("#"):
+		if l.is_empty():
 			continue
 
 		# Variable declaration: "var <name> default=<value>"
@@ -727,6 +727,9 @@ func _advance_queue() -> void:
 		"verify":
 			# Register a background verify monitor — non-blocking, script continues
 			var vline: String = task.get("verify_line", "")
+			# Late variable substitution — query results may not exist at parse time
+			for vn: String in _test_vars:
+				vline = vline.replace("{%s}" % vn, _test_vars[vn])
 			var monitor: Dictionary = _parse_verify(vline)
 			if not monitor.is_empty():
 				monitor["id"] = _verify_next_id
@@ -801,6 +804,41 @@ func _execute_rcon_task(task: Dictionary) -> void:
 		_log("  ERR: RCON not available", Color(1.0, 0.3, 0.3))
 		return
 	for cmd in task.get("commands", []):
+		# Comments — print to log, don't send to RCON
+		if cmd.begins_with("#"):
+			_log("  %s" % cmd, Color(0.45, 0.55, 0.45))
+			continue
+		# Query entity config: "query @e[name=AI] <key> <var_name> [default] [+offset]"
+		# Resolves entity at runtime, calls cfg(key), stores result in test variable.
+		# Optional +N or -N at the end adds an offset to the result.
+		if cmd.begins_with("query "):
+			var q_tokens: Array = _tokenize_verify(cmd.substr(6))
+			if q_tokens.size() >= 3 and q_tokens[0].begins_with("@e["):
+				var q_sel: Dictionary = _parse_entity_selector(q_tokens[0])
+				var q_key: String = q_tokens[1]
+				var q_var: String = q_tokens[2]
+				var q_default: float = float(q_tokens[3]) if q_tokens.size() > 3 else 0.0
+				var q_offset: float = 0.0
+				# Check for +N or -N offset as last token
+				if q_tokens.size() > 3:
+					var last_tok: String = q_tokens[q_tokens.size() - 1]
+					if last_tok.begins_with("+") or (last_tok.begins_with("-") and last_tok != q_tokens[3]):
+						q_offset = float(last_tok)
+				var q_entities: Array = _resolve_entity_selector(q_sel)
+				if not q_entities.is_empty() and is_instance_valid(q_entities[0]):
+					var q_entity: Node = q_entities[0]
+					var q_val: float = q_default
+					if q_entity.has_method("cfg"):
+						q_val = q_entity.cfg(q_key, q_default)
+					elif q_key in q_entity:
+						q_val = float(q_entity.get(q_key))
+					q_val += q_offset
+					_test_vars[q_var] = str(q_val)
+					_log("  query %s.%s = %.0f → {%s}" % [q_entity.name, q_key, q_val, q_var], Color(0.5, 0.7, 0.9))
+				else:
+					_test_vars[q_var] = str(q_default + q_offset)
+					_log("  query: entity not found, using default %.0f → {%s}" % [q_default + q_offset, q_var], Color(0.8, 0.5, 0.3))
+			continue
 		# Handle set variable pseudo-commands from while loop bodies
 		if cmd.begins_with("_SET_VAR_"):
 			var kv: String = cmd.substr(9)  # Strip "_SET_VAR_"

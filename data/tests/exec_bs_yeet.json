@@ -1,8 +1,9 @@
 {
   "name": "exec_bs_yeet",
-  "description": "B-S RELEASE mode: ball+shackle fly as connected pair. Shackle barely affects ball trajectory (mass=5 vs ball=140). Ball thrown right at 45deg.",
+  "description": "B-S RELEASE mode: ball+shackle fly as connected pair. Mass-weighted YEET means shackle gets yanked hard (mass=5), ball barely slows (mass=140).",
   "debug": {
-    "log": ["executioner/throw", "executioner/ball"]
+    "log": ["executioner/throw", "executioner/ball", "executioner/chain_radius"],
+    "on": ["executioner/chain_radius"]
   },
   "script": [
     "level flat_floor",
@@ -10,18 +11,33 @@
     "clear",
     "portal off",
     "clearplayers",
-    "ai_spawn 400 876 class=executioner",
+
+    "# Spawn at left side so ball has room to fly right",
+    "ai_spawn 400 876 class=executioner name=AI mode=release",
     "wait 0.5",
-    "comment Cycle to RELEASE mode: default=H_R, 2 presses: H_R->H_H->R",
-    "ai_cmd interact 0.05",
-    "wait 0.3",
-    "ai_cmd interact 0.05",
-    "wait 0.5",
-    "comment Throw ball right and slightly up (45deg)",
+
+    "# Query chain length (+20 buffer) so verify radius tracks config changes",
+    "query @e[name=AI] exec_chain_total_len chain_radius 400 +20",
+
+    "# Player must not move — Release mode decouples player from chain",
+    "verify @e[name=AI] within circle 400 876 80 until done",
+
+    "announce B-S YEET test: ball at 45 deg, shackle should get yanked",
+    "# Throw at 45 deg up-right. Full charge (1.5s hold)",
     "ai_cmd grapple 1.5 0.71 -0.71",
-    "wait 0.1",
+
+    "# Wait for throw to fire before starting chain verifies",
+    "wait 1.6",
+
+    "# Shackle must stay within total chain length of ball — mass-weighted constraint keeps it close",
+    "verify @e[name=shackle] within circle @e[name=spikeball] {chain_radius} until done",
+    "# Ball must not clip through floor (wall drag → floor transition)",
+    "verify @e[name=spikeball] within rect 0 0 1920 895 until done",
+
+    "# Let ball fly, bounce off walls/floor, come to rest. Watch for B-S YEET log messages",
     "ai_cmd none 6.0",
     "wait 6",
+
     "ai_off",
     "enablejoins",
     "gameconfig multiple_players_same_class true",

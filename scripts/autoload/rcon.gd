@@ -308,7 +308,10 @@ func _execute(command: String) -> String:
 			return "OK: %s" % ann_text if not ann_text.is_empty() else "OK"
 
 		"comment":
-			# Silent no-op — inline documentation in test scripts
+			# Inline documentation — prints to log but not on screen
+			var comment_text: String = " ".join(parts.slice(1))
+			if not comment_text.is_empty():
+				print("  # %s" % comment_text)
 			return "OK"
 
 		"shackle_attach":

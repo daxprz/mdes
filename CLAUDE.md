@@ -65,6 +65,7 @@ Do NOT use tumu when:
 | `scripts/enemies/monster_player_controller.gd` | Player controller — gamepad/keyboard input, leap aiming, ball mode, health bar, HUD icon |
 | `scripts/autoload/game_manager.gd` | Game state, tower progress, game-wide config settings |
 | `data/modifier_blueprints/` | Modifier blueprint JSON files (heavy_ball, bouncy_chain, ghost_shackle, etc.) |
+| `data/tests/exec_release_ball_wall.json` | Test: ball must not sink through floor when stuck to wall |
 
 ## Conventions
 

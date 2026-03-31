@@ -7625,6 +7625,36 @@ func _exec_shackle_chain_len() -> float:
 	var total: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
 	return total * (1.0 - _exec_chain_split)
 
+func _exec_is_bs_release() -> bool:
+	## True when in Release mode — ball is chained to shackle, not player.
+	var chain: Node2D = _exec_chain_node
+	return chain and is_instance_valid(chain) and chain.anchor_a.get("is_wall", false)
+
+func _exec_stuck_chain_anchor() -> Vector2:
+	## Get the chain anchor for stuck states: shackle in B-S, player in B-P.
+	if _exec_is_bs_release():
+		return _exec_shackle_pos
+	return global_position
+
+func _exec_stuck_chain_max() -> float:
+	## Get the chain max length for stuck states: total in B-S, split in B-P.
+	if _exec_is_bs_release():
+		return cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	return _exec_ball_chain_len()
+
+func _exec_bs_stuck_pull(dir: Vector2, overshoot: float, delta: float) -> void:
+	## In B-S mode, when ball is stuck and chain is too long, yank the shackle
+	## toward the ball (mass-weighted). Ball barely moves.
+	var m_ball_bs: float = ball_cfg("mass", EXEC_BALL_MASS)
+	var m_shackle_bs: float = _shackle.cfg("mass", 5.0) if _shackle else 5.0
+	var total_mass: float = m_ball_bs + m_shackle_bs
+	var shackle_frac: float = m_ball_bs / total_mass
+	# Pull shackle toward ball
+	_exec_shackle_pos -= dir * overshoot * shackle_frac
+	if _shackle:
+		_shackle._settled = false
+		_shackle._bounce_count = 0
+
 
 # -- YEET Physics (shared by thrown + stuck states) ----------------------------
 
@@ -8263,13 +8293,49 @@ func _exec_tick_ball(delta: float) -> void:
 				var chain_dist: float = chain_vec.length()
 				if chain_dist > chain_max:
 					var chain_dir: Vector2 = chain_vec.normalized()
-					_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
-					# YEET: only for B-P and B-E. In B-S, the shackle handles its own constraint.
-					if not is_bs_chain:
+					var overshoot: float = chain_dist - chain_max
+					if is_bs_chain:
+						# B-S: mass-weighted constraint — heavy ball barely slows, light shackle gets yanked
+						var m_ball_bs: float = ball_cfg("mass", EXEC_BALL_MASS)
+						var m_shackle_bs: float = _shackle.cfg("mass", 5.0) if _shackle else 5.0
+						var total_mass_bs: float = m_ball_bs + m_shackle_bs
+						var ball_frac: float = m_shackle_bs / total_mass_bs   # How much ball moves (small: 5/145 ≈ 3%)
+						var shackle_frac: float = m_ball_bs / total_mass_bs   # How much shackle moves (large: 140/145 ≈ 97%)
+						# Position correction: distribute overshoot by inverse mass
+						_exec_ball_pos -= chain_dir * overshoot * ball_frac
+						_exec_shackle_pos += chain_dir * overshoot * shackle_frac
+						# Elastic collision (YEET) — once per slack→taut transition
+						if not _exec_chain_taut:
+							_exec_chain_taut = true
+							var e_bs: float = _shackle.cfg("chain_elasticity", 0.25) if _shackle else 0.25
+							var v_b: float = _exec_ball_vel.dot(chain_dir)
+							var v_s: float = _exec_shackle_vel.dot(chain_dir)
+							var relative_v: float = v_b - v_s
+							if absf(relative_v) > 10.0:
+								var imp_to_shackle: float = (1.0 + e_bs) * m_ball_bs / total_mass_bs * relative_v
+								var imp_to_ball: float = (1.0 + e_bs) * m_shackle_bs / total_mass_bs * relative_v
+								_exec_shackle_vel += chain_dir * imp_to_shackle
+								_exec_ball_vel -= chain_dir * imp_to_ball
+								_shackle._settled = false  # Wake shackle from settlement
+								_shackle._bounce_count = 0
+								DebugOverlay.log("executioner/ball", self,
+									"B-S YEET: ball_imp=%.0f shackle_imp=%.0f rel_v=%.0f m_b=%.0f m_s=%.0f",
+									[imp_to_ball, imp_to_shackle, relative_v, m_ball_bs, m_shackle_bs])
+						else:
+							# Already taut: project out outward velocity components (mass-weighted)
+							var v_b_out: float = _exec_ball_vel.dot(chain_dir)
+							if v_b_out > 0.0:
+								_exec_ball_vel -= chain_dir * v_b_out * ball_frac
+							var v_s_out: float = _exec_shackle_vel.dot(-chain_dir)
+							if v_s_out > 0.0:
+								_exec_shackle_vel -= (-chain_dir) * v_s_out * shackle_frac
+					else:
+						# B-P / B-E: ball clamped to anchor, player/entity gets YEETed
+						_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
 						_exec_try_yeet(chain_dir)
-					var outward_v: float = _exec_ball_vel.dot(chain_dir)
-					if outward_v > 0.0:
-						_exec_ball_vel -= chain_dir * outward_v
+						var outward_v: float = _exec_ball_vel.dot(chain_dir)
+						if outward_v > 0.0:
+							_exec_ball_vel -= chain_dir * outward_v
 				else:
 					_exec_chain_taut = false
 
@@ -8328,26 +8394,47 @@ func _exec_tick_ball(delta: float) -> void:
 
 		ExecEndState.STUCK_WALL:
 			# Ball drags slowly down the wall under its own weight
+			var prev_wall_y: float = _exec_ball_pos.y
 			_exec_ball_pos.y += ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
 			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
 				_exec_ball_anchor_offset.y += ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
 				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
-			# Chain tension — bidirectional: ball gets dragged toward player AND player gets tugged
-			var bw_len: float = _exec_ball_chain_len()
-			var bw_vec: Vector2 = _exec_ball_pos - global_position
+			# Floor check — if ball slides down past a floor, transition to STUCK_PLATFORM
+			var wall_space := get_world_2d().direct_space_state
+			if wall_space:
+				var wall_query := PhysicsRayQueryParameters2D.create(
+					Vector2(_exec_ball_pos.x, prev_wall_y),
+					Vector2(_exec_ball_pos.x, _exec_ball_pos.y + 4.0), 1)
+				wall_query.exclude = [get_rid()]
+				var wall_result: Dictionary = wall_space.intersect_ray(wall_query)
+				if wall_result and wall_result["normal"].y < -0.5:
+					_exec_ball_pos.y = wall_result["position"].y
+					_exec_ball_anchor_body = wall_result["collider"] if wall_result["collider"] is Node2D else null
+					if _exec_ball_anchor_body:
+						_exec_ball_anchor_offset = _exec_ball_pos - _exec_ball_anchor_body.global_position
+					_exec_ball_state = ExecEndState.STUCK_PLATFORM
+					DebugOverlay.log("executioner/ball", self,
+						"BALL SLID OFF WALL → STUCK_PLATFORM at y=%.0f", [_exec_ball_pos.y])
+			# Chain tension — resolve anchor: shackle in B-S, player otherwise
+			var bw_anchor: Vector2 = _exec_stuck_chain_anchor()
+			var bw_len: float = _exec_stuck_chain_max()
+			var bw_vec: Vector2 = _exec_ball_pos - bw_anchor
 			var bw_dist: float = bw_vec.length()
 			if bw_dist > bw_len:
 				var bw_dir: Vector2 = bw_vec / bw_dist
 				var bw_over: float = bw_dist - bw_len
-				# Drag ball toward player (pops off wall when pulled hard enough)
-				var ball_pull: float = bw_over * 8.0
-				_exec_ball_pos -= bw_dir * ball_pull * delta
-				if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
-					_exec_ball_anchor_offset -= bw_dir * ball_pull * delta
-				# Tug player toward ball
-				velocity += bw_dir * minf(bw_over * 3.0, 300.0) * delta
+				if _exec_is_bs_release():
+					# B-S: mass-weighted — yank shackle, barely move ball
+					_exec_bs_stuck_pull(bw_dir, bw_over, delta)
+				else:
+					# B-P: drag ball toward player, tug player toward ball
+					var ball_pull: float = bw_over * 8.0
+					_exec_ball_pos -= bw_dir * ball_pull * delta
+					if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+						_exec_ball_anchor_offset -= bw_dir * ball_pull * delta
+					velocity += bw_dir * minf(bw_over * 3.0, 300.0) * delta
 				# If dragged far enough, pop off wall → freefall
-				if bw_over > 30.0:
+				if bw_over > 30.0 and not _exec_is_bs_release():
 					_exec_ball_state = ExecEndState.THROWN
 					_exec_ball_vel = -bw_dir * 100.0
 					_exec_ball_anchor_body = null
@@ -8355,28 +8442,34 @@ func _exec_tick_ball(delta: float) -> void:
 			_exec_update_chain_ball_anchor()
 
 		ExecEndState.STUCK_PLATFORM:
-			var bp_len: float = _exec_ball_chain_len()
-			var bp_vec: Vector2 = _exec_ball_pos - global_position
+			var bp_anchor: Vector2 = _exec_stuck_chain_anchor()
+			var bp_len: float = _exec_stuck_chain_max()
+			var bp_vec: Vector2 = _exec_ball_pos - bp_anchor
 			var bp_dist: float = bp_vec.length()
-			if bp_dist > bp_len * 0.8:
-				var bp_dir: Vector2 = bp_vec / bp_dist
-				var bp_over: float = bp_dist - bp_len * 0.8
-				# Drag ball along platform toward player
-				var plat_pull: float = bp_over * 6.0
-				_exec_ball_pos -= bp_dir * plat_pull * delta
-				if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
-					_exec_ball_anchor_offset -= bp_dir * plat_pull * delta
-			if bp_dist > bp_len:
-				var bp_dir2: Vector2 = bp_vec / bp_dist
-				var bp_over2: float = bp_dist - bp_len
-				# Tug player toward ball
-				velocity += bp_dir2 * minf(bp_over2 * 3.0, 300.0) * delta
-				# If very far, pop off platform → freefall
-				if bp_over2 > 30.0:
-					_exec_ball_state = ExecEndState.THROWN
-					_exec_ball_vel = -bp_dir2 * 100.0
-					_exec_ball_anchor_body = null
-					DebugOverlay.log("executioner/ball", self, "BALL PULLED OFF PLATFORM by chain")
+			if _exec_is_bs_release():
+				# B-S: ball stays stuck, shackle gets yanked if too far
+				if bp_dist > bp_len:
+					var bp_dir: Vector2 = bp_vec / bp_dist
+					var bp_over: float = bp_dist - bp_len
+					_exec_bs_stuck_pull(bp_dir, bp_over, delta)
+			else:
+				# B-P: drag ball along platform, tug player
+				if bp_dist > bp_len * 0.8:
+					var bp_dir: Vector2 = bp_vec / bp_dist
+					var bp_over: float = bp_dist - bp_len * 0.8
+					var plat_pull: float = bp_over * 6.0
+					_exec_ball_pos -= bp_dir * plat_pull * delta
+					if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
+						_exec_ball_anchor_offset -= bp_dir * plat_pull * delta
+				if bp_dist > bp_len:
+					var bp_dir2: Vector2 = bp_vec / bp_dist
+					var bp_over2: float = bp_dist - bp_len
+					velocity += bp_dir2 * minf(bp_over2 * 3.0, 300.0) * delta
+					if bp_over2 > 30.0:
+						_exec_ball_state = ExecEndState.THROWN
+						_exec_ball_vel = -bp_dir2 * 100.0
+						_exec_ball_anchor_body = null
+						DebugOverlay.log("executioner/ball", self, "BALL PULLED OFF PLATFORM by chain")
 			_exec_update_chain_ball_anchor()
 
 		ExecEndState.STUCK_CEILING:

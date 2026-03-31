@@ -181,6 +181,10 @@ var _cfg_class_data: Dictionary = {}       # Cached class default data (for live
 var _cfg_class_original: Dictionary = {}   # Original defaults from JSON (for range calc)
 var _cfg_class_data_name: String = ""      # Which class the cached data is for
 var _cfg_class_editor_scroll: int = 0      # Scroll offset for class editor sliders
+var _cfg_class_hover_button: String = ""   # "revert:<key>" or "promote:<key>" when hovering a button
+var _cfg_tooltip_text: String = ""         # Tooltip text shown under mouse
+var _cfg_tooltip_pos: Vector2 = Vector2.ZERO
+var _last_hover_lx: float = 0.0           # Last mouse X relative to content area (for button hover)
 
 # Stat selection for calculations
 var _cfg_selected_stat: String = ""        # Config key selected in Entity Stats
@@ -896,7 +900,7 @@ func _input(event: InputEvent) -> void:
 			_handle_ct_tree_prop_drag(event.position.x)
 			get_viewport().set_input_as_handled()
 		elif event.position.x >= _panel_x + ICON_BAR_WIDTH and event.position.x <= _panel_x + _panel_width:
-			# Only handle hover in content area (past icon bar)
+			_last_hover_lx = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
 			if _current_section == Section.TEST_RUNNER:
 				_handle_test_hover(event.position.y)
 			elif _current_section == Section.LEVEL_EDITOR:
@@ -2728,6 +2732,16 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 		if sub["id"] != "cfg_modified_ents":
 			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.15, 0.2, 0.3, 0.4), 1.0)
 
+	# Tooltip — render last so it's on top of everything
+	if not _cfg_tooltip_text.is_empty():
+		var tip_font: Font = ThemeDB.fallback_font
+		var tip_size: Vector2 = tip_font.get_string_size(_cfg_tooltip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9)
+		var tip_x: float = clampf(_cfg_tooltip_pos.x, x, x + pw - tip_size.x - 12)
+		var tip_y: float = _cfg_tooltip_pos.y + 16
+		_panel.draw_rect(Rect2(tip_x - 2, tip_y - 10, tip_size.x + 8, 14), Color(0.1, 0.1, 0.1, 0.9))
+		_panel.draw_rect(Rect2(tip_x - 2, tip_y - 10, tip_size.x + 8, 14), Color(0.4, 0.5, 0.6, 0.5), false, 1.0)
+		_panel.draw_string(tip_font, Vector2(tip_x + 2, tip_y), _cfg_tooltip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.9, 0.9, 0.9))
+
 
 func _get_all_entities() -> Array:
 	## Returns a deduplicated list of all entities (enemies + players + dummies + entities).
@@ -2905,11 +2919,21 @@ func _draw_verify_monitors() -> void:
 			"rect":
 				var bmin: Vector2 = boundary.get("min", Vector2.ZERO)
 				var bmax: Vector2 = boundary.get("max", Vector2(1920, 1080))
-				var rect_col: Color = Color(0.2, 0.9, 0.3, 0.3) if state == "active" else Color(1.0, 0.2, 0.1, 0.5)
-				_world_overlay.draw_rect(Rect2(bmin, bmax - bmin), rect_col, false, 2.0)
+				_draw_verify_rect(bmin, bmax, state == "active")
 				var rect_label_col: Color = Color(0.3, 1.0, 0.4, 0.9) if state == "active" else Color(1.0, 0.3, 0.2, 0.9)
 				_draw_debug_label(bmin + Vector2(4, -4),
 					"verify[%d]" % monitor["id"], 9, rect_label_col, font)
+				# Line from rect center to monitored entity + distance label
+				var rect_center: Vector2 = (bmin + bmax) * 0.5
+				var entities_r: Array = rcon._test_runner._resolve_entity_selector(monitor.get("selector", {}))
+				for entity in entities_r:
+					if is_instance_valid(entity):
+						var epos: Vector2 = entity.global_position
+						var inside: bool = epos.x >= bmin.x and epos.x <= bmax.x and epos.y >= bmin.y and epos.y <= bmax.y
+						var line_col_r: Color = Color(0.2, 0.9, 0.3, 0.3) if inside else Color(1.0, 0.2, 0.1, 0.6)
+						_world_overlay.draw_line(rect_center, epos, line_col_r, 1.5)
+						_draw_debug_label(epos + Vector2(10, -14),
+							"%s" % ("OK" if inside else "BREACH"), 9, rect_label_col, font)
 
 
 func _draw_verify_circle(center: Vector2, radius: float, is_ok: bool) -> void:
@@ -2986,6 +3010,153 @@ func _draw_verify_circle(center: Vector2, radius: float, is_ok: bool) -> void:
 	# Zone 4: Outer red stripes (100%+6 → 130% radius)
 	_draw_candy_stripe_annulus(center, radius + 6.0, radius * 1.3,
 		red_base, stripe_spacing, false)
+
+
+func _draw_verify_rect(bmin: Vector2, bmax: Vector2, is_ok: bool) -> void:
+	## Draw the 4-zone verify rect boundary with candy-stripe fill.
+	## Same visual language as circles: green stripes inside, red stripes outside.
+	var stripe_spacing: float = 16.0
+	var band_width: float = 30.0  # Width of the stripe band on each side
+
+	# Saturation phase (same logic as circle)
+	var test_runner: Node = null
+	var rcon_ref: Node = get_node_or_null("/root/Rcon")
+	if rcon_ref and rcon_ref._test_runner:
+		test_runner = rcon_ref._test_runner
+	var test_done: bool = test_runner and test_runner._test_state in ["COMPLETE", "FINALIZED"]
+
+	var green_sat: float = 0.3
+	var red_sat: float = 0.3
+	if test_done:
+		if is_ok:
+			green_sat = 1.0
+			red_sat = 0.0
+		else:
+			green_sat = 0.0
+			red_sat = 1.0
+
+	var grey := 0.18
+	var green_base := Color(
+		lerpf(grey, 0.05, green_sat),
+		lerpf(grey, 0.6, green_sat),
+		lerpf(grey, 0.05, green_sat))
+	var red_base := Color(
+		lerpf(grey, 0.7, red_sat),
+		lerpf(grey, 0.04, red_sat),
+		lerpf(grey, 0.02, red_sat))
+	var green_ring := Color(
+		lerpf(grey, 0.1, green_sat),
+		lerpf(grey, 0.9, green_sat),
+		lerpf(grey, 0.15, green_sat),
+		lerpf(0.25, 0.7, green_sat))
+	var red_ring := Color(
+		lerpf(grey, 1.0, red_sat),
+		lerpf(grey, 0.1, red_sat),
+		lerpf(grey, 0.05, red_sat),
+		lerpf(0.25, 0.7, red_sat))
+
+	if test_done and not is_ok:
+		var pulse: float = 0.7 + 0.3 * sin(Time.get_ticks_msec() / 150.0)
+		red_ring.a = pulse
+		red_base = Color(0.9, 0.05, 0.02)
+
+	# Zone 1: Inner green stripes (inset band_width from boundary, fading inward)
+	_draw_candy_stripe_rect_band(bmin, bmax, band_width, green_base, stripe_spacing, true)
+
+	# Zone 2: Solid green rect at the boundary
+	_world_overlay.draw_rect(Rect2(bmin, bmax - bmin), green_ring, false, 3.0)
+
+	# Zone 3: Solid red rect just outside the boundary
+	var outset: float = 4.0
+	_world_overlay.draw_rect(Rect2(bmin - Vector2(outset, outset),
+		bmax - bmin + Vector2(outset * 2, outset * 2)), red_ring, false, 3.0)
+
+	# Zone 4: Outer red stripes (outside boundary, fading outward)
+	var outer_min: Vector2 = bmin - Vector2(outset + band_width, outset + band_width)
+	var outer_max: Vector2 = bmax + Vector2(outset + band_width, outset + band_width)
+	_draw_candy_stripe_rect_band_outer(bmin - Vector2(outset, outset),
+		bmax + Vector2(outset, outset), band_width, red_base, stripe_spacing)
+
+
+func _draw_candy_stripe_rect_band(bmin: Vector2, bmax: Vector2, band: float,
+		base_color: Color, spacing: float, _fade_inward: bool) -> void:
+	## Draw 45° candy stripes inside a rect, within `band` pixels of each edge.
+	## Alpha fades from 0 at the inner edge to 0.5 at the boundary.
+	var stripe_width: float = spacing * 0.4
+	var sub_len: float = 8.0
+	# The stripe region covers the full rect area
+	var region_min: Vector2 = bmin
+	var region_max: Vector2 = bmax
+	# 45° lines: x + y = k
+	var k_start: float = region_min.x + region_min.y
+	var k_end: float = region_max.x + region_max.y
+	k_start = floor(k_start / spacing) * spacing
+	var k: float = k_start
+	while k <= k_end:
+		# Clip 45° line (x + y = k) to the rect [bmin, bmax]
+		# x ranges from max(bmin.x, k - bmax.y) to min(bmax.x, k - bmin.y)
+		var x1: float = maxf(region_min.x, k - region_max.y)
+		var x2: float = minf(region_max.x, k - region_min.y)
+		if x1 < x2:
+			var sx: float = x1
+			while sx < x2:
+				var sx_next: float = minf(sx + sub_len, x2)
+				var mid_x: float = (sx + sx_next) * 0.5
+				var mid_y: float = k - mid_x
+				# Distance to nearest rect edge
+				var dist_to_edge: float = minf(minf(mid_x - bmin.x, bmax.x - mid_x),
+					minf(mid_y - bmin.y, bmax.y - mid_y))
+				if dist_to_edge < band and dist_to_edge >= 0.0:
+					# Alpha: 0.5 at edge (dist=0), 0 at band depth
+					var alpha: float = 0.5 * (1.0 - dist_to_edge / band)
+					if alpha > 0.005:
+						var p1 := Vector2(sx, k - sx)
+						var p2 := Vector2(sx_next, k - sx_next)
+						_world_overlay.draw_line(p1, p2,
+							Color(base_color.r, base_color.g, base_color.b, alpha), stripe_width)
+				sx = sx_next
+		k += spacing
+
+
+func _draw_candy_stripe_rect_band_outer(bmin: Vector2, bmax: Vector2, band: float,
+		base_color: Color, spacing: float) -> void:
+	## Draw 45° candy stripes OUTSIDE a rect, within `band` pixels of each edge.
+	## Alpha fades from 0.4 at the boundary to 0 at the outer edge.
+	var stripe_width: float = spacing * 0.4
+	var sub_len: float = 8.0
+	var outer_min: Vector2 = bmin - Vector2(band, band)
+	var outer_max: Vector2 = bmax + Vector2(band, band)
+	var k_start: float = outer_min.x + outer_min.y
+	var k_end: float = outer_max.x + outer_max.y
+	k_start = floor(k_start / spacing) * spacing
+	var k: float = k_start
+	while k <= k_end:
+		var x1: float = maxf(outer_min.x, k - outer_max.y)
+		var x2: float = minf(outer_max.x, k - outer_min.y)
+		if x1 < x2:
+			var sx: float = x1
+			while sx < x2:
+				var sx_next: float = minf(sx + sub_len, x2)
+				var mid_x: float = (sx + sx_next) * 0.5
+				var mid_y: float = k - mid_x
+				# Only draw if OUTSIDE the inner rect
+				if mid_x < bmin.x or mid_x > bmax.x or mid_y < bmin.y or mid_y > bmax.y:
+					# Distance to nearest rect edge (from outside)
+					var dx: float = 0.0
+					if mid_x < bmin.x: dx = bmin.x - mid_x
+					elif mid_x > bmax.x: dx = mid_x - bmax.x
+					var dy: float = 0.0
+					if mid_y < bmin.y: dy = bmin.y - mid_y
+					elif mid_y > bmax.y: dy = mid_y - bmax.y
+					var dist_from_edge: float = maxf(dx, dy)
+					var alpha: float = 0.4 * (1.0 - dist_from_edge / band)
+					if alpha > 0.005:
+						var p1 := Vector2(sx, k - sx)
+						var p2 := Vector2(sx_next, k - sx_next)
+						_world_overlay.draw_line(p1, p2,
+							Color(base_color.r, base_color.g, base_color.b, alpha), stripe_width)
+				sx = sx_next
+		k += spacing
 
 
 func _draw_circle_ring(center: Vector2, radius: float, color: Color, width: float, segments: int) -> void:
@@ -3995,24 +4166,51 @@ func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) ->
 			break
 		var val: float = float(data[key])
 		var orig_val: float = float(_cfg_class_original[key]) if _cfg_class_original.has(key) else val
+		var is_modified: bool = absf(val - orig_val) > 0.001
 		var range_info: Vector2 = _get_config_range(key, orig_val)
 		var t: float = clampf((val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
 
+		# Modified indicator — highlight row
+		var label_col: Color = Color(1.0, 0.85, 0.3) if is_modified else Color(0.7, 0.7, 0.7)
+		if is_modified:
+			_panel.draw_rect(Rect2(x, y + local_y, 2, slider_h - 2), Color(1.0, 0.7, 0.2, 0.6))
+
 		# Key label
-		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 8, Color(0.7, 0.7, 0.7))
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.30, 8, label_col)
+
+		# Revert (↩) and Promote (↑) buttons — only when modified
+		if is_modified:
+			var btn_y: float = y + local_y + 2
+			# Revert button
+			var revert_x: float = x + pw * 0.32
+			var revert_hover: bool = (_cfg_class_hover_button == "revert:%s" % key)
+			var revert_col: Color = Color(0.7, 0.5, 0.2) if revert_hover else Color(0.4, 0.3, 0.2)
+			_panel.draw_rect(Rect2(revert_x, btn_y, 12, 12), revert_col)
+			_panel.draw_string(font, Vector2(revert_x + 2, btn_y + 10), "↩", HORIZONTAL_ALIGNMENT_LEFT, 12, 8, Color(0.9, 0.7, 0.3))
+			# Promote button
+			var promote_x: float = x + pw * 0.32 + 15
+			var promote_hover: bool = (_cfg_class_hover_button == "promote:%s" % key)
+			var promote_col: Color = Color(0.2, 0.5, 0.3) if promote_hover else Color(0.15, 0.3, 0.2)
+			_panel.draw_rect(Rect2(promote_x, btn_y, 12, 12), promote_col)
+			_panel.draw_string(font, Vector2(promote_x + 2, btn_y + 10), "↑", HORIZONTAL_ALIGNMENT_LEFT, 12, 8, Color(0.3, 0.9, 0.4))
 
 		# Slider track
 		var slider_x: float = x + pw * 0.45
 		var slider_w: float = pw * 0.35
 		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
-		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), Color(0.3, 0.6, 1.0))
+		var fill_col: Color = Color(1.0, 0.7, 0.2) if is_modified else Color(0.3, 0.6, 1.0)
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
 
 		# Handle
 		var handle_x: float = slider_x + slider_w * t
-		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color(0.8, 0.8, 0.8))
+		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE if is_modified else Color(0.8, 0.8, 0.8))
 
-		# Value
-		_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 11), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.7))
+		# Value (show original in brackets if modified)
+		if is_modified:
+			_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 11), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 0.85, 0.3))
+			_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 3), "(%.2f)" % orig_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 6, Color(0.5, 0.5, 0.5))
+		else:
+			_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 11), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.7))
 
 		local_y += slider_h + slider_gap
 		key_idx += 1
@@ -4420,7 +4618,7 @@ func _handle_cfg_classes_click(_lx: float, local_y: float, _body_h: float) -> vo
 
 
 func _handle_cfg_class_click(lx: float, local_y: float, _body_h: float) -> void:
-	## Click in class editor — start slider drag.
+	## Click in class editor — revert/promote buttons or start slider drag.
 	if _cfg_selected_class < 0 and _cfg_selected_class > -100:
 		return
 	var pw: float = _content_width
@@ -4438,6 +4636,19 @@ func _handle_cfg_class_click(lx: float, local_y: float, _body_h: float) -> void:
 	if row_idx < 0 or row_idx >= keys.size():
 		return
 	var key: String = keys[row_idx]
+	var val: float = float(_cfg_class_data[key])
+	var orig_val: float = float(_cfg_class_original[key]) if _cfg_class_original.has(key) else val
+	var is_modified: bool = absf(val - orig_val) > 0.001
+	# Check revert/promote buttons (only when modified)
+	if is_modified:
+		var revert_x: float = pw * 0.32
+		var promote_x: float = pw * 0.32 + 15
+		if lx >= revert_x and lx < revert_x + 12:
+			_cfg_revert_key(cls_name, key)
+			return
+		elif lx >= promote_x and lx < promote_x + 12:
+			_cfg_promote_key(cls_name, key)
+			return
 	# Check if click is on slider area
 	if lx >= pw * 0.45 and lx < pw * 0.82:
 		_cfg_class_dragging_key = key
@@ -4528,6 +4739,57 @@ func _cfg_apply_class_data_to_entities() -> void:
 			if "_name" in p and p._name == "%s_defaults" % cls_name:
 				entity._config_stack[i] = new_provider
 				break
+
+
+func _cfg_revert_key(cls_name: String, key: String) -> void:
+	## Revert a single key back to its original (resource default) value.
+	if not _cfg_class_original.has(key):
+		return
+	_cfg_class_data[key] = _cfg_class_original[key]
+	_cfg_save_class_override()
+	_cfg_apply_class_data_to_entities()
+	_panel.queue_redraw()
+	DebugOverlay.log("debug_panel/config", self, "REVERT %s.%s → %.2f", [cls_name, key, float(_cfg_class_original[key])])
+
+
+func _cfg_promote_key(cls_name: String, key: String) -> void:
+	## Promote a modified value as the new default in res://data/config/class_defaults/<class>.json.
+	## Also updates the original cache so the row no longer appears modified.
+	if not _cfg_class_data.has(key):
+		return
+	var val = _cfg_class_data[key]
+	# Load the resource default file and update it
+	var res_path: String = "res://data/config/class_defaults/%s.json" % cls_name
+	var file := FileAccess.open(res_path, FileAccess.READ)
+	var res_data: Dictionary = {}
+	if file:
+		var parsed = JSON.parse_string(file.get_as_text())
+		if parsed is Dictionary:
+			res_data = parsed
+		file = null
+	res_data[key] = val
+	file = FileAccess.open(res_path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(res_data, "  "))
+		file = null
+	# Update original cache so row is no longer modified
+	_cfg_class_original[key] = val
+	# Remove this key from user override if it now matches default
+	var override_path: String = "user://class_overrides/%s.json" % cls_name
+	var ofile := FileAccess.open(override_path, FileAccess.READ)
+	if ofile:
+		var oparsed = JSON.parse_string(ofile.get_as_text())
+		ofile = null
+		if oparsed is Dictionary:
+			oparsed.erase(key)
+			if oparsed.is_empty():
+				DirAccess.remove_absolute(override_path)
+			else:
+				ofile = FileAccess.open(override_path, FileAccess.WRITE)
+				if ofile:
+					ofile.store_string(JSON.stringify(oparsed, "  "))
+	_panel.queue_redraw()
+	DebugOverlay.log("debug_panel/config", self, "PROMOTE %s.%s = %.2f (saved to res://)", [cls_name, key, float(val)])
 
 
 func _handle_cfg_entity_stats_click(_lx: float, local_y: float, _body_h: float) -> void:
@@ -4829,6 +5091,8 @@ func _handle_cfg_hover(my: float) -> void:
 	_cfg_hover_entity_idx = -1
 	_cfg_hover_blueprint_idx = -1
 	_cfg_hover_instance_idx = -1
+	_cfg_class_hover_button = ""
+	_cfg_tooltip_text = ""
 	if not _cfg_subsections_initialized:
 		return
 	var y: float = 0.0
@@ -4846,6 +5110,8 @@ func _handle_cfg_hover(my: float) -> void:
 			match sub["id"]:
 				"cfg_classes":
 					_cfg_hover_class_idx = int(local_y / 16.0) + _cfg_class_scroll_offset
+				"cfg_class":
+					_handle_cfg_class_hover(local_y)
 				"cfg_entities":
 					# After filter field (24px)
 					var entity_local: float = local_y - 24
@@ -4862,6 +5128,42 @@ func _handle_cfg_hover(my: float) -> void:
 						_cfg_hover_instance_idx = int(mod_local / 16.0) + _cfg_instances_scroll_offset
 			return
 		y += sub["height"]
+
+
+func _handle_cfg_class_hover(local_y: float) -> void:
+	## Detect hover over revert/promote buttons in the class editor.
+	if _cfg_selected_class < 0 and _cfg_selected_class > -100:
+		return
+	var pw: float = _content_width
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var row_idx: int = int(local_y / (slider_h + slider_gap)) + _cfg_class_editor_scroll
+	var cls_name: String = _cfg_resolve_class_name()
+	if cls_name.is_empty():
+		return
+	_cfg_ensure_class_data(cls_name)
+	var keys: Array = []
+	for key in _cfg_class_data:
+		keys.append(key)
+	if row_idx < 0 or row_idx >= keys.size():
+		return
+	var key: String = keys[row_idx]
+	var val: float = float(_cfg_class_data[key])
+	var orig_val: float = float(_cfg_class_original[key]) if _cfg_class_original.has(key) else val
+	var is_modified: bool = absf(val - orig_val) > 0.001
+	if not is_modified:
+		return
+	var lx: float = _last_hover_lx
+	var revert_x: float = pw * 0.32
+	var promote_x: float = pw * 0.32 + 15
+	if lx >= revert_x and lx < revert_x + 12:
+		_cfg_class_hover_button = "revert:%s" % key
+		_cfg_tooltip_text = "Revert '%s' to default (%.2f)" % [key, orig_val]
+		_cfg_tooltip_pos = get_viewport().get_mouse_position()
+	elif lx >= promote_x and lx < promote_x + 12:
+		_cfg_class_hover_button = "promote:%s" % key
+		_cfg_tooltip_text = "Promote '%.2f' as new default for '%s'" % [val, key]
+		_cfg_tooltip_pos = get_viewport().get_mouse_position()
 
 
 func _handle_cfg_sub_resize_drag(my: float) -> void:

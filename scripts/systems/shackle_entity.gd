@@ -165,20 +165,24 @@ func _tick_thrown(delta: float) -> void:
 			if outward_v > 0.0:
 				vel -= chain_dir * outward_v
 	else:
-		# B-S chain constraint: shackle dragged by ball (RELEASE mode)
-		var ball_chain: Node2D = owner_player._exec_chain_node
-		var has_bs_chain: bool = ball_chain and is_instance_valid(ball_chain) and \
-			ball_chain.anchor_a.get("is_wall", false)
-		if has_bs_chain:
-			var total_len: float = owner_player.cfg("exec_chain_total_len", 600.0)
-			var bs_vec: Vector2 = global_position - owner_player._exec_ball_pos
-			var bs_dist: float = bs_vec.length()
-			if bs_dist > total_len:
-				var bs_dir: Vector2 = bs_vec / bs_dist
-				global_position = owner_player._exec_ball_pos + bs_dir * total_len
-				var outward_v: float = vel.dot(bs_dir)
-				if outward_v > 0.0:
-					vel -= bs_dir * outward_v
+		# B-S mode (RELEASE): mass-weighted constraint to ball.
+		# The ball side also applies its half in player_side.gd THROWN state.
+		# When ball is stuck (not THROWN), only this side enforces the constraint.
+		var total_len: float = owner_player.cfg("exec_chain_total_len", 600.0)
+		var bs_vec: Vector2 = global_position - owner_player._exec_ball_pos
+		var bs_dist: float = bs_vec.length()
+		if bs_dist > total_len:
+			var bs_dir: Vector2 = bs_vec / bs_dist
+			var overshoot: float = bs_dist - total_len
+			# Mass-weighted: shackle moves most, ball barely budges
+			var m_ball: float = owner_player.ball_cfg("mass", 140.0) if owner_player.has_method("ball_cfg") else 140.0
+			var m_shackle: float = cfg("mass", 5.0)
+			var shackle_frac: float = m_ball / (m_ball + m_shackle)
+			global_position -= bs_dir * overshoot * shackle_frac
+			var outward_v: float = vel.dot(bs_dir)
+			if outward_v > 0.0:
+				vel -= bs_dir * outward_v * shackle_frac
+			chain_taut = true
 		else:
 			chain_taut = false
 
@@ -233,6 +237,32 @@ func _tick_attached(delta: float) -> void:
 					var outward_v: float = anchor_body.velocity.dot(chain_dir)
 					if outward_v > 0.0:
 						anchor_body.velocity -= chain_dir * outward_v
+			else:
+				chain_taut = false
+		else:
+			# B-S mode (RELEASE): no chain to player, constrain entity to ball instead.
+			# Mass-weighted: heavy ball barely moves, entity gets dragged.
+			var total_len: float = owner_player.cfg("exec_chain_total_len", 600.0)
+			var bs_vec: Vector2 = global_position - owner_player._exec_ball_pos
+			var bs_dist: float = bs_vec.length()
+			if bs_dist > total_len:
+				var bs_dir: Vector2 = bs_vec / bs_dist
+				var overshoot: float = bs_dist - total_len
+				var m_ball: float = owner_player.ball_cfg("mass", 140.0) if owner_player.has_method("ball_cfg") else 140.0
+				var PlayerSide = preload("res://scripts/characters/player_side.gd")
+				var m_entity: float = PlayerSide.entity_cfg(anchor_body, "mass", 20.0)
+				var entity_frac: float = m_ball / (m_ball + m_entity)
+				# Drag entity toward ball
+				anchor_body.global_position -= bs_dir * overshoot * entity_frac
+				global_position = anchor_body.global_position + anchor_offset
+				if "velocity" in anchor_body:
+					var outward_v: float = anchor_body.velocity.dot(bs_dir)
+					if outward_v > 0.0:
+						anchor_body.velocity -= bs_dir * outward_v * entity_frac
+				chain_taut = true
+				DebugOverlay.log("executioner/chain_radius", self,
+					"B-S LEASH: entity=%s dist=%.0f len=%.0f overshoot=%.0f",
+					[anchor_body.name, bs_dist, total_len, overshoot])
 			else:
 				chain_taut = false
 	else:

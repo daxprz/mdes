@@ -20,6 +20,9 @@
     "ai_spawn 500 876 class=executioner name=AI",
     "wait 0.5",
 
+    "# Query chain length (+20 buffer) so verify radius tracks config changes",
+    "query @e[name=AI] exec_chain_total_len chain_radius 400 +20",
+
     "announce Spawning dummy right above player (within shackle snap range)",
     "spawn dummy 500 840 name=ball",
     "wait 0.3",
@@ -34,8 +37,9 @@
     "ai_cmd grapple 1.5 0.71 -0.71",
     "wait 1",
 
+    "# Dummy must stay within chain length + margin of spike ball",
     "announce Verify: dummy must stay within chain length of spike ball",
-    "verify @e[name=ball] within circle @e[name=spikeball] 700 until done",
+    "verify @e[name=ball] within circle @e[name=spikeball] {chain_radius} until done",
     "wait 8",
 
     "ai_off",

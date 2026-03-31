@@ -163,6 +163,22 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.37
+**B-S Release mode physics fix, rect verify boundaries, dynamic config queries in tests**
+
+- **B-S mass-weighted constraint**: ball no longer hard-clamped to shackle — position correction distributed by mass ratio (ball=140 moves 3%, shackle=5 moves 97%)
+- **B-S YEET elastic collision**: fires once per slack→taut transition, transferring momentum proportional to mass
+- **STUCK_WALL floor transition**: ball dragging down a wall now detects floor via raycast and transitions to STUCK_PLATFORM instead of clipping through ground
+- **STUCK_PLATFORM/STUCK_WALL anchor fix**: stuck states now use correct chain anchor (shackle in B-S, player in B-P) instead of always using the player
+- **B-S entity leash**: shackle attached to entity in Release mode now constrains entity to ball distance, preventing unchecked drift
+- **Rect verify boundaries**: candy-stripe rendering for rect monitors matching circle style (green inner band, solid borders, red outer band, fade gradients)
+- **`query` command in tests**: `query @e[name=AI] exec_chain_total_len chain_radius 400 +20` reads live config values from entities at runtime, stores in test variables with optional offset
+- **`#` comments in tests**: lines starting with `#` print to test log without RCON dispatch; `comment` command also prints to log
+- **Revert/Promote buttons**: class editor sliders show ↩ (revert to default) and ↑ (promote as new default) buttons on modified values, with hover tooltips
+- **Late variable substitution**: verify lines resolve `{variables}` at execution time, enabling dynamic radii from runtime queries
+- **New test**: `exec_release_ball_wall` — verifies ball doesn't sink through floor when stuck to wall
+- **All exec tests updated**: use `query` for dynamic chain radius, `#` comments explaining each step, `announce` for on-screen context
+
 ### v0.10.36
 **Config panel redesign: 9 sub-sections, class defaults, entity config stacks**
 

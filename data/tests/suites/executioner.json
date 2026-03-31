@@ -4,6 +4,7 @@
   "gate": false,
   "tests": [
     "exec_release_ball_up",
+    "exec_release_ball_wall",
     "exec_release_mode",
     "exec_bs_yeet",
     "exec_bs_loop",
