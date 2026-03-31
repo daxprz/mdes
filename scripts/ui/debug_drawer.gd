@@ -3096,7 +3096,7 @@ func _build_player_config_groups(entity: Node2D) -> Array[Array]:
 	elif char_class == PlayerManager.CharacterClass.RANGED:
 		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
 	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
-		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_ball_spin_speed", "exec_ball_spin_accel", "exec_ball_max_spin", "exec_ball_wall_drag", "exec_ball_ceiling_drag", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
+		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_ball_spin_speed", "exec_ball_spin_accel", "exec_ball_max_spin", "exec_ball_wall_drag", "exec_ball_ceiling_drag", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed", "exec_chain_damping", "exec_chain_gravity"]])
 		groups.append(["# Executioner Shackle", ["shackle:mass", "shackle:chain_elasticity", "shackle:gravity", "shackle:drag"]])
 		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
 		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
@@ -3163,6 +3163,8 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 		"exec_chain_elasticity": 0.25,
 		"exec_chain_total_len": 600.0,
 		"exec_chain_adjust_speed": 0.5,
+	"exec_chain_damping": 0.85,
+	"exec_chain_gravity": 600.0,
 		"exec_swing_max_damage": 80.0,
 		"exec_swing_slam_radius": 60.0,
 		"exec_cleave_max_damage": 150.0,
@@ -3195,6 +3197,11 @@ func _get_config_range(key: String, default_val: float) -> Vector2:
 			"gravity": return Vector2(0.0, 2000.0)
 			"drag": return Vector2(0.8, 1.0)
 		return Vector2(0.0, maxf(1.0, default_val * 3.0))
+	# Chain physics ranges
+	if key == "exec_chain_damping":
+		return Vector2(0.8, 1.0)
+	if key == "exec_chain_gravity":
+		return Vector2(0.0, 1500.0)
 	var entity: Node2D = _get_selected_entity()
 	if entity and entity.get("CONFIG_BOUNDS") and entity.CONFIG_BOUNDS.has(key):
 		return entity.CONFIG_BOUNDS[key]

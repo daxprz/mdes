@@ -21,6 +21,8 @@ const WALL_MASS := 99999.0
 var anchor_a: Dictionary = {}
 var anchor_b: Dictionary = {}
 var target_length: float = 200.0
+var chain_damping: float = 0.85   # Velocity retention per frame (0.85=dampened, 0.99=free-swinging)
+var chain_gravity: float = 600.0  # Sag strength (px/s²)
 var current_hp: int = CHAIN_MAX_HP
 var _severed: bool = false
 var _owner_index: int = -1
@@ -174,8 +176,8 @@ func _physics_process(delta: float) -> void:
 	_prev_points[_point_count - 1] = pos_b
 
 	# Verlet integration: position-based physics with implicit velocity
-	var gravity := Vector2(0, 600.0)  # Match game gravity
-	var damping: float = 0.99  # Slight damping to reduce oscillation
+	var gravity := Vector2(0, chain_gravity)
+	var damping: float = chain_damping
 	for i in range(1, _point_count - 1):
 		var current: Vector2 = _points[i]
 		var prev: Vector2 = _prev_points[i]

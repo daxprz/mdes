@@ -107,11 +107,9 @@ func _init_shackle_entity() -> void:
 	_shackle.owner_player = self
 	_shackle.entity_id = "shackle"
 	_shackle.name = "shackle"
-	_shackle.global_position = global_position
-	# Add as child of the player — available immediately, no deferred needed
 	add_child(_shackle)
-	# Set top_level so the shackle's position is in world space, not player-local
 	_shackle.top_level = true
+	_shackle.global_position = global_position
 
 func shackle_cfg(key: String, default_val: float) -> float:
 	## Delegate to shackle entity's cfg().
@@ -7848,6 +7846,16 @@ func _exec_handle_chain_length(delta: float) -> void:
 		# else: B-S chain keeps its full target_length (set at creation)
 	if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node) and not _exec_shackle_chain_node._severed:
 		_exec_shackle_chain_node.target_length = _exec_shackle_chain_len()
+
+	# Sync chain physics settings from player config
+	var chain_damp: float = cfg("exec_chain_damping", 0.85)
+	var chain_grav: float = cfg("exec_chain_gravity", 600.0)
+	if _exec_chain_node and is_instance_valid(_exec_chain_node) and not _exec_chain_node._severed:
+		_exec_chain_node.chain_damping = chain_damp
+		_exec_chain_node.chain_gravity = chain_grav
+	if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node) and not _exec_shackle_chain_node._severed:
+		_exec_shackle_chain_node.chain_damping = chain_damp
+		_exec_shackle_chain_node.chain_gravity = chain_grav
 
 	# Track whether split is actively changing (for radius display)
 	var split_delta: float = _exec_chain_split - old_split

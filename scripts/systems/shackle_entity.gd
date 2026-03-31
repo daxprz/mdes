@@ -302,7 +302,7 @@ func spawn_chain_to_player() -> void:
 	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
 	chain_node = Node2D.new()
 	chain_node.set_script(ChainScript)
-	var anchor_a: Dictionary = {"node": owner_player, "offset": Vector2.ZERO, "is_wall": false}
+	var anchor_a: Dictionary = {"body": owner_player, "body_offset": Vector2.ZERO, "is_wall": false}
 	var anchor_b: Dictionary = ChainScript.make_anchor_wall(global_position)
 	chain_node.setup(anchor_a, anchor_b, chain_len(), owner_player.player_index if owner_player else -1)
 	owner_player.get_parent().add_child(chain_node)
