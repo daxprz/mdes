@@ -45,7 +45,8 @@ Do NOT use tumu when:
 | `scripts/effects/procedural_tree.gd` | Configurable procedural tree (blueprint system) |
 | `data/tree_blueprints/` | Tree blueprint JSON files (oak, pine, etc.) |
 | `scripts/systems/splay_manager.gd` | Splay pose spawning (scale-aware) |
-| `scripts/systems/chain.gd` | Chain physics (FABRIK rigid links) + scaled rendering |
+| `scripts/systems/chain.gd` | Chain physics (FABRIK rigid links) + scaled rendering, configurable damping/gravity |
+| `scripts/systems/shackle_entity.gd` | Executioner shackle as proper entity — own config stack, physics, chain, snap |
 | `scripts/systems/entity_effects.gd` | Generic timed-effect system (stun, slow, bleed, etc.) |
 | `docs/epics/EPIC_debug_overlay.md` | Debug system spec |
 | `docs/epics/EPIC_monster_scaling.md` | Monster scaling spec (COMPLETE) |

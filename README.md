@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.35
+**ShackleEntity refactor, chain damping, anchor fix**
+
+- **ShackleEntity**: shackle is now a proper scene entity (`scripts/systems/shackle_entity.gd`) with its own config stack, physics tick, chain spawning, enemy snap, and leash constraint. Legacy property accessors on player_side.gd delegate transparently.
+- **Chain physics configurable**: `exec_chain_damping` (default 0.85) and `exec_chain_gravity` (default 600) — tunable via debug drawer sliders in real-time
+- **Chain anchor fix**: shackle chain was severing immediately because anchor used `"node"` key instead of `"body"` — chain.gd expects `"body"`
+- **Entities group**: shackle and spikeball markers now use `"entities"` group instead of `"players"`, preventing them from intercepting AI commands, tab selection, and player listings
+- **Shackle init in _ready()**: shackle entity created during `_ready()` not just `reset_state()`, fixing null shackle on fresh spawn
+- **top_level positioning**: shackle entity uses `top_level = true` for world-space positioning as child of player
+
 ### v0.10.34
 **Chain physics fix, TPS metrics, clean logs, unified UI, generic ai_spawn**
 
