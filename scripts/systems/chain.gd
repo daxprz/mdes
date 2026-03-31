@@ -133,9 +133,14 @@ func _ready() -> void:
 	z_index = 5
 
 
+static var _chain_counter: int = 0
+
 func setup(a: Dictionary, b: Dictionary, length: float, owner_idx: int = -1) -> void:
 	_init_config()
 	add_to_group("entities")
+	_chain_counter += 1
+	name = "chain_%02d" % _chain_counter
+	entity_id = name
 	anchor_a = a
 	anchor_b = b
 	target_length = clampf(length, CHAIN_MIN_LEN, CHAIN_MAX_LEN)

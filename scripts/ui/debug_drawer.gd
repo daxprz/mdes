@@ -179,6 +179,7 @@ var _cfg_class_scroll_offset: int = 0
 var _cfg_class_dragging_key: String = ""   # Which class slider is being dragged
 var _cfg_class_data: Dictionary = {}       # Cached class default data (for live editing)
 var _cfg_class_data_name: String = ""      # Which class the cached data is for
+var _cfg_class_editor_scroll: int = 0      # Scroll offset for class editor sliders
 
 # Stat selection for calculations
 var _cfg_selected_stat: String = ""        # Config key selected in Entity Stats
@@ -1855,7 +1856,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 		var pct: float = float(_scroll_offset) / float(_visible_rows.size() - max_visible)
 		var bar_h: float = maxf(20.0, ph * float(max_visible) / float(_visible_rows.size()))
 		var bar_y: float = tree_y_start + pct * (ph - tree_y_start - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_group_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_col_x: float, font: Font) -> void:
@@ -2281,7 +2282,7 @@ func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> voi
 		var pct: float = float(_test_scroll_offset) / float(max_scroll)
 		var bar_h: float = maxf(16.0, h * float(visible_count) / float(display_tests.size()))
 		var bar_y: float = y + pct * (h - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 12, bar_y, 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 12, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_sub_controls(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
@@ -3756,7 +3757,7 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		var max_s: int = maxi(1, entities.size() - max_entity_rows)
 		var pct: float = float(entity_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, (h - 24) * float(max_entity_rows) / float(entities.size()))
-		_panel.draw_rect(Rect2(x + pw - 6, y + 24 + pct * (h - 24 - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 24 + pct * (h - 24 - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3823,7 +3824,7 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 		var max_s: int = maxi(1, filtered_bps.size() - visible)
 		var pct: float = float(bp_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, remaining_h * float(visible) / float(filtered_bps.size()))
-		_panel.draw_rect(Rect2(x + pw - 6, y + 20 + pct * (remaining_h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 20 + pct * (remaining_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3926,7 +3927,7 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 	if total_rows > visible_rows and visible_rows > 0:
 		var pct: float = float(_cfg_class_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(16.0, h * float(visible_rows) / float(total_rows))
-		_panel.draw_rect(Rect2(x + pw - 6, y + pct * (h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 6, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3949,12 +3950,26 @@ func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) ->
 	var local_y: float = 0.0
 	var slider_h: float = 16.0
 	var slider_gap: float = 2.0
+	var total_keys: int = data.size()
+	var visible_keys: int = int(h / (slider_h + slider_gap))
+	var max_scroll: int = maxi(0, total_keys - visible_keys)
+	_cfg_class_editor_scroll = clampi(_cfg_class_editor_scroll, 0, max_scroll)
+	var key_idx: int = 0
+
+	# Load original defaults for stable range calculation
+	var MCP_draw = load("res://scripts/systems/monster_config.gd")
+	var original_provider_draw = MCP_draw.load_class_defaults(cls_name)
+	var original_data: Dictionary = original_provider_draw._data if original_provider_draw and "_data" in original_provider_draw else {}
 
 	for key in data:
+		if key_idx < _cfg_class_editor_scroll:
+			key_idx += 1
+			continue
 		if y + local_y > y + h:
 			break
 		var val: float = float(data[key])
-		var range_info: Vector2 = _get_config_range(key, val)
+		var orig_val: float = float(original_data[key]) if original_data.has(key) else val
+		var range_info: Vector2 = _get_config_range(key, orig_val)
 		var t: float = clampf((val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
 
 		# Key label
@@ -3974,12 +3989,13 @@ func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) ->
 		_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 11), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.7))
 
 		local_y += slider_h + slider_gap
+		key_idx += 1
 
-	# Show indicator if content was clipped
-	var total_h: float = data.size() * (slider_h + slider_gap)
-	if total_h > h:
-		_panel.draw_string(font, Vector2(x + pw * 0.4, y + h - 10), "... more ...", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.5))
-		_panel.draw_rect(Rect2(x + pw - 6, y, 3, h), Color(0.4, 0.5, 0.7, 0.3))  # Full-height indicator
+	# Scroll indicator
+	if total_keys > visible_keys and visible_keys > 0:
+		var pct: float = float(_cfg_class_editor_scroll) / float(max_scroll) if max_scroll > 0 else 0.0
+		var bar_h: float = maxf(20.0, h * float(visible_keys) / float(total_keys))
+		_panel.draw_rect(Rect2(x + pw - 8, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_cfg_sub_entity_mods(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4074,7 +4090,7 @@ func _draw_cfg_sub_entity_stats(x: float, y: float, pw: float, h: float, font: F
 	if total_keys > visible_rows and visible_rows > 0:
 		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(16.0, body_h * float(visible_rows) / float(total_keys))
-		_panel.draw_rect(Rect2(x + pw - 6, y + 16 + pct * (body_h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 16 + pct * (body_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
 
 
 func _draw_cfg_sub_calculations(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4383,7 +4399,7 @@ func _handle_cfg_class_click(lx: float, local_y: float, _body_h: float) -> void:
 	var pw: float = _content_width
 	var slider_h: float = 16.0
 	var slider_gap: float = 2.0
-	var row_idx: int = int(local_y / (slider_h + slider_gap))
+	var row_idx: int = int(local_y / (slider_h + slider_gap)) + _cfg_class_editor_scroll
 	# Map row to key
 	var cls_name: String = _cfg_resolve_class_name()
 	if cls_name.is_empty():
@@ -4779,6 +4795,8 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 			match sub["id"]:
 				"cfg_classes":
 					_cfg_class_scroll_offset = maxi(0, _cfg_class_scroll_offset + delta)
+				"cfg_class":
+					_cfg_class_editor_scroll = maxi(0, _cfg_class_editor_scroll + delta)
 				"cfg_entities":
 					_cfg_entities_scroll_offset = maxi(0, _cfg_entities_scroll_offset + delta)
 				"cfg_entity_stats":
