@@ -131,10 +131,13 @@ func _tick_thrown(delta: float) -> void:
 		if s_result:
 			var normal: Vector2 = s_result["normal"]
 			global_position = s_result["position"] + normal * 2.0
-			vel = vel.bounce(normal) * 0.4
+			vel = vel.bounce(normal) * 0.3  # 30% energy retention
 			# Stop bouncing if velocity is negligible
-			if vel.length() < 15.0:
+			if vel.length() < 30.0:
 				vel = Vector2.ZERO
+			# Ground friction — slow horizontal movement on floor hits
+			if normal.y < -0.5:
+				vel.x *= 0.7
 			AudioManager.play("grapple_hit", -8.0, 1.5)
 
 	# RIGID chain constraint — if shackle has a chain to player

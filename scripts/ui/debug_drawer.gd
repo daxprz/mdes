@@ -2745,13 +2745,26 @@ func _get_all_entities() -> Array:
 	return result
 
 
+var _debug_label_queue: Array = []  # Collected labels for two-pass rendering
+
 func _draw_debug_label(pos: Vector2, text: String, font_size: int, color: Color, font: Font = ThemeDB.fallback_font) -> void:
-	## Draw a debug label with 75% grey background. All debug world-space text uses this.
-	var text_size: Vector2 = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	## Queue a debug label for two-pass rendering (backgrounds first, then text).
+	_debug_label_queue.append({"pos": pos, "text": text, "size": font_size, "color": color, "font": font})
+
+
+func _flush_debug_labels() -> void:
+	## Render all queued labels: backgrounds first (z-behind), then text (z-front).
+	## This prevents text from being obscured by later labels' backgrounds.
 	var pad := Vector2(3, 2)
-	var bg_rect := Rect2(pos.x - pad.x, pos.y - text_size.y, text_size.x + pad.x * 2, text_size.y + pad.y * 2)
-	_world_overlay.draw_rect(bg_rect, Color(0.15, 0.15, 0.15, 0.75))
-	_world_overlay.draw_string(font, pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, color)
+	# Pass 1: all backgrounds
+	for label in _debug_label_queue:
+		var text_size: Vector2 = label["font"].get_string_size(label["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, label["size"])
+		var bg_rect := Rect2(label["pos"].x - pad.x, label["pos"].y - text_size.y, text_size.x + pad.x * 2, text_size.y + pad.y * 2)
+		_world_overlay.draw_rect(bg_rect, Color(0.15, 0.15, 0.15, 0.75))
+	# Pass 2: all text
+	for label in _debug_label_queue:
+		_world_overlay.draw_string(label["font"], label["pos"], label["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, label["size"], label["color"])
+	_debug_label_queue.clear()
 
 
 func _draw_selection_overlay() -> void:
@@ -2763,8 +2776,10 @@ func _draw_selection_overlay() -> void:
 
 	var sel: Node2D = _get_selected_entity()
 	if not sel:
+		_flush_debug_labels()  # Flush verify monitor labels
 		return
 	if not DebugOverlay.should_draw("state_info/selection_indicator", sel):
+		_flush_debug_labels()
 		return
 
 	var font: Font = ThemeDB.fallback_font
@@ -2824,14 +2839,28 @@ func _draw_selection_overlay() -> void:
 		_draw_debug_label(info_pos + Vector2(0, dy + 10), "state: %d" % sel._state, 9, val_col, font)
 		dy += line_h
 	if "velocity" in sel:
-		_draw_debug_label(info_pos + Vector2(0, dy + 10), "vel: (%.0f, %.0f)" % [sel.velocity.x, sel.velocity.y], 9, val_col, font)
+		var v: Vector2 = sel.velocity
+		_draw_debug_label(info_pos + Vector2(0, dy + 10), "vel: (%.0f, %.0f) |%.0f|" % [v.x, v.y, v.length()], 9, val_col, font)
 		dy += line_h
+		# Draw velocity arrow in world space
+		if v.length() > 5.0:
+			var arrow_scale: float = minf(v.length() / 5.0, 60.0)
+			var arrow_dir: Vector2 = v.normalized()
+			var arrow_end: Vector2 = pos + arrow_dir * arrow_scale
+			_world_overlay.draw_line(pos, arrow_end, Color(0.3, 0.9, 0.3, 0.5), 2.0)
+			# Arrowhead
+			var perp: Vector2 = Vector2(-arrow_dir.y, arrow_dir.x)
+			_world_overlay.draw_line(arrow_end, arrow_end - arrow_dir * 6 + perp * 4, Color(0.3, 0.9, 0.3, 0.5), 1.5)
+			_world_overlay.draw_line(arrow_end, arrow_end - arrow_dir * 6 - perp * 4, Color(0.3, 0.9, 0.3, 0.5), 1.5)
 	if "creature_scale" in sel:
 		_draw_debug_label(info_pos + Vector2(0, dy + 10), "scale: %.2f" % sel.creature_scale, 9, val_col, font)
 		dy += line_h
 	if "_chained" in sel and sel._chained:
 		_draw_debug_label(info_pos + Vector2(0, dy + 10), "[CHAINED]", 9, Color(1.0, 0.5, 0.2), font)
 		dy += line_h
+
+	# Flush all queued labels (backgrounds first, then text)
+	_flush_debug_labels()
 
 
 func _draw_verify_monitors() -> void:
