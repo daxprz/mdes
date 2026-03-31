@@ -41,7 +41,15 @@ const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
 var _health_bar: Node2D = null
 
 
+static var _instance_counter: int = 0
+
 func _ready() -> void:
+	_instance_counter += 1
+	var new_name: String = "bat_%02d" % _instance_counter
+	# Avoid name conflict with siblings
+	if get_parent() and get_parent().has_node(new_name):
+		new_name = "bat_%02d_%d" % [_instance_counter, get_instance_id()]
+	name = new_name
 	add_to_group("enemies")
 	add_to_group("animals")
 	set_meta("faction", "animals")

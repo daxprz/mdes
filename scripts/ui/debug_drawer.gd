@@ -1857,7 +1857,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 		var pct: float = float(_scroll_offset) / float(_visible_rows.size() - max_visible)
 		var bar_h: float = maxf(20.0, ph * float(max_visible) / float(_visible_rows.size()))
 		var bar_y: float = tree_y_start + pct * (ph - tree_y_start - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_group_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_col_x: float, font: Font) -> void:
@@ -2283,7 +2283,7 @@ func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> voi
 		var pct: float = float(_test_scroll_offset) / float(max_scroll)
 		var bar_h: float = maxf(16.0, h * float(visible_count) / float(display_tests.size()))
 		var bar_y: float = y + pct * (h - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_sub_controls(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
@@ -3758,7 +3758,7 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		var max_s: int = maxi(1, entities.size() - max_entity_rows)
 		var pct: float = float(entity_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, (h - 24) * float(max_entity_rows) / float(entities.size()))
-		_panel.draw_rect(Rect2(x + pw - 16, y + 24 + pct * (h - 24 - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, y + 24 + pct * (h - 24 - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3825,7 +3825,7 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 		var max_s: int = maxi(1, filtered_bps.size() - visible)
 		var pct: float = float(bp_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, remaining_h * float(visible) / float(filtered_bps.size()))
-		_panel.draw_rect(Rect2(x + pw - 16, y + 20 + pct * (remaining_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, y + 20 + pct * (remaining_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3928,7 +3928,7 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 	if total_rows > visible_rows and visible_rows > 0:
 		var pct: float = float(_cfg_class_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(16.0, h * float(visible_rows) / float(total_rows))
-		_panel.draw_rect(Rect2(x + pw - 16, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3991,7 +3991,7 @@ func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) ->
 	if total_keys > visible_keys and visible_keys > 0:
 		var pct: float = float(_cfg_class_editor_scroll) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(20.0, h * float(visible_keys) / float(total_keys))
-		_panel.draw_rect(Rect2(x + pw - 16, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, y + pct * (h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_cfg_sub_entity_mods(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4086,7 +4086,7 @@ func _draw_cfg_sub_entity_stats(x: float, y: float, pw: float, h: float, font: F
 	if total_keys > visible_rows and visible_rows > 0:
 		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(16.0, body_h * float(visible_rows) / float(total_keys))
-		_panel.draw_rect(Rect2(x + pw - 16, y + 16 + pct * (body_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.7))
+		_panel.draw_rect(Rect2(x + pw - 16, y + 16 + pct * (body_h - bar_h), 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
 func _draw_cfg_sub_calculations(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4371,22 +4371,22 @@ func _handle_cfg_classes_click(_lx: float, local_y: float, _body_h: float) -> vo
 	var row_h: float = 16.0
 	var all_classes: Array = PlayerHUD.ALL_CLASSES
 	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	var clicked_row: int = int(local_y / row_h) + _cfg_class_scroll_offset
 	# Player classes
-	for i in range(all_classes.size()):
-		if local_y >= i * row_h and local_y < (i + 1) * row_h:
-			_cfg_selected_class = all_classes[i]
-			_cfg_class_data.clear()
-			_cfg_class_original.clear()
-			_cfg_class_data_name = ""
-			return
-	# Physics entity classes (continuous list, no separator)
-	var offset: float = all_classes.size() * row_h
-	for i in range(extra_classes.size()):
-		if local_y >= offset + i * row_h and local_y < offset + (i + 1) * row_h:
-			_cfg_selected_class = -100 - i  # Negative IDs for physics entities
-			_cfg_class_data.clear()
-			_cfg_class_data_name = ""
-			return
+	if clicked_row >= 0 and clicked_row < all_classes.size():
+		_cfg_selected_class = all_classes[clicked_row]
+		_cfg_class_data.clear()
+		_cfg_class_original.clear()
+		_cfg_class_data_name = ""
+		return
+	# Physics entity classes (continuous after player classes)
+	var extra_idx: int = clicked_row - all_classes.size()
+	if extra_idx >= 0 and extra_idx < extra_classes.size():
+		_cfg_selected_class = -100 - extra_idx
+		_cfg_class_data.clear()
+		_cfg_class_original.clear()
+		_cfg_class_data_name = ""
+		return
 
 
 func _handle_cfg_class_click(lx: float, local_y: float, _body_h: float) -> void:
@@ -4567,12 +4567,12 @@ func _handle_cfg_entities_click(lx: float, local_y: float, _body_h: float) -> vo
 		return
 	y += 24
 
-	# Entity list (starts right after filter)
+	# Entity list (starts right after filter) — account for scroll offset
 	var entity_row_h: float = 16.0
 	var entities: Array = _get_all_entities()
-
-	for ei in range(entities.size()):
-		if local_y >= y and local_y < y + entity_row_h:
+	var ei: int = int((local_y - y) / entity_row_h) + _cfg_entities_scroll_offset
+	if ei >= 0 and ei < entities.size():
+		if true:
 			var e: Node2D = entities[ei]
 			# Check "Mod+" button click
 			if e.has_method("push_config") and not _cfg_cached_bp_names.is_empty():
@@ -4595,10 +4595,6 @@ func _handle_cfg_entities_click(lx: float, local_y: float, _body_h: float) -> vo
 			_cfg_selected_stat = ""
 			_config_filter_focused = false
 			return
-		y += entity_row_h
-	if entities.is_empty():
-		y += entity_row_h
-	y += 8
 
 	_config_filter_focused = false
 
@@ -4644,21 +4640,15 @@ func _handle_cfg_blueprints_click(lx: float, local_y: float, _body_h: float) -> 
 				filtered_bps.append(bp)
 
 	var row_h: float = 16.0
-	var list_h: float = minf(_body_h * 0.45, filtered_bps.size() * row_h + 4.0)
-	var visible: int = int(list_h / row_h)
-	for bi in range(mini(visible, filtered_bps.size())):
-		if local_y >= y and local_y < y + row_h:
-			_cfg_selected_blueprint = filtered_bps[bi + _cfg_blueprints_scroll_offset]
+	var clicked_bp_idx: int = int((local_y - y) / row_h) + _cfg_blueprints_scroll_offset
+	if clicked_bp_idx >= 0 and clicked_bp_idx < filtered_bps.size():
+		if true:
+			_cfg_selected_blueprint = filtered_bps[clicked_bp_idx]
 			_cfg_bp_cached_data.clear()  # Force reload
 			_cfg_bp_filter_focused = false
 			return
-		y += row_h
-	if filtered_bps.is_empty():
-		y += row_h
 
-	y += 8  # gap + separator
-
-	# Blueprint editor area
+	# Blueprint editor area (now in separate Modifier sub-section)
 	if _cfg_selected_blueprint.is_empty():
 		_cfg_bp_filter_focused = false
 		return
