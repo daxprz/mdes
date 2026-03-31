@@ -3369,7 +3369,7 @@ func _get_cfg_preferred_height(sid: String) -> float:
 			return SUB_HEADER_H + 8 * 16.0 + 4.0  # ~8 sliders
 		"cfg_entities":
 			var entity_count: int = _get_all_entities().size()
-			return SUB_HEADER_H + clampi(entity_count + 1, 3, 10) * 16.0 + 4.0
+			return SUB_HEADER_H + 24 + clampi(entity_count, 2, 10) * 16.0 + 4.0  # 24 for filter
 		"cfg_entity_mods":
 			return SUB_HEADER_H + 4 * 16.0 + 4.0
 		"cfg_entity_stats":
@@ -3378,7 +3378,7 @@ func _get_cfg_preferred_height(sid: String) -> float:
 			return SUB_HEADER_H + 4 * 14.0 + 4.0
 		"cfg_modifiers":
 			var count: int = maxi(2, _cfg_cached_bp_names.size())
-			return SUB_HEADER_H + clampi(count, 2, 6) * 16.0 + 4.0
+			return SUB_HEADER_H + 20 + clampi(count, 2, 10) * 16.0 + 4.0  # 20 for filter
 		"cfg_modifier":
 			return SUB_HEADER_H + 6 * 16.0 + 20.0  # Sliders + buttons
 		"cfg_modified_ents":
@@ -3711,13 +3711,14 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 	for ei in range(entity_offset, mini(entity_offset + visible_entities, entities.size())):
 		var e: Node2D = entities[ei]
 		var is_sel: bool = (e == selected_entity)
-		# Entity ID — show player name for players, entity_id or node name otherwise
+		var is_hover: bool = (_cfg_hover_entity_idx == ei)
 		var eid: String = _cfg_get_entity_display_name(e)
-		# Entity type
 		var etype: String = _cfg_get_entity_type(e)
 		if is_sel:
 			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, entity_row_h - 2), Color(0.15, 0.25, 0.15))
-		var id_col := Color(0.5, 1.0, 0.5) if is_sel else Color(0.7, 0.7, 0.7)
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, entity_row_h - 2), Color(0.12, 0.12, 0.15))
+		var id_col := Color(0.5, 1.0, 0.5) if is_sel else (Color(0.8, 0.8, 0.8) if is_hover else Color(0.7, 0.7, 0.7))
 		var type_col := Color(0.4, 0.8, 0.4) if is_sel else Color(0.5, 0.5, 0.5)
 		var num_col := Color(0.3, 0.9, 1.0) if is_sel else Color(0.4, 0.5, 0.6)
 		_panel.draw_string(font, Vector2(x + 2, y + local_y + 12), "%d" % (ei + 1), HORIZONTAL_ALIGNMENT_LEFT, 14, 9, num_col)
@@ -3745,7 +3746,12 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		_panel.draw_string(font, Vector2(x + 6, y + local_y + 12), "(no entities in scene)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		local_y += entity_row_h
 
-	# Entities list is now a pure list — sliders moved to Class editor and Entity Stats
+	# Scroll indicator
+	if entities.size() > max_entity_rows and max_entity_rows > 0:
+		var max_s: int = maxi(1, entities.size() - max_entity_rows)
+		var pct: float = float(entity_offset) / float(max_s)
+		var bar_h: float = maxf(16.0, (h - 24) * float(max_entity_rows) / float(entities.size()))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 24 + pct * (h - 24 - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
 
 
 func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3778,17 +3784,21 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 				filtered_bps.append(bp)
 
 	var row_h: float = 16.0
-	var list_h: float = minf(h * 0.45, filtered_bps.size() * row_h + 4.0)
-	var visible: int = int(list_h / row_h)
+	var remaining_h: float = h - local_y - 4
+	var visible: int = int(remaining_h / row_h)
+	visible = maxi(visible, 1)
 	var bp_offset: int = clampi(_cfg_blueprints_scroll_offset, 0, maxi(0, filtered_bps.size() - visible))
 	_cfg_blueprints_scroll_offset = bp_offset
 
 	for bi in range(bp_offset, mini(bp_offset + visible, filtered_bps.size())):
 		var bp_name: String = filtered_bps[bi]
 		var is_sel: bool = (bp_name == _cfg_selected_blueprint)
+		var is_hover: bool = (_cfg_hover_blueprint_idx == bi)
 		if is_sel:
 			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.25))
-		var col: Color = Color(0.6, 0.8, 1.0) if is_sel else Color(0.5, 0.5, 0.6)
+		elif is_hover:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.12, 0.12, 0.15))
+		var col: Color = Color(0.6, 0.8, 1.0) if is_sel else (Color(0.8, 0.8, 0.8) if is_hover else Color(0.5, 0.5, 0.6))
 		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), bp_name, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.65, 9, col)
 		# Show modifier count
 		var bp_data: Dictionary = _cfg_load_blueprint(bp_name)
@@ -3803,7 +3813,12 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "(no blueprints)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		local_y += row_h
 
-	# Editor is in the separate "Modifier" sub-section below
+	# Scroll indicator
+	if filtered_bps.size() > visible and visible > 0:
+		var max_s: int = maxi(1, filtered_bps.size() - visible)
+		var pct: float = float(bp_offset) / float(max_s)
+		var bar_h: float = maxf(16.0, remaining_h * float(visible) / float(filtered_bps.size()))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 20 + pct * (remaining_h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
 
 
 func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3862,36 +3877,57 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 	## Classes list — click to select a class for editing.
 	var row_h: float = 16.0
 	var all_classes: Array = PlayerHUD.ALL_CLASSES
-	# Also add physics entity "classes"
 	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	var total_rows: int = all_classes.size() + 1 + extra_classes.size()  # +1 for separator
+	var visible_rows: int = int(h / row_h)
+	var max_scroll: int = maxi(0, total_rows - visible_rows)
+	_cfg_class_scroll_offset = clampi(_cfg_class_scroll_offset, 0, max_scroll)
 	var local_y: float = 0.0
+	var row_idx: int = 0
 
 	for i in range(all_classes.size()):
-		if y + local_y > y + h:
-			break
-		var cls: int = all_classes[i]
-		var cls_name: String = PlayerHUD.CLASS_NAMES.get(cls, "?")
-		var is_sel: bool = (_cfg_selected_class == cls)
-		if is_sel:
-			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.2, 0.15))
-		var col: Color = Color(0.5, 1.0, 0.5) if is_sel else Color(0.6, 0.6, 0.6)
-		var cls_col: Color = PlayerHUD.CLASS_COLORS.get(cls, Color(0.5, 0.5, 0.5))
-		_panel.draw_rect(Rect2(x + 2, y + local_y + 3, 8, row_h - 6), cls_col)
-		_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), cls_name, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
-		local_y += row_h
+		if row_idx >= _cfg_class_scroll_offset and y + local_y < y + h:
+			var cls: int = all_classes[i]
+			var cls_name: String = PlayerHUD.CLASS_NAMES.get(cls, "?")
+			var is_sel: bool = (_cfg_selected_class == cls)
+			var is_hover: bool = (_cfg_hover_entity_idx == row_idx)
+			if is_sel:
+				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.2, 0.15))
+			elif is_hover:
+				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.12, 0.12, 0.15))
+			var col: Color = Color(0.5, 1.0, 0.5) if is_sel else (Color(0.8, 0.8, 0.8) if is_hover else Color(0.6, 0.6, 0.6))
+			var cls_col: Color = PlayerHUD.CLASS_COLORS.get(cls, Color(0.5, 0.5, 0.5))
+			_panel.draw_rect(Rect2(x + 2, y + local_y + 3, 8, row_h - 6), cls_col)
+			_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), cls_name, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
+			local_y += row_h
+		row_idx += 1
+
+	# Separator
+	if row_idx >= _cfg_class_scroll_offset and y + local_y < y + h:
+		_panel.draw_line(Vector2(x, y + local_y + 2), Vector2(x + pw - 16, y + local_y + 2), Color(0.2, 0.3, 0.4), 1.0)
+		local_y += 6
+	row_idx += 1
 
 	# Physics entity classes
-	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
-	local_y += 2
-	for ec in extra_classes:
-		if y + local_y > y + h:
-			break
-		var is_sel: bool = (_cfg_selected_class == -100 - extra_classes.find(ec))  # Negative IDs for physics entities
-		if is_sel:
-			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.2))
-		var col: Color = Color(0.5, 0.8, 1.0) if is_sel else Color(0.5, 0.5, 0.5)
-		_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), ec, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
-		local_y += row_h
+	for ec_idx in range(extra_classes.size()):
+		if row_idx >= _cfg_class_scroll_offset and y + local_y < y + h:
+			var ec: String = extra_classes[ec_idx]
+			var is_sel: bool = (_cfg_selected_class == -100 - ec_idx)
+			var is_hover: bool = (_cfg_hover_entity_idx == row_idx)
+			if is_sel:
+				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.2))
+			elif is_hover:
+				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.12, 0.12, 0.15))
+			var col: Color = Color(0.5, 0.8, 1.0) if is_sel else (Color(0.7, 0.7, 0.8) if is_hover else Color(0.5, 0.5, 0.5))
+			_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), ec, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
+			local_y += row_h
+		row_idx += 1
+
+	# Scroll indicator
+	if total_rows > visible_rows and visible_rows > 0:
+		var pct: float = float(_cfg_class_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
+		var bar_h: float = maxf(16.0, h * float(visible_rows) / float(total_rows))
+		_panel.draw_rect(Rect2(x + pw - 6, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4499,9 +4535,7 @@ func _handle_cfg_entities_click(lx: float, local_y: float, _body_h: float) -> vo
 		return
 	y += 24
 
-	# Entity list
-	y += 2  # separator
-	y += 16  # "Entities" header
+	# Entity list (starts right after filter)
 	var entity_row_h: float = 16.0
 	var entities: Array = _get_all_entities()
 
@@ -4721,9 +4755,13 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 			sub_end = 9999.0
 		if my >= y and my < sub_end:
 			match sub["id"]:
+				"cfg_classes":
+					_cfg_class_scroll_offset = maxi(0, _cfg_class_scroll_offset + delta)
 				"cfg_entities":
+					_cfg_entities_scroll_offset = maxi(0, _cfg_entities_scroll_offset + delta)
+				"cfg_entity_stats":
 					_config_scroll_offset = maxi(0, _config_scroll_offset + delta)
-				"cfg_blueprints":
+				"cfg_modifiers":
 					_cfg_blueprints_scroll_offset = maxi(0, _cfg_blueprints_scroll_offset + delta)
 				"cfg_modified_ents":
 					_cfg_instances_scroll_offset = maxi(0, _cfg_instances_scroll_offset + delta)
@@ -4732,7 +4770,7 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 
 
 func _handle_cfg_hover(my: float) -> void:
-	## Update hover state for config sub-sections.
+	## Update hover state for all config sub-sections.
 	_cfg_hover_entity_idx = -1
 	_cfg_hover_blueprint_idx = -1
 	_cfg_hover_instance_idx = -1
@@ -4751,13 +4789,17 @@ func _handle_cfg_hover(my: float) -> void:
 		if my >= body_y and my < sub_end:
 			var local_y: float = my - body_y
 			match sub["id"]:
+				"cfg_classes":
+					# Direct — no filter offset
+					_cfg_hover_entity_idx = int(local_y / 16.0) + _cfg_class_scroll_offset
 				"cfg_entities":
-					# Hover over entity list (after filter+header = 42px)
-					var entity_local: float = local_y - 42
+					# After filter field (24px)
+					var entity_local: float = local_y - 24
 					if entity_local >= 0:
 						_cfg_hover_entity_idx = int(entity_local / 16.0) + _cfg_entities_scroll_offset
-				"cfg_blueprints":
-					var bp_local: float = local_y - 20  # After filter
+				"cfg_modifiers":
+					# After filter field (20px)
+					var bp_local: float = local_y - 20
 					if bp_local >= 0:
 						_cfg_hover_blueprint_idx = int(bp_local / 16.0) + _cfg_blueprints_scroll_offset
 				"cfg_modified_ents":
