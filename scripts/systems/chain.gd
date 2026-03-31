@@ -86,6 +86,8 @@ var is_taut: bool = false                   # True when chain is at full extensi
 var _debug_log_timer: float = 0.0
 const DEBUG_LOG_INTERVAL := 0.5  # Log every 0.5 seconds, not every frame
 
+var _glow_node: Node2D = null  # Child node for selection glow, renders behind chain
+
 # -- Shake feedback ------------------------------------------------------------
 
 var _shake_timer: float = 0.0
@@ -468,6 +470,20 @@ func get_tension() -> float:
 func _draw() -> void:
 	if _points.size() < 2:
 		return
+	# Manage selection glow node — renders behind chain (z_index = -1)
+	var is_selected: bool = DebugOverlay.global_enabled and \
+		is_instance_valid(PlayerHUD.debug_selected_enemy) and \
+		PlayerHUD.debug_selected_enemy == self
+	if is_selected:
+		if not _glow_node or not is_instance_valid(_glow_node):
+			_glow_node = Node2D.new()
+			_glow_node.z_index = -1  # Behind the chain
+			_glow_node.draw.connect(_draw_selection_glow)
+			add_child(_glow_node)
+		_glow_node.visible = true
+		_glow_node.queue_redraw()
+	elif _glow_node and is_instance_valid(_glow_node):
+		_glow_node.visible = false
 
 	var hp_ratio: float = float(current_hp) / float(CHAIN_MAX_HP)
 	var dark_grey := Color(0.3, 0.28, 0.26, 0.95)
@@ -497,15 +513,6 @@ func _draw() -> void:
 		var width: float = (4.0 if i % 2 == 0 else 2.0) * cs
 		draw_line(p1, p2, draw_col, width)
 
-	# Selection glow — pulsing transparent aura when selected in debug drawer
-	if DebugOverlay.global_enabled and is_instance_valid(PlayerHUD.debug_selected_enemy) and PlayerHUD.debug_selected_enemy == self:
-		var pulse: float = 0.3 + 0.2 * sin(Time.get_ticks_msec() / 200.0)
-		var glow_col := Color(0.3, 0.7, 1.0, pulse)
-		for i in range(_points.size() - 1):
-			var p1: Vector2 = _points[i] - global_position
-			var p2: Vector2 = _points[i + 1] - global_position
-			draw_line(p1, p2, glow_col, 10.0 * cs)
-
 	# Anchor hardware
 	_draw_anchor_hardware(anchor_a, _points[0])
 	_draw_anchor_hardware(anchor_b, _points[_points.size() - 1])
@@ -517,6 +524,19 @@ func _get_creature_scale(anchor: Dictionary) -> float:
 	if is_instance_valid(body) and "creature_scale" in body:
 		return body.creature_scale
 	return 1.0
+
+
+func _draw_selection_glow() -> void:
+	## Draw pulsing blue aura behind the chain — called by _glow_node.
+	if _points.size() < 2:
+		return
+	var cs: float = maxf(_get_creature_scale(anchor_a), _get_creature_scale(anchor_b))
+	var pulse: float = 0.25 + 0.2 * sin(Time.get_ticks_msec() / 200.0)
+	var glow_col := Color(0.3, 0.7, 1.0, pulse)
+	for i in range(_points.size() - 1):
+		var p1: Vector2 = _points[i] - global_position
+		var p2: Vector2 = _points[i + 1] - global_position
+		_glow_node.draw_line(p1, p2, glow_col, 12.0 * cs)
 
 
 func _draw_anchor_hardware(anchor: Dictionary, world_pos: Vector2) -> void:
