@@ -3698,16 +3698,11 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		_panel.draw_string(font, Vector2(x + 4, y + local_y + 14), cfg_filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.8, 0.8, 0.8))
 	local_y += 24
 
-	# -- Entity list --
+	# -- Entity list (count shown in header bar, not here) --
 	var entities: Array = _get_all_entities()
-	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
-	local_y += 2
-	_panel.draw_string(font, Vector2(x, y + local_y + 12), "Entities (%d)" % entities.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.75, 1.0))
-	local_y += 16
-
 	var entity_row_h: float = 16.0
 	var selected_entity: Node2D = _get_selected_entity()
-	var max_entity_rows: int = int((h - local_y - 4) * 0.4 / entity_row_h)  # Use ~40% of remaining space for entity list
+	var max_entity_rows: int = int((h - local_y - 4) / entity_row_h)
 	max_entity_rows = maxi(max_entity_rows, 2)
 	var visible_entities: int = mini(entities.size(), max_entity_rows)
 	var entity_offset: int = clampi(_cfg_entities_scroll_offset, 0, maxi(0, entities.size() - visible_entities))
@@ -3808,99 +3803,7 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "(no blueprints)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		local_y += row_h
 
-	local_y += 4
-	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
-	local_y += 4
-
-	# Blueprint editor — interactive sliders for live tuning
-	if _cfg_selected_blueprint.is_empty():
-		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "Click a blueprint to edit", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
-		return
-
-	# Cache blueprint data for editing (reload only on selection change)
-	if _cfg_bp_cached_data.get("_bp_name", "") != _cfg_selected_blueprint:
-		_cfg_bp_cached_data = _cfg_load_blueprint(_cfg_selected_blueprint)
-		_cfg_bp_cached_data["_bp_name"] = _cfg_selected_blueprint
-
-	# Header: blueprint name + buttons
-	_panel.draw_string(font, Vector2(x, y + local_y + 11), _cfg_selected_blueprint, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.38, 9, Color(0.9, 0.7, 0.3))
-
-	# [Apply] button — applies to selected entity's config stack
-	var sel_entity: Node2D = _get_selected_entity()
-	if sel_entity and sel_entity.has_method("push_config"):
-		var apply_x: float = x + pw * 0.40
-		_panel.draw_rect(Rect2(apply_x, y + local_y, 38, 14), Color(0.2, 0.35, 0.2))
-		_panel.draw_string(font, Vector2(apply_x + 3, y + local_y + 10), "Apply", HORIZONTAL_ALIGNMENT_LEFT, 34, 7, Color(0.5, 1.0, 0.5))
-
-	# [Shackle] button — applies to shackle config stack
-	if sel_entity and sel_entity.has_method("push_shackle_config"):
-		var shk_x: float = x + pw * 0.53
-		_panel.draw_rect(Rect2(shk_x, y + local_y, 44, 14), Color(0.2, 0.25, 0.35))
-		_panel.draw_string(font, Vector2(shk_x + 3, y + local_y + 10), "Shackle", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.7, 1.0))
-
-	# [Save] button
-	var save_x: float = x + pw - 44
-	_panel.draw_rect(Rect2(save_x, y + local_y, 30, 14), Color(0.25, 0.2, 0.15))
-	_panel.draw_string(font, Vector2(save_x + 3, y + local_y + 10), "Save", HORIZONTAL_ALIGNMENT_LEFT, 28, 7, Color(0.9, 0.8, 0.4))
-	local_y += 18
-
-	# Editable modifier rows: [key] [op] [===slider===] [value]
-	var slider_h: float = 16.0
-	var slider_gap: float = 2.0
-	var mod_keys: Array[String] = []
-	for key in _cfg_bp_cached_data:
-		if not key.begins_with("_"):
-			mod_keys.append(key)
-
-	for key in mod_keys:
-		if y + local_y > y + h - 4:
-			break
-		var val = _cfg_bp_cached_data[key]
-		var op_str: String = "?"
-		var num_val: float = 0.0
-		if val is Array and val.size() == 2:
-			op_str = str(val[0])
-			num_val = float(val[1])
-
-		# Operation label (clickable to cycle)
-		var op_col := Color(0.6, 0.8, 0.4)
-		match op_str:
-			"multiply": op_col = Color(0.8, 0.6, 1.0)
-			"add": op_col = Color(0.4, 0.8, 0.6)
-			"set": op_col = Color(1.0, 0.7, 0.3)
-			"min": op_col = Color(0.4, 0.7, 1.0)
-			"max": op_col = Color(1.0, 0.5, 0.4)
-
-		# Key name
-		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.28, 8, Color(0.7, 0.7, 0.7))
-
-		# Operation badge
-		var op_badge_x: float = x + pw * 0.29
-		_panel.draw_rect(Rect2(op_badge_x, y + local_y + 2, pw * 0.11, 12), op_col * 0.3)
-		_panel.draw_string(font, Vector2(op_badge_x + 2, y + local_y + 11), op_str.substr(0, 3), HORIZONTAL_ALIGNMENT_LEFT, pw * 0.11, 7, op_col)
-
-		# Slider track
-		var slider_x: float = x + pw * 0.42
-		var slider_w: float = pw * 0.35
-		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
-
-		# Slider range depends on operation
-		var range_info: Vector2 = _cfg_bp_slider_range(op_str, num_val)
-		var t: float = clampf((num_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
-
-		# Slider fill
-		var is_dragging: bool = (_cfg_bp_dragging_key == key)
-		var fill_col: Color = Color(0.8, 0.6, 1.0) if is_dragging else op_col * 0.7
-		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
-
-		# Handle
-		var handle_x: float = slider_x + slider_w * t
-		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE if is_dragging else Color(0.8, 0.8, 0.8))
-
-		# Value text
-		_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 11), "%.2f" % num_val, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.18, 8, Color(0.9, 0.9, 0.9))
-
-		local_y += slider_h + slider_gap
+	# Editor is in the separate "Modifier" sub-section below
 
 
 func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4197,14 +4100,74 @@ func _draw_cfg_sub_calculations(x: float, y: float, pw: float, h: float, font: F
 
 
 func _draw_cfg_sub_modifier(x: float, y: float, pw: float, h: float, font: Font) -> void:
-	## Modifier editor — same as old _draw_cfg_sub_blueprints editor area.
-	## Reuses the blueprint editor drawing from the existing code.
+	## Modifier editor — interactive sliders for the selected blueprint.
 	if _cfg_selected_blueprint.is_empty():
 		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a modifier above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		return
-	# Delegate to the existing blueprint editor drawing (it handles cached data, sliders, buttons)
-	# The _draw_cfg_sub_blueprints function handles list + editor. Here we just draw the editor part.
-	_panel.draw_string(font, Vector2(x + 4, y + 11), "Modifier editor — use Modifiers list above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.5))
+
+	# Cache blueprint data for editing (reload only on selection change)
+	if _cfg_bp_cached_data.get("_bp_name", "") != _cfg_selected_blueprint:
+		_cfg_bp_cached_data = _cfg_load_blueprint(_cfg_selected_blueprint)
+		_cfg_bp_cached_data["_bp_name"] = _cfg_selected_blueprint
+
+	var local_y: float = 0.0
+
+	# Header: blueprint name + buttons
+	_panel.draw_string(font, Vector2(x, y + local_y + 11), _cfg_selected_blueprint, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.38, 9, Color(0.9, 0.7, 0.3))
+	var sel_entity: Node2D = _get_selected_entity()
+	if sel_entity and sel_entity.has_method("push_config"):
+		var apply_x: float = x + pw * 0.40
+		_panel.draw_rect(Rect2(apply_x, y + local_y, 38, 14), Color(0.2, 0.35, 0.2))
+		_panel.draw_string(font, Vector2(apply_x + 3, y + local_y + 10), "Apply", HORIZONTAL_ALIGNMENT_LEFT, 34, 7, Color(0.5, 1.0, 0.5))
+	if sel_entity and sel_entity.has_method("push_shackle_config"):
+		var shk_x: float = x + pw * 0.53
+		_panel.draw_rect(Rect2(shk_x, y + local_y, 44, 14), Color(0.2, 0.25, 0.35))
+		_panel.draw_string(font, Vector2(shk_x + 3, y + local_y + 10), "Shackle", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.7, 1.0))
+	var save_x: float = x + pw - 44
+	_panel.draw_rect(Rect2(save_x, y + local_y, 30, 14), Color(0.25, 0.2, 0.15))
+	_panel.draw_string(font, Vector2(save_x + 3, y + local_y + 10), "Save", HORIZONTAL_ALIGNMENT_LEFT, 28, 7, Color(0.9, 0.8, 0.4))
+	local_y += 18
+
+	# Editable modifier rows: [key] [op] [===slider===] [value]
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var mod_keys: Array[String] = []
+	for key in _cfg_bp_cached_data:
+		if not key.begins_with("_"):
+			mod_keys.append(key)
+
+	for key in mod_keys:
+		if y + local_y > y + h - 4:
+			break
+		var val = _cfg_bp_cached_data[key]
+		var op_str: String = "?"
+		var num_val: float = 0.0
+		if val is Array and val.size() == 2:
+			op_str = str(val[0])
+			num_val = float(val[1])
+		var op_col := Color(0.6, 0.8, 0.4)
+		match op_str:
+			"multiply": op_col = Color(0.8, 0.6, 1.0)
+			"add": op_col = Color(0.4, 0.8, 0.6)
+			"set": op_col = Color(1.0, 0.7, 0.3)
+			"min": op_col = Color(0.4, 0.7, 1.0)
+			"max": op_col = Color(1.0, 0.5, 0.4)
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.28, 8, Color(0.7, 0.7, 0.7))
+		var op_badge_x: float = x + pw * 0.29
+		_panel.draw_rect(Rect2(op_badge_x, y + local_y + 2, pw * 0.11, 12), op_col * 0.3)
+		_panel.draw_string(font, Vector2(op_badge_x + 2, y + local_y + 11), op_str.substr(0, 3), HORIZONTAL_ALIGNMENT_LEFT, pw * 0.11, 7, op_col)
+		var slider_x: float = x + pw * 0.42
+		var slider_w: float = pw * 0.35
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
+		var range_info: Vector2 = _cfg_bp_slider_range(op_str, num_val)
+		var t: float = clampf((num_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
+		var is_dragging: bool = (_cfg_bp_dragging_key == key)
+		var fill_col: Color = Color(0.8, 0.6, 1.0) if is_dragging else op_col * 0.7
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
+		var handle_x: float = slider_x + slider_w * t
+		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE if is_dragging else Color(0.8, 0.8, 0.8))
+		_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 11), "%.2f" % num_val, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.18, 8, Color(0.9, 0.9, 0.9))
+		local_y += slider_h + slider_gap
 
 
 func _draw_cfg_sub_modified_ents(x: float, y: float, pw: float, h: float, font: Font) -> void:
