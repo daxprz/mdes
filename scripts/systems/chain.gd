@@ -497,6 +497,15 @@ func _draw() -> void:
 		var width: float = (4.0 if i % 2 == 0 else 2.0) * cs
 		draw_line(p1, p2, draw_col, width)
 
+	# Selection glow — pulsing transparent aura when selected in debug drawer
+	if DebugOverlay.global_enabled and is_instance_valid(PlayerHUD.debug_selected_enemy) and PlayerHUD.debug_selected_enemy == self:
+		var pulse: float = 0.3 + 0.2 * sin(Time.get_ticks_msec() / 200.0)
+		var glow_col := Color(0.3, 0.7, 1.0, pulse)
+		for i in range(_points.size() - 1):
+			var p1: Vector2 = _points[i] - global_position
+			var p2: Vector2 = _points[i + 1] - global_position
+			draw_line(p1, p2, glow_col, 10.0 * cs)
+
 	# Anchor hardware
 	_draw_anchor_hardware(anchor_a, _points[0])
 	_draw_anchor_hardware(anchor_b, _points[_points.size() - 1])
