@@ -893,7 +893,8 @@ func _input(event: InputEvent) -> void:
 		elif not _ct_tree_prop_dragging.is_empty():
 			_handle_ct_tree_prop_drag(event.position.x)
 			get_viewport().set_input_as_handled()
-		elif event.position.x >= _panel_x and event.position.x <= _panel_x + _panel_width:
+		elif event.position.x >= _panel_x + ICON_BAR_WIDTH and event.position.x <= _panel_x + _panel_width:
+			# Only handle hover in content area (past icon bar)
 			if _current_section == Section.TEST_RUNNER:
 				_handle_test_hover(event.position.y)
 			elif _current_section == Section.LEVEL_EDITOR:
@@ -903,6 +904,13 @@ func _input(event: InputEvent) -> void:
 			elif _current_section == Section.CONFIG:
 				_handle_cfg_hover(event.position.y)
 			_update_hover(event.position.y)
+		elif event.position.x >= _panel_x and event.position.x < _panel_x + ICON_BAR_WIDTH:
+			# Mouse is over icon bar — clear all content hover state
+			_cfg_hover_class_idx = -1
+			_cfg_hover_entity_idx = -1
+			_cfg_hover_blueprint_idx = -1
+			_cfg_hover_instance_idx = -1
+			_hover_row = -1
 
 
 func _handle_text_input(event: InputEventKey, _field: String) -> void:
@@ -1847,7 +1855,7 @@ func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
 		var pct: float = float(_scroll_offset) / float(_visible_rows.size() - max_visible)
 		var bar_h: float = maxf(20.0, ph * float(max_visible) / float(_visible_rows.size()))
 		var bar_y: float = tree_y_start + pct * (ph - tree_y_start - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_group_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_col_x: float, font: Font) -> void:
@@ -2273,7 +2281,7 @@ func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> voi
 		var pct: float = float(_test_scroll_offset) / float(max_scroll)
 		var bar_h: float = maxf(16.0, h * float(visible_count) / float(display_tests.size()))
 		var bar_y: float = y + pct * (h - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 12, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 12, bar_y, 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_sub_controls(x: float, y: float, pw: float, h: float, font: Font, te: Node) -> void:
@@ -3748,7 +3756,7 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		var max_s: int = maxi(1, entities.size() - max_entity_rows)
 		var pct: float = float(entity_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, (h - 24) * float(max_entity_rows) / float(entities.size()))
-		_panel.draw_rect(Rect2(x + pw - 6, y + 24 + pct * (h - 24 - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 24 + pct * (h - 24 - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3815,7 +3823,7 @@ func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Fon
 		var max_s: int = maxi(1, filtered_bps.size() - visible)
 		var pct: float = float(bp_offset) / float(max_s)
 		var bar_h: float = maxf(16.0, remaining_h * float(visible) / float(filtered_bps.size()))
-		_panel.draw_rect(Rect2(x + pw - 6, y + 20 + pct * (remaining_h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 20 + pct * (remaining_h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3918,7 +3926,7 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 	if total_rows > visible_rows and visible_rows > 0:
 		var pct: float = float(_cfg_class_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
 		var bar_h: float = maxf(16.0, h * float(visible_rows) / float(total_rows))
-		_panel.draw_rect(Rect2(x + pw - 6, y + pct * (h - bar_h), 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 6, y + pct * (h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -3967,6 +3975,12 @@ func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) ->
 
 		local_y += slider_h + slider_gap
 
+	# Show indicator if content was clipped
+	var total_h: float = data.size() * (slider_h + slider_gap)
+	if total_h > h:
+		_panel.draw_string(font, Vector2(x + pw * 0.4, y + h - 10), "... more ...", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.5))
+		_panel.draw_rect(Rect2(x + pw - 6, y, 3, h), Color(0.4, 0.5, 0.7, 0.3))  # Full-height indicator
+
 
 func _draw_cfg_sub_entity_mods(x: float, y: float, pw: float, h: float, font: Font) -> void:
 	## Entity Mods — modifiers applied to selected entity.
@@ -4013,23 +4027,30 @@ func _draw_cfg_sub_entity_stats(x: float, y: float, pw: float, h: float, font: F
 	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
 	local_y += 2
 
-	# Build stat rows from config keys
+	# Build stat rows from config keys with scroll support
 	if _config_keys.is_empty():
 		_rebuild_config_keys(sel)
 	var row_h: float = 13.0
-	for key in _config_keys:
-		if y + local_y > y + h:
+	var body_h: float = h - local_y - 4
+	var visible_rows: int = int(body_h / row_h)
+	var total_keys: int = _config_keys.size()
+	var max_scroll: int = maxi(0, total_keys - visible_rows)
+	_config_scroll_offset = clampi(_config_scroll_offset, 0, max_scroll)
+	var draw_idx: int = 0
+	for ki in range(total_keys):
+		var key: String = _config_keys[ki]
+		if ki < _config_scroll_offset:
+			continue
+		if draw_idx >= visible_rows:
 			break
 		if key.begins_with("# "):
-			# Group header
 			_panel.draw_string(font, Vector2(col_stat_x, y + local_y + 9), key.substr(2), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.4, 0.6, 0.8))
 			local_y += row_h
+			draw_idx += 1
 			continue
-		# Resolve values
 		var default_val: float = _get_config_default(sel, key)
 		var base_val: float = default_val
 		var curr_val: float = sel.cfg(key, default_val)
-		# Count modifiers touching this key
 		var mod_count: int = 0
 		if "_config_stack" in sel:
 			for provider in sel._config_stack:
@@ -4047,6 +4068,13 @@ func _draw_cfg_sub_entity_stats(x: float, y: float, pw: float, h: float, font: F
 			_panel.draw_string(font, Vector2(col_mods_x, y + local_y + 9), "%d" % mod_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.8, 0.6, 1.0))
 		_panel.draw_string(font, Vector2(col_curr_x, y + local_y + 9), "%.1f" % curr_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, stat_col)
 		local_y += row_h
+		draw_idx += 1
+
+	# Scroll indicator
+	if total_keys > visible_rows and visible_rows > 0:
+		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
+		var bar_h: float = maxf(16.0, body_h * float(visible_rows) / float(total_keys))
+		_panel.draw_rect(Rect2(x + pw - 6, y + 16 + pct * (body_h - bar_h), 3, bar_h), Color(0.4, 0.5, 0.7, 0.6))
 
 
 func _draw_cfg_sub_calculations(x: float, y: float, pw: float, h: float, font: Font) -> void:
