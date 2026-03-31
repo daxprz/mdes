@@ -8264,7 +8264,9 @@ func _exec_tick_ball(delta: float) -> void:
 				if chain_dist > chain_max:
 					var chain_dir: Vector2 = chain_vec.normalized()
 					_exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
-					_exec_try_yeet(chain_dir)
+					# YEET: only for B-P and B-E. In B-S, the shackle handles its own constraint.
+					if not is_bs_chain:
+						_exec_try_yeet(chain_dir)
 					var outward_v: float = _exec_ball_vel.dot(chain_dir)
 					if outward_v > 0.0:
 						_exec_ball_vel -= chain_dir * outward_v

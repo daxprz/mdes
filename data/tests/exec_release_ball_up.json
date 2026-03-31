@@ -12,6 +12,7 @@
     "clearplayers",
     "ai_spawn 960 876 class=executioner name=AI mode=release",
     "wait 0.5",
+    "verify @e[name=AI] within circle 960 876 80 until done",
     "announce Throwing ball up-right in Release mode",
     "ai_cmd grapple 1.5 0.87 -0.50",
     "wait 0.1",
