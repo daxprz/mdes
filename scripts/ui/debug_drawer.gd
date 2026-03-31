@@ -3625,13 +3625,12 @@ func _draw_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary
 	if not ctx_text.is_empty():
 		_panel.draw_string(font, Vector2(x + 140, y + 14), ctx_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 170, 9, ctx_col)
 
-	# Resize grip dots (2x3 grid)
-	if not sub["collapsed"]:
-		var grip_x: float = x + pw - 22
-		var grip_col := accent_col * Color(1, 1, 1, 0.3)
-		for gi in range(3):
-			for gj in range(2):
-				_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), grip_col)
+	# Resize grip dots (2x3 grid) — always visible since grip controls section ABOVE
+	var grip_x: float = x + pw - 22
+	var grip_col := accent_col * Color(1, 1, 1, 0.3)
+	for gi in range(3):
+		for gj in range(2):
+			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), grip_col)
 
 
 func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
