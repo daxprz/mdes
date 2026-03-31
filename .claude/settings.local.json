@@ -99,7 +99,9 @@
       "Bash(nc -w1 localhost 9999 sleep 0.5 echo \"debug on body_mechanics/spine_debug\")",
       "Bash(nc -w1 localhost 9999 echo \"debug on body_mechanics/leg_debug\")",
       "Bash(nc -w1 localhost 9999 echo \"mocap connect\")",
-      "Bash(nc -w1 localhost 9999 sleep 2 echo \"mocap status\")"
+      "Bash(nc -w1 localhost 9999 sleep 2 echo \"mocap status\")",
+      "Bash(md5 -q /Users/jeremy/dev/dax/test123/assets/sprites/characters/executioner_side.png)",
+      "Bash(md5 -q /Users/jeremy/dev/dax/test123/assets/sprites/characters/executioner_topdown.png)"
     ]
   }
 }

@@ -97,42 +97,35 @@ func remove_config(provider: Variant) -> void:
 # Default: nearly massless (mass=5) so the ball barely notices it.
 # Push modifiers to make the shackle heavier, bouncier, etc.
 
-const SHACKLE_DEFAULT_CONFIG := {
-	"mass": 5.0,
-	"chain_elasticity": 0.25,
-	"gravity": 600.0,
-	"drag": 0.97,
-}
-
-func _init_shackle_config() -> void:
-	## Initialize the shackle's config stack with base defaults.
-	## Called once when executioner class is chosen.
-	if _exec_shackle_base_config != null:
-		return  # Already initialized
-	var MCP = preload("res://scripts/systems/monster_config.gd")
-	_exec_shackle_base_config = MCP.DictProvider.new(SHACKLE_DEFAULT_CONFIG, "shackle_defaults")
-	_exec_shackle_config_stack = [_exec_shackle_base_config]
+func _init_shackle_entity() -> void:
+	## Create the ShackleEntity node if it doesn't exist.
+	if _shackle and is_instance_valid(_shackle):
+		return
+	var ShackleScript: GDScript = preload("res://scripts/systems/shackle_entity.gd")
+	_shackle = Node2D.new()
+	_shackle.set_script(ShackleScript)
+	_shackle.owner_player = self
+	_shackle.entity_id = "shackle"
+	_shackle.name = "shackle"
+	_shackle.global_position = global_position
+	# Add as child of the player — available immediately, no deferred needed
+	add_child(_shackle)
+	# Set top_level so the shackle's position is in world space, not player-local
+	_shackle.top_level = true
 
 func shackle_cfg(key: String, default_val: float) -> float:
-	## Resolve a config value from the shackle's config stack.
-	## Same pattern as player cfg(): first non-null wins, then modifiers.
-	var val: float = default_val
-	for provider in _exec_shackle_config_stack:
-		var pval: Variant = provider.get_value(key)
-		if pval != null:
-			val = float(pval)
-			break
-	var MCP = preload("res://scripts/systems/monster_config.gd")
-	val = MCP.apply_modifiers(_exec_shackle_config_stack, key, val)
-	return val
+	## Delegate to shackle entity's cfg().
+	if _shackle and is_instance_valid(_shackle):
+		return _shackle.cfg(key, default_val)
+	return default_val
 
 func push_shackle_config(provider: Variant) -> void:
-	## Push a modifier onto the shackle's config stack.
-	_exec_shackle_config_stack.insert(0, provider)
+	if _shackle and is_instance_valid(_shackle):
+		_shackle.push_config(provider)
 
 func remove_shackle_config(provider: Variant) -> void:
-	## Remove a modifier from the shackle's config stack.
-	_exec_shackle_config_stack.erase(provider)
+	if _shackle and is_instance_valid(_shackle):
+		_shackle.remove_config(provider)
 
 
 # Jump height = v^2 / (2*g). With v=550, g=900: max height ~168px
@@ -419,9 +412,10 @@ func reset_state() -> void:
 
 	# Executioner-specific reset
 	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
-		_init_shackle_config()
+		_init_shackle_entity()
 		_exec_ball_state = ExecEndState.HELD
-		_exec_shackle_state = ExecEndState.HELD
+		if _shackle:
+			_shackle.reset()
 		_exec_throw_step = 0
 		_exec_ball_vel = Vector2.ZERO
 		_exec_shackle_vel = Vector2.ZERO
@@ -7425,18 +7419,40 @@ var _exec_ball_angular_vel: float = 0.0
 var _exec_ball_hold_time: float = 0.0
 var _exec_ball_rotation: float = 0.0
 
-var _exec_shackle_state: ExecEndState = ExecEndState.HELD
-var _exec_shackle_pos: Vector2 = Vector2.ZERO
-var _exec_shackle_vel: Vector2 = Vector2.ZERO
-var _exec_shackle_anchor_body: Node2D = null       # The enemy we're attached to
-var _exec_shackle_anchor_offset: Vector2 = Vector2.ZERO
-var _exec_shackle_spin_angle: float = 0.0
-var _exec_shackle_angular_vel: float = 0.0
-var _exec_shackle_hold_time: float = 0.0
+# Shackle entity — proper scene node with own config stack and physics.
+# Created on executioner init, persists while player exists.
+var _shackle: Node2D = null  # ShackleEntity instance
+# Legacy accessors for gradual migration (read/write through to _shackle)
+var _exec_shackle_state: int:
+	get: return _shackle.state if _shackle else 0
+	set(v): if _shackle: _shackle.state = v
+var _exec_shackle_pos: Vector2:
+	get: return _shackle.global_position if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.global_position = v
+var _exec_shackle_vel: Vector2:
+	get: return _shackle.vel if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.vel = v
+var _exec_shackle_anchor_body: Node2D:
+	get: return _shackle.anchor_body if _shackle else null
+	set(v): if _shackle: _shackle.anchor_body = v
+var _exec_shackle_anchor_offset: Vector2:
+	get: return _shackle.anchor_offset if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.anchor_offset = v
+var _exec_shackle_spin_angle: float:
+	get: return _shackle.spin_angle if _shackle else 0.0
+	set(v): if _shackle: _shackle.spin_angle = v
+var _exec_shackle_angular_vel: float:
+	get: return _shackle.angular_vel if _shackle else 0.0
+	set(v): if _shackle: _shackle.angular_vel = v
+var _exec_shackle_hold_time: float:
+	get: return _shackle.hold_time if _shackle else 0.0
+	set(v): if _shackle: _shackle.hold_time = v
 
 # Chain nodes (chain.gd instances — splay-chain physics, breakable)
 var _exec_chain_node: Node2D = null       # Ball side chain
-var _exec_shackle_chain_node: Node2D = null  # Shackle side chain
+var _exec_shackle_chain_node: Node2D:
+	get: return _shackle.chain_node if _shackle else null
+	set(v): if _shackle: _shackle.chain_node = v
 
 # Chain split: how much of total goes to ball (rest goes to shackle)
 var _exec_chain_split: float = EXEC_CHAIN_SPLIT_DEFAULT
@@ -7444,7 +7460,9 @@ var _exec_chain_split: float = EXEC_CHAIN_SPLIT_DEFAULT
 # Trajectory preview — two arcs forming a probability cone
 var _exec_preview_arc: PackedVector2Array = PackedVector2Array()       # Optimistic (no damping)
 var _exec_preview_arc_inner: PackedVector2Array = PackedVector2Array()  # Pessimistic (damped)
-var _exec_shackle_preview_arc: PackedVector2Array = PackedVector2Array()
+var _exec_shackle_preview_arc: PackedVector2Array:
+	get: return _shackle.preview_arc if _shackle else PackedVector2Array()
+	set(v): if _shackle: _shackle.preview_arc = v
 
 var _exec_swing_active: bool = false
 var _exec_swing_time: float = 0.0
@@ -7458,14 +7476,18 @@ var _exec_cleave_flash_timer: float = 0.0
 var _exec_r1_was_pressed: bool = false
 var _exec_chain_clank_timer: float = 0.0  # Timer for chain clanking during throw
 var _exec_chain_taut: bool = false        # True once ball chain goes slack→taut (YEET fires once)
-var _exec_shackle_chain_taut: bool = false # Same for shackle chain
+var _exec_shackle_chain_taut: bool:
+	get: return _shackle.chain_taut if _shackle else false
+	set(v): if _shackle: _shackle.chain_taut = v
 var _exec_yeet_immunity: float = 0.0     # Seconds to skip OOB check after YEET
 
-# Shackle config stack — same pattern as player/monster config stacks.
-# The shackle is the "other end" in B-S mode. Modifiers here change how the
-# shackle behaves as a flight body (mass, elasticity, gravity, drag).
-var _exec_shackle_config_stack: Array = []
-var _exec_shackle_base_config: Variant = null  # Base DictProvider (set once in _init_shackle_config)
+# Legacy accessors — config stack now lives on the ShackleEntity
+var _exec_shackle_config_stack: Array:
+	get: return _shackle._config_stack if _shackle else []
+	set(v): if _shackle: _shackle._config_stack = v
+var _exec_shackle_base_config: Variant:
+	get: return _shackle._base_config if _shackle else null
+	set(v): if _shackle: _shackle._base_config = v
 var _exec_chain_len_changing: bool = false  # True while actively adjusting split
 var _exec_l2_tap_timer: float = 0.0      # Double-tap detection for L2
 var _exec_r2_tap_timer: float = 0.0      # Double-tap detection for R2
@@ -7555,7 +7577,9 @@ func _exec_ball_chain_len() -> float:
 	return total * _exec_chain_split
 
 func _exec_shackle_chain_len() -> float:
-	## How much chain the shackle side gets.
+	## Delegate to shackle entity.
+	if _shackle and is_instance_valid(_shackle):
+		return _shackle.chain_len()
 	var total: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
 	return total * (1.0 - _exec_chain_split)
 
@@ -8364,6 +8388,11 @@ func _exec_spawn_chain() -> void:
 
 
 func _exec_spawn_shackle_chain() -> void:
+	## Delegate to shackle entity.
+	if _shackle and is_instance_valid(_shackle):
+		_shackle.spawn_chain_to_player()
+		return
+	# Legacy fallback
 	## Spawn a chain.gd between player and shackle — uses shackle's share of total length.
 	if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node):
 		_exec_shackle_chain_node.queue_free()
@@ -8412,12 +8441,17 @@ func _exec_update_chain_ball_anchor() -> void:
 
 
 func _exec_update_chain_shackle_anchor() -> void:
-	## Keep the shackle chain's anchor in sync with the shackle position.
-	if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node) and not _exec_shackle_chain_node._severed:
-		_exec_shackle_chain_node.anchor_b["pos"] = _exec_shackle_pos
+	## Delegate to shackle entity.
+	if _shackle and is_instance_valid(_shackle):
+		_shackle.update_chain_anchor()
 
 
 func _exec_tick_shackle(delta: float) -> void:
+	## Delegate to ShackleEntity for all physics.
+	if _shackle and is_instance_valid(_shackle):
+		_shackle.tick(delta)
+	return
+	# --- Legacy code below (kept for reference, unreachable) ---
 	match _exec_shackle_state:
 		ExecEndState.HELD, ExecEndState.WINDUP:
 			pass
@@ -8546,6 +8580,11 @@ func _exec_tick_shackle(delta: float) -> void:
 
 
 func _exec_try_snap_shackle_to_enemy() -> bool:
+	## Delegate to shackle entity.
+	if _shackle and is_instance_valid(_shackle):
+		return _shackle.try_snap_to_enemy()
+	return false
+	# --- Legacy code below (kept for reference, unreachable) ---
 	## Check if the shackle is near any damageable entity. Snaps to hitbox or center.
 	## Checks enemies, attack dummies, and players (but not self).
 	var targets: Array = []

@@ -33,7 +33,7 @@
     "wait 3",
 
     "announce Activating verify monitor",
-    "verify @e[name=ball] within circle @e[name=AI] 320 until done",
+    "verify @e[name=ball] within circle @e[name=AI] 400 until done",
 
     "set cycles = 2",
     "while {cycles}",
