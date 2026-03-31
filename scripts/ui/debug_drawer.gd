@@ -119,6 +119,8 @@ const LE_ACTIONS_GAMEPLAY: Array[Dictionary] = [
 	{"label": "Toggle Territorial", "cmd": "territorial", "color": Color(0.8, 0.6, 0.3)},
 	{"label": "Revive All Players", "cmd": "revive", "color": Color(0.3, 0.9, 0.6)},
 	{"label": "Enable Player Joins", "cmd": "enable_joins", "color": Color(0.3, 0.8, 0.8)},
+	{"label": "SETTINGS", "cmd": ""},
+	{"label": "Same Class OK", "cmd": "toggle_same_class", "color": Color(0.6, 0.6, 0.8)},
 ]
 
 # Config section state
@@ -146,6 +148,7 @@ var _cfg_entities_scroll_offset: int = 0
 var _cfg_blueprints_scroll_offset: int = 0
 var _cfg_instances_scroll_offset: int = 0
 var _cfg_hover_entity_idx: int = -1
+var _cfg_hover_class_idx: int = -1
 var _cfg_hover_blueprint_idx: int = -1
 var _cfg_hover_instance_idx: int = -1
 
@@ -183,7 +186,6 @@ var _cfg_stat_cache: Array = []            # Cached calculation steps for select
 var _cfg_stat_cache_dirty: bool = true
 
 const CFG_SUB_MIN := {
-	"cfg_settings":    30.0,
 	"cfg_classes":     30.0,
 	"cfg_class":       36.0,
 	"cfg_entities":    36.0,
@@ -2684,7 +2686,6 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 
 		if body_h > 0:
 			match sub["id"]:
-				"cfg_settings":    _draw_cfg_sub_settings(x, body_y, pw, body_h, font)
 				"cfg_classes":     _draw_cfg_sub_classes(x, body_y, pw, body_h, font)
 				"cfg_class":       _draw_cfg_sub_class(x, body_y, pw, body_h, font)
 				"cfg_entities":    _draw_cfg_sub_entities(x, body_y, pw, body_h, font)
@@ -3254,8 +3255,7 @@ func _get_config_range(key: String, default_val: float) -> Vector2:
 func _init_cfg_subsections() -> void:
 	_cfg_subsections = []
 	var sids: Array[String] = [
-		"cfg_settings",      # 1. Game Settings
-		"cfg_classes",       # 2. Classes list
+		"cfg_classes",       # 1. Classes list
 		"cfg_class",         # 3. Class editor
 		"cfg_entities",      # 4. Entities list
 		"cfg_entity_mods",   # 5. Entity Mods
@@ -3282,7 +3282,6 @@ func _init_cfg_subsections() -> void:
 
 func _cfg_sub_title(sid: String) -> String:
 	match sid:
-		"cfg_settings": return "Game Settings"
 		"cfg_classes": return "Classes"
 		"cfg_class":
 			if _cfg_selected_class >= 0:
@@ -3361,8 +3360,6 @@ func _auto_snap_cfg() -> void:
 
 func _get_cfg_preferred_height(sid: String) -> float:
 	match sid:
-		"cfg_settings":
-			return SUB_HEADER_H + 1 * 18.0 + 8.0
 		"cfg_classes":
 			return SUB_HEADER_H + clampi(PlayerHUD.ALL_CLASSES.size() + 2, 4, 10) * 16.0 + 4.0
 		"cfg_class":
@@ -3878,7 +3875,7 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 	var row_h: float = 16.0
 	var all_classes: Array = PlayerHUD.ALL_CLASSES
 	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
-	var total_rows: int = all_classes.size() + 1 + extra_classes.size()  # +1 for separator
+	var total_rows: int = all_classes.size() + extra_classes.size()
 	var visible_rows: int = int(h / row_h)
 	var max_scroll: int = maxi(0, total_rows - visible_rows)
 	_cfg_class_scroll_offset = clampi(_cfg_class_scroll_offset, 0, max_scroll)
@@ -3890,7 +3887,7 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 			var cls: int = all_classes[i]
 			var cls_name: String = PlayerHUD.CLASS_NAMES.get(cls, "?")
 			var is_sel: bool = (_cfg_selected_class == cls)
-			var is_hover: bool = (_cfg_hover_entity_idx == row_idx)
+			var is_hover: bool = (_cfg_hover_class_idx == row_idx)
 			if is_sel:
 				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.2, 0.15))
 			elif is_hover:
@@ -3902,18 +3899,12 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 			local_y += row_h
 		row_idx += 1
 
-	# Separator
-	if row_idx >= _cfg_class_scroll_offset and y + local_y < y + h:
-		_panel.draw_line(Vector2(x, y + local_y + 2), Vector2(x + pw - 16, y + local_y + 2), Color(0.2, 0.3, 0.4), 1.0)
-		local_y += 6
-	row_idx += 1
-
-	# Physics entity classes
+	# Physics entity classes (no separator — treated as part of the same list)
 	for ec_idx in range(extra_classes.size()):
 		if row_idx >= _cfg_class_scroll_offset and y + local_y < y + h:
 			var ec: String = extra_classes[ec_idx]
 			var is_sel: bool = (_cfg_selected_class == -100 - ec_idx)
-			var is_hover: bool = (_cfg_hover_entity_idx == row_idx)
+			var is_hover: bool = (_cfg_hover_class_idx == row_idx)
 			if is_sel:
 				_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.2))
 			elif is_hover:
@@ -4321,8 +4312,6 @@ func _handle_cfg_click(lx: float, my: float) -> void:
 func _handle_cfg_subsection_click(sub_id: String, lx: float, local_y: float, body_h: float) -> void:
 	## Handle click within a specific config sub-section.
 	match sub_id:
-		"cfg_settings":
-			_handle_cfg_settings_click(lx, local_y)
 		"cfg_classes":
 			_handle_cfg_classes_click(lx, local_y, body_h)
 		"cfg_class":
@@ -4349,8 +4338,8 @@ func _handle_cfg_classes_click(_lx: float, local_y: float, _body_h: float) -> vo
 			_cfg_class_data.clear()  # Force reload on class change
 			_cfg_class_data_name = ""
 			return
-	# Separator + physics entity classes
-	var offset: float = all_classes.size() * row_h + 2
+	# Physics entity classes (continuous list, no separator)
+	var offset: float = all_classes.size() * row_h
 	for i in range(extra_classes.size()):
 		if local_y >= offset + i * row_h and local_y < offset + (i + 1) * row_h:
 			_cfg_selected_class = -100 - i  # Negative IDs for physics entities
@@ -4419,8 +4408,13 @@ func _cfg_class_drag_at(lx: float) -> void:
 	var key: String = _cfg_class_dragging_key
 	if not _cfg_class_data.has(key):
 		return
-	var current_val: float = float(_cfg_class_data[key])
-	var range_info: Vector2 = _get_config_range(key, current_val)
+	# Use original default for range calculation (not current modified value, which causes runaway)
+	var MCP = load("res://scripts/systems/monster_config.gd")
+	var original_provider = MCP.load_class_defaults(_cfg_class_data_name)
+	var original_val: float = float(_cfg_class_data[key])
+	if original_provider and "_data" in original_provider and original_provider._data.has(key):
+		original_val = float(original_provider._data[key])
+	var range_info: Vector2 = _get_config_range(key, original_val)
 	var new_val: float = lerpf(range_info.x, range_info.y, t)
 	# Snap to nice values
 	if absf(new_val) > 10.0:
@@ -4771,6 +4765,7 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 
 func _handle_cfg_hover(my: float) -> void:
 	## Update hover state for all config sub-sections.
+	_cfg_hover_class_idx = -1
 	_cfg_hover_entity_idx = -1
 	_cfg_hover_blueprint_idx = -1
 	_cfg_hover_instance_idx = -1
@@ -4790,8 +4785,7 @@ func _handle_cfg_hover(my: float) -> void:
 			var local_y: float = my - body_y
 			match sub["id"]:
 				"cfg_classes":
-					# Direct — no filter offset
-					_cfg_hover_entity_idx = int(local_y / 16.0) + _cfg_class_scroll_offset
+					_cfg_hover_class_idx = int(local_y / 16.0) + _cfg_class_scroll_offset
 				"cfg_entities":
 					# After filter field (24px)
 					var entity_local: float = local_y - 24
@@ -5388,6 +5382,9 @@ func _le_execute_scene_action(cmd: String) -> void:
 		"enable_joins":
 			rcon._execute("enablejoins")
 			_le_scene_flash = "Joins enabled"
+		"toggle_same_class":
+			GameManager.multiple_players_same_class = not GameManager.multiple_players_same_class
+			_le_scene_flash = "Same class: %s" % ("ON" if GameManager.multiple_players_same_class else "OFF")
 		"clear_level":
 			rcon._execute("clear")
 			rcon._execute("clearplayers")
