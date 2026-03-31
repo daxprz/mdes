@@ -1,0 +1,15 @@
+{
+  "_class": "healer",
+  "max_health": 90,
+  "max_mana": 130,
+  "speed": 95,
+  "mana_regen": 2.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

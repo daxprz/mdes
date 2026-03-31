@@ -1,0 +1,10 @@
+{
+  "_class": "soccer_dummy",
+  "mass": 20.0,
+  "gravity": 600.0,
+  "friction": 0.97,
+  "air_friction": 0.998,
+  "bounce": 0.5,
+  "radius": 14.0,
+  "max_health": 1000
+}

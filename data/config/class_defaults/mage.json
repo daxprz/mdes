@@ -1,0 +1,15 @@
+{
+  "_class": "mage",
+  "max_health": 80,
+  "max_mana": 150,
+  "speed": 90,
+  "mana_regen": 3.0,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

@@ -1,0 +1,17 @@
+{
+  "_class": "ranged",
+  "max_health": 100,
+  "max_mana": 80,
+  "speed": 120,
+  "mana_regen": 1.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0,
+  "ranger_max_arrows": 10.0,
+  "ranger_reload_time": 1.5
+}

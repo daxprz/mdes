@@ -1,0 +1,15 @@
+{
+  "_class": "guitarist",
+  "max_health": 95,
+  "max_mana": 70,
+  "speed": 105,
+  "mana_regen": 1.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

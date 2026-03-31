@@ -1,0 +1,15 @@
+{
+  "_class": "balloonist",
+  "max_health": 85,
+  "max_mana": 80,
+  "speed": 100,
+  "mana_regen": 1.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

@@ -1,0 +1,7 @@
+{
+  "_class": "chain",
+  "damping": 0.85,
+  "gravity": 600.0,
+  "link_length": 8.0,
+  "max_hp": 200.0
+}

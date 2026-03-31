@@ -1,0 +1,15 @@
+{
+  "_class": "demolitionist",
+  "max_health": 100,
+  "max_mana": 100,
+  "speed": 105,
+  "mana_regen": 1.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

@@ -1,0 +1,15 @@
+{
+  "_class": "werewolf",
+  "max_health": 140,
+  "max_mana": 20,
+  "speed": 135,
+  "mana_regen": 0.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0
+}

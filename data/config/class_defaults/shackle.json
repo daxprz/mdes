@@ -1,0 +1,7 @@
+{
+  "_class": "shackle",
+  "mass": 5.0,
+  "chain_elasticity": 0.25,
+  "gravity": 600.0,
+  "drag": 0.97
+}

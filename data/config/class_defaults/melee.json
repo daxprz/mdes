@@ -1,0 +1,18 @@
+{
+  "_class": "melee",
+  "max_health": 175,
+  "max_mana": 50,
+  "speed": 110,
+  "mana_regen": 1.0,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0,
+  "melee_combo_window": 0.6,
+  "melee_enrage_duration": 10.0,
+  "melee_enrage_cooldown": 45.0
+}

@@ -1,0 +1,18 @@
+{
+  "_class": "rogue",
+  "max_health": 90,
+  "max_mana": 60,
+  "speed": 150,
+  "mana_regen": 1.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0,
+  "rogue_stealth_duration": 5.0,
+  "rogue_stealth_cooldown": 20.0,
+  "rogue_stealth_damage_mult": 3.75
+}

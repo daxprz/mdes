@@ -1,0 +1,23 @@
+{
+  "_class": "executioner",
+  "max_health": 200,
+  "max_mana": 30,
+  "speed": 85,
+  "mana_regen": 0.5,
+  "gravity": 900.0,
+  "jump_velocity": -550.0,
+  "attack_cooldown": 0.4,
+  "special_cooldown": 1.5,
+  "attack_damage_mult": 1.0,
+  "special_damage_mult": 1.0,
+  "charge_damage_mult": 1.0,
+  "knockback_mult": 1.0,
+  "exec_chain_elasticity": 0.25,
+  "exec_chain_total_len": 600.0,
+  "exec_chain_adjust_speed": 0.5,
+  "exec_swing_max_damage": 80.0,
+  "exec_swing_slam_radius": 60.0,
+  "exec_cleave_max_damage": 150.0,
+  "exec_cleave_charge_time": 2.0,
+  "exec_cleave_knockback": 500.0
+}
