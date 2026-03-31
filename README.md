@@ -163,6 +163,27 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.36
+**Config panel redesign: 9 sub-sections, class defaults, entity config stacks**
+
+- **Config panel restructured** from 4 to 9 sub-sections: Classes, Class editor, Entities, Entity Mods, Entity Stats, Calculations, Modifiers, Modifier editor, Modified Entities
+- **Class defaults from JSON**: 18 files in `data/config/class_defaults/` — one per player class, physics entity (spikeball, shackle, chain, soccer_dummy), and monster
+- **Class editor with live sliders**: drag to edit defaults, saves to user overrides, updates all entities immediately
+- **Entity Stats table**: Stat/Base/Mods/Curr columns showing resolved config values
+- **Calculations breakdown**: full computation chain showing base → each modifier → final value
+- **Cross-selection**: clicking Modified Entities selects the entity, clicking stats shows calculations
+- **Every physics body has config**: soccer dummy, spike ball, chain all have `cfg()/push_config()/remove_config()`
+- **SpikeBallEntity**: proper persistent entity with own config stack, `exec_ball_*` prefix dropped
+- **Chain config stack**: `cfg()` for damping, gravity, link_length, max_hp
+- **Soccer dummy config**: mass, gravity, friction, bounce, radius all configurable
+- **Chain selection glow**: pulsing blue polyline aura behind selected chain
+- **Game Settings moved** to Level Editor Actions ("Same Class OK" toggle)
+- **Dynamic section titles**: update each frame with selection context (Class: melee, Stats: bat_01, etc.)
+- **Scroll/hover/click fixes**: all list sections have scroll indicators, hover highlights, scroll-aware click handlers
+- **Entity naming**: chains auto-named `chain_01`, bats auto-named `bat_01`
+- **Resize grip always visible** on collapsed sub-section headers
+- **TPS metrics visible** in debug aspect tree (visual + textual separate)
+
 ### v0.10.35
 **ShackleEntity refactor, chain damping, anchor fix**
 
