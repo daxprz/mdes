@@ -163,21 +163,25 @@ func apply_timed_config(overrides: Dictionary, duration: float, provider_name: S
 	push_config(timed_prov)
 
 ## Load base defaults from JSON. Called during _ready().
+## Tries class_defaults/monster.json first (new path), falls back to monster_defaults.json (legacy).
 func _load_config_defaults() -> void:
-	var path: String = "res://data/config/monster_defaults.json"
-	if not FileAccess.file_exists(path):
-		return
-	var file := FileAccess.open(path, FileAccess.READ)
-	if not file:
-		return
-	var json := JSON.new()
-	if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
-		var data: Dictionary = json.data
-		data.erase("_comment")
-		var provider := MCP.DictProvider.new(data, "defaults")
+	var provider = MCP.load_class_defaults("monster")
+	if not provider:
+		# Legacy fallback
+		var path: String = "res://data/config/monster_defaults.json"
+		if not FileAccess.file_exists(path):
+			return
+		var file := FileAccess.open(path, FileAccess.READ)
+		if not file:
+			return
+		var json := JSON.new()
+		if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+			var data: Dictionary = json.data
+			data.erase("_comment")
+			provider = MCP.DictProvider.new(data, "defaults")
+	if provider:
 		_config_stack.append(provider)  # Append = lowest priority
-		DebugOverlay.log("monster/state", self, "CONFIG LOAD: %d defaults from %s" % [
-			data.size(), path])
+		DebugOverlay.log("monster/state", self, "CONFIG LOAD: monster defaults loaded (%s)" % [str(provider)])
 
 ## Get the effective body radius used for leap/pathing clearance.
 ## Uses pathing_radius if set, otherwise sc(cfg("leap_body_radius", LEAP_BODY_RADIUS)).

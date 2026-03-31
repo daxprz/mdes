@@ -62,7 +62,9 @@ func _init_config() -> void:
 	if _base_config != null:
 		return
 	var MCP = preload("res://scripts/systems/monster_config.gd")
-	_base_config = MCP.DictProvider.new(DEFAULT_CONFIG, "soccer_defaults")
+	_base_config = MCP.load_class_defaults("soccer_dummy")
+	if not _base_config:
+		_base_config = MCP.DictProvider.new(DEFAULT_CONFIG, "soccer_defaults")
 	_config_stack = [_base_config]
 
 

@@ -171,3 +171,33 @@ static func apply_modifiers(config_stack: Array, key: String, base_val: float) -
 			"max":
 				val = minf(val, operand)
 	return val
+
+
+## Load a class default JSON file and return a DictProvider.
+## Checks user:// override first, then res:// default. Merges both.
+## Returns null if no file exists.
+static func load_class_defaults(class_name_str: String) -> Variant:
+	var data: Dictionary = {}
+	# Load base defaults from res://
+	var res_path: String = "res://data/config/class_defaults/%s.json" % class_name_str
+	if FileAccess.file_exists(res_path):
+		var file := FileAccess.open(res_path, FileAccess.READ)
+		if file:
+			var json := JSON.new()
+			if json.parse(file.get_as_text()) == OK and json.data is Dictionary:
+				data = json.data
+	# Merge user overrides on top (if they exist)
+	var user_path: String = "user://class_overrides/%s.json" % class_name_str
+	if FileAccess.file_exists(user_path):
+		var ufile := FileAccess.open(user_path, FileAccess.READ)
+		if ufile:
+			var ujson := JSON.new()
+			if ujson.parse(ufile.get_as_text()) == OK and ujson.data is Dictionary:
+				for key in ujson.data:
+					data[key] = ujson.data[key]
+	# Strip metadata keys
+	data.erase("_class")
+	data.erase("_comment")
+	if data.is_empty():
+		return null
+	return DictProvider.new(data, "%s_defaults" % class_name_str)

@@ -97,6 +97,23 @@ func remove_config(provider: Variant) -> void:
 # Default: nearly massless (mass=5) so the ball barely notices it.
 # Push modifiers to make the shackle heavier, bouncier, etc.
 
+func _init_class_config() -> void:
+	## Load class defaults from JSON file and push as base config provider.
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	var cls_name: String = PlayerHUD.CLASS_NAMES.get(character_class, "").to_lower()
+	if cls_name.is_empty():
+		return
+	var provider = MCP.load_class_defaults(cls_name)
+	if provider:
+		# Remove any existing class defaults provider (in case of class change)
+		for p in _config_stack:
+			if "_name" in p and p._name.ends_with("_defaults"):
+				_config_stack.erase(p)
+				break
+		# Push at bottom of stack (lowest priority — base defaults)
+		_config_stack.append(provider)
+
+
 func _init_spikeball_entity() -> void:
 	## Create the SpikeBallEntity node — persistent, owns ball config stack.
 	if _exec_ball_marker and is_instance_valid(_exec_ball_marker):
@@ -533,6 +550,7 @@ var _mana_bar: Node2D = null
 
 func _ready() -> void:
 	add_to_group("players")
+	_init_class_config()
 	_apply_class_sprite()
 	_update_player_label()
 	_update_controller_led()
