@@ -27,6 +27,42 @@ var current_hp: int = CHAIN_MAX_HP
 var _severed: bool = false
 var _owner_index: int = -1
 
+# Config stack — standard entity interface for chain physics tuning
+var entity_id: String = "chain"
+var _config_stack: Array = []
+var _base_config: Variant = null
+
+const DEFAULT_CONFIG := {
+	"damping": 0.85,
+	"gravity": 600.0,
+	"link_length": 8.0,
+	"max_hp": 200.0,
+}
+
+func cfg(key: String, default_val: float) -> float:
+	var val: float = default_val
+	for provider in _config_stack:
+		var pval: Variant = provider.get_value(key)
+		if pval != null:
+			val = float(pval)
+			break
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	val = MCP.apply_modifiers(_config_stack, key, val)
+	return val
+
+func push_config(provider: Variant) -> void:
+	_config_stack.insert(0, provider)
+
+func remove_config(provider: Variant) -> void:
+	_config_stack.erase(provider)
+
+func _init_config() -> void:
+	if _base_config != null:
+		return
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+	_base_config = MCP.DictProvider.new(DEFAULT_CONFIG, "chain_defaults")
+	_config_stack = [_base_config]
+
 # -- Chain segment positions (Jakobsen constraint) -----------------------------
 
 var _points: PackedVector2Array = PackedVector2Array()  # Current world positions
@@ -94,6 +130,8 @@ func _ready() -> void:
 
 
 func setup(a: Dictionary, b: Dictionary, length: float, owner_idx: int = -1) -> void:
+	_init_config()
+	add_to_group("entities")
 	anchor_a = a
 	anchor_b = b
 	target_length = clampf(length, CHAIN_MIN_LEN, CHAIN_MAX_LEN)
@@ -176,8 +214,8 @@ func _physics_process(delta: float) -> void:
 	_prev_points[_point_count - 1] = pos_b
 
 	# Verlet integration: position-based physics with implicit velocity
-	var gravity := Vector2(0, chain_gravity)
-	var damping: float = chain_damping
+	var gravity := Vector2(0, cfg("gravity", chain_gravity))
+	var damping: float = cfg("damping", chain_damping)
 	for i in range(1, _point_count - 1):
 		var current: Vector2 = _points[i]
 		var prev: Vector2 = _prev_points[i]
