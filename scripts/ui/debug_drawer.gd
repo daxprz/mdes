@@ -3739,113 +3739,7 @@ func _draw_cfg_sub_entities(x: float, y: float, pw: float, h: float, font: Font)
 		_panel.draw_string(font, Vector2(x + 6, y + local_y + 12), "(no entities in scene)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		local_y += entity_row_h
 
-	local_y += 4
-	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
-	local_y += 4
-
-	# -- Config sliders for selected entity --
-	if not selected_entity:
-		_panel.draw_string(font, Vector2(x, y + local_y + 14), "Click an entity to configure", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.5, 0.5))
-		return
-
-	# Entity info header
-	var has_cfg: bool = selected_entity.has_method("cfg")
-	var entity_type_label: String = ""
-	if selected_entity.get_script():
-		entity_type_label = selected_entity.get_script().resource_path.get_file().get_basename()
-	_panel.draw_string(font, Vector2(x, y + local_y + 12), entity_type_label, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 9, Color(0.9, 0.7, 0.3))
-
-	var props_text: String = ""
-	if "health" in selected_entity:
-		props_text += "HP:%d " % selected_entity.health
-	if "creature_scale" in selected_entity:
-		props_text += "scale:%.1f " % selected_entity.creature_scale
-	if "_chained" in selected_entity and selected_entity._chained:
-		props_text += "[chained] "
-	if "_state" in selected_entity:
-		props_text += "state:%d" % selected_entity._state
-	if not props_text.is_empty():
-		_panel.draw_string(font, Vector2(x + pw * 0.5, y + local_y + 12), props_text, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.48, 8, Color(0.6, 0.6, 0.6))
-	local_y += 16
-
-	# Show config sliders for entities that have cfg()
-	if not has_cfg:
-		_draw_entity_properties(x, y + local_y, pw, y + h, font, selected_entity)
-		return
-
-	var monster: Node2D = selected_entity
-	if _config_keys.is_empty():
-		_rebuild_config_keys(monster)
-
-	# Filter config keys
-	var filtered_keys: Array[String] = []
-	if _config_filter_text.is_empty():
-		filtered_keys.assign(_config_keys)
-	else:
-		var ft: String = _config_filter_text.to_lower()
-		for key in _config_keys:
-			if key.begins_with("# ") or ft in key.to_lower():
-				filtered_keys.append(key)
-
-	# Draw sliders
-	var slider_h: float = 16.0
-	var slider_gap: float = 2.0
-	var remaining_h: float = h - local_y - 10
-	var visible_count: int = int(remaining_h / (slider_h + slider_gap))
-	var max_scroll: int = maxi(0, filtered_keys.size() - visible_count)
-	_config_scroll_offset = clampi(_config_scroll_offset, 0, max_scroll)
-
-	for i in range(_config_scroll_offset, mini(_config_scroll_offset + visible_count, filtered_keys.size())):
-		var key: String = filtered_keys[i]
-
-		# Group header
-		if key.begins_with("# "):
-			_panel.draw_line(Vector2(x, y + local_y + 8), Vector2(x + pw - 16, y + local_y + 8), Color(0.2, 0.3, 0.4), 1.0)
-			_panel.draw_string(font, Vector2(x, y + local_y + 14), key.substr(2), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.75, 1.0))
-			local_y += slider_h + slider_gap
-			continue
-
-		# Resolve value — shackle: prefix routes through shackle_cfg()
-		var display_key: String = key
-		var default_val: float
-		var current_val: float
-		var is_modified: bool
-		if key.begins_with("shackle:"):
-			var skey: String = key.substr(8)
-			display_key = skey
-			default_val = _get_shackle_config_default(skey)
-			current_val = monster.shackle_cfg(skey, default_val) if monster.has_method("shackle_cfg") else default_val
-			is_modified = current_val != default_val
-		else:
-			default_val = _get_config_default(monster, key)
-			current_val = monster.cfg(key, default_val)
-			is_modified = monster._config_stack.size() > 1 and current_val != default_val
-
-		var label_col: Color = Color(1.0, 0.85, 0.3) if is_modified else Color(0.7, 0.7, 0.7)
-		_panel.draw_string(font, Vector2(x + 8, y + local_y + 11), display_key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 8, label_col)
-
-		var slider_x: float = x + pw * 0.47
-		var slider_w: float = pw * 0.35
-		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
-
-		var range_info: Vector2 = _get_config_range(key, default_val)
-		var t: float = clampf((current_val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
-		var fill_col: Color = Color(0.3, 0.6, 1.0) if not is_modified else Color(1.0, 0.7, 0.2)
-		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), fill_col)
-
-		var handle_x: float = slider_x + slider_w * t
-		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color.WHITE)
-
-		_panel.draw_string(font, Vector2(x + pw * 0.84, y + local_y + 11), "%.2f" % current_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, label_col)
-
-		local_y += slider_h + slider_gap
-
-	# Scrollbar
-	if filtered_keys.size() > visible_count and visible_count > 0:
-		var pct: float = float(_config_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
-		var bar_h: float = maxf(20.0, remaining_h * float(visible_count) / float(filtered_keys.size()))
-		var bar_y: float = y + (h - remaining_h) + pct * (remaining_h - bar_h)
-		_panel.draw_rect(Rect2(x + pw - 4, bar_y, 3, bar_h), Color(0.3, 0.3, 0.4, 0.5))
+	# Entities list is now a pure list — sliders moved to Class editor and Entity Stats
 
 
 func _draw_cfg_sub_blueprints(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -4087,11 +3981,62 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
-	## Class editor — sliders for base stats of selected class.
+	## Class editor — sliders for base stats loaded from class default JSON.
 	if _cfg_selected_class < 0:
 		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a class above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		return
-	_panel.draw_string(font, Vector2(x + 4, y + 11), "Class editor — coming soon", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.5))
+
+	# Resolve class name
+	var cls_name: String = ""
+	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	if _cfg_selected_class >= 0:
+		cls_name = PlayerHUD.CLASS_NAMES.get(_cfg_selected_class, "").to_lower()
+	elif _cfg_selected_class <= -100:
+		var idx: int = -100 - _cfg_selected_class
+		if idx >= 0 and idx < extra_classes.size():
+			cls_name = extra_classes[idx]
+
+	if cls_name.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Unknown class", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.3, 0.3))
+		return
+
+	# Load class defaults
+	var MCP = load("res://scripts/systems/monster_config.gd")
+	var provider = MCP.load_class_defaults(cls_name)
+	if not provider:
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "No defaults for '%s'" % cls_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.3, 0.3))
+		return
+
+	# Get all keys from the provider
+	var data: Dictionary = provider._data
+	var local_y: float = 0.0
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+
+	for key in data:
+		if y + local_y > y + h:
+			break
+		var val: float = float(data[key])
+		var range_info: Vector2 = _get_config_range(key, val)
+		var t: float = clampf((val - range_info.x) / maxf(range_info.y - range_info.x, 0.001), 0.0, 1.0)
+
+		# Key label
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.42, 8, Color(0.7, 0.7, 0.7))
+
+		# Slider track
+		var slider_x: float = x + pw * 0.45
+		var slider_w: float = pw * 0.35
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w, 8), Color(0.1, 0.1, 0.15))
+		_panel.draw_rect(Rect2(slider_x, y + local_y + 4, slider_w * t, 8), Color(0.3, 0.6, 1.0))
+
+		# Handle
+		var handle_x: float = slider_x + slider_w * t
+		_panel.draw_rect(Rect2(handle_x - 2, y + local_y + 2, 4, 12), Color(0.8, 0.8, 0.8))
+
+		# Value
+		_panel.draw_string(font, Vector2(x + pw * 0.83, y + local_y + 11), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.7))
+
+		local_y += slider_h + slider_gap
 
 
 func _draw_cfg_sub_entity_mods(x: float, y: float, pw: float, h: float, font: Font) -> void:
