@@ -170,11 +170,26 @@ var _cfg_bp_editor_scroll: int = 0       # Scroll offset in the blueprint editor
 var _cfg_cached_bp_names: Array[String] = []
 var _cfg_bp_names_dirty: bool = true
 
+# Class selection
+var _cfg_selected_class: int = -1          # CharacterClass enum value (-1 = none)
+var _cfg_class_scroll_offset: int = 0
+
+# Stat selection for calculations
+var _cfg_selected_stat: String = ""        # Config key selected in Entity Stats
+var _cfg_stat_cache: Array = []            # Cached calculation steps for selected stat
+var _cfg_stat_cache_dirty: bool = true
+
 const CFG_SUB_MIN := {
-	"cfg_settings":   30.0,
-	"cfg_entities":   60.0,
-	"cfg_blueprints": 36.0,
-	"cfg_instances":  36.0,
+	"cfg_settings":    30.0,
+	"cfg_classes":     30.0,
+	"cfg_class":       36.0,
+	"cfg_entities":    36.0,
+	"cfg_entity_mods": 30.0,
+	"cfg_entity_stats":36.0,
+	"cfg_calculations":30.0,
+	"cfg_modifiers":   36.0,
+	"cfg_modifier":    36.0,
+	"cfg_modified_ents":30.0,
 }
 
 # Test runner section state — sub-section framework
@@ -2650,21 +2665,27 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 
 		var body_y: float = y + SUB_HEADER_H
 		var body_h: float
-		if sub["id"] == "cfg_instances":
+		if sub["id"] == "cfg_modified_ents":
 			# Last section fills remaining space
-			body_h = maxf(CFG_SUB_MIN["cfg_instances"] - SUB_HEADER_H, ph - body_y)
+			body_h = maxf(CFG_SUB_MIN["cfg_modified_ents"] - SUB_HEADER_H, ph - body_y)
 		else:
 			body_h = sub["height"] - SUB_HEADER_H
 
 		if body_h > 0:
 			match sub["id"]:
-				"cfg_settings":   _draw_cfg_sub_settings(x, body_y, pw, body_h, font)
-				"cfg_entities":   _draw_cfg_sub_entities(x, body_y, pw, body_h, font)
-				"cfg_blueprints": _draw_cfg_sub_blueprints(x, body_y, pw, body_h, font)
-				"cfg_instances":  _draw_cfg_sub_instances(x, body_y, pw, body_h, font)
+				"cfg_settings":    _draw_cfg_sub_settings(x, body_y, pw, body_h, font)
+				"cfg_classes":     _draw_cfg_sub_classes(x, body_y, pw, body_h, font)
+				"cfg_class":       _draw_cfg_sub_class(x, body_y, pw, body_h, font)
+				"cfg_entities":    _draw_cfg_sub_entities(x, body_y, pw, body_h, font)
+				"cfg_entity_mods": _draw_cfg_sub_entity_mods(x, body_y, pw, body_h, font)
+				"cfg_entity_stats":_draw_cfg_sub_entity_stats(x, body_y, pw, body_h, font)
+				"cfg_calculations":_draw_cfg_sub_calculations(x, body_y, pw, body_h, font)
+				"cfg_modifiers":   _draw_cfg_sub_blueprints(x, body_y, pw, body_h, font)
+				"cfg_modifier":    _draw_cfg_sub_modifier(x, body_y, pw, body_h, font)
+				"cfg_modified_ents":_draw_cfg_sub_modified_ents(x, body_y, pw, body_h, font)
 
 		# Snap indicator during resize
-		if _cfg_sub_resize_idx == si and sub["id"] != "cfg_instances":
+		if _cfg_sub_resize_idx == si and sub["id"] != "cfg_modified_ents":
 			var snap_h: float = _get_cfg_preferred_height(sub["id"])
 			var snap_y: float = y + snap_h
 			var near_snap: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
@@ -2676,12 +2697,12 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 			if near_snap:
 				_panel.draw_string(font, Vector2(x + pw - 40, snap_y - 3), "snap", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, snap_col)
 
-		if sub["id"] == "cfg_instances":
+		if sub["id"] == "cfg_modified_ents":
 			y += body_h + SUB_HEADER_H
 		else:
 			y += sub["height"]
 
-		if sub["id"] != "cfg_instances":
+		if sub["id"] != "cfg_modified_ents":
 			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.15, 0.2, 0.3, 0.4), 1.0)
 
 
@@ -3221,11 +3242,23 @@ func _get_config_range(key: String, default_val: float) -> Vector2:
 
 func _init_cfg_subsections() -> void:
 	_cfg_subsections = []
-	for sid in ["cfg_settings", "cfg_entities", "cfg_blueprints", "cfg_instances"]:
+	var sids: Array[String] = [
+		"cfg_settings",      # 1. Game Settings
+		"cfg_classes",       # 2. Classes list
+		"cfg_class",         # 3. Class editor
+		"cfg_entities",      # 4. Entities list
+		"cfg_entity_mods",   # 5. Entity Mods
+		"cfg_entity_stats",  # 6. Entity Stats table
+		"cfg_calculations",  # 7. Calculations breakdown
+		"cfg_modifiers",     # 8. Modifier blueprints list
+		"cfg_modifier",      # 9. Modifier editor
+		"cfg_modified_ents", # 10. Modified Entities
+	]
+	for sid in sids:
 		_cfg_subsections.append({
 			"id": sid,
 			"title": _cfg_sub_title(sid),
-			"collapsed": false,
+			"collapsed": sid in ["cfg_class", "cfg_calculations", "cfg_modified_ents"],  # Start collapsed
 			"height": _get_cfg_preferred_height(sid),
 		})
 	var had_cfg_layout: bool = FileAccess.file_exists("user://config_panel_layout.json")
@@ -3239,9 +3272,38 @@ func _init_cfg_subsections() -> void:
 func _cfg_sub_title(sid: String) -> String:
 	match sid:
 		"cfg_settings": return "Game Settings"
+		"cfg_classes": return "Classes"
+		"cfg_class":
+			if _cfg_selected_class >= 0:
+				var cls_name: String = PlayerHUD.CLASS_NAMES.get(_cfg_selected_class, "")
+				return "Class (%s)" % cls_name if not cls_name.is_empty() else "Class"
+			return "Class"
 		"cfg_entities": return "Entities"
-		"cfg_blueprints": return "Mod Blueprints"
-		"cfg_instances": return "Mod Instances"
+		"cfg_entity_mods":
+			var sel: Node2D = _get_selected_entity()
+			if sel:
+				return "Entity Mods (%s)" % _cfg_get_entity_display_name(sel)
+			return "Entity Mods"
+		"cfg_entity_stats":
+			var sel: Node2D = _get_selected_entity()
+			if sel:
+				return "Entity Stats (%s)" % _cfg_get_entity_display_name(sel)
+			return "Entity Stats"
+		"cfg_calculations":
+			if not _cfg_selected_stat.is_empty():
+				var sel: Node2D = _get_selected_entity()
+				var ename: String = _cfg_get_entity_display_name(sel) if sel else ""
+				return "Calc (%s:%s)" % [ename, _cfg_selected_stat]
+			return "Calculations"
+		"cfg_modifiers": return "Modifiers"
+		"cfg_modifier":
+			if not _cfg_selected_blueprint.is_empty():
+				return "Modifier (%s)" % _cfg_selected_blueprint
+			return "Modifier"
+		"cfg_modified_ents":
+			if not _cfg_selected_blueprint.is_empty():
+				return "Modified (%s)" % _cfg_selected_blueprint
+			return "Modified Entities"
 	return sid
 
 
@@ -3282,28 +3344,34 @@ func _auto_snap_cfg() -> void:
 		var delta: float = preferred - sub["height"]
 		sub["height"] = preferred
 		last["height"] -= delta
-	if last["height"] < CFG_SUB_MIN.get("cfg_instances", 36.0):
-		last["height"] = CFG_SUB_MIN.get("cfg_instances", 36.0)
+	if last["height"] < CFG_SUB_MIN.get("cfg_modified_ents", 36.0):
+		last["height"] = CFG_SUB_MIN.get("cfg_modified_ents", 36.0)
 
 
 func _get_cfg_preferred_height(sid: String) -> float:
 	match sid:
 		"cfg_settings":
-			# 1 toggle row + padding
 			return SUB_HEADER_H + 1 * 18.0 + 8.0
+		"cfg_classes":
+			return SUB_HEADER_H + clampi(PlayerHUD.ALL_CLASSES.size() + 2, 4, 10) * 16.0 + 4.0
+		"cfg_class":
+			return SUB_HEADER_H + 8 * 16.0 + 4.0  # ~8 sliders
 		"cfg_entities":
-			# Filter + entity list + selected entity sliders
 			var entity_count: int = _get_all_entities().size()
-			var rows: int = maxi(2, entity_count) + 2  # +2 for filter + entity header
-			if _get_selected_entity():
-				rows += 8  # Extra rows for entity info + sliders
-			return SUB_HEADER_H + clampi(rows, 4, 16) * 16.0 + 4.0
-		"cfg_blueprints":
+			return SUB_HEADER_H + clampi(entity_count + 1, 3, 10) * 16.0 + 4.0
+		"cfg_entity_mods":
+			return SUB_HEADER_H + 4 * 16.0 + 4.0
+		"cfg_entity_stats":
+			return SUB_HEADER_H + 8 * 14.0 + 4.0  # ~8 stat rows
+		"cfg_calculations":
+			return SUB_HEADER_H + 4 * 14.0 + 4.0
+		"cfg_modifiers":
 			var count: int = maxi(2, _cfg_cached_bp_names.size())
-			return SUB_HEADER_H + clampi(count, 2, 6) * 16.0 + 60.0  # +editor area
-		"cfg_instances":
-			var count: int = _cfg_count_active_modifiers()
-			return SUB_HEADER_H + clampi(count, 2, 8) * 16.0 + 4.0
+			return SUB_HEADER_H + clampi(count, 2, 6) * 16.0 + 4.0
+		"cfg_modifier":
+			return SUB_HEADER_H + 6 * 16.0 + 20.0  # Sliders + buttons
+		"cfg_modified_ents":
+			return SUB_HEADER_H + 3 * 16.0 + 4.0
 	return SUB_HEADER_H + 40.0
 
 
@@ -3570,11 +3638,20 @@ func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictio
 	var ctx_text: String = ""
 	var ctx_col := Color(0.4, 0.6, 0.8)
 	match sub["id"]:
+		"cfg_classes":
+			ctx_text = "%d" % (PlayerHUD.ALL_CLASSES.size() + 5)  # +5 physics entity classes
 		"cfg_entities":
 			ctx_text = "%d" % _get_all_entities().size()
-		"cfg_blueprints":
+		"cfg_entity_mods":
+			var sel: Node2D = _get_selected_entity()
+			if sel and "_config_stack" in sel:
+				ctx_text = "%d providers" % sel._config_stack.size()
+		"cfg_entity_stats":
+			if not _config_keys.is_empty():
+				ctx_text = "%d keys" % _config_keys.size()
+		"cfg_modifiers":
 			ctx_text = "%d" % _cfg_cached_bp_names.size()
-		"cfg_instances":
+		"cfg_modified_ents":
 			var count: int = _cfg_count_active_modifiers()
 			if count > 0:
 				ctx_text = "%d active" % count
@@ -3974,6 +4051,245 @@ func _draw_cfg_sub_instances(x: float, y: float, pw: float, h: float, font: Font
 		_panel.draw_string(font, Vector2(x + 4, y + local_y + 11), "(no active modifiers)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 
 
+func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Classes list — click to select a class for editing.
+	var row_h: float = 16.0
+	var all_classes: Array = PlayerHUD.ALL_CLASSES
+	# Also add physics entity "classes"
+	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	var local_y: float = 0.0
+
+	for i in range(all_classes.size()):
+		if y + local_y > y + h:
+			break
+		var cls: int = all_classes[i]
+		var cls_name: String = PlayerHUD.CLASS_NAMES.get(cls, "?")
+		var is_sel: bool = (_cfg_selected_class == cls)
+		if is_sel:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.2, 0.15))
+		var col: Color = Color(0.5, 1.0, 0.5) if is_sel else Color(0.6, 0.6, 0.6)
+		var cls_col: Color = PlayerHUD.CLASS_COLORS.get(cls, Color(0.5, 0.5, 0.5))
+		_panel.draw_rect(Rect2(x + 2, y + local_y + 3, 8, row_h - 6), cls_col)
+		_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), cls_name, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
+		local_y += row_h
+
+	# Physics entity classes
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
+	local_y += 2
+	for ec in extra_classes:
+		if y + local_y > y + h:
+			break
+		var is_sel: bool = (_cfg_selected_class == -100 - extra_classes.find(ec))  # Negative IDs for physics entities
+		if is_sel:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 2), Color(0.15, 0.15, 0.2))
+		var col: Color = Color(0.5, 0.8, 1.0) if is_sel else Color(0.5, 0.5, 0.5)
+		_panel.draw_string(font, Vector2(x + 14, y + local_y + 11), ec, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 9, col)
+		local_y += row_h
+
+
+func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Class editor — sliders for base stats of selected class.
+	if _cfg_selected_class < 0:
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a class above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	_panel.draw_string(font, Vector2(x + 4, y + 11), "Class editor — coming soon", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.5))
+
+
+func _draw_cfg_sub_entity_mods(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Entity Mods — modifiers applied to selected entity.
+	var sel: Node2D = _get_selected_entity()
+	if not sel:
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select an entity", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	if not sel.has_method("cfg") or not "_config_stack" in sel:
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "(no config stack)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	var row_h: float = 14.0
+	var local_y: float = 0.0
+	for provider in sel._config_stack:
+		if y + local_y > y + h:
+			break
+		var pname: String = provider._name if "_name" in provider else str(provider)
+		var is_mod: bool = provider.has_method("is_modifier") and provider.is_modifier()
+		var col: Color = Color(0.7, 0.85, 1.0) if is_mod else Color(0.5, 0.5, 0.5)
+		var type_str: String = "MOD" if is_mod else "BASE"
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 10), type_str, HORIZONTAL_ALIGNMENT_LEFT, 30, 7, col * 0.7)
+		_panel.draw_string(font, Vector2(x + 36, y + local_y + 10), pname, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.6, 8, col)
+		local_y += row_h
+	if sel._config_stack.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "(no providers)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+
+
+func _draw_cfg_sub_entity_stats(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Entity Stats — Stat / Base / Mods / Curr table.
+	var sel: Node2D = _get_selected_entity()
+	if not sel or not sel.has_method("cfg"):
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select an entity with cfg()", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	# Header row
+	var local_y: float = 0.0
+	var col_stat_x: float = x + 4
+	var col_base_x: float = x + pw * 0.45
+	var col_mods_x: float = x + pw * 0.65
+	var col_curr_x: float = x + pw * 0.78
+	_panel.draw_string(font, Vector2(col_stat_x, y + 10), "Stat", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(col_base_x, y + 10), "Base", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(col_mods_x, y + 10), "Mods", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(col_curr_x, y + 10), "Curr", HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.5, 0.5, 0.6))
+	local_y += 14.0
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.2, 0.3, 0.4), 1.0)
+	local_y += 2
+
+	# Build stat rows from config keys
+	if _config_keys.is_empty():
+		_rebuild_config_keys(sel)
+	var row_h: float = 13.0
+	for key in _config_keys:
+		if y + local_y > y + h:
+			break
+		if key.begins_with("# "):
+			# Group header
+			_panel.draw_string(font, Vector2(col_stat_x, y + local_y + 9), key.substr(2), HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.4, 0.6, 0.8))
+			local_y += row_h
+			continue
+		# Resolve values
+		var default_val: float = _get_config_default(sel, key)
+		var base_val: float = default_val
+		var curr_val: float = sel.cfg(key, default_val)
+		# Count modifiers touching this key
+		var mod_count: int = 0
+		if "_config_stack" in sel:
+			for provider in sel._config_stack:
+				if provider.has_method("is_modifier") and provider.is_modifier() and provider.has_method("has_modifier"):
+					if provider.has_modifier(key):
+						mod_count += 1
+		var is_modified: bool = curr_val != base_val
+		var is_sel_stat: bool = (_cfg_selected_stat == key)
+		if is_sel_stat:
+			_panel.draw_rect(Rect2(x, y + local_y, pw - 16, row_h - 1), Color(0.15, 0.2, 0.25))
+		var stat_col: Color = Color(1.0, 0.85, 0.3) if is_modified else Color(0.6, 0.6, 0.6)
+		_panel.draw_string(font, Vector2(col_stat_x, y + local_y + 9), key, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.40, 7, stat_col)
+		_panel.draw_string(font, Vector2(col_base_x, y + local_y + 9), "%.1f" % base_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.5, 0.5, 0.5))
+		if mod_count > 0:
+			_panel.draw_string(font, Vector2(col_mods_x, y + local_y + 9), "%d" % mod_count, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.8, 0.6, 1.0))
+		_panel.draw_string(font, Vector2(col_curr_x, y + local_y + 9), "%.1f" % curr_val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, stat_col)
+		local_y += row_h
+
+
+func _draw_cfg_sub_calculations(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Calculations — breakdown of how a selected stat is computed.
+	if _cfg_selected_stat.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Click a stat above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	var sel: Node2D = _get_selected_entity()
+	if not sel or not sel.has_method("cfg") or not "_config_stack" in sel:
+		return
+	# Walk config stack and show each provider's contribution
+	var local_y: float = 0.0
+	var row_h: float = 13.0
+	var key: String = _cfg_selected_stat
+	var default_val: float = _get_config_default(sel, key)
+	var val: float = default_val
+	# Header
+	_panel.draw_string(font, Vector2(x + 4, y + local_y + 9), "Step", HORIZONTAL_ALIGNMENT_LEFT, 30, 7, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(x + 36, y + local_y + 9), "Source", HORIZONTAL_ALIGNMENT_LEFT, pw * 0.3, 7, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(x + pw * 0.48, y + local_y + 9), "Op", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(x + pw * 0.62, y + local_y + 9), "Value", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.5, 0.6))
+	_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 9), "Result", HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.5, 0.5, 0.6))
+	local_y += row_h + 2
+	# Base value
+	_panel.draw_string(font, Vector2(x + 4, y + local_y + 9), "base", HORIZONTAL_ALIGNMENT_LEFT, 30, 7, Color(0.5, 0.7, 0.5))
+	_panel.draw_string(font, Vector2(x + 36, y + local_y + 9), "default", HORIZONTAL_ALIGNMENT_LEFT, pw * 0.3, 7, Color(0.5, 0.5, 0.5))
+	_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 9), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.7, 0.7, 0.7))
+	local_y += row_h
+	# Walk base providers (first non-null wins)
+	for provider in sel._config_stack:
+		if provider.has_method("is_modifier") and provider.is_modifier():
+			continue
+		var pval = provider.get_value(key)
+		if pval != null:
+			val = float(pval)
+			var pname: String = provider._name if "_name" in provider else "?"
+			_panel.draw_string(font, Vector2(x + 4, y + local_y + 9), "set", HORIZONTAL_ALIGNMENT_LEFT, 30, 7, Color(1.0, 0.7, 0.3))
+			_panel.draw_string(font, Vector2(x + 36, y + local_y + 9), pname, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.3, 7, Color(0.7, 0.7, 0.7))
+			_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 9), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.9, 0.9, 0.9))
+			local_y += row_h
+			break
+	# Walk modifier providers (applied in reverse order in apply_modifiers)
+	var step: int = 1
+	for i in range(sel._config_stack.size() - 1, -1, -1):
+		if y + local_y > y + h:
+			break
+		var provider = sel._config_stack[i]
+		if not provider.has_method("is_modifier") or not provider.is_modifier():
+			continue
+		if not provider.has_method("get_modifier"):
+			continue
+		var mod = provider.get_modifier(key)
+		if mod == null:
+			continue
+		var op: String = str(mod[0])
+		var operand: float = float(mod[1])
+		var prev_val: float = val
+		match op:
+			"multiply": val *= operand
+			"add": val += operand
+			"set": val = operand
+			"min": val = maxf(val, operand)
+			"max": val = minf(val, operand)
+		var pname: String = provider._name if "_name" in provider else "?"
+		var op_col: Color = Color(0.8, 0.6, 1.0)
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 9), "%d" % step, HORIZONTAL_ALIGNMENT_LEFT, 30, 7, Color(0.5, 0.5, 0.5))
+		_panel.draw_string(font, Vector2(x + 36, y + local_y + 9), pname, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.3, 7, Color(0.7, 0.7, 0.7))
+		_panel.draw_string(font, Vector2(x + pw * 0.48, y + local_y + 9), op, HORIZONTAL_ALIGNMENT_LEFT, 40, 7, op_col)
+		_panel.draw_string(font, Vector2(x + pw * 0.62, y + local_y + 9), "%.2f" % operand, HORIZONTAL_ALIGNMENT_LEFT, 40, 7, Color(0.7, 0.7, 0.7))
+		_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 9), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 7, Color(0.9, 0.9, 0.9))
+		local_y += row_h
+		step += 1
+	# Final
+	_panel.draw_line(Vector2(x, y + local_y), Vector2(x + pw - 16, y + local_y), Color(0.3, 0.4, 0.3), 1.0)
+	local_y += 2
+	_panel.draw_string(font, Vector2(x + 4, y + local_y + 9), "final", HORIZONTAL_ALIGNMENT_LEFT, 30, 7, Color(0.3, 1.0, 0.3))
+	_panel.draw_string(font, Vector2(x + pw * 0.80, y + local_y + 9), "%.2f" % val, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.3, 1.0, 0.3))
+
+
+func _draw_cfg_sub_modifier(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Modifier editor — same as old _draw_cfg_sub_blueprints editor area.
+	## Reuses the blueprint editor drawing from the existing code.
+	if _cfg_selected_blueprint.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a modifier above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	# Delegate to the existing blueprint editor drawing (it handles cached data, sliders, buttons)
+	# The _draw_cfg_sub_blueprints function handles list + editor. Here we just draw the editor part.
+	_panel.draw_string(font, Vector2(x + 4, y + 11), "Modifier editor — use Modifiers list above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.5))
+
+
+func _draw_cfg_sub_modified_ents(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Modified Entities — entities with the selected modifier applied.
+	if _cfg_selected_blueprint.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a modifier", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+	var row_h: float = 14.0
+	var local_y: float = 0.0
+	var bp_name: String = _cfg_selected_blueprint
+	for entity in _get_all_entities():
+		if not "_config_stack" in entity:
+			continue
+		for provider in entity._config_stack:
+			if provider.has_method("is_modifier") and provider.is_modifier():
+				if "_name" in provider and provider._name == bp_name:
+					if y + local_y > y + h:
+						break
+					var eid: String = _cfg_entity_id_str(entity)
+					var etype: String = _cfg_get_entity_type(entity)
+					_panel.draw_string(font, Vector2(x + 4, y + local_y + 10), eid, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.5, 8, Color(0.7, 0.85, 1.0))
+					_panel.draw_string(font, Vector2(x + pw * 0.52, y + local_y + 10), etype, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.4, 7, Color(0.5, 0.5, 0.5))
+					local_y += row_h
+					break  # One entry per entity
+	if local_y == 0:
+		_panel.draw_string(font, Vector2(x + 4, y + 11), "(no entities)", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+
+
 func _cfg_get_entity_display_name(e: Node2D) -> String:
 	## Returns display name for an entity in the entity list.
 	var is_player_entity: bool = "player_index" in e and "character_class" in e
@@ -4050,7 +4366,7 @@ func _handle_cfg_click(lx: float, my: float) -> void:
 
 		var body_y: float = header_end
 		var body_end: float = y + sub["height"]
-		if sub["id"] == "cfg_instances":
+		if sub["id"] == "cfg_modified_ents":
 			body_end = maxf(body_end, 9999.0)  # Last section fills remaining space
 
 		if my >= body_y and my < body_end:
@@ -4069,7 +4385,7 @@ func _handle_cfg_subsection_click(sub_id: String, lx: float, local_y: float, bod
 			_handle_cfg_entities_click(lx, local_y, body_h)
 		"cfg_blueprints":
 			_handle_cfg_blueprints_click(lx, local_y, body_h)
-		"cfg_instances":
+		"cfg_modified_ents":
 			_handle_cfg_instances_click(lx, local_y, body_h)
 
 
@@ -4309,7 +4625,7 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 			y += SUB_HEADER_H
 			continue
 		var sub_end: float = y + sub["height"]
-		if sub["id"] == "cfg_instances":
+		if sub["id"] == "cfg_modified_ents":
 			sub_end = 9999.0
 		if my >= y and my < sub_end:
 			match sub["id"]:
@@ -4317,7 +4633,7 @@ func _handle_cfg_scroll(my: float, delta: int) -> void:
 					_config_scroll_offset = maxi(0, _config_scroll_offset + delta)
 				"cfg_blueprints":
 					_cfg_blueprints_scroll_offset = maxi(0, _cfg_blueprints_scroll_offset + delta)
-				"cfg_instances":
+				"cfg_modified_ents":
 					_cfg_instances_scroll_offset = maxi(0, _cfg_instances_scroll_offset + delta)
 			return
 		y += sub["height"]
@@ -4338,7 +4654,7 @@ func _handle_cfg_hover(my: float) -> void:
 			continue
 		var body_y: float = y + SUB_HEADER_H
 		var sub_end: float = y + sub["height"]
-		if sub["id"] == "cfg_instances":
+		if sub["id"] == "cfg_modified_ents":
 			sub_end = 9999.0
 		if my >= body_y and my < sub_end:
 			var local_y: float = my - body_y
@@ -4352,7 +4668,7 @@ func _handle_cfg_hover(my: float) -> void:
 					var bp_local: float = local_y - 20  # After filter
 					if bp_local >= 0:
 						_cfg_hover_blueprint_idx = int(bp_local / 16.0) + _cfg_blueprints_scroll_offset
-				"cfg_instances":
+				"cfg_modified_ents":
 					var mod_local: float = local_y - 20  # After filter
 					if mod_local >= 0:
 						_cfg_hover_instance_idx = int(mod_local / 16.0) + _cfg_instances_scroll_offset
