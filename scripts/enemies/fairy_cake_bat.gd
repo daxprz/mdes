@@ -41,11 +41,7 @@ const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
 var _health_bar: Node2D = null
 
 
-static var _bat_counter: int = 0
-
 func _ready() -> void:
-	_bat_counter += 1
-	name = "bat_%02d" % _bat_counter
 	add_to_group("enemies")
 	add_to_group("animals")
 	set_meta("faction", "animals")
