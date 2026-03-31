@@ -1035,6 +1035,7 @@ func _execute(command: String) -> String:
 			var spawn_y: float = 876.0
 			var ai_name: String = ""
 			var ai_class: String = "executioner"
+			var ai_state: Dictionary = {}  # Generic key=value state to apply after spawn
 			if parts.size() >= 3:
 				spawn_x = float(parts[1])
 				spawn_y = float(parts[2])
@@ -1043,7 +1044,19 @@ func _execute(command: String) -> String:
 					ai_name = parts[pi].substr(5)
 				elif parts[pi].begins_with("class="):
 					ai_class = parts[pi].substr(6).to_lower()
-			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y), ai_name, ai_class)
+				elif parts[pi].contains("="):
+					var kv: PackedStringArray = parts[pi].split("=", true, 1)
+					ai_state[kv[0]] = kv[1]
+			var result: String = _cmd_ai_spawn(Vector2(spawn_x, spawn_y), ai_name, ai_class)
+			if result.begins_with("OK") and not ai_state.is_empty():
+				# Find the spawned player and apply state
+				var spawned: Node2D = null
+				for p in get_tree().get_nodes_in_group("players"):
+					if p.has_method("ai_queue_cmd") and "_ai_active" in p and p._ai_active:
+						spawned = p
+				if spawned:
+					result += _apply_entity_state(spawned, ai_state)
+			return result
 
 		"exec_test":
 			# AI throw test: exec_test [angle_deg] [hold_secs] [x y]
@@ -1097,6 +1110,18 @@ func _execute(command: String) -> String:
 					p.reset_state()
 					count += 1
 			return "OK: reset %d players" % count
+
+		"exec_mode":
+			# Set executioner chain mode: exec_mode <release|hold_release|hold_hold>
+			if parts.size() < 2:
+				return "ERR: usage: exec_mode <release|hold_release|hold_hold>"
+			for p in get_tree().get_nodes_in_group("players"):
+				if "_exec_chain_mode" in p:
+					var applied: String = _apply_entity_state(p, {"mode": parts[1]})
+					if not applied.is_empty():
+						return "OK:%s" % applied
+					return "ERR: unknown mode '%s'. Use: release, hold_release, hold_hold" % parts[1]
+			return "ERR: no executioner player found"
 
 		"exec_get":
 			# Read current tuning values: exec_get [key]
@@ -1265,7 +1290,10 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			dummy.collision_mask = 1   # World
 			dummy.entity_id = dummy_id
 			container.add_child(dummy)
-			return "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
+			var dummy_result: String = "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]
+			if not spawn_config.is_empty():
+				dummy_result += _apply_entity_state(dummy, spawn_config)
+			return dummy_result
 
 		"player_monster":
 			# Spawn a player-controlled monster. device=-1 for keyboard, 0+ for controller.
@@ -3003,6 +3031,66 @@ func _cmd_list_tests() -> String:
 					lines.append("  %s" % fname.get_basename())
 				fname = dir.get_next()
 	return "\n".join(lines)
+
+
+func _apply_entity_state(entity: Node2D, state: Dictionary) -> String:
+	## Apply key=value state to an entity. Handles semantic keys (mode, facing)
+	## and falls back to direct property assignment for anything else.
+	var applied: Array[String] = []
+	for key in state:
+		var val: String = state[key]
+		match key:
+			"mode":
+				# Chain mode for Executioner
+				if "_exec_chain_mode" in entity:
+					match val.to_lower():
+						"release", "r":
+							entity._exec_chain_mode = entity.ExecChainMode.RELEASE_RELEASE
+						"hold_release", "hr":
+							entity._exec_chain_mode = entity.ExecChainMode.HOLD_RELEASE
+						"hold_hold", "hh":
+							entity._exec_chain_mode = entity.ExecChainMode.HOLD_HOLD
+					applied.append("mode=%s" % val)
+			"facing":
+				if "_facing_right" in entity:
+					if val == "left":
+						entity._facing_right = false
+						if "_facing_target" in entity:
+							entity._facing_target = -1.0
+					elif val == "right":
+						entity._facing_right = true
+						if "_facing_target" in entity:
+							entity._facing_target = 1.0
+					applied.append("facing=%s" % val)
+			"throw_mode":
+				# Ball-first vs shackle-first
+				if "_exec_throw_mode" in entity:
+					match val.to_lower():
+						"ball", "ball_first":
+							entity._exec_throw_mode = entity.ExecThrowMode.BALL_FIRST
+						"shackle", "shackle_first":
+							entity._exec_throw_mode = entity.ExecThrowMode.SHACKLE_FIRST
+					applied.append("throw_mode=%s" % val)
+			"standdown":
+				if "_standdown" in entity:
+					entity._standdown = val.to_lower() in ["true", "1", "on", "yes"]
+					applied.append("standdown=%s" % val)
+			_:
+				# Generic property set — try to set directly on the entity
+				if key in entity:
+					var prop_val = entity.get(key)
+					if prop_val is float:
+						entity.set(key, float(val))
+					elif prop_val is int:
+						entity.set(key, int(val))
+					elif prop_val is bool:
+						entity.set(key, val.to_lower() in ["true", "1", "on", "yes"])
+					elif prop_val is String:
+						entity.set(key, val)
+					applied.append("%s=%s" % [key, val])
+	if applied.is_empty():
+		return ""
+	return " [%s]" % ", ".join(applied)
 
 
 func _get_all_entities() -> Array:

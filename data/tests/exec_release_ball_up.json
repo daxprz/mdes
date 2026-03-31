@@ -1,24 +1,25 @@
 {
-	"name": "exec_release_ball_up",
-	"script": [
-		"level flat_floor",
-		"wait 0.3",
-		"clear",
-		"portal off",
-		"clearplayers",
-		"ai_spawn 960 876 class=executioner",
-		"wait 0.3",
-		"ai_cmd interact 0.05",
-		"wait 0.15",
-		"ai_cmd interact 0.05",
-		"wait 0.3",
-		"ai_cmd grapple 1.5 0.87 -0.50",
-		"wait 0.1",
-		"ai_cmd none 5.0",
-		"wait 5",
-		"ai_off",
-		"enablejoins",
-		"gameconfig multiple_players_same_class true",
-		"notify observations exec_release_ball_up [\"OK\",\"RETRY\"] 0 editor"
-	]
+  "name": "exec_release_ball_up",
+  "description": "Release mode: throw ball up-right. Player should NOT be yanked (released chain).",
+  "debug": {
+    "log": ["executioner/throw", "executioner/ball"]
+  },
+  "script": [
+    "level flat_floor",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "ai_spawn 960 876 class=executioner name=AI mode=release",
+    "wait 0.5",
+    "announce Throwing ball up-right in Release mode",
+    "ai_cmd grapple 1.5 0.87 -0.50",
+    "wait 0.1",
+    "ai_cmd none 5.0",
+    "wait 5",
+    "ai_off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify observations exec_release_ball_up [\"OK\",\"RETRY\"] 0 editor"
+  ]
 }
