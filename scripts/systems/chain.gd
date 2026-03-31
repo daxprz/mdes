@@ -527,16 +527,18 @@ func _get_creature_scale(anchor: Dictionary) -> float:
 
 
 func _draw_selection_glow() -> void:
-	## Draw pulsing blue aura behind the chain — called by _glow_node.
+	## Draw pulsing blue aura behind the chain — single continuous polyline.
 	if _points.size() < 2:
 		return
 	var cs: float = maxf(_get_creature_scale(anchor_a), _get_creature_scale(anchor_b))
 	var pulse: float = 0.25 + 0.2 * sin(Time.get_ticks_msec() / 200.0)
 	var glow_col := Color(0.3, 0.7, 1.0, pulse)
-	for i in range(_points.size() - 1):
-		var p1: Vector2 = _points[i] - global_position
-		var p2: Vector2 = _points[i + 1] - global_position
-		_glow_node.draw_line(p1, p2, glow_col, 12.0 * cs)
+	# Build local-space polyline
+	var local_points: PackedVector2Array = PackedVector2Array()
+	local_points.resize(_points.size())
+	for i in range(_points.size()):
+		local_points[i] = _points[i] - global_position
+	_glow_node.draw_polyline(local_points, glow_col, 12.0 * cs)
 
 
 func _draw_anchor_hardware(anchor: Dictionary, world_pos: Vector2) -> void:
