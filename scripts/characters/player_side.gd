@@ -97,6 +97,28 @@ func remove_config(provider: Variant) -> void:
 # Default: nearly massless (mass=5) so the ball barely notices it.
 # Push modifiers to make the shackle heavier, bouncier, etc.
 
+func _init_spikeball_entity() -> void:
+	## Create the SpikeBallEntity node — persistent, owns ball config stack.
+	if _exec_ball_marker and is_instance_valid(_exec_ball_marker):
+		return
+	var SpikeScript: GDScript = preload("res://scripts/systems/spikeball_entity.gd")
+	_exec_ball_marker = Node2D.new()
+	_exec_ball_marker.set_script(SpikeScript)
+	_exec_ball_marker.owner_player = self
+	_exec_ball_marker.entity_id = "spikeball"
+	_exec_ball_marker.name = "spikeball"
+	add_child(_exec_ball_marker)
+	_exec_ball_marker.top_level = true
+	_exec_ball_marker.global_position = global_position
+
+
+func ball_cfg(key: String, default_val: float) -> float:
+	## Query the spike ball's config stack. Keys have no prefix (mass, gravity, etc.)
+	if _exec_ball_marker and is_instance_valid(_exec_ball_marker) and _exec_ball_marker.has_method("cfg"):
+		return _exec_ball_marker.cfg(key, default_val)
+	return default_val
+
+
 func _init_shackle_entity() -> void:
 	## Create the ShackleEntity node if it doesn't exist.
 	if _shackle and is_instance_valid(_shackle):
@@ -524,6 +546,7 @@ func _ready() -> void:
 	# Initialize executioner shackle entity
 	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
 		_init_shackle_entity()
+		_init_spikeball_entity()
 	# Initialize ranged reticle position
 	if character_class == PlayerManager.CharacterClass.RANGED:
 		call_deferred("_init_reticle_pos")
@@ -7411,7 +7434,7 @@ var _exec_throw_step: int = 0
 
 var _exec_ball_state: ExecEndState = ExecEndState.HELD
 var _exec_ball_pos: Vector2 = Vector2.ZERO
-var _exec_ball_marker: Node2D = null  # Scene node that tracks ball position for @e[name=spikeball]
+var _exec_ball_marker: Node2D = null  # SpikeBallEntity — persistent, owns ball config stack
 var _exec_ball_vel: Vector2 = Vector2.ZERO
 var _exec_ball_anchor_body: Node2D = null
 var _exec_ball_anchor_offset: Vector2 = Vector2.ZERO
@@ -7617,7 +7640,7 @@ func _exec_try_yeet(chain_dir: Vector2) -> void:
 	_exec_chain_taut = true
 
 	# Query each participant for its own config (supports per-entity overrides/artifacts)
-	var m_ball: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
+	var m_ball: float = ball_cfg("mass", EXEC_BALL_MASS)
 	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 
 	if _exec_is_entity_yeet_mode():
@@ -7703,24 +7726,12 @@ func _handle_executioner(delta: float) -> void:
 	_exec_tick_cleave(delta)
 	_exec_tick_ball(delta)
 	_exec_tick_shackle(delta)
-	# Spike ball marker — exists only when ball is out, tracks _exec_ball_pos.
-	# Has cfg()/push_config()/remove_config() that proxy to the player's config stack,
-	# so it appears as a configurable entity in the debug drawer.
-	var ball_is_out: bool = _exec_ball_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING]
-	if ball_is_out:
-		if not _exec_ball_marker or not is_instance_valid(_exec_ball_marker):
-			var SpikeBallScript: GDScript = preload("res://scripts/testing/spikeball_marker.gd")
-			_exec_ball_marker = Node2D.new()
-			_exec_ball_marker.set_script(SpikeBallScript)
-			_exec_ball_marker.name = "spikeball"
-			_exec_ball_marker._owner_player = self
-			_exec_ball_marker.add_to_group("entities")
-			get_tree().current_scene.add_child(_exec_ball_marker)
-		_exec_ball_marker.global_position = _exec_ball_pos
-	else:
-		if _exec_ball_marker and is_instance_valid(_exec_ball_marker):
-			_exec_ball_marker.queue_free()
-			_exec_ball_marker = null
+	# Update spikeball entity position — persistent, tracks ball position
+	if _exec_ball_marker and is_instance_valid(_exec_ball_marker):
+		if _exec_ball_state == ExecEndState.HELD:
+			_exec_ball_marker.global_position = global_position
+		else:
+			_exec_ball_marker.global_position = _exec_ball_pos
 	_exec_check_chain_severed()
 	if _exec_cleave_flash_timer > 0.0:
 		_exec_cleave_flash_timer -= delta
@@ -7891,7 +7902,7 @@ func _exec_handle_throw(delta: float) -> void:
 		if is_throwing_ball and _exec_ball_state == ExecEndState.HELD:
 			_exec_ball_state = ExecEndState.WINDUP
 			_exec_ball_hold_time = 0.0
-			_exec_ball_angular_vel = cfg("exec_ball_spin_speed", EXEC_BALL_SPIN_SPEED)
+			_exec_ball_angular_vel = ball_cfg("spin_speed", EXEC_BALL_SPIN_SPEED)
 			_exec_ball_spin_angle = 0.0
 		elif not is_throwing_ball and _exec_shackle_state == ExecEndState.HELD:
 			_exec_shackle_state = ExecEndState.WINDUP
@@ -7900,14 +7911,14 @@ func _exec_handle_throw(delta: float) -> void:
 			_exec_shackle_spin_angle = 0.0
 	if _exec_ball_state == ExecEndState.WINDUP:
 		_exec_ball_hold_time += delta
-		_exec_ball_angular_vel = minf(_exec_ball_angular_vel + cfg("exec_ball_spin_accel", EXEC_BALL_SPIN_ACCEL) * delta, cfg("exec_ball_max_spin", EXEC_BALL_MAX_SPIN))
+		_exec_ball_angular_vel = minf(_exec_ball_angular_vel + ball_cfg("spin_accel", EXEC_BALL_SPIN_ACCEL) * delta, ball_cfg("max_spin", EXEC_BALL_MAX_SPIN))
 		var dir_sign: float = 1.0 if _facing_right else -1.0
 		_exec_ball_spin_angle += _exec_ball_angular_vel * delta * dir_sign
 		velocity.x *= 0.6
 		# Show trajectory preview (like monster leap) — right stick priority for aiming
 		var aim := _get_aim_direction_analog()
 		var charge_t: float = clampf(_exec_ball_hold_time / 1.5, 0.0, 1.0)
-		var speed: float = lerpf(cfg("exec_ball_throw_speed", EXEC_BALL_THROW_SPEED), cfg("exec_ball_max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
+		var speed: float = lerpf(ball_cfg("throw_speed", EXEC_BALL_THROW_SPEED), ball_cfg("max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
 		_exec_update_preview(aim * speed)
 		if not _is_device_action_pressed("grapple"):
 			_exec_preview_arc.clear()
@@ -7941,8 +7952,8 @@ func _exec_update_preview(launch_vel: Vector2) -> void:
 	##   Inner arc: pessimistic (player stops on floor, heavy ball friction)
 	## Reality should always fall between the two.
 	var R: float = _exec_ball_chain_len()
-	var g: float = cfg("exec_ball_gravity", EXEC_BALL_GRAVITY)
-	var mb: float = cfg("exec_ball_mass", EXEC_BALL_MASS)
+	var g: float = ball_cfg("gravity", EXEC_BALL_GRAVITY)
+	var mb: float = ball_cfg("mass", EXEC_BALL_MASS)
 	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 	var space := get_world_2d().direct_space_state
 
@@ -8101,7 +8112,7 @@ func _exec_should_hold_on_throw() -> bool:
 func _exec_throw_ball() -> void:
 	var aim := _get_aim_direction_analog()
 	var charge_t: float = clampf(_exec_ball_hold_time / 1.5, 0.0, 1.0)
-	var speed: float = lerpf(cfg("exec_ball_throw_speed", EXEC_BALL_THROW_SPEED), cfg("exec_ball_max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
+	var speed: float = lerpf(ball_cfg("throw_speed", EXEC_BALL_THROW_SPEED), ball_cfg("max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
 	_exec_ball_vel = aim * speed
 	_exec_ball_pos = global_position + aim * 20.0
 	DebugOverlay.log("executioner/throw", self,
@@ -8184,7 +8195,7 @@ func _exec_tick_ball(delta: float) -> void:
 			pass
 		ExecEndState.THROWN:
 			# Pure gravity — no air drag. Ball freefalls like a heavy object.
-			_exec_ball_vel.y += cfg("exec_ball_gravity", EXEC_BALL_GRAVITY) * delta
+			_exec_ball_vel.y += ball_cfg("gravity", EXEC_BALL_GRAVITY) * delta
 			var prev_pos: Vector2 = _exec_ball_pos
 			_exec_ball_pos += _exec_ball_vel * delta
 
@@ -8260,16 +8271,16 @@ func _exec_tick_ball(delta: float) -> void:
 				var normal: Vector2 = result["normal"]
 				# Damage + stun on enemy hit (same stagger as chain-yank on monster)
 				if collider.has_method("take_damage"):
-					collider.take_damage(int(cfg("exec_ball_damage", EXEC_BALL_DAMAGE)), player_index)
+					collider.take_damage(int(ball_cfg("damage", EXEC_BALL_DAMAGE)), player_index)
 					_spawn_blood_particles(result["position"])
 				var EntityEffects := preload("res://scripts/systems/entity_effects.gd")
-				EntityEffects.apply(collider, "stun", cfg("exec_ball_stun_duration", EXEC_BALL_STUN_DURATION))
+				EntityEffects.apply(collider, "stun", ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
 				if collider.has_method("apply_stun"):
-					collider.apply_stun(cfg("exec_ball_stun_duration", EXEC_BALL_STUN_DURATION))
+					collider.apply_stun(ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
 				elif collider.has_method("apply_slow"):
-					collider.apply_slow(cfg("exec_ball_stun_duration", EXEC_BALL_STUN_DURATION))
+					collider.apply_slow(ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
 				DebugOverlay.log("executioner/ball", self, "BALL HIT: target=%s stunned=%.1fs",
-					[collider.name, cfg("exec_ball_stun_duration", EXEC_BALL_STUN_DURATION)])
+					[collider.name, ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION)])
 
 				# Determine surface type by normal direction
 				if collider is Node2D:
@@ -8297,9 +8308,9 @@ func _exec_tick_ball(delta: float) -> void:
 
 		ExecEndState.STUCK_WALL:
 			# Ball drags slowly down the wall under its own weight
-			_exec_ball_pos.y += cfg("exec_ball_wall_drag", EXEC_BALL_WALL_DRAG) * delta
+			_exec_ball_pos.y += ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
 			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
-				_exec_ball_anchor_offset.y += cfg("exec_ball_wall_drag", EXEC_BALL_WALL_DRAG) * delta
+				_exec_ball_anchor_offset.y += ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
 				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
 			# Chain tension — bidirectional: ball gets dragged toward player AND player gets tugged
 			var bw_len: float = _exec_ball_chain_len()
@@ -8350,13 +8361,13 @@ func _exec_tick_ball(delta: float) -> void:
 
 		ExecEndState.STUCK_CEILING:
 			# Ball is in ceiling — drags out quickly and then freefalls
-			_exec_ball_pos.y += cfg("exec_ball_ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
+			_exec_ball_pos.y += ball_cfg("ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
 			if _exec_ball_anchor_body and is_instance_valid(_exec_ball_anchor_body):
-				_exec_ball_anchor_offset.y += cfg("exec_ball_ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
+				_exec_ball_anchor_offset.y += ball_cfg("ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
 				_exec_ball_pos = _exec_ball_anchor_body.global_position + _exec_ball_anchor_offset
 			# After dragging ~10px out, the ball pops free and freefalls
 			# Check if we've moved far enough from impact to consider it "popped out"
-			_exec_ball_vel.y += cfg("exec_ball_gravity", EXEC_BALL_GRAVITY) * delta * 0.3  # Partial gravity while dragging
+			_exec_ball_vel.y += ball_cfg("gravity", EXEC_BALL_GRAVITY) * delta * 0.3  # Partial gravity while dragging
 			if _exec_ball_vel.y > 50.0:
 				# Ball has popped free — back to THROWN state (freefall with chain constraint)
 				_exec_ball_state = ExecEndState.THROWN
@@ -9271,8 +9282,8 @@ func _exec_test_tick(delta: float) -> void:
 			# Release — run prediction BEFORE releasing
 			var charge_t: float = clampf(_exec_test_hold_time / 1.5, 0.0, 1.0)
 			var speed: float = lerpf(
-				cfg("exec_ball_throw_speed", EXEC_BALL_THROW_SPEED),
-				cfg("exec_ball_max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
+				ball_cfg("throw_speed", EXEC_BALL_THROW_SPEED),
+				ball_cfg("max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
 			var launch_vel: Vector2 = _exec_test_aim * speed
 			DebugOverlay.log("executioner/throw", self,
 				"LAUNCH: vel=(%.1f, %.1f) speed=%.1f", [launch_vel.x, launch_vel.y, speed])
