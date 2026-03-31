@@ -116,9 +116,17 @@ func tick(delta: float) -> void:
 			_tick_retracting(delta)
 
 
+var _bounce_count: int = 0
+var _settled: bool = false  # True when shackle has come to rest on a surface
+
 func _tick_thrown(delta: float) -> void:
 	## Shackle in flight — gravity, collision, chain constraint, snap detection.
+	if _settled:
+		# Settled on a surface — no gravity, no movement. Just sit here.
+		return
+
 	vel.y += cfg("gravity", GRAVITY) * delta
+	vel *= 0.995  # Air damping
 	var prev_pos: Vector2 = global_position
 	global_position += vel * delta
 
@@ -131,14 +139,18 @@ func _tick_thrown(delta: float) -> void:
 		if s_result:
 			var normal: Vector2 = s_result["normal"]
 			global_position = s_result["position"] + normal * 2.0
-			vel = vel.bounce(normal) * 0.3  # 30% energy retention
-			# Stop bouncing if velocity is negligible
-			if vel.length() < 30.0:
-				vel = Vector2.ZERO
-			# Ground friction — slow horizontal movement on floor hits
+			_bounce_count += 1
+			vel = vel.bounce(normal) * 0.3
+			# Ground friction
 			if normal.y < -0.5:
-				vel.x *= 0.7
-			AudioManager.play("grapple_hit", -8.0, 1.5)
+				vel.x *= 0.5
+			# Settle: stop after enough bounces or low velocity
+			if vel.length() < 30.0 or _bounce_count > 10:
+				vel = Vector2.ZERO
+				_settled = true
+				DebugOverlay.log("executioner/ball", self, "SHACKLE SETTLED after %d bounces", [_bounce_count])
+			if _bounce_count <= 3:
+				AudioManager.play("grapple_hit", -8.0, 1.5)
 
 	# RIGID chain constraint — if shackle has a chain to player
 	var has_chain: bool = chain_node and is_instance_valid(chain_node)
@@ -324,6 +336,8 @@ func reset() -> void:
 	## Reset shackle to held state. Destroys chain.
 	state = State.HELD
 	vel = Vector2.ZERO
+	_settled = false
+	_bounce_count = 0
 	anchor_body = null
 	anchor_offset = Vector2.ZERO
 	spin_angle = 0.0
