@@ -4381,12 +4381,82 @@ func _handle_cfg_subsection_click(sub_id: String, lx: float, local_y: float, bod
 	match sub_id:
 		"cfg_settings":
 			_handle_cfg_settings_click(lx, local_y)
+		"cfg_classes":
+			_handle_cfg_classes_click(lx, local_y, body_h)
 		"cfg_entities":
 			_handle_cfg_entities_click(lx, local_y, body_h)
-		"cfg_blueprints":
+		"cfg_entity_stats":
+			_handle_cfg_entity_stats_click(lx, local_y, body_h)
+		"cfg_modifiers":
 			_handle_cfg_blueprints_click(lx, local_y, body_h)
 		"cfg_modified_ents":
-			_handle_cfg_instances_click(lx, local_y, body_h)
+			_handle_cfg_modified_ents_click(lx, local_y, body_h)
+
+
+func _handle_cfg_classes_click(_lx: float, local_y: float, _body_h: float) -> void:
+	## Click in classes list — select a class.
+	var row_h: float = 16.0
+	var all_classes: Array = PlayerHUD.ALL_CLASSES
+	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	# Player classes
+	for i in range(all_classes.size()):
+		if local_y >= i * row_h and local_y < (i + 1) * row_h:
+			_cfg_selected_class = all_classes[i]
+			return
+	# Separator + physics entity classes
+	var offset: float = all_classes.size() * row_h + 2
+	for i in range(extra_classes.size()):
+		if local_y >= offset + i * row_h and local_y < offset + (i + 1) * row_h:
+			_cfg_selected_class = -100 - i  # Negative IDs for physics entities
+			return
+
+
+func _handle_cfg_entity_stats_click(_lx: float, local_y: float, _body_h: float) -> void:
+	## Click in entity stats table — select a stat for calculations.
+	var header_h: float = 16.0  # Header + separator
+	if local_y < header_h:
+		return
+	var row_h: float = 13.0
+	var row_idx: int = int((local_y - header_h) / row_h)
+	# Map row index to config key (skipping group headers)
+	var key_idx: int = 0
+	for key in _config_keys:
+		if key.begins_with("# "):
+			if key_idx == row_idx:
+				return  # Clicked a group header, ignore
+			key_idx += 1
+			continue
+		if key_idx == row_idx:
+			_cfg_selected_stat = key
+			_cfg_stat_cache_dirty = true
+			return
+		key_idx += 1
+
+
+func _handle_cfg_modified_ents_click(_lx: float, local_y: float, _body_h: float) -> void:
+	## Click in modified entities list — cross-select entity.
+	if _cfg_selected_blueprint.is_empty():
+		return
+	var row_h: float = 14.0
+	var idx: int = int(local_y / row_h)
+	var bp_name: String = _cfg_selected_blueprint
+	var match_idx: int = 0
+	for entity in _get_all_entities():
+		if not "_config_stack" in entity:
+			continue
+		for provider in entity._config_stack:
+			if provider.has_method("is_modifier") and provider.is_modifier():
+				if "_name" in provider and provider._name == bp_name:
+					if match_idx == idx:
+						# Cross-select: select this entity
+						PlayerHUD.debug_select_entity(entity)
+						DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
+						DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
+						_config_keys.clear()
+						_cfg_selected_stat = ""
+						return
+					match_idx += 1
+					break
 
 
 func _handle_cfg_settings_click(_lx: float, local_y: float) -> void:
@@ -4430,11 +4500,12 @@ func _handle_cfg_entities_click(lx: float, local_y: float, _body_h: float) -> vo
 			if lx >= btn_x and lx <= btn_x + 34 and e.has_method("exec_tuning_toggle"):
 				e.exec_tuning_toggle()
 				return
-			# Click on entity name — select it
+			# Click on entity name — select it + clear stat selection
 			PlayerHUD.debug_select_entity(e)
 			DebugOverlay.set_observer("state_info/state_text_panel", "human", true, DebugOverlay.TextMode.NONE)
 			DebugOverlay.set_observer("state_info/selection_indicator", "human", true, DebugOverlay.TextMode.NONE)
 			_config_keys.clear()
+			_cfg_selected_stat = ""
 			_config_filter_focused = false
 			return
 		y += entity_row_h
