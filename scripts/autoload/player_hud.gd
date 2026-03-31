@@ -1101,8 +1101,8 @@ func dump_entity_skeleton(entity: Node2D, trigger: String = "manual") -> Diction
 			data["part_health"][pname] = { "hp": p["current_hp"], "max": p["max_hp"], "state": p["damage_state"] }
 
 	var json_str: String = JSON.stringify(data, "\t")
-	print("=== SKELETON DUMP [%s] ===" % trigger)
-	print(json_str)
+	DebugOverlay.log("body_mechanics/spine_debug", entity,
+		"=== SKELETON DUMP [%s] ===\n%s", [trigger, json_str])
 
 	_dump_count += 1
 	var path: String = "user://dumps/skeleton_%03d_%s.json" % [_dump_count, trigger]
@@ -1111,13 +1111,17 @@ func dump_entity_skeleton(entity: Node2D, trigger: String = "manual") -> Diction
 	if file:
 		file.store_string(json_str)
 		file.close()
-		print("Saved to: %s" % path)
+		DebugOverlay.log("body_mechanics/spine_debug", entity,
+			"Saved to: %s", [path])
 
 	return data
 
 
 func check_auto_dump_triggers(entity: Node2D) -> void:
 	## Call periodically to check if any auto-dump rule fires.
+	## Only active when body_mechanics/spine_debug logging is enabled.
+	if DebugOverlay.should_log("body_mechanics/spine_debug", entity) == DebugOverlay.TextMode.NONE:
+		return
 	var now: float = Time.get_ticks_msec() / 1000.0
 	if now - _last_auto_dump_time < AUTO_DUMP_COOLDOWN:
 		return

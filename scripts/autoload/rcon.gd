@@ -1029,18 +1029,21 @@ func _execute(command: String) -> String:
 			return "ERR: no executioner player found"
 
 		"ai_spawn":
-			# Spawn an AI-controlled Executioner player at a position.
-			# ai_spawn [x y] [name=id]  — defaults to (960, 876)
+			# Spawn an AI-controlled player at a position.
+			# ai_spawn [x y] [class=executioner] [name=id]  — defaults to (960, 876), executioner
 			var spawn_x: float = 960.0
 			var spawn_y: float = 876.0
 			var ai_name: String = ""
+			var ai_class: String = "executioner"
 			if parts.size() >= 3:
 				spawn_x = float(parts[1])
 				spawn_y = float(parts[2])
 			for pi in range(3, parts.size()):
 				if parts[pi].begins_with("name="):
 					ai_name = parts[pi].substr(5)
-			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y), ai_name)
+				elif parts[pi].begins_with("class="):
+					ai_class = parts[pi].substr(6).to_lower()
+			return _cmd_ai_spawn(Vector2(spawn_x, spawn_y), ai_name, ai_class)
 
 		"exec_test":
 			# AI throw test: exec_test [angle_deg] [hold_secs] [x y]
@@ -1361,8 +1364,8 @@ func _key_name_to_code(name: String) -> int:
 		_: return 0
 
 
-func _cmd_ai_spawn(pos: Vector2, custom_name: String = "") -> String:
-	## Spawn an AI-controlled Executioner player. No joystick needed.
+func _cmd_ai_spawn(pos: Vector2, custom_name: String = "", cls_name: String = "executioner") -> String:
+	## Spawn an AI-controlled player of the given class. No joystick needed.
 	var scene_path: String = "res://scenes/characters/player_side.tscn"
 	if not ResourceLoader.exists(scene_path):
 		return "ERR: player_side.tscn not found"
@@ -1376,11 +1379,21 @@ func _cmd_ai_spawn(pos: Vector2, custom_name: String = "") -> String:
 			player_index = i
 			break
 
-	var stats: Dictionary = PlayerManager.CLASS_STATS[PlayerManager.CharacterClass.EXECUTIONER]
+	# Resolve class name to enum
+	var char_class: int = PlayerManager.CharacterClass.EXECUTIONER
+	for cls in PlayerHUD.CLASS_NAMES:
+		if PlayerHUD.CLASS_NAMES[cls].to_lower() == cls_name:
+			char_class = cls
+			break
+
+	if not PlayerManager.CLASS_STATS.has(char_class):
+		return "ERR: unknown class '%s'" % cls_name
+
+	var stats: Dictionary = PlayerManager.CLASS_STATS[char_class]
 	PlayerManager.players[player_index] = {
 		"device_id": fake_device,
 		"player_index": player_index,
-		"character_class": PlayerManager.CharacterClass.EXECUTIONER,
+		"character_class": char_class,
 		"health": stats["max_health"],
 		"max_health": stats["max_health"],
 		"mana": stats["max_mana"],
@@ -1400,7 +1413,7 @@ func _cmd_ai_spawn(pos: Vector2, custom_name: String = "") -> String:
 	player_node.name = custom_name if not custom_name.is_empty() else "AIPlayer_%d" % player_index
 	player_node.player_index = player_index
 	player_node.device_id = fake_device
-	player_node.character_class = PlayerManager.CharacterClass.EXECUTIONER
+	player_node.character_class = char_class
 	player_node.global_position = pos
 	get_tree().current_scene.add_child(player_node)
 
@@ -1408,7 +1421,8 @@ func _cmd_ai_spawn(pos: Vector2, custom_name: String = "") -> String:
 	player_node.ai_set_active(true)
 	player_node._facing_right = true
 
-	return "OK: AI Executioner spawned at (%.0f, %.0f) slot=%d" % [pos.x, pos.y, player_index]
+	var cls_display: String = PlayerHUD.CLASS_NAMES.get(char_class, cls_name)
+	return "OK: AI %s spawned at (%.0f, %.0f) slot=%d" % [cls_display, pos.x, pos.y, player_index]
 
 
 func _cmd_exec_test(angle_deg: float, hold_time: float, pos: Vector2 = Vector2(960, 876)) -> String:
@@ -1449,9 +1463,7 @@ func _cmd_exec_test(angle_deg: float, hold_time: float, pos: Vector2 = Vector2(9
 	# Then idle for 5 seconds to observe the result
 	ai_player.ai_queue_cmd([], 5.0)
 
-	print("=== AI TEST: angle=%.0f hold=%.1fs aim=(%.2f,%.2f) pos=(960,876) ===" %
-		[angle_deg, hold_time, aim.x, aim.y])
-	return "OK: exec_test angle=%.0f hold=%.1fs (AI player)" % [angle_deg, hold_time]
+	return "OK: exec_test angle=%.0f hold=%.1fs aim=(%.2f,%.2f)" % [angle_deg, hold_time, aim.x, aim.y]
 
 
 func _cmd_eval(expr_text: String) -> String:

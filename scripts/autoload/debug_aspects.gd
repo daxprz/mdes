@@ -87,6 +87,7 @@ func _register_all() -> void:
 	# -- Chain --
 	r.call("chain/tether_arc", "Chain reach barrier candy-stripe circle")
 	r.call("chain/chain_barrier", "Chain constraint visualization during precog")
+	r.call("chain/link_state", "Chain link positions, taut/slack state, tension (throttled log)")
 
 	# -- Splay Poses --
 	r.call("splay_poses/pre_physics_pose", "Splay pose before physics solve")

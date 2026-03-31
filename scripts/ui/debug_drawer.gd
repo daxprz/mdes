@@ -257,6 +257,7 @@ var _world_overlay: Node2D = null  # World-space overlay for entity selection in
 
 func _ready() -> void:
 	layer = 109  # Below console (110), above game
+	_load_drawer_state()
 	_panel_x = -_panel_width
 	_panel = Control.new()
 	_panel.name = "DebugDrawerPanel"
@@ -266,6 +267,36 @@ func _ready() -> void:
 	add_child(_panel)
 	# Deferred: add world-space overlay to the scene for selection indicators
 	call_deferred("_init_world_overlay")
+
+
+func _load_drawer_state() -> void:
+	## Load drawer-level state: active section, panel width.
+	var path: String = "user://drawer_state.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	var data: Dictionary = json.data
+	if data.has("section"):
+		_current_section = clampi(int(data["section"]), 0, Section.values().size() - 1) as Section
+	if data.has("panel_width"):
+		_panel_width = clampf(float(data["panel_width"]), 300.0, 800.0)
+		_content_width = _panel_width - ICON_BAR_WIDTH
+
+
+func _save_drawer_state() -> void:
+	## Save drawer-level state.
+	var data: Dictionary = {
+		"section": int(_current_section),
+		"panel_width": _panel_width,
+	}
+	var file := FileAccess.open("user://drawer_state.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
 
 
 func _init_world_overlay() -> void:
@@ -305,9 +336,11 @@ func _init_subsections() -> void:
 			"collapsed": false,
 			"height": _get_preferred_height(sid),
 		})
+	var had_saved_layout: bool = FileAccess.file_exists("user://debug_panel_layout.json")
 	_load_subsection_layout()
-	# Auto-snap all sections to their preferred (content-based) heights
-	_auto_snap_all()
+	# Only auto-snap if no saved layout — trust user's saved heights otherwise
+	if not had_saved_layout:
+		_auto_snap_all()
 	_subsections_initialized = true
 
 
@@ -1150,6 +1183,7 @@ func _handle_icon_click(my: float) -> void:
 				_current_section = icon_sections[i]
 				_config_keys.clear()  # Force rebuild when switching to config
 				_cached_lists_dirty = true  # Force rebuild test/suite lists
+				_save_drawer_state()
 			_panel.queue_redraw()
 			return
 
@@ -1816,6 +1850,19 @@ func _draw_group_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_col
 	# Group name
 	_panel.draw_string(font, Vector2(x + 14, ry + 13), group, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.5, 0.7, 1.0))
 
+	# Group-level aggregate TPS — visual and textual separate
+	var group_v_tps: int = 0
+	var group_t_tps: int = 0
+	for path in aspects:
+		var ainfo: DebugOverlay.AspectInfo = DebugOverlay.get_aspect(path)
+		if ainfo:
+			group_v_tps += ainfo._visual_tps
+			group_t_tps += ainfo._textual_tps
+	if group_v_tps > 0:
+		_panel.draw_string(font, Vector2(v_col_x - 36, ry + 13), "%d" % group_v_tps, HORIZONTAL_ALIGNMENT_RIGHT, 30, 7, _tps_color(group_v_tps))
+	if group_t_tps > 0:
+		_panel.draw_string(font, Vector2(t_col_x - 36, ry + 13), "%d" % group_t_tps, HORIZONTAL_ALIGNMENT_RIGHT, 30, 7, _tps_color(group_t_tps))
+
 	# Group-level V/T indicators (aggregate)
 	var any_vis: bool = false
 	var any_txt: int = DebugOverlay.TextMode.NONE
@@ -1856,7 +1903,17 @@ func _draw_aspect_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_co
 		# Small dot to indicate other observers
 		_panel.draw_circle(Vector2(x + INDENT + 2, ry + ROW_HEIGHT * 0.5), 2.0, Color(0.3, 0.6, 1.0, 0.7))
 
-	_panel.draw_string(font, Vector2(x + INDENT + 6, ry + 13), label, HORIZONTAL_ALIGNMENT_LEFT, int(v_col_x - x - INDENT - 14), 9, label_col)
+	_panel.draw_string(font, Vector2(x + INDENT + 6, ry + 13), label, HORIZONTAL_ALIGNMENT_LEFT, int(v_col_x - x - INDENT - 70), 9, label_col)
+
+	# TPS metrics — visual and textual shown separately, aligned with V/T columns
+	var v_tps: int = info._visual_tps
+	var t_tps: int = info._textual_tps
+	if v_tps > 0:
+		var v_tps_col: Color = _tps_color(v_tps)
+		_panel.draw_string(font, Vector2(v_col_x - 36, ry + 13), "%d" % v_tps, HORIZONTAL_ALIGNMENT_RIGHT, 30, 7, v_tps_col)
+	if t_tps > 0:
+		var t_tps_col: Color = _tps_color(t_tps)
+		_panel.draw_string(font, Vector2(t_col_x - 36, ry + 13), "%d" % t_tps, HORIZONTAL_ALIGNMENT_RIGHT, 30, 7, t_tps_col)
 
 	# Visual checkbox
 	_draw_checkbox(v_col_x - 4, ry + 2, visual_on)
@@ -1868,6 +1925,16 @@ func _draw_aspect_row(row: Dictionary, x: float, ry: float, v_col_x: float, t_co
 	_draw_text_mode_indicator(t_col_x - 4, ry + 2, textual, font)
 	if actual_txt != DebugOverlay.TextMode.NONE and textual == DebugOverlay.TextMode.NONE:
 		_panel.draw_rect(Rect2(t_col_x - 4, ry + 2, CHECKBOX_SIZE, CHECKBOX_SIZE), Color(0.3, 0.6, 1.0, 0.5), false, 1.0)
+
+
+func _tps_color(tps: int) -> Color:
+	## Color for TPS counter: green→orange→red based on tick rate.
+	if tps > 120:
+		return Color(1.0, 0.3, 0.2, 0.9)   # Hot
+	elif tps > 30:
+		return Color(1.0, 0.7, 0.2, 0.8)   # Warm
+	else:
+		return Color(0.4, 0.7, 0.4, 0.6)   # Cool
 
 
 func _draw_checkbox(cx: float, cy: float, checked: bool) -> void:
@@ -1927,7 +1994,7 @@ func _draw_test_runner_section(content_x: float, font: Font, ph: float) -> void:
 			break
 
 		# Draw header bar
-		_draw_sub_header(x, y, pw, font, sub)
+		_draw_test_sub_header(x, y, pw, font, sub)
 
 		if sub["collapsed"]:
 			y += SUB_HEADER_H
@@ -1979,8 +2046,8 @@ func _draw_test_runner_section(content_x: float, font: Font, ph: float) -> void:
 			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.3, 0.4, 0.4), 1.0)
 
 
-func _draw_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
-	## Draw a sub-section header bar with collapse icon, title, context info, and grip.
+func _draw_test_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	## Draw test runner sub-section header — has extra context (mode, save, deletes).
 	var bg_col := Color(0.08, 0.1, 0.14, 0.95)
 	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
 	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.25, 0.35, 0.5, 0.6), 1.0)
@@ -3028,7 +3095,7 @@ func _build_player_config_groups(entity: Node2D) -> Array[Array]:
 	elif char_class == PlayerManager.CharacterClass.RANGED:
 		groups.append(["# Ranger", ["ranger_max_arrows", "ranger_reload_time"]])
 	elif char_class == PlayerManager.CharacterClass.EXECUTIONER:
-		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
+		groups.append(["# Executioner Ball", ["exec_ball_damage", "exec_ball_stun_duration", "exec_ball_gravity", "exec_ball_throw_speed", "exec_ball_max_throw_speed", "exec_ball_mass", "exec_ball_spin_speed", "exec_ball_spin_accel", "exec_ball_max_spin", "exec_ball_wall_drag", "exec_ball_ceiling_drag", "exec_chain_elasticity", "exec_chain_total_len", "exec_chain_adjust_speed"]])
 		groups.append(["# Executioner Shackle", ["shackle:mass", "shackle:chain_elasticity", "shackle:gravity", "shackle:drag"]])
 		groups.append(["# Executioner Swing", ["exec_swing_max_damage", "exec_swing_slam_radius"]])
 		groups.append(["# Executioner Cleave", ["exec_cleave_max_damage", "exec_cleave_charge_time", "exec_cleave_knockback"]])
@@ -3087,6 +3154,11 @@ func _get_player_config_default(_entity: Node2D, key: String) -> float:
 		"exec_ball_throw_speed": 1200.0,
 		"exec_ball_max_throw_speed": 6000.0,
 		"exec_ball_mass": 140.0,
+	"exec_ball_spin_speed": 4.0,
+	"exec_ball_spin_accel": 3.0,
+	"exec_ball_max_spin": 15.0,
+	"exec_ball_wall_drag": 12.0,
+	"exec_ball_ceiling_drag": 20.0,
 		"exec_chain_elasticity": 0.25,
 		"exec_chain_total_len": 600.0,
 		"exec_chain_adjust_speed": 0.5,
@@ -3148,8 +3220,10 @@ func _init_cfg_subsections() -> void:
 			"collapsed": false,
 			"height": _get_cfg_preferred_height(sid),
 		})
+	var had_cfg_layout: bool = FileAccess.file_exists("user://config_panel_layout.json")
 	_load_cfg_layout()
-	_auto_snap_cfg()
+	if not had_cfg_layout:
+		_auto_snap_cfg()
 	_cfg_subsections_initialized = true
 	_cfg_rebuild_bp_names()
 
@@ -3447,16 +3521,18 @@ func _cfg_instantiate_blueprint(bp_name: String, entity: Node2D) -> void:
 
 # -- Config sub-section drawing ------------------------------------------------
 
-func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
-	## Draw sub-section header — same style as LE/CT, blue-ish accent for config.
-	var bg_col := Color(0.06, 0.06, 0.09, 0.95)
+func _draw_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary,
+		accent_col: Color, ctx_text: String = "", ctx_col: Color = Color(0.5, 0.5, 0.5)) -> void:
+	## Unified sub-section header — used by Config, Level Editor, and Constructs.
+	## accent_col tints the title, top line, and triangle.
+	var bg_col := Color(0.07, 0.07, 0.07, 0.95)
 	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.15, 0.25, 0.4, 0.6), 1.0)
+	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), accent_col * Color(1, 1, 1, 0.4), 1.0)
 
 	# Collapse triangle
 	var tri_x: float = x + 6
 	var tri_y: float = y + SUB_HEADER_H * 0.5
-	var tri_col := Color(0.45, 0.5, 0.55)
+	var tri_col := accent_col * Color(1, 1, 1, 0.6)
 	if sub["collapsed"]:
 		var pts: PackedVector2Array = [
 			Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]
@@ -3467,27 +3543,35 @@ func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictio
 		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
 
 	# Title
-	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 120, 10, Color(0.5, 0.8, 1.0))
+	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 120, 10, accent_col)
 
-	# Context info on right side
+	# Context info
+	if not ctx_text.is_empty():
+		_panel.draw_string(font, Vector2(x + 140, y + 14), ctx_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 170, 9, ctx_col)
+
+	# Resize grip dots (2x3 grid)
+	if not sub["collapsed"]:
+		var grip_x: float = x + pw - 22
+		var grip_col := accent_col * Color(1, 1, 1, 0.3)
+		for gi in range(3):
+			for gj in range(2):
+				_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), grip_col)
+
+
+func _draw_cfg_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	var ctx_text: String = ""
+	var ctx_col := Color(0.4, 0.6, 0.8)
 	match sub["id"]:
 		"cfg_entities":
-			var count: int = _get_all_entities().size()
-			_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d" % count, HORIZONTAL_ALIGNMENT_LEFT, 30, 9, Color(0.4, 0.6, 0.8))
+			ctx_text = "%d" % _get_all_entities().size()
 		"cfg_blueprints":
-			var count: int = _cfg_cached_bp_names.size()
-			_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d" % count, HORIZONTAL_ALIGNMENT_LEFT, 30, 9, Color(0.4, 0.6, 0.8))
+			ctx_text = "%d" % _cfg_cached_bp_names.size()
 		"cfg_instances":
 			var count: int = _cfg_count_active_modifiers()
 			if count > 0:
-				_panel.draw_string(font, Vector2(x + pw * 0.5, y + 14), "%d active" % count, HORIZONTAL_ALIGNMENT_LEFT, 60, 9, Color(0.9, 0.7, 0.3))
-
-	# Resize grip (≡) on the header bar right side — for resizing the section ABOVE
-	if not sub["collapsed"]:
-		var grip_x: float = x + pw - 22
-		var grip_y: float = y + 6
-		for gi in range(3):
-			_panel.draw_line(Vector2(grip_x, grip_y + gi * 4), Vector2(grip_x + 10, grip_y + gi * 4), Color(0.3, 0.4, 0.5, 0.5), 1.0)
+				ctx_text = "%d active" % count
+				ctx_col = Color(0.9, 0.7, 0.3)
+	_draw_sub_header(x, y, pw, font, sub, Color(0.5, 0.8, 1.0), ctx_text, ctx_col)
 
 
 func _draw_cfg_sub_settings(x: float, y: float, pw: float, _h: float, font: Font) -> void:
@@ -4339,8 +4423,10 @@ func _init_le_subsections() -> void:
 			"collapsed": false,
 			"height": _get_le_preferred_height(sid),
 		})
+	var had_le_layout: bool = FileAccess.file_exists("user://level_editor_layout.json")
 	_load_le_layout()
-	_auto_snap_le()
+	if not had_le_layout:
+		_auto_snap_le()
 	_le_subsections_initialized = true
 	_le_rebuild_level_names()
 
@@ -5277,28 +5363,6 @@ func _draw_level_editor_section(content_x: float, font: Font, ph: float) -> void
 
 
 func _draw_le_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
-	## Draw sub-section header — same structure as test runner, warm color accent.
-	var bg_col := Color(0.08, 0.08, 0.06, 0.95)
-	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.3, 0.25, 0.15, 0.6), 1.0)
-
-	# Collapse triangle
-	var tri_x: float = x + 6
-	var tri_y: float = y + SUB_HEADER_H * 0.5
-	var tri_col := Color(0.5, 0.5, 0.45)
-	if sub["collapsed"]:
-		var pts: PackedVector2Array = [
-			Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]
-		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
-	else:
-		var pts: PackedVector2Array = [
-			Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]
-		_panel.draw_polygon(pts, PackedColorArray([tri_col, tri_col, tri_col]))
-
-	# Title
-	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 70, 10, Color(0.9, 0.7, 0.3))
-
-	# Context info
 	var ctx_text: String = ""
 	var ctx_col := Color(0.6, 0.55, 0.4)
 	match sub["id"]:
@@ -5329,15 +5393,7 @@ func _draw_le_sub_header(x: float, y: float, pw: float, font: Font, sub: Diction
 				if total > 0:
 					ctx_text = "%d changed" % total
 					ctx_col = Color(1.0, 0.8, 0.3)
-
-	if not ctx_text.is_empty():
-		_panel.draw_string(font, Vector2(x + 88, y + 14), ctx_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 120, 9, ctx_col)
-
-	# Grip dots
-	var grip_x: float = x + pw - 22
-	for gi in range(3):
-		for gj in range(2):
-			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.3, 0.25))
+	_draw_sub_header(x, y, pw, font, sub, Color(0.9, 0.7, 0.3), ctx_text, ctx_col)
 
 
 func _draw_le_sub_level(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -5600,8 +5656,10 @@ func _init_ct_subsections() -> void:
 			"collapsed": false,
 			"height": _get_ct_preferred_height(sid),
 		})
+	var had_ct_layout: bool = FileAccess.file_exists("user://constructs_layout.json")
 	_load_ct_layout()
-	_auto_snap_ct()
+	if not had_ct_layout:
+		_auto_snap_ct()
 	_ct_subsections_initialized = true
 
 
@@ -6107,21 +6165,6 @@ func _draw_blueprints_section(content_x: float, font: Font, ph: float) -> void:
 
 
 func _draw_ct_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
-	var bg_col := Color(0.08, 0.07, 0.05, 0.95)
-	_panel.draw_rect(Rect2(x, y, pw - 8, SUB_HEADER_H), bg_col)
-	_panel.draw_line(Vector2(x, y), Vector2(x + pw - 8, y), Color(0.3, 0.2, 0.1, 0.6), 1.0)
-
-	var tri_x: float = x + 6
-	var tri_y: float = y + SUB_HEADER_H * 0.5
-	var tri_col := Color(0.5, 0.45, 0.4)
-	if sub["collapsed"]:
-		_panel.draw_polygon(PackedVector2Array([Vector2(tri_x, tri_y - 5), Vector2(tri_x + 6, tri_y), Vector2(tri_x, tri_y + 5)]), PackedColorArray([tri_col, tri_col, tri_col]))
-	else:
-		_panel.draw_polygon(PackedVector2Array([Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 7, tri_y - 3), Vector2(tri_x + 3, tri_y + 4)]), PackedColorArray([tri_col, tri_col, tri_col]))
-
-	_panel.draw_string(font, Vector2(x + 18, y + 14), sub["title"], HORIZONTAL_ALIGNMENT_LEFT, 80, 10, Color(0.9, 0.55, 0.2))
-
-	# Context
 	var ctx: String = ""
 	var ctx_col := Color(0.6, 0.5, 0.4)
 	match sub["id"]:
@@ -6136,14 +6179,7 @@ func _draw_ct_sub_header(x: float, y: float, pw: float, font: Font, sub: Diction
 			if _ct_selected_type == "trees" and not _ct_tree_blueprint_name.is_empty():
 				ctx = _ct_tree_blueprint_name
 				ctx_col = Color(0.3, 0.8, 0.4)
-	if not ctx.is_empty():
-		_panel.draw_string(font, Vector2(x + 98, y + 14), ctx, HORIZONTAL_ALIGNMENT_LEFT, pw - 130, 9, ctx_col)
-
-	# Grip
-	var grip_x: float = x + pw - 22
-	for gi in range(3):
-		for gj in range(2):
-			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.25, 0.2))
+	_draw_sub_header(x, y, pw, font, sub, Color(0.9, 0.55, 0.2), ctx, ctx_col)
 
 
 func _draw_ct_sub_types(x: float, y: float, pw: float, h: float, font: Font) -> void:

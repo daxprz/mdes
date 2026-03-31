@@ -15,7 +15,7 @@
     "debug log executioner/chain_radius",
 
     "announce Shackle Drag Test",
-    "ai_spawn 640 876 name=AI",
+    "ai_spawn 640 876 class=executioner name=AI",
     "wait 0.5",
     "spawn dummy 840 876 name=ball",
     "wait 0.5",

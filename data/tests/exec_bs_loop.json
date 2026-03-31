@@ -10,7 +10,7 @@
     "clear",
     "portal off",
     "clearplayers",
-    "ai_spawn 960 876",
+    "ai_spawn 960 876 class=executioner",
     "wait 0.5",
 
     "announce B-S Release Loop",

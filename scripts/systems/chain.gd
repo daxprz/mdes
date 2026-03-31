@@ -32,6 +32,20 @@ var _prev_points: PackedVector2Array = PackedVector2Array()  # Previous frame po
 var _point_count: int = 0
 var _link_len: float = 8.0        # Actual length per segment
 
+# -- Tension feedback ----------------------------------------------------------
+# After FABRIK solving, these report where the chain WANTS each endpoint to be.
+# If an endpoint is free-moving (ball/shackle), it should read these to get
+# the chain-constrained position instead of computing its own constraint.
+
+var tension_pos_a: Vector2 = Vector2.ZERO  # Where chain wants anchor A to be
+var tension_pos_b: Vector2 = Vector2.ZERO  # Where chain wants anchor B to be
+var is_taut: bool = false                   # True when chain is at full extension
+
+# -- Debug logging (throttled) -------------------------------------------------
+
+var _debug_log_timer: float = 0.0
+const DEBUG_LOG_INTERVAL := 0.5  # Log every 0.5 seconds, not every frame
+
 # -- Shake feedback ------------------------------------------------------------
 
 var _shake_timer: float = 0.0
@@ -179,44 +193,10 @@ func _physics_process(delta: float) -> void:
 	var total_chain_len: float = _link_len * float(_point_count - 1)
 	var anchor_dist: float = pos_a.distance_to(pos_b)
 
-	if anchor_dist >= total_chain_len:
-		# Chain is taut — lay points along the line, but check for wall obstruction.
-		# If the line between anchors crosses geometry, don't just lerp through it;
-		# instead, keep the existing draped shape and let FABRIK + collision handle it.
-		var space_check := get_world_2d().direct_space_state
-		var obstructed: bool = false
-		if space_check:
-			var los_query := PhysicsRayQueryParameters2D.create(pos_a, pos_b, 1)
-			obstructed = not space_check.intersect_ray(los_query).is_empty()
-		if not obstructed:
-			# Clear line of sight — safe to go taut (straight line)
-			for i in range(_point_count):
-				var t: float = float(i) / float(_point_count - 1)
-				_points[i] = pos_a.lerp(pos_b, t)
-		else:
-			# Obstructed taut chain: use FABRIK to find a path around surfaces
-			var fabrik_iterations_taut: int = clampi(_point_count / 2, 3, 8)
-			for _pass in range(fabrik_iterations_taut):
-				_points[0] = pos_a
-				for i in range(1, _point_count):
-					var dir: Vector2 = _points[i] - _points[i - 1]
-					var dist: float = dir.length()
-					if dist < 0.001:
-						dir = Vector2(0, 1)
-						dist = 0.001
-					_points[i] = _points[i - 1] + (dir / dist) * _link_len
-				_points[_point_count - 1] = pos_b
-				for i in range(_point_count - 2, -1, -1):
-					var dir: Vector2 = _points[i] - _points[i + 1]
-					var dist: float = dir.length()
-					if dist < 0.001:
-						dir = Vector2(0, -1)
-						dist = 0.001
-					_points[i] = _points[i + 1] + (dir / dist) * _link_len
-				# Collide every other iteration to save raycasts
-				if _pass % 2 == 0:
-					_collide_with_surfaces()
-	else:
+	# Always use FABRIK + gravity + collision. Even when taut, the chain should
+	# sag under gravity and drape around geometry. A straight line is only correct
+	# if the tension vastly exceeds gravity (which we don't model — real chains sag).
+	if true:
 		# Chain has slack — FABRIK drapes it naturally with rigid links.
 		# Surface collision is applied between iterations so the chain wraps
 		# around platforms and walls instead of passing through them.
@@ -254,9 +234,28 @@ func _physics_process(delta: float) -> void:
 	# Re-apply surface collision after constraints (may have pushed points inside)
 	_collide_with_surfaces()
 
+	# Tension feedback: after FABRIK solving, report where the chain pulls each endpoint.
+	# The first interior point from each end gives the tension direction.
+	# If an anchor is free-moving, it should follow this position.
+	is_taut = anchor_dist >= total_chain_len * 0.98
+	if _point_count >= 3:
+		# tension_pos_a = where anchor A would be if it followed the chain
+		# (i.e., one link_len from point[1] toward point[0])
+		tension_pos_a = _points[1] + (_points[0] - _points[1]).normalized() * _link_len
+		tension_pos_b = _points[_point_count - 2] + (_points[_point_count - 1] - _points[_point_count - 2]).normalized() * _link_len
+	else:
+		tension_pos_a = pos_a
+		tension_pos_b = pos_b
+
 	# Check for projectile hits and melee attacks
 	_check_projectile_hits()
 	_check_melee_hits()
+
+	# Throttled debug logging
+	_debug_log_timer -= delta
+	if _debug_log_timer <= 0 and DebugOverlay.should_log("chain/link_state", self) != DebugOverlay.TextMode.NONE:
+		_debug_log_timer = DEBUG_LOG_INTERVAL
+		_log_chain_state(pos_a, pos_b, anchor_dist, total_chain_len)
 
 	# Shake decay
 	if _shake_timer > 0:
@@ -504,3 +503,32 @@ func _get_limb_width(anchor: Dictionary) -> float:
 		"elbow_l", "elbow_r": return 6.0
 		"knee_l", "knee_r": return 6.0
 	return 8.0
+
+
+func _log_chain_state(pos_a: Vector2, pos_b: Vector2, anchor_dist: float, total_len: float) -> void:
+	## Throttled chain state log — prints link positions, taut/slack, tension direction.
+	var state_str: String = "TAUT" if is_taut else "SLACK"
+	var slack_pct: float = 100.0 * (1.0 - anchor_dist / maxf(total_len, 1.0)) if not is_taut else 0.0
+
+	# Sample a few points along the chain to show shape (not all — too verbose)
+	var sample_count: int = mini(5, _point_count)
+	var samples: String = ""
+	for i in range(sample_count):
+		var idx: int = int(float(i) / float(sample_count - 1) * float(_point_count - 1)) if sample_count > 1 else 0
+		var p: Vector2 = _points[idx]
+		samples += "(%.0f,%.0f) " % [p.x, p.y]
+
+	# Compute chain curvature — how far the midpoint deviates from the straight line
+	var mid_idx: int = _point_count / 2
+	var mid_point: Vector2 = _points[mid_idx]
+	var straight_mid: Vector2 = pos_a.lerp(pos_b, 0.5)
+	var sag: float = mid_point.distance_to(straight_mid)
+
+	# Tension direction at each end
+	var tension_dir_a: Vector2 = (_points[1] - _points[0]).normalized() if _point_count >= 2 else Vector2.ZERO
+	var tension_dir_b: Vector2 = (_points[_point_count - 2] - _points[_point_count - 1]).normalized() if _point_count >= 2 else Vector2.ZERO
+
+	DebugOverlay.log("chain/link_state", self,
+		"CHAIN %s: links=%d len=%.0f dist=%.0f slack=%.0f%% sag=%.1f tense_a=(%.2f,%.2f) tense_b=(%.2f,%.2f) pts=[%s]",
+		[state_str, _point_count, total_len, anchor_dist, slack_pct, sag,
+		 tension_dir_a.x, tension_dir_a.y, tension_dir_b.x, tension_dir_b.y, samples.strip_edges()])

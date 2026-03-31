@@ -54,6 +54,12 @@ class AspectInfo:
 	## Cached actualized state (updated when observers change)
 	var _actual_visual: bool = false
 	var _actual_textual: int = TextMode.NONE
+	## Tick counters — incremented on every vis()/log() call, even when disabled.
+	## Reset every second to compute ticks-per-second (TPS) rate.
+	var _visual_ticks: int = 0      # Visual draw calls this second
+	var _textual_ticks: int = 0     # Log calls this second
+	var _visual_tps: int = 0        # Visual ticks per second (computed)
+	var _textual_tps: int = 0       # Textual ticks per second (computed)
 
 
 # -- State ---------------------------------------------------------------------
@@ -86,9 +92,24 @@ var _console: Node = null
 
 # -- Lifecycle -----------------------------------------------------------------
 
+var _tps_timer: float = 0.0  # Accumulates delta for TPS calculation
+
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	load_profile()
+
+
+func _process(delta: float) -> void:
+	_tps_timer += delta
+	if _tps_timer >= 1.0:
+		_tps_timer -= 1.0
+		# Snapshot tick counts into TPS rates, then reset counters
+		for path in _aspects:
+			var info: AspectInfo = _aspects[path]
+			info._visual_tps = info._visual_ticks
+			info._textual_tps = info._textual_ticks
+			info._visual_ticks = 0
+			info._textual_ticks = 0
 
 
 # -- Registration --------------------------------------------------------------
@@ -236,8 +257,11 @@ func _recompute_actual(info: AspectInfo) -> void:
 # -- Query API (hot path) -----------------------------------------------------
 
 ## Check if visual debug should be drawn for this aspect + entity.
+## ALWAYS increments the visual tick counter (even when disabled) for TPS metrics.
 ## Call from _draw() to gate debug rendering.
 func should_draw(aspect_path: String, entity: Node = null) -> bool:
+	if _aspects.has(aspect_path):
+		_aspects[aspect_path]._visual_ticks += 1
 	if not global_enabled:
 		return false
 	if not _aspects.has(aspect_path):
@@ -247,6 +271,23 @@ func should_draw(aspect_path: String, entity: Node = null) -> bool:
 	if entity and not _entity_passes_filter(entity):
 		return false
 	return true
+
+
+## Execute a visual debug lambda if the aspect is enabled.
+## ALWAYS increments the visual tick counter for TPS metrics.
+## Usage: DebugOverlay.vis("aspect/sub", self, func(): draw_circle(...))
+func vis(aspect_path: String, entity: Node, draw_fn: Callable) -> void:
+	if _aspects.has(aspect_path):
+		_aspects[aspect_path]._visual_ticks += 1
+	if not global_enabled:
+		return
+	if not _aspects.has(aspect_path):
+		return
+	if not _aspects[aspect_path]._actual_visual:
+		return
+	if entity and not _entity_passes_filter(entity):
+		return
+	draw_fn.call()
 
 
 ## Check if textual debug should be logged for this aspect + entity.
@@ -264,7 +305,10 @@ func should_log(aspect_path: String, entity: Node = null) -> int:
 
 
 ## Combined log call: checks aspect, formats message, routes to destination(s).
+## ALWAYS increments the textual tick counter for TPS metrics.
 func log(aspect_path: String, entity: Node, msg: String, args: Array = []) -> void:
+	if _aspects.has(aspect_path):
+		_aspects[aspect_path]._textual_ticks += 1
 	var mode: int = should_log(aspect_path, entity)
 	if mode == TextMode.NONE:
 		return

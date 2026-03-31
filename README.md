@@ -163,6 +163,28 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.34
+**Chain physics fix, TPS metrics, clean logs, unified UI, generic ai_spawn**
+
+- **B-S chain length fix**: B-S chain was getting overwritten from 600 to 300 every frame by split update — now correctly preserves full length for Release mode chains
+- **Unified B-S/B-P/B-E physics**: removed separate B-S constraint code, all modes use same chain constraint + YEET path. B-S with attached entity uses entity mass for YEET
+- **Chain FABRIK sag**: removed straight-line shortcut for taut chains — FABRIK + gravity always runs, producing natural catenary drape even when taut
+- **Chain tension feedback**: chain.gd reports `tension_pos_a/b` and `is_taut` after FABRIK solve
+- **TPS metrics in debug drawer**: every debug aspect shows visual and textual ticks-per-second, color-coded (green/orange/red). Visible even when aspect is off — see which systems are active
+- **`vis()` API**: `DebugOverlay.vis("aspect", entity, func(): draw_calls)` — lambda pattern for debug draw, always counts ticks
+- **Clean logs**: all hardcoded `print()` calls in player_side.gd routed through `DebugOverlay.log()`. Skeleton dumps gated behind `body_mechanics/spine_debug` aspect. Startup logs reduced to 4 lines
+- **Generic `ai_spawn`**: accepts `class=executioner` (or any class name). All tests updated to explicitly declare class
+- **`announce` command**: shows large centered text on screen with fade-out
+- **`comment` command**: silent no-op for test script documentation
+- **Spikeball marker entity**: proper Node2D with script, `cfg()`/`push_config()` proxied to owner player. Shows as configurable entity in debug drawer
+- **Spike ball properties configurable**: spin speed, spin accel, max spin, wall drag, ceiling drag all route through `cfg()` with debug drawer sliders
+- **Unified sub-section headers**: `_draw_sub_header()` shared by Config, Level Editor, Constructs — consistent look with accent color theming
+- **Drawer state persistence**: active section saved/restored across restarts via `drawer_state.json`
+- **Layout persistence fix**: `_auto_snap_all()` no longer overwrites saved sub-section heights on reload
+- **Logs moved to `/var/tumu/logs/`**: falls back to `/tmp/` if unavailable
+- **Input mapping doc**: `docs/design/input_mapping.md` — PS5/Xbox/keyboard mappings for all game actions
+- **New test**: `exec_release_mode` — Release mode with dummy attachment, verify boundary
+
 ### v0.10.33
 **Verify monitors, candy-stripe boundaries, shackle drag fix, monster HUD, test loops**
 

@@ -14,7 +14,11 @@ Options:
 ```bash
 pkill -f "Godot.*test123" 2>/dev/null
 sleep 1
-nohup /Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 > /tmp/godot_debug.log 2>&1 &
+LOG_DIR="/var/tumu/logs"
+if [ ! -d "$LOG_DIR" ]; then
+  mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="/tmp"
+fi
+nohup /Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 > "$LOG_DIR/godot_debug.log" 2>&1 &
 sleep 3
 echo "status" | nc -w2 localhost 9999
 ```

@@ -1856,10 +1856,16 @@ func _tick_verify_monitors(delta: float) -> void:
 					_log("  VERIFY [%d]: variable {%s} falsy — PASSED" % [monitor["id"], vname], Color(0.4, 1.0, 0.4))
 					continue
 
-		# Check boundary
+		# Check boundary — skip if subject or center entity doesn't exist yet
 		var selector: Dictionary = monitor.get("selector", {})
 		var boundary: Dictionary = monitor.get("boundary", {})
 		var entities: Array = _resolve_entity_selector(selector)
+		if entities.is_empty():
+			continue  # Subject entity not in scene yet — skip this frame
+		if boundary.has("center_entity"):
+			var center_entities: Array = _resolve_entity_selector(boundary["center_entity"])
+			if center_entities.is_empty():
+				continue  # Center entity not in scene yet — skip this frame
 		for entity in entities:
 			if not _is_within_boundary(entity.global_position, boundary):
 				# BREACH — immediate test failure

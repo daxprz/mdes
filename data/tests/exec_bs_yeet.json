@@ -10,7 +10,7 @@
     "clear",
     "portal off",
     "clearplayers",
-    "ai_spawn 400 876",
+    "ai_spawn 400 876 class=executioner",
     "wait 0.5",
     "comment Cycle to RELEASE mode: default=H_R, 2 presses: H_R->H_H->R",
     "ai_cmd interact 0.05",
