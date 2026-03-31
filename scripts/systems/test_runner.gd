@@ -1537,7 +1537,7 @@ func _check_breach_conditions() -> void:
 func _find_matching_entities(patterns: Array) -> Array:
 	## Find all entities (enemies + players) whose name matches any of the glob patterns.
 	var result: Array = []
-	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("players")
+	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("players") + get_tree().get_nodes_in_group("entities")
 	for node: Node in all_nodes:
 		for pattern: String in patterns:
 			if _glob_match(node.name, pattern):
@@ -1757,7 +1757,7 @@ func _parse_until(tokens: Array) -> Dictionary:
 func _resolve_entity_selector(selector: Dictionary) -> Array:
 	## Find all entities matching an @e[...] selector.
 	var filters: Array = selector.get("filters", [])
-	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("players")
+	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + get_tree().get_nodes_in_group("players") + get_tree().get_nodes_in_group("entities")
 	# Deduplicate
 	var seen: Dictionary = {}
 	var unique: Array = []

@@ -51,7 +51,7 @@ var owner_player: Node2D = null         # The Executioner player that owns this 
 
 
 func _ready() -> void:
-	add_to_group("players")  # So entity selectors find us
+	add_to_group("entities")  # For @e[...] selectors — NOT "players" to avoid intercepting AI commands
 	_init_config()
 
 

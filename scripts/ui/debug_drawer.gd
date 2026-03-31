@@ -2686,11 +2686,12 @@ func _draw_config_section(content_x: float, font: Font, ph: float) -> void:
 
 
 func _get_all_entities() -> Array:
-	## Returns a deduplicated list of all entities (enemies + players + dummies).
+	## Returns a deduplicated list of all entities (enemies + players + dummies + entities).
 	var all: Array = []
 	all.append_array(get_tree().get_nodes_in_group("enemies"))
 	all.append_array(get_tree().get_nodes_in_group("players"))
 	all.append_array(get_tree().get_nodes_in_group("attack_dummies"))
+	all.append_array(get_tree().get_nodes_in_group("entities"))
 	var seen: Dictionary = {}
 	var result: Array = []
 	for e in all:

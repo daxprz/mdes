@@ -523,6 +523,9 @@ func _ready() -> void:
 	_demo_power_tier = PlayerManager.demo_power_tier
 	_demo_size_tier = PlayerManager.demo_size_tier
 	_demo_napalm = PlayerManager.demo_napalm
+	# Initialize executioner shackle entity
+	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
+		_init_shackle_entity()
 	# Initialize ranged reticle position
 	if character_class == PlayerManager.CharacterClass.RANGED:
 		call_deferred("_init_reticle_pos")
@@ -7713,7 +7716,7 @@ func _handle_executioner(delta: float) -> void:
 			_exec_ball_marker.set_script(SpikeBallScript)
 			_exec_ball_marker.name = "spikeball"
 			_exec_ball_marker._owner_player = self
-			_exec_ball_marker.add_to_group("players")
+			_exec_ball_marker.add_to_group("entities")
 			get_tree().current_scene.add_child(_exec_ball_marker)
 		_exec_ball_marker.global_position = _exec_ball_pos
 	else:
