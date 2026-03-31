@@ -7395,7 +7395,7 @@ const EXEC_SHACKLE_SNAP_RANGE := 40.0     # Hitbox proximity snap range
 const EXEC_SHACKLE_MASS := 5.0            # Shackle mass — very light so ball barely notices it in B-S mode
 
 # Chain — ONE total chain, player in middle, ball on one end, shackle on other
-const EXEC_CHAIN_TOTAL_LEN := 600.0       # Total fixed chain length (ball + shackle)
+const EXEC_CHAIN_TOTAL_LEN := 400.0       # Total fixed chain length (ball + shackle)
 const EXEC_CHAIN_SPLIT_DEFAULT := 0.5     # Default split: 50% ball, 50% shackle
 const EXEC_CHAIN_SPLIT_MIN := 0.1         # Minimum split (10% to one side)
 const EXEC_CHAIN_SPLIT_MAX := 0.9         # Maximum split (90% to one side)

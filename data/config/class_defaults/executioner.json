@@ -13,7 +13,7 @@
   "charge_damage_mult": 1.0,
   "knockback_mult": 1.0,
   "exec_chain_elasticity": 0.25,
-  "exec_chain_total_len": 600.0,
+  "exec_chain_total_len": 400.0,
   "exec_chain_adjust_speed": 0.5,
   "exec_swing_max_damage": 80.0,
   "exec_swing_slam_radius": 60.0,
