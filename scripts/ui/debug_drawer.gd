@@ -173,6 +173,9 @@ var _cfg_bp_names_dirty: bool = true
 # Class selection
 var _cfg_selected_class: int = -1          # CharacterClass enum value (-1 = none)
 var _cfg_class_scroll_offset: int = 0
+var _cfg_class_dragging_key: String = ""   # Which class slider is being dragged
+var _cfg_class_data: Dictionary = {}       # Cached class default data (for live editing)
+var _cfg_class_data_name: String = ""      # Which class the cached data is for
 
 # Stat selection for calculations
 var _cfg_selected_stat: String = ""        # Config key selected in Entity Stats
@@ -766,6 +769,10 @@ func _input(event: InputEvent) -> void:
 			_cfg_bp_dragging_key = ""
 			get_viewport().set_input_as_handled()
 			return
+		if not _cfg_class_dragging_key.is_empty():
+			_cfg_class_dragging_key = ""
+			get_viewport().set_input_as_handled()
+			return
 		if _sub_resize_idx >= 0:
 			_handle_sub_resize_release()
 			_sub_resize_idx = -1
@@ -857,6 +864,10 @@ func _input(event: InputEvent) -> void:
 			get_viewport().set_input_as_handled()
 		elif not _config_dragging_key.is_empty():
 			_handle_config_drag(event.position.x)
+			get_viewport().set_input_as_handled()
+		elif not _cfg_class_dragging_key.is_empty():
+			var cls_lx: float = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
+			_cfg_class_drag_at(cls_lx)
 			get_viewport().set_input_as_handled()
 		elif not _cfg_bp_dragging_key.is_empty():
 			var bp_lx: float = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
@@ -3982,33 +3993,21 @@ func _draw_cfg_sub_classes(x: float, y: float, pw: float, h: float, font: Font) 
 
 func _draw_cfg_sub_class(x: float, y: float, pw: float, h: float, font: Font) -> void:
 	## Class editor — sliders for base stats loaded from class default JSON.
-	if _cfg_selected_class < 0:
+	if _cfg_selected_class < 0 and _cfg_selected_class > -100:
 		_panel.draw_string(font, Vector2(x + 4, y + 11), "Select a class above", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
 		return
 
-	# Resolve class name
-	var cls_name: String = ""
-	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
-	if _cfg_selected_class >= 0:
-		cls_name = PlayerHUD.CLASS_NAMES.get(_cfg_selected_class, "").to_lower()
-	elif _cfg_selected_class <= -100:
-		var idx: int = -100 - _cfg_selected_class
-		if idx >= 0 and idx < extra_classes.size():
-			cls_name = extra_classes[idx]
-
+	var cls_name: String = _cfg_resolve_class_name()
 	if cls_name.is_empty():
 		_panel.draw_string(font, Vector2(x + 4, y + 11), "Unknown class", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.3, 0.3))
 		return
 
-	# Load class defaults
-	var MCP = load("res://scripts/systems/monster_config.gd")
-	var provider = MCP.load_class_defaults(cls_name)
-	if not provider:
+	_cfg_ensure_class_data(cls_name)
+	if _cfg_class_data.is_empty():
 		_panel.draw_string(font, Vector2(x + 4, y + 11), "No defaults for '%s'" % cls_name, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.3, 0.3))
 		return
 
-	# Get all keys from the provider
-	var data: Dictionary = provider._data
+	var data: Dictionary = _cfg_class_data
 	var local_y: float = 0.0
 	var slider_h: float = 16.0
 	var slider_gap: float = 2.0
@@ -4327,6 +4326,8 @@ func _handle_cfg_subsection_click(sub_id: String, lx: float, local_y: float, bod
 			_handle_cfg_settings_click(lx, local_y)
 		"cfg_classes":
 			_handle_cfg_classes_click(lx, local_y, body_h)
+		"cfg_class":
+			_handle_cfg_class_click(lx, local_y, body_h)
 		"cfg_entities":
 			_handle_cfg_entities_click(lx, local_y, body_h)
 		"cfg_entity_stats":
@@ -4346,13 +4347,126 @@ func _handle_cfg_classes_click(_lx: float, local_y: float, _body_h: float) -> vo
 	for i in range(all_classes.size()):
 		if local_y >= i * row_h and local_y < (i + 1) * row_h:
 			_cfg_selected_class = all_classes[i]
+			_cfg_class_data.clear()  # Force reload on class change
+			_cfg_class_data_name = ""
 			return
 	# Separator + physics entity classes
 	var offset: float = all_classes.size() * row_h + 2
 	for i in range(extra_classes.size()):
 		if local_y >= offset + i * row_h and local_y < offset + (i + 1) * row_h:
 			_cfg_selected_class = -100 - i  # Negative IDs for physics entities
+			_cfg_class_data.clear()
+			_cfg_class_data_name = ""
 			return
+
+
+func _handle_cfg_class_click(lx: float, local_y: float, _body_h: float) -> void:
+	## Click in class editor — start slider drag.
+	if _cfg_selected_class < 0 and _cfg_selected_class > -100:
+		return
+	var pw: float = _content_width
+	var slider_h: float = 16.0
+	var slider_gap: float = 2.0
+	var row_idx: int = int(local_y / (slider_h + slider_gap))
+	# Map row to key
+	var cls_name: String = _cfg_resolve_class_name()
+	if cls_name.is_empty():
+		return
+	_cfg_ensure_class_data(cls_name)
+	var keys: Array = []
+	for key in _cfg_class_data:
+		keys.append(key)
+	if row_idx < 0 or row_idx >= keys.size():
+		return
+	var key: String = keys[row_idx]
+	# Check if click is on slider area
+	if lx >= pw * 0.45 and lx < pw * 0.82:
+		_cfg_class_dragging_key = key
+		_cfg_class_drag_at(lx)
+
+
+func _cfg_resolve_class_name() -> String:
+	## Get the class name string for the currently selected class.
+	var extra_classes: Array[String] = ["spikeball", "shackle", "chain", "soccer_dummy", "monster"]
+	if _cfg_selected_class >= 0:
+		return PlayerHUD.CLASS_NAMES.get(_cfg_selected_class, "").to_lower()
+	elif _cfg_selected_class <= -100:
+		var idx: int = -100 - _cfg_selected_class
+		if idx >= 0 and idx < extra_classes.size():
+			return extra_classes[idx]
+	return ""
+
+
+func _cfg_ensure_class_data(cls_name: String) -> void:
+	## Load class data into cache if not already loaded.
+	if _cfg_class_data_name == cls_name and not _cfg_class_data.is_empty():
+		return
+	_cfg_class_data.clear()
+	_cfg_class_data_name = cls_name
+	var MCP = load("res://scripts/systems/monster_config.gd")
+	var provider = MCP.load_class_defaults(cls_name)
+	if provider and "_data" in provider:
+		_cfg_class_data = provider._data.duplicate()
+
+
+func _cfg_class_drag_at(lx: float) -> void:
+	## Set class default value based on slider position.
+	if _cfg_class_dragging_key.is_empty() or _cfg_class_data.is_empty():
+		return
+	var pw: float = _content_width
+	var slider_x: float = pw * 0.45
+	var slider_w: float = pw * 0.35
+	var t: float = clampf((lx - slider_x) / slider_w, 0.0, 1.0)
+	var key: String = _cfg_class_dragging_key
+	if not _cfg_class_data.has(key):
+		return
+	var current_val: float = float(_cfg_class_data[key])
+	var range_info: Vector2 = _get_config_range(key, current_val)
+	var new_val: float = lerpf(range_info.x, range_info.y, t)
+	# Snap to nice values
+	if absf(new_val) > 10.0:
+		new_val = roundf(new_val)
+	elif absf(new_val) > 1.0:
+		new_val = roundf(new_val * 10.0) / 10.0
+	else:
+		new_val = roundf(new_val * 100.0) / 100.0
+	_cfg_class_data[key] = new_val
+	# Save to user overrides
+	_cfg_save_class_override()
+	# Update all entities of this class — reload their base config
+	_cfg_apply_class_data_to_entities()
+	_panel.queue_redraw()
+
+
+func _cfg_save_class_override() -> void:
+	## Save current class data edits to user://class_overrides/<class>.json.
+	var cls_name: String = _cfg_class_data_name
+	if cls_name.is_empty():
+		return
+	DirAccess.make_dir_recursive_absolute("user://class_overrides")
+	var path: String = "user://class_overrides/%s.json" % cls_name
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(_cfg_class_data, "  "))
+
+
+func _cfg_apply_class_data_to_entities() -> void:
+	## Push updated class data onto all entities that use this class.
+	## Replaces the existing base config provider with the new data.
+	var cls_name: String = _cfg_class_data_name
+	if cls_name.is_empty():
+		return
+	var MCP = load("res://scripts/systems/monster_config.gd")
+	var new_provider = MCP.DictProvider.new(_cfg_class_data.duplicate(), "%s_defaults" % cls_name)
+	for entity in _get_all_entities():
+		if not "_config_stack" in entity:
+			continue
+		# Find and replace the existing defaults provider
+		for i in range(entity._config_stack.size()):
+			var p = entity._config_stack[i]
+			if "_name" in p and p._name == "%s_defaults" % cls_name:
+				entity._config_stack[i] = new_provider
+				break
 
 
 func _handle_cfg_entity_stats_click(_lx: float, local_y: float, _body_h: float) -> void:
