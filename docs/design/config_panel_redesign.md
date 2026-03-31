@@ -240,23 +240,37 @@ var _cfg_selected_stat: String = ""         # Config key selected in Entity Stat
 2. Entity Mods → Modifier editor
 3. Stat selection → Calculations
 
-### Phase 7: Spikeball config stack
-1. Give spikeball_marker.gd its own config stack (like shackle_entity.gd)
-2. Move `exec_ball_*` keys from player stack to ball stack, drop prefix
-3. Update all `cfg("exec_ball_*")` calls to query ball entity instead
-4. Ball modifiers go on the ball, not the player
+### Phase 7: Physics entity config stacks
+Every physics body gets its own config stack, default file, and entity identity.
 
-### Phase 8: Chain config entity
-1. Create chain config as a queryable entity (or sub-config on player)
-2. Move `exec_chain_*` keys to their own namespace
-3. Chain damping/gravity read from chain config, not player cfg()
+**Spike Ball** (`scripts/systems/spikeball_entity.gd`):
+1. Promote from marker to full entity (like shackle_entity.gd)
+2. Own config stack with defaults: mass=140, gravity=900, damage=35, stun=3, throw_speed=1200, max_throw_speed=6000, spin_speed=4, spin_accel=3, max_spin=10, wall_drag=12, ceiling_drag=20
+3. Move all `cfg("exec_ball_*")` calls to `_spikeball.cfg("*")`
+4. Persistent — created in _ready(), exists when ball is held or thrown
+5. Default file: `data/config/class_defaults/spikeball.json`
 
-### Phase 9: Migration cleanup
-1. Remove hardcoded CLASS_STATS defaults
-2. Remove _get_player_config_default hardcoded values
-3. All values load from JSON files
-4. `exec_ball_*` prefix removed from ball keys
-5. `exec_chain_*` prefix removed from chain keys
+**Chain** (`scripts/systems/chain.gd` — enhance existing):
+1. Give chain.gd its own config stack
+2. `cfg()` method on chain for: damping, gravity, total_len, link_length, elasticity
+3. Chain reads its own config instead of being set by player each frame
+4. Default file: `data/config/class_defaults/chain.json`
+5. Chain instances appear in entity list when they exist
+
+**Soccer Dummy** (`scripts/testing/soccer_dummy.gd` — enhance existing):
+1. Give soccer_dummy.gd a config stack
+2. `cfg()` for: mass, gravity, friction, air_friction, bounce_factor, radius
+3. Replace hardcoded constants with cfg() calls
+4. Default file: `data/config/class_defaults/soccer_dummy.json`
+5. Modifiers can be pushed onto individual dummies
+
+### Phase 8: Migration cleanup
+1. Remove hardcoded CLASS_STATS defaults → load from JSON
+2. Remove _get_player_config_default hardcoded values → load from JSON
+3. Remove _get_shackle_config_default → load from JSON
+4. All values load from class default files
+5. Prefixes dropped: `exec_ball_*` → `*` on ball, `exec_chain_*` → `*` on chain
+6. `monster_defaults.json` moves to `class_defaults/monster.json`
 
 ## Resolved Questions
 
@@ -264,15 +278,20 @@ var _cfg_selected_stat: String = ""         # Config key selected in Entity Stat
 
 2. **Shackle and spikeball** — separate classes in the Classes list. Each has its own config stack and default file:
 
+**Principle: every distinct physics body gets its own config stack.** If it has mass, velocity, or physics interactions, it's a config entity. No exceptions.
+
 | Class | Config Stack | Default File | Keys |
 |-------|-------------|--------------|------|
 | Melee | player._config_stack | `class_defaults/melee.json` | speed, gravity, health, melee_* |
-| Executioner | player._config_stack | `class_defaults/executioner.json` | speed, gravity, health, exec_chain_* |
-| Spike Ball | spikeball._config_stack (NEW) | `class_defaults/spikeball.json` | mass, gravity, damage, spin, stun, throw_speed |
+| Ranged | player._config_stack | `class_defaults/ranged.json` | speed, gravity, health, ranger_* |
+| Executioner | player._config_stack | `class_defaults/executioner.json` | speed, gravity, health |
+| *(other classes)* | player._config_stack | `class_defaults/<class>.json` | speed, gravity, health, class-specific |
+| Spike Ball | spikeball._config_stack (NEW) | `class_defaults/spikeball.json` | mass, gravity, damage, spin, stun, throw_speed, wall_drag, ceiling_drag |
 | Shackle | shackle._config_stack | `class_defaults/shackle.json` | mass, gravity, drag, elasticity |
-| Chain | (set from player cfg) | `class_defaults/chain.json` | damping, gravity, total_len |
+| Chain | chain._config_stack (NEW) | `class_defaults/chain.json` | damping, gravity, total_len, link_length, elasticity |
+| Soccer Dummy | dummy._config_stack (NEW) | `class_defaults/soccer_dummy.json` | mass, gravity, friction, air_friction, bounce, radius |
 | Monster | monster._config_stack | `class_defaults/monster.json` (was monster_defaults.json) | all monster keys |
 
-   The spikeball needs its own config stack (like the shackle already has) instead of proxying to the player. Ball keys (`exec_ball_*`) move from the player stack to the ball stack, dropping the `exec_ball_` prefix.
+   Every physics entity owns its config. Keys drop their entity prefix (e.g., `exec_ball_mass` → `mass` on the spike ball). Modifiers are pushed onto the entity they affect, not the player.
 
 3. **Calculations caching** — cache is rebuilt on every config change (modifier push/remove, slider drag, class default edit). NOT every frame. Display from cache.
