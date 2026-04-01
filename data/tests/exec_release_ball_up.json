@@ -2,41 +2,40 @@
   "name": "exec_release_ball_up",
   "description": "Release mode: throw ball up-right. Player should NOT be yanked (released chain). Shackle must stay within chain radius of ball.",
   "debug": {
-    "log": ["executioner/throw", "executioner/ball", "executioner/chain_radius"],
-    "on": ["executioner/chain_radius"]
+    "log": [
+      "executioner/throw",
+      "executioner/ball",
+      "executioner/chain_radius"
+    ],
+    "on": [
+      "executioner/chain_radius"
+    ]
   },
   "script": [
+    "var inspect default=false",
     "level flat_floor",
     "wait 0.3",
     "clear",
     "portal off",
     "clearplayers",
-
     "# Spawn executioner in Release mode at center floor",
     "ai_spawn 960 876 class=executioner name=AI mode=release",
     "wait 0.5",
-
     "# Query chain length (+20 margin) so verify radius tracks config changes",
     "query @e[name=AI] exec_chain_total_len chain_radius 400 +20",
-
-    "# Player must stay put — Release mode means no YEET on the player",
+    "# Player must stay put \u2014 Release mode means no YEET on the player",
     "verify @e[name=AI] within circle 960 876 80 until done",
-
     "announce Release mode: throwing ball up-right",
     "# Throw at ~60 deg up-right. 1.5s hold = full charge",
     "ai_cmd grapple 1.5 0.87 -0.50",
-
     "# Wait for throw to fire before starting chain-radius verify",
     "wait 1.6",
-
     "# Shackle must stay within total chain length of the ball at all times",
     "verify @e[name=shackle] within circle @e[name=spikeball] {chain_radius} until done",
     "# chain_radius = exec_chain_total_len + 20px buffer for physics jitter",
-
-    "# Let physics settle — ball bounces, shackle gets yanked, both come to rest",
+    "# Let physics settle \u2014 ball bounces, shackle gets yanked, both come to rest",
     "ai_cmd none 5.0",
     "wait 5",
-
     "ai_off",
     "enablejoins",
     "gameconfig multiple_players_same_class true",

@@ -12,6 +12,7 @@ const TASK_RESULTS := "results" # Show aggregated results
 const TASK_DEBUG_PROFILE := "debug_profile"  # Apply/clear debug profile
 const TASK_NOTIFY := "notify"   # Show notification and wait for dismiss
 const TASK_WHILE := "while"     # Loop: re-queue body while variable is truthy
+const TASK_INSPECT := "inspect" # Manual visual inspection gate (OK/BAD/BROKEN)
 
 var _task_queue: Array = []   # Array of {type, data}
 var _running: bool = false
@@ -28,6 +29,8 @@ var _test_vars: Dictionary = {}      # Test variables from "var <name> default=<
 var _test_state: String = ""         # Current state: INITIALIZING/RUNNING/COMPLETE/FINALIZED
 var _state_timestamps: Dictionary = {} # {state: msec}
 var _waiting_for_notify: bool = false # True only during TASK_NOTIFY wait
+var _waiting_for_inspect: bool = false # True during TASK_INSPECT wait
+var _inspect_result: String = ""       # "OK", "BAD", or "BROKEN" after inspect
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -110,6 +113,8 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 	var trailing_modal: Dictionary = _queue_script(script, test_name)
 
 	_task_queue.append({"type": TASK_RESULTS})
+	# Inspect gate: if {inspect} variable is true, show manual verification modal
+	_task_queue.append({"type": TASK_INSPECT, "test_name": test_name})
 	if not trailing_modal.is_empty():
 		_task_queue.append(trailing_modal)
 	_start_queue()
@@ -743,6 +748,28 @@ func _advance_queue() -> void:
 					_line_states[monitor["line_idx"]] = "verifying"
 				_log("  VERIFY [%d]: %s" % [monitor["id"], vline.substr(7)], Color(0.4, 0.8, 1.0))
 			_wait_timer = 0.1
+		TASK_INSPECT:
+			# Manual visual inspection gate — only fires if {inspect} is truthy AND test passed
+			var inspect_val: String = _test_vars.get("inspect", "false").to_lower()
+			var all_passed: bool = true
+			for r in _results:
+				if not r.get("passed", false):
+					all_passed = false
+					break
+			if inspect_val in ["true", "1", "yes"] and all_passed:
+				var inspect_rcon: Node = get_node_or_null("/root/Rcon")
+				if inspect_rcon:
+					inspect_rcon._notify_dismissed_button = ""
+					var test_nm: String = task.get("test_name", _current_test_name)
+					inspect_rcon._execute(
+						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] 30 editor' % test_nm)
+				_waiting_for_inspect = true
+				_inspect_result = ""
+				_wait_timer = 999.0
+				_log("  INSPECT: Waiting for visual verification...", Color(1.0, 0.9, 0.3))
+			else:
+				# Skip inspect — not enabled or test failed
+				_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
@@ -775,6 +802,31 @@ func _process(delta: float) -> void:
 					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
+		# Check if inspect modal was dismissed
+		if _waiting_for_inspect:
+			var rcon_inspect: Node = get_node_or_null("/root/Rcon")
+			if rcon_inspect and not rcon_inspect._notify_active:
+				_waiting_for_inspect = false
+				_inspect_result = rcon_inspect._notify_dismissed_button
+				rcon_inspect._notify_dismissed_button = ""
+				if _inspect_result == "OK":
+					_log("  INSPECT: PASSED — visual verification OK", Color(0.4, 1.0, 0.4))
+					_wait_timer = 0.0
+				elif _inspect_result == "BAD":
+					_log("  INSPECT: BAD — test passed but should have failed", Color(1.0, 0.3, 0.2))
+					# Mark results as failed
+					_results.append({"name": "inspect", "passed": false,
+						"checks": [{"label": "visual", "passed": false, "value": "bad"}]})
+					_wait_timer = 0.0
+				elif _inspect_result == "BROKEN":
+					_log("  INSPECT: BROKEN — test is invalid/broken", Color(1.0, 0.5, 0.0))
+					_results.append({"name": "inspect", "passed": false,
+						"checks": [{"label": "visual", "passed": false, "value": "broken"}]})
+					_wait_timer = 0.0
+				else:
+					# Timeout or unknown — treat as OK (auto-dismiss)
+					_log("  INSPECT: timeout — auto-OK", Color(0.6, 0.6, 0.6))
+					_wait_timer = 0.0
 		# Check if modal was dismissed — advance the queue (only during TASK_NOTIFY)
 		if _waiting_for_notify:
 			var rcon_modal: Node = get_node_or_null("/root/Rcon")

@@ -2,10 +2,16 @@
   "name": "exec_shackle_kick",
   "description": "Shackle constraint: AI shackles a dummy via throw, dummy is kicked in 4 directions per cycle. Verify dummy stays within shackle chain distance of player.",
   "debug": {
-    "log": ["executioner/throw", "executioner/chain_radius"],
-    "on": ["executioner/chain_radius"]
+    "log": [
+      "executioner/throw",
+      "executioner/chain_radius"
+    ],
+    "on": [
+      "executioner/chain_radius"
+    ]
   },
   "script": [
+    "var inspect default=false",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -13,54 +19,45 @@
     "clearplayers",
     "debug on executioner/chain_radius",
     "debug log executioner/chain_radius",
-
     "announce Shackle Kick Test",
     "# Spawn executioner at center-left",
     "ai_spawn 640 876 class=executioner name=AI",
     "wait 0.5",
-
     "# Query shackle radius: total * 0.5 (default split) + 20 buffer",
     "query @e[name=AI] exec_chain_total_len shackle_radius 400 *0.5 +20",
     "# Spawn offset: 75% of shackle length = total * 0.375",
     "query @e[name=AI] exec_chain_total_len offset 400 *0.375",
-
     "# Spawn dummy at 75% of shackle length from player, relative to AI position",
     "spawn dummy @e[name=AI] ~{offset} ~0 name=ball",
     "wait 0.5",
-
-    "# Switch to H&H mode — both throws held",
+    "# Switch to H&H mode \u2014 both throws held",
     "announce Switching to H&H",
     "ai_cmd interact 0.05",
     "wait 0.5",
-
     "# First throw: ball up (held by chain to player)",
     "announce Throw ball up (held)",
     "ai_cmd grapple 0.4 0.0 -1.0",
     "wait 2.5",
-
     "# Second throw: shackle toward dummy (attaches on snap)",
     "announce Throw shackle at dummy (held)",
     "ai_cmd grapple 0.4 1.0 0.0",
     "wait 3",
-
     "# Verify dummy stays within shackle chain length of player",
     "announce Activating verify: dummy within shackle radius",
     "verify @e[name=ball] within circle @e[name=AI] {shackle_radius} until done",
-
-    "# Kick the dummy in 4 directions — chain should constrain it each time",
+    "# Kick the dummy in 4 directions \u2014 chain should constrain it each time",
     "set cycles = 2",
     "while {cycles}",
-      "kick ball -600 0",
-      "wait 2",
-      "kick ball 600 0",
-      "wait 2",
-      "kick ball -1275 -1275",
-      "wait 2",
-      "kick ball 1275 -1275",
-      "wait 2",
-      "set cycles = {cycles}-1",
+    "kick ball -600 0",
+    "wait 2",
+    "kick ball 600 0",
+    "wait 2",
+    "kick ball -1275 -1275",
+    "wait 2",
+    "kick ball 1275 -1275",
+    "wait 2",
+    "set cycles = {cycles}-1",
     "endwhile",
-
     "ai_off",
     "enablejoins",
     "notify observations exec_shackle_kick [\"OK\",\"RETRY\"] 0 editor"

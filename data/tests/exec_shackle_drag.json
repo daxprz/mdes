@@ -2,10 +2,16 @@
   "name": "exec_shackle_drag",
   "description": "Shackle leash: AI throws shackle at nearby soccer ball, then walks right. Verify ball is dragged along within shackle chain distance.",
   "debug": {
-    "log": ["executioner/throw", "executioner/chain_radius"],
-    "on": ["executioner/chain_radius"]
+    "log": [
+      "executioner/throw",
+      "executioner/chain_radius"
+    ],
+    "on": [
+      "executioner/chain_radius"
+    ]
   },
   "script": [
+    "var inspect default=false",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -13,39 +19,31 @@
     "clearplayers",
     "debug on executioner/chain_radius",
     "debug log executioner/chain_radius",
-
     "announce Shackle Drag Test",
-    "# Spawn executioner in H&H mode — both throws held",
+    "# Spawn executioner in H&H mode \u2014 both throws held",
     "ai_spawn 960 876 class=executioner name=AI mode=hh",
     "wait 0.5",
-
     "# Query shackle radius: total * 0.5 (default split) + 20 buffer",
     "query @e[name=AI] exec_chain_total_len shackle_radius 400 *0.5 +20",
-
     "# Spawn soccer ball 50px to the LEFT of the player",
     "announce Spawning soccer ball to the left",
     "spawn dummy @e[name=AI] ~-50 ~0 name=ball",
     "wait 0.5",
-
     "# First throw: spike ball straight up (gets it out of the way, held by chain)",
     "announce Throwing spike ball up",
     "ai_cmd grapple 0.4 0.0 -1.0",
     "wait 2",
-
-    "# Second throw: shackle left toward the soccer ball — should snap-attach",
+    "# Second throw: shackle left toward the soccer ball \u2014 should snap-attach",
     "announce Throwing shackle at the soccer ball",
     "ai_cmd grapple 0.4 -1.0 0.0",
     "wait 2",
-
     "# Verify ball stays within shackle chain radius of player",
     "announce Verify: ball must stay within shackle radius of AI",
     "verify @e[name=ball] within circle @e[name=AI] {shackle_radius} until done",
-
-    "# Walk right — ball should be dragged along by the chain",
-    "announce AI walking right — ball should follow",
+    "# Walk right \u2014 ball should be dragged along by the chain",
+    "announce AI walking right \u2014 ball should follow",
     "ai_cmd move_right 4.0",
     "wait 5",
-
     "ai_off",
     "enablejoins",
     "notify observations exec_shackle_drag [\"OK\",\"RETRY\"] 0 editor"

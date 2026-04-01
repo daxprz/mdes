@@ -2,10 +2,17 @@
   "name": "exec_release_mode",
   "description": "Release mode: ball thrown at 45 deg up-right, shackle auto-attaches to nearby dummy, both fly as B-S pair. Verify dummy stays within chain distance of the spike ball.",
   "debug": {
-    "log": ["executioner/throw", "executioner/ball", "executioner/chain_radius"],
-    "on": ["executioner/chain_radius"]
+    "log": [
+      "executioner/throw",
+      "executioner/ball",
+      "executioner/chain_radius"
+    ],
+    "on": [
+      "executioner/chain_radius"
+    ]
   },
   "script": [
+    "var inspect default=false",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -15,33 +22,26 @@
     "debug log executioner/chain_radius",
     "debug log executioner/throw",
     "debug log chain/link_state",
-
-    "announce Release Mode — B-S with Dummy",
+    "announce Release Mode \u2014 B-S with Dummy",
     "ai_spawn 500 876 class=executioner name=AI",
     "wait 0.5",
-
     "# Query chain length (+20 buffer) so verify radius tracks config changes",
     "query @e[name=AI] exec_chain_total_len chain_radius 400 +20",
-
     "announce Spawning dummy right above player (within shackle snap range)",
     "spawn dummy 500 840 name=ball",
     "wait 0.3",
-
     "announce Switch to Release mode",
     "ai_cmd interact 0.05",
     "wait 0.3",
     "ai_cmd interact 0.05",
     "wait 0.5",
-
     "announce Throwing spike ball at 45 deg up-right",
     "ai_cmd grapple 1.5 0.71 -0.71",
     "wait 1",
-
     "# Dummy must stay within chain length + margin of spike ball",
     "announce Verify: dummy must stay within chain length of spike ball",
     "verify @e[name=ball] within circle @e[name=spikeball] {chain_radius} until done",
     "wait 8",
-
     "ai_off",
     "enablejoins",
     "gameconfig multiple_players_same_class true",

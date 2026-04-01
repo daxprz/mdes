@@ -1,20 +1,21 @@
 {
-	"name": "quick",
-	"script": [
-		"var owait default=0",
-		"level title_screen",
-		"wait 0.2",
-		"clear",
-		"portal off",
-		"clearplayers",
-		"spawn dummy 800 885",
-		"spawn monster 960 885",
-		"wait 10 unless exit_circle 800 885 44 dummy*",
-		"standdown on",
-		"debug on testing/violations",
-		"check hp extract:damage_taken > 0.0 label:damage",
-		"check fps extract:fps > 20.0",
-		"check ik extract:ik_peak < 2000.0 label:ik_peak",
-		"notify observations DONE [\"OK\"] {owait} editor"
-	]
+  "name": "quick",
+  "script": [
+    "var inspect default=false",
+    "var owait default=0",
+    "level title_screen",
+    "wait 0.2",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "spawn dummy 800 885",
+    "spawn monster 960 885",
+    "wait 10 unless exit_circle 800 885 44 dummy*",
+    "standdown on",
+    "debug on testing/violations",
+    "check hp extract:damage_taken > 0.0 label:damage",
+    "check fps extract:fps > 20.0",
+    "check ik extract:ik_peak < 2000.0 label:ik_peak",
+    "notify observations DONE [\"OK\"] {owait} editor"
+  ]
 }

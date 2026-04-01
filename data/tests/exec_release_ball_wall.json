@@ -1,40 +1,40 @@
 {
   "name": "exec_release_ball_wall",
-  "description": "Release mode: player near right wall, throws ball at wall. Ball must not sink below ground (wall drag → floor transition).",
+  "description": "Release mode: player near right wall, throws ball at wall. Ball must not sink below ground (wall drag \u2192 floor transition).",
   "debug": {
-    "log": ["executioner/throw", "executioner/ball", "executioner/chain_radius"],
-    "on": ["executioner/chain_radius"]
+    "log": [
+      "executioner/throw",
+      "executioner/ball",
+      "executioner/chain_radius"
+    ],
+    "on": [
+      "executioner/chain_radius"
+    ]
   },
   "script": [
+    "var inspect default=false",
     "level flat_floor",
     "wait 0.3",
     "clear",
     "portal off",
     "clearplayers",
-
     "# Spawn near the right wall so ball hits it quickly",
     "ai_spawn 1700 876 class=executioner name=AI mode=release",
     "wait 0.5",
-
     "# Query chain length (+20 buffer) so verify radius tracks config changes",
     "query @e[name=AI] exec_chain_total_len chain_radius 400 +20",
-
     "announce Spike ball should NOT go through the floor",
-    "# Throw nearly horizontal with slight upward angle — will hit right wall fast",
+    "# Throw nearly horizontal with slight upward angle \u2014 will hit right wall fast",
     "ai_cmd grapple 1.5 1.0 -0.2",
-
     "# Wait for throw to fire before starting verifies",
     "wait 1.6",
-
-    "# Ball must stay above ground — wall drag should transition to floor, not clip through",
+    "# Ball must stay above ground \u2014 wall drag should transition to floor, not clip through",
     "verify @e[name=spikeball] within rect 0 0 1920 895 until done",
     "# Shackle must stay within chain length of ball",
     "verify @e[name=shackle] within circle @e[name=spikeball] {chain_radius} until done",
-
     "# Wait for ball to stick to wall, slide down, and settle on floor",
     "ai_cmd none 8.0",
     "wait 8",
-
     "ai_off",
     "enablejoins",
     "gameconfig multiple_players_same_class true",

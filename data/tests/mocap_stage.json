@@ -1,23 +1,34 @@
 {
-	"name": "mocap_stage",
-	"description": "Motion capture mapping test — 4x monster on left, ball on right, flat floor",
-	"version": "1.0",
-	"level": "flat_floor",
-	"timeout": 300,
-	"setup": [
-		"clear",
-		"standdown on",
-		"spawn monster 400 850 standdown scale=4.0",
-		"spawn dummy 1500 860",
-		"tab"
-	],
-	"script": [
-		"wait 0.5",
-		"mocap connect"
-	],
-	"checks": [],
-	"debug": {
-		"visual": ["body_mechanics/spine_debug", "body_mechanics/leg_debug", "body_mechanics/origin_marker", "body_mechanics/ik_plant_marks", "attack_zones/swipe", "attack_zones/bite"],
-		"log": ["monster/player_input", "monster/state"]
-	}
+  "name": "mocap_stage",
+  "description": "Motion capture mapping test \u2014 4x monster on left, ball on right, flat floor",
+  "version": "1.0",
+  "level": "flat_floor",
+  "timeout": 300,
+  "setup": [
+    "clear",
+    "standdown on",
+    "spawn monster 400 850 standdown scale=4.0",
+    "spawn dummy 1500 860",
+    "tab"
+  ],
+  "script": [
+    "var inspect default=false",
+    "wait 0.5",
+    "mocap connect"
+  ],
+  "checks": [],
+  "debug": {
+    "visual": [
+      "body_mechanics/spine_debug",
+      "body_mechanics/leg_debug",
+      "body_mechanics/origin_marker",
+      "body_mechanics/ik_plant_marks",
+      "attack_zones/swipe",
+      "attack_zones/bite"
+    ],
+    "log": [
+      "monster/player_input",
+      "monster/state"
+    ]
+  }
 }

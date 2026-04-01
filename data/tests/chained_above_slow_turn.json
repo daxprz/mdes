@@ -1,24 +1,25 @@
 {
-	"name": "chained_above_slow_turn",
-	"script": [
-		"var owait default=0",
-		"level title_screen",
-		"wait 0.2",
-		"clear",
-		"portal off",
-		"clearplayers",
-		"spawn monster 960 885 standdown scale=2.0 config={turn_speed=2.0,stiffness=6.0,landing_compress=20.0}",
-		"chain 0 head floor 180",
-		"spawn dummy 959 588",
-		"debug log monster/blend",
-		"debug on body_mechanics/spine_debug",
-		"debug on body_mechanics/tail_segments",
-		"debug on body_mechanics/leg_debug",
-		"standdown off",
-		"wait 15 unless breach 738 888 876 295 monster* dummy* unless breach 1040 299 1196 888 monster* dummy* unless breach 745 439 1175 438 monster* dummy*",
-		"standdown on",
-		"debug nolog monster/blend",
-		"check fps extract:fps > 20.0",
-		"notify observations DONE [\"OK\"] {owait} editor"
-	]
+  "name": "chained_above_slow_turn",
+  "script": [
+    "var inspect default=false",
+    "var owait default=0",
+    "level title_screen",
+    "wait 0.2",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "spawn monster 960 885 standdown scale=2.0 config={turn_speed=2.0,stiffness=6.0,landing_compress=20.0}",
+    "chain 0 head floor 180",
+    "spawn dummy 959 588",
+    "debug log monster/blend",
+    "debug on body_mechanics/spine_debug",
+    "debug on body_mechanics/tail_segments",
+    "debug on body_mechanics/leg_debug",
+    "standdown off",
+    "wait 15 unless breach 738 888 876 295 monster* dummy* unless breach 1040 299 1196 888 monster* dummy* unless breach 745 439 1175 438 monster* dummy*",
+    "standdown on",
+    "debug nolog monster/blend",
+    "check fps extract:fps > 20.0",
+    "notify observations DONE [\"OK\"] {owait} editor"
+  ]
 }

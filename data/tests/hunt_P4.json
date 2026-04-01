@@ -1,19 +1,20 @@
 {
-	"name": "hunt_P4",
-	"script": [
-		"var owait default=0",
-		"level title_screen",
-		"wait 0.2",
-		"clear",
-		"portal off",
-		"clearplayers",
-		"spawn dummy 1250 525",
-		"spawn monster 960 885",
-		"wait 15 unless exit_circle 1250 523 26 dummy*",
-		"standdown on",
-		"check hp extract:damage_taken > 0.0 label:damage",
-		"check fps extract:fps > 20.0",
-		"check ik extract:ik_peak < 2000.0 label:ik_peak",
-		"notify observations DONE [\"OK\"] {owait} editor"
-	]
+  "name": "hunt_P4",
+  "script": [
+    "var inspect default=false",
+    "var owait default=0",
+    "level title_screen",
+    "wait 0.2",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "spawn dummy 1250 525",
+    "spawn monster 960 885",
+    "wait 15 unless exit_circle 1250 523 26 dummy*",
+    "standdown on",
+    "check hp extract:damage_taken > 0.0 label:damage",
+    "check fps extract:fps > 20.0",
+    "check ik extract:ik_peak < 2000.0 label:ik_peak",
+    "notify observations DONE [\"OK\"] {owait} editor"
+  ]
 }

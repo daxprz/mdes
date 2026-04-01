@@ -1,19 +1,20 @@
 {
-	"name": "giant_floor_to_P3",
-	"script": [
-		"var owait default=0",
-		"level title_screen",
-		"wait 0.2",
-		"clear",
-		"portal off",
-		"clearplayers",
-		"spawn dummy 669 525",
-		"spawn monster 1300 885 scale=1.5 pathing_radius=55",
-		"# this is a test",
-		"wait 25 unless exit_circle 669 523 40 dummy*",
-		"standdown off",
-		"check fps extract:fps > 15.0",
-		"check ik extract:ik_peak < 3000.0 label:ik_peak",
-		"notify observations DONE [\"OK\"] {owait} editor"
-	]
+  "name": "giant_floor_to_P3",
+  "script": [
+    "var inspect default=false",
+    "var owait default=0",
+    "level title_screen",
+    "wait 0.2",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "spawn dummy 669 525",
+    "spawn monster 1300 885 scale=1.5 pathing_radius=55",
+    "# this is a test",
+    "wait 25 unless exit_circle 669 523 40 dummy*",
+    "standdown off",
+    "check fps extract:fps > 15.0",
+    "check ik extract:ik_peak < 3000.0 label:ik_peak",
+    "notify observations DONE [\"OK\"] {owait} editor"
+  ]
 }
