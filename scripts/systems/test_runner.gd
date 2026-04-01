@@ -161,13 +161,15 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 			var var_parts := l.split(" ", false)
 			if var_parts.size() >= 2:
 				var var_name: String = var_parts[1]
+				var default_val: String = "0"
+				for vp in var_parts.slice(2):
+					if vp.begins_with("default="):
+						default_val = vp.substr(8)
 				if _override_vars.has(var_name):
 					_test_vars[var_name] = str(_override_vars[var_name])
+					_log("  var %s = %s (override, default=%s)" % [var_name, _test_vars[var_name], default_val],
+						Color(1.0, 0.8, 0.3))
 				else:
-					var default_val: String = "0"
-					for vp in var_parts.slice(2):
-						if vp.begins_with("default="):
-							default_val = vp.substr(8)
 					_test_vars[var_name] = default_val
 			continue
 
