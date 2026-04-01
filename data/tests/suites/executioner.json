@@ -1,7 +1,7 @@
 {
   "name": "executioner",
   "description": "Executioner ball-and-chain mechanics",
-  "gate": false,
+  "gate": true,
   "tests": [
     "exec_release_ball_up",
     "exec_release_ball_wall",

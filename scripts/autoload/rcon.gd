@@ -200,19 +200,21 @@ func _execute(command: String) -> String:
 
 		"spawn":
 			var what: String = parts[1] if parts.size() > 1 else "monster"
-			var x: float = float(parts[2]) if parts.size() > 2 else 960.0
-			var y: float = float(parts[3]) if parts.size() > 3 else 750.0
+			# Resolve position: supports absolute (960 876) or relative (@e[name=AI] ~150 ~0)
+			var pos_result: Array = _resolve_pos(parts, 2)
+			var x: float = pos_result[0]
+			var y: float = pos_result[1]
+			var arg_start: int = pos_result[2]
 			var state: String = ""
 			var spawn_scale: float = 1.0
 			var spawn_pathing_radius: float = -1.0
 			var spawn_config: Dictionary = {}
 			# Parse remaining args: positional state OR key=value pairs
-			for pi in range(4, parts.size()):
+			for pi in range(arg_start, parts.size()):
 				var arg: String = parts[pi]
 				if arg.begins_with("config={") and arg.ends_with("}"):
-					# Parse config={k=v,k=v} syntax
-					var inner: String = arg.substr(8, arg.length() - 9)  # Strip "config={" and "}"
-					for pair in inner.split(","):
+					var inner_cfg: String = arg.substr(8, arg.length() - 9)
+					for pair in inner_cfg.split(","):
 						var eq: int = pair.find("=")
 						if eq > 0:
 							spawn_config[pair.substr(0, eq).strip_edges()] = pair.substr(eq + 1).strip_edges()
@@ -1033,16 +1035,16 @@ func _execute(command: String) -> String:
 
 		"ai_spawn":
 			# Spawn an AI-controlled player at a position.
-			# ai_spawn [x y] [class=executioner] [name=id]  — defaults to (960, 876), executioner
-			var spawn_x: float = 960.0
-			var spawn_y: float = 876.0
+			# ai_spawn [x y | @e[...] ~dx ~dy] [class=executioner] [name=id]
+			# Supports absolute coords or relative to entity position.
+			var ai_pos: Array = _resolve_pos(parts, 1, 960.0, 876.0)
+			var spawn_x: float = ai_pos[0]
+			var spawn_y: float = ai_pos[1]
+			var ai_arg_start: int = ai_pos[2]
 			var ai_name: String = ""
 			var ai_class: String = "executioner"
 			var ai_state: Dictionary = {}  # Generic key=value state to apply after spawn
-			if parts.size() >= 3:
-				spawn_x = float(parts[1])
-				spawn_y = float(parts[2])
-			for pi in range(3, parts.size()):
+			for pi in range(ai_arg_start, parts.size()):
 				if parts[pi].begins_with("name="):
 					ai_name = parts[pi].substr(5)
 				elif parts[pi].begins_with("class="):
@@ -1240,6 +1242,79 @@ func _cmd_test(what: String) -> String:
 			return "OK: test precog started — P0 at (%.0f, %.0f)" % [positions[0].x, positions[0].y]
 		_:
 			return "ERR: unknown test '%s'" % what
+
+
+func _resolve_pos(parts: PackedStringArray, start_idx: int, default_x: float = 960.0, default_y: float = 750.0) -> Array:
+	## Resolve a position from command parts starting at start_idx.
+	## Supports Minecraft-style relative coordinates:
+	##   960 876              → absolute (960, 876)
+	##   @e[name=AI] ~150 ~0  → entity pos + (150, 0)
+	##   @e[name=AI] ~ ~      → entity pos exactly
+	##   @e[name=AI]           → entity pos (no tilde args)
+	## Returns [x: float, y: float, next_idx: int]
+	if start_idx >= parts.size():
+		return [default_x, default_y, start_idx]
+
+	var token: String = parts[start_idx]
+
+	# Check for entity selector: @e[...]
+	if token.begins_with("@e["):
+		var base_pos: Vector2 = _resolve_entity_pos(token)
+		if base_pos == Vector2.INF:
+			return [default_x, default_y, start_idx + 1]
+		var next_idx: int = start_idx + 1
+		var rx: float = base_pos.x
+		var ry: float = base_pos.y
+		# Check for ~X ~Y after the selector
+		if next_idx < parts.size() and parts[next_idx].begins_with("~"):
+			rx = base_pos.x + _parse_tilde(parts[next_idx])
+			next_idx += 1
+		if next_idx < parts.size() and parts[next_idx].begins_with("~"):
+			ry = base_pos.y + _parse_tilde(parts[next_idx])
+			next_idx += 1
+		return [rx, ry, next_idx]
+
+	# Check for absolute coordinates: two numbers
+	if start_idx + 1 < parts.size() and token.is_valid_float() and parts[start_idx + 1].is_valid_float():
+		return [float(token), float(parts[start_idx + 1]), start_idx + 2]
+
+	# Single number or non-matching — return defaults
+	return [default_x, default_y, start_idx]
+
+
+func _resolve_entity_pos(token: String) -> Vector2:
+	## Resolve an @e[key=value] selector to its world position.
+	## Returns Vector2.INF if not found.
+	if not token.begins_with("@e["):
+		return Vector2.INF
+	var bracket_end: int = token.find("]")
+	if bracket_end < 0:
+		return Vector2.INF
+	var inner: String = token.substr(3, bracket_end - 3)
+	var all_nodes: Array = get_tree().get_nodes_in_group("enemies") + \
+		get_tree().get_nodes_in_group("players") + \
+		get_tree().get_nodes_in_group("entities") + \
+		get_tree().get_nodes_in_group("attack_dummies")
+	for node in all_nodes:
+		if not is_instance_valid(node) or not node is Node2D:
+			continue
+		for pair in inner.split(","):
+			var eq: int = pair.find("=")
+			if eq > 0:
+				var key: String = pair.substr(0, eq)
+				var val: String = pair.substr(eq + 1)
+				match key:
+					"name":
+						if node.name == val or ("entity_id" in node and str(node.entity_id) == val):
+							return node.global_position
+	return Vector2.INF
+
+
+func _parse_tilde(token: String) -> float:
+	## Parse a tilde-prefixed coordinate: ~ → 0, ~50 → 50, ~-50 → -50
+	if token == "~":
+		return 0.0
+	return float(token.substr(1))
 
 
 func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String = "", spawn_scale: float = 1.0, spawn_pathing_radius: float = -1.0, spawn_config: Dictionary = {}) -> String:

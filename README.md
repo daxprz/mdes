@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.38
+**Minecraft-style relative coordinates, query multipliers, executioner gate suite**
+
+- **Relative coordinates in spawn/ai_spawn**: `spawn dummy @e[name=AI] ~150 ~0` spawns at entity position + offset — Minecraft `~X ~Y` syntax
+- **`_resolve_pos()` utility**: shared by `spawn` and `ai_spawn`, supports `@e[name=AI] ~X ~Y`, `@e[name=AI]` (exact pos), or absolute `960 876`
+- **`query` multiplier**: `query @e[name=AI] exec_chain_total_len shackle_radius 400 *0.5 +20` — `(value * mult) + offset`
+- **Late variable substitution**: `{variables}` from `query` resolve within the same batch, not just at parse time
+- **`#` comments print to test log**: no longer silently skipped — shown in muted green during test execution
+- **`comment` command prints to log**: `print("  # ...")` instead of silent no-op
+- **Executioner suite is now a gate suite**: `"gate": true` — runs in test-gate alongside chained, combat, leaping, scaling
+- **exec_shackle_kick rewritten**: uses `query` for dynamic shackle radius, relative spawn positioning
+- **exec_shackle_drag rewritten**: proper throw sequence (ball up, shackle at ball), walks right to test drag constraint
+- **exec_bs_yeet updated**: shortened wait, user-edited formatting
+- **All 5 gate suites pass**: chained 8/8, combat 14/14, leaping 5/5, scaling 1/1, executioner 7/7
+
 ### v0.10.37
 **B-S Release mode physics fix, rect verify boundaries, dynamic config queries in tests**
 

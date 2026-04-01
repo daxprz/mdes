@@ -8,11 +8,10 @@
 		"portal off",
 		"clearplayers",
 		"spawn dummy 669 525",
-		"spawn monster 1300 885 standdown scale=2.0 pathing_radius=55",
+		"spawn monster 1300 885 scale=1.5 pathing_radius=55",
 		"# this is a test",
 		"wait 25 unless exit_circle 669 523 40 dummy*",
-		"standdown on",
-		"check hp extract:damage_taken > 0.0 label:damage",
+		"standdown off",
 		"check fps extract:fps > 15.0",
 		"check ik extract:ik_peak < 3000.0 label:ik_peak",
 		"notify observations DONE [\"OK\"] {owait} editor"

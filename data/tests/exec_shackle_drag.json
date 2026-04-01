@@ -1,6 +1,6 @@
 {
   "name": "exec_shackle_drag",
-  "description": "Shackle leash: AI shackles ball, walks far away. Verify ball follows player within chain distance.",
+  "description": "Shackle leash: AI throws shackle at nearby soccer ball, then walks right. Verify ball is dragged along within shackle chain distance.",
   "debug": {
     "log": ["executioner/throw", "executioner/chain_radius"],
     "on": ["executioner/chain_radius"]
@@ -15,27 +15,34 @@
     "debug log executioner/chain_radius",
 
     "announce Shackle Drag Test",
-    "ai_spawn 640 876 class=executioner name=AI",
+    "# Spawn executioner in H&H mode — both throws held",
+    "ai_spawn 960 876 class=executioner name=AI mode=hh",
     "wait 0.5",
-    "spawn dummy 840 876 name=ball",
+
+    "# Query shackle radius: total * 0.5 (default split) + 20 buffer",
+    "query @e[name=AI] exec_chain_total_len shackle_radius 400 *0.5 +20",
+
+    "# Spawn soccer ball 50px to the LEFT of the player",
+    "announce Spawning soccer ball to the left",
+    "spawn dummy @e[name=AI] ~-50 ~0 name=ball",
     "wait 0.5",
 
-    "announce Force-attaching shackle (no ball throw — player is free to walk)",
-    "shackle_attach ball",
-    "wait 1",
+    "# First throw: spike ball straight up (gets it out of the way, held by chain)",
+    "announce Throwing spike ball up",
+    "ai_cmd grapple 0.4 0.0 -1.0",
+    "wait 2",
 
-    "announce Verify: ball must stay within 350px of AI at all times",
-    "verify @e[name=ball] within circle @e[name=AI] 350 until done",
+    "# Second throw: shackle left toward the soccer ball — should snap-attach",
+    "announce Throwing shackle at the soccer ball",
+    "ai_cmd grapple 0.4 -1.0 0.0",
+    "wait 2",
 
-    "announce AI walks far right",
-    "ai_cmd move_right 5.0",
-    "wait 6",
+    "# Verify ball stays within shackle chain radius of player",
+    "announce Verify: ball must stay within shackle radius of AI",
+    "verify @e[name=ball] within circle @e[name=AI] {shackle_radius} until done",
 
-    "announce AI walks far left",
-    "ai_cmd move_left 6.0",
-    "wait 7",
-
-    "announce AI walks right again",
+    "# Walk right — ball should be dragged along by the chain",
+    "announce AI walking right — ball should follow",
     "ai_cmd move_right 4.0",
     "wait 5",
 
