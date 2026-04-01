@@ -86,6 +86,25 @@ if DebugOverlay.should_draw("group/sub_aspect", self):
 
 **Any complex feature should have debug aspects/sub-aspects added as-appropriate.** This enables future inspection and testing.
 
+## Knowledge Repository
+
+You have access to a curated knowledge base at `/var/tumu/research/`. This contains synthesized knowledge from multiple sources, organized by domain and topic.
+
+**Required reading** (read the top-level index before any design or implementation work):
+- `/var/tumu/research/gamedev/godot/index.md` — Godot patterns, architecture, state machines, UI, animation, and best practices synthesized from 14+ video sources
+
+This index document is your first stop for Godot knowledge. It contains:
+- Common themes validated across multiple independent sources (high-confidence patterns)
+- Deep-links to specific video timestamps for detailed explanations
+- An appendix with cross-links to full video transcripts (`content.md`)
+
+**When you need more detail** on a specific topic mentioned in the index, follow the cross-links in the appendix to read the full structured video transcript. Only read what is relevant to the current task — don't read all 14 sources upfront.
+
+**Other knowledge domains** available at `/var/tumu/research/`:
+- `ai/` — AI tools, Claude, machine learning
+- `engineering/` — robotics, fabrication
+- `software/` — IDEs, languages, devops
+
 ## Required Reading
 
 Before working on any task, read these files to understand the system:
