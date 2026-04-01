@@ -17,12 +17,15 @@ var _test_editor: Node = null
 # Notify/prompt state (modal or editor-banner)
 var _notify_layer: CanvasLayer = null
 var _notify_name: String = ""
+var _notify_message: String = ""
 var _notify_buttons: Array = []
 var _notify_timeout: float = 0.0
 var _notify_timer: float = 0.0
 var _notify_active: bool = false
 var _notify_mode: String = ""  # "blocking" or "editor"
 var _notify_dismissed_button: String = ""  # Set when dismissed, read by test runner
+var _notify_hover_idx: int = -1           # Which button is hovered (-1 = none)
+var _notify_mouse_pos: Vector2 = Vector2.ZERO
 
 # Bounded-leap builder state (populated by `bleap` commands)
 var _bleap_defs: Array = []              # Accumulated leap defs from previous `bleap next` calls
@@ -48,8 +51,8 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	# Notify countdown timer
-	if _notify_active:
+	# Notify countdown timer. Negative timeout = wait forever (no auto-dismiss).
+	if _notify_active and _notify_timeout >= 0:
 		_notify_timer -= _delta
 		if _notify_timer <= 0:
 			_cmd_notify_dismiss(_notify_buttons[0] if not _notify_buttons.is_empty() else "OK")
@@ -978,12 +981,16 @@ func _execute(command: String) -> String:
 		"notify":
 			# notify <name> <message> <buttons_json> <timeout> [blocking|editor]
 			# e.g.: notify observations DONE ["OK"] 600 editor
+			# Message can be quoted: notify inspect "How does this look?" ["OK"] -1 blocking
 			if parts.size() < 5:
 				return "ERR: usage: notify <name> <message> <buttons_json> <timeout> [blocking|editor]"
 			var notify_name: String = parts[1]
-			var notify_msg: String = parts[2].replace("\"", "")
+			# Extract message: everything between name and buttons array
 			var btn_start: int = command.find("[")
 			var btn_end: int = command.find("]", btn_start)
+			var name_end: int = command.find(notify_name) + notify_name.length()
+			var msg_raw: String = command.substr(name_end, btn_start - name_end).strip_edges()
+			var notify_msg: String = msg_raw.replace("\"", "")
 			var buttons_str: String = command.substr(btn_start, btn_end - btn_start + 1) if btn_start >= 0 else '["OK"]'
 			var last_token: String = parts[parts.size() - 1].to_lower()
 			var mode: String = "editor"  # Default: non-blocking editor banner
@@ -2970,6 +2977,7 @@ func _cmd_notify(notify_name: String, message: String, buttons_str: String, time
 		buttons = json.data
 
 	_notify_name = notify_name
+	_notify_message = message
 	_notify_buttons = buttons
 	_notify_timeout = timeout
 	_notify_timer = timeout
@@ -2992,6 +3000,10 @@ func _cmd_notify(notify_name: String, message: String, buttons_str: String, time
 		panel.gui_input.connect(func(event: InputEvent):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 				_notify_handle_click(event.position)
+			elif event is InputEventMouseMotion:
+				_notify_mouse_pos = event.position
+				_notify_update_hover()
+				panel.queue_redraw()
 		)
 		panel.mouse_filter = Control.MOUSE_FILTER_STOP
 		_notify_layer.add_child(panel)
@@ -3032,6 +3044,34 @@ func _cmd_emit(event_name: String, value: String) -> String:
 	return "OK: emit %s=%s" % [event_name, value]
 
 
+## Button colors for notify modal — each button gets a distinct color
+const NOTIFY_BUTTON_COLORS := {
+	"OK": Color(0.2, 0.8, 0.3),
+	"BAD": Color(0.9, 0.3, 0.2),
+	"BROKEN": Color(0.9, 0.6, 0.1),
+	"RETRY": Color(0.3, 0.6, 1.0),
+}
+
+## Tooltips for each button — shown below the button on hover
+const NOTIFY_BUTTON_TOOLTIPS := {
+	"OK": "Test passed and looks correct",
+	"BAD": "Test passed, but it should have failed",
+	"BROKEN": "Test passed, but is invalid / broken",
+	"RETRY": "Run this test again",
+}
+
+func _get_notify_rect() -> Rect2:
+	## Compute the dialog rect based on content.
+	var vp := get_viewport().get_visible_rect().size
+	var pw: float = minf(500.0, vp.x * 0.6)
+	var btn_count: int = maxi(_notify_buttons.size(), 1)
+	var btn_row_w: float = btn_count * 110.0 + 20.0
+	pw = maxf(pw, btn_row_w)
+	var ph: float = 150.0
+	var px: float = (vp.x - pw) / 2.0
+	var py: float = (vp.y - ph) / 2.0
+	return Rect2(px, py, pw, ph)
+
 func _draw_blocking_notify() -> void:
 	if not _notify_active or not _notify_layer:
 		return
@@ -3040,49 +3080,107 @@ func _draw_blocking_notify() -> void:
 		return
 	var font: Font = ThemeDB.fallback_font
 	var vp := get_viewport().get_visible_rect().size
-	var pw: float = 300.0
-	var ph: float = 120.0
-	var px: float = (vp.x - pw) / 2.0
-	var py: float = (vp.y - ph) / 2.0
+	var r: Rect2 = _get_notify_rect()
+	var px: float = r.position.x
+	var py: float = r.position.y
+	var pw: float = r.size.x
+	var ph: float = r.size.y
 
 	# Dim background
-	panel.draw_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.4))
+	panel.draw_rect(Rect2(0, 0, vp.x, vp.y), Color(0, 0, 0, 0.5))
 	# Dialog box
-	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.1, 0.12, 0.1, 0.97))
+	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.08, 0.09, 0.08, 0.97))
 	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.4, 0.7, 0.4, 0.7), false, 2.0)
-	# Name label (small, top)
-	panel.draw_string(font, Vector2(px + 10, py + 16), _notify_name,
-		HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, Color(0.5, 0.5, 0.5))
-	# Message
-	panel.draw_string(font, Vector2(px + pw/2 - 30, py + 45), _notify_name.to_upper() if _notify_name == "observations" else "DONE",
-		HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 20, Color(0.9, 0.9, 0.9))
-	# Countdown
-	var countdown: int = ceili(_notify_timer)
-	panel.draw_string(font, Vector2(px + pw/2 - 10, py + 70), str(countdown),
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(0.8, 0.8, 0.3))
-	# Buttons
-	var bw: float = (pw - 20) / float(_notify_buttons.size())
+	# Name label (small, top-left)
+	panel.draw_string(font, Vector2(px + 12, py + 18), _notify_name,
+		HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.45, 0.45, 0.45))
+	# Message (large, centered)
+	var display_msg: String = _notify_message if not _notify_message.is_empty() else _notify_name.to_upper()
+	var msg_size: Vector2 = font.get_string_size(display_msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)
+	var msg_x: float = px + (pw - msg_size.x) / 2.0
+	panel.draw_string(font, Vector2(msg_x, py + 55), display_msg,
+		HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 18, Color(0.95, 0.95, 0.95))
+	# Countdown (only if timeout > 0)
+	if _notify_timeout > 0:
+		var countdown: int = ceili(_notify_timer)
+		panel.draw_string(font, Vector2(px + pw - 40, py + 18), "%ds" % countdown,
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.8, 0.8, 0.3))
+	# Buttons — centered row, color-coded, with hover highlight + tooltip
+	var btn_w: float = 100.0
+	var btn_h: float = 30.0
+	var btn_gap: float = 10.0
+	var total_btn_w: float = _notify_buttons.size() * btn_w + (_notify_buttons.size() - 1) * btn_gap
+	var btn_start_x: float = px + (pw - total_btn_w) / 2.0
+	var btn_y: float = py + ph - btn_h - 15.0
 	for i in range(_notify_buttons.size()):
-		var bx: float = px + 10 + i * bw
-		var by: float = py + ph - 35
-		var col := Color(0.3, 0.8, 0.3)
-		panel.draw_rect(Rect2(bx, by, bw - 6, 25), col * Color(1, 1, 1, 0.2))
-		panel.draw_rect(Rect2(bx, by, bw - 6, 25), col * Color(1, 1, 1, 0.6), false, 1.0)
-		panel.draw_string(font, Vector2(bx + bw/2 - 12, by + 18), str(_notify_buttons[i]),
-			HORIZONTAL_ALIGNMENT_LEFT, bw - 10, 12, col)
+		var bx: float = btn_start_x + i * (btn_w + btn_gap)
+		var label: String = str(_notify_buttons[i])
+		var col: Color = NOTIFY_BUTTON_COLORS.get(label, Color(0.5, 0.5, 0.5))
+		var is_hovered: bool = (i == _notify_hover_idx)
+		# Button background — brighter on hover
+		var bg_alpha: float = 0.45 if is_hovered else 0.2
+		var border_width: float = 2.5 if is_hovered else 1.5
+		panel.draw_rect(Rect2(bx, btn_y, btn_w, btn_h), col * Color(1, 1, 1, bg_alpha))
+		panel.draw_rect(Rect2(bx, btn_y, btn_w, btn_h), col * Color(1, 1, 1, 0.8 if is_hovered else 0.6), false, border_width)
+		# Button label (centered)
+		var lbl_size: Vector2 = font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 14)
+		var lbl_x: float = bx + (btn_w - lbl_size.x) / 2.0
+		var label_col: Color = Color(1, 1, 1) if is_hovered else col
+		panel.draw_string(font, Vector2(lbl_x, btn_y + 21), label,
+			HORIZONTAL_ALIGNMENT_LEFT, btn_w, 14, label_col)
+	# Tooltip — render below the hovered button
+	if _notify_hover_idx >= 0 and _notify_hover_idx < _notify_buttons.size():
+		var hover_label: String = str(_notify_buttons[_notify_hover_idx])
+		var tip_text: String = NOTIFY_BUTTON_TOOLTIPS.get(hover_label, "")
+		if not tip_text.is_empty():
+			var tip_col: Color = NOTIFY_BUTTON_COLORS.get(hover_label, Color(0.5, 0.5, 0.5))
+			var tip_size: Vector2 = font.get_string_size(tip_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10)
+			var tip_x: float = px + (pw - tip_size.x) / 2.0
+			var tip_y: float = btn_y + btn_h + 8.0
+			# Background
+			panel.draw_rect(Rect2(tip_x - 4, tip_y - 10, tip_size.x + 8, 14),
+				Color(0.05, 0.05, 0.05, 0.9))
+			# Text
+			panel.draw_string(font, Vector2(tip_x, tip_y), tip_text,
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 10, tip_col * Color(1, 1, 1, 0.9))
+
+
+func _notify_update_hover() -> void:
+	## Update which button is hovered based on mouse position.
+	_notify_hover_idx = -1
+	var r: Rect2 = _get_notify_rect()
+	var px: float = r.position.x
+	var py: float = r.position.y
+	var pw: float = r.size.x
+	var ph: float = r.size.y
+	var btn_w: float = 100.0
+	var btn_h: float = 30.0
+	var btn_gap: float = 10.0
+	var total_btn_w: float = _notify_buttons.size() * btn_w + (_notify_buttons.size() - 1) * btn_gap
+	var btn_start_x: float = px + (pw - total_btn_w) / 2.0
+	var btn_y: float = py + ph - btn_h - 15.0
+	for i in range(_notify_buttons.size()):
+		var bx: float = btn_start_x + i * (btn_w + btn_gap)
+		if Rect2(bx, btn_y, btn_w, btn_h).has_point(_notify_mouse_pos):
+			_notify_hover_idx = i
+			return
 
 
 func _notify_handle_click(pos: Vector2) -> void:
-	var vp := get_viewport().get_visible_rect().size
-	var pw: float = 300.0
-	var ph: float = 120.0
-	var px: float = (vp.x - pw) / 2.0
-	var py: float = (vp.y - ph) / 2.0
-	var bw: float = (pw - 20) / float(_notify_buttons.size())
+	var r: Rect2 = _get_notify_rect()
+	var px: float = r.position.x
+	var py: float = r.position.y
+	var pw: float = r.size.x
+	var ph: float = r.size.y
+	var btn_w: float = 100.0
+	var btn_h: float = 30.0
+	var btn_gap: float = 10.0
+	var total_btn_w: float = _notify_buttons.size() * btn_w + (_notify_buttons.size() - 1) * btn_gap
+	var btn_start_x: float = px + (pw - total_btn_w) / 2.0
+	var btn_y: float = py + ph - btn_h - 15.0
 	for i in range(_notify_buttons.size()):
-		var bx: float = px + 10 + i * bw
-		var by: float = py + ph - 35
-		if Rect2(bx, by, bw - 6, 25).has_point(pos):
+		var bx: float = btn_start_x + i * (btn_w + btn_gap)
+		if Rect2(bx, btn_y, btn_w, btn_h).has_point(pos):
 			_cmd_notify_dismiss(str(_notify_buttons[i]))
 			return
 

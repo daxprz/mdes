@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.39
+**Inspect gate, blocking notify overhaul, refactor foundation**
+
+- **Inspect gate for tests**: `run test_name inspect=true` shows a blocking modal after test passes — OK/BAD/BROKEN buttons with color-coded hover tooltips
+- **Blocking notify rewrite**: wider dialog (500px), proper multi-word message parsing, centered text, color-coded buttons, hover highlights, tooltip descriptions
+- **Negative timeout = wait forever**: `timeout=-1` prevents auto-dismiss on blocking modals (timeout=0 still auto-dismisses for backwards compatibility)
+- **Inspect replaces trailing notify**: when enabled, inspect IS the final modal — no competing observations dialog
+- **`run_inspect.sh`**: shell script for agent workflow — runs test with inspect, polls log for result, exits with 0/1/2/3
+- **Refactor Phase 1+2 foundation**: StateMachine, State, CharacterContext, StatsComponent, HealthComponent, InputController (Player/AI), ClassComponent, ConfigProvider Resources, ObjectPool autoload
+- **Movement FSM states**: Idle, Run, Jump, Fall, WallSlide, Dash
+- **Action FSM states**: Ready, Attacking, Charging, Blocking, Staggered, Dead
+- **Character base class**: `character.gd` with composition wiring (not yet extending player_side.gd)
+- **Design doc**: `docs/design/player_refactor.md` — full architecture for unified Character system
+- **All 44 tests have `var inspect default=false`** — disabled by default, enabled via override
+
 ### v0.10.38
 **Minecraft-style relative coordinates, query multipliers, executioner gate suite**
 

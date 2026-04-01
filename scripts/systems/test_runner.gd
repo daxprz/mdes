@@ -765,7 +765,7 @@ func _advance_queue() -> void:
 					var test_nm: String = task.get("test_name", _current_test_name)
 					# timeout=0 means NO auto-dismiss — waits forever for human click
 					inspect_rcon._execute(
-						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] 0 editor' % test_nm)
+						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] -1 blocking' % test_nm)
 				_waiting_for_inspect = true
 				_inspect_result = ""
 				_wait_timer = 999.0
