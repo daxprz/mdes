@@ -45,6 +45,7 @@
     "ai_cmd move_right 4.0",
     "wait 5",
     "ai_off",
-    "enablejoins"
+    "enablejoins",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

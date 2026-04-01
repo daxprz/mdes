@@ -49,6 +49,7 @@
     "check hp extract:damage_taken > 0.0 label:damage",
     "check zones",
     "check fps extract:fps > 20.0",
-    "check bounded_leaps floor-to-P4 multi-hop arcs"
+    "check bounded_leaps floor-to-P4 multi-hop arcs",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

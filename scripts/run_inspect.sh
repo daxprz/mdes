@@ -13,7 +13,8 @@ LOG="/var/tumu/logs/godot_debug.log"
 LOG_START=$(wc -l < "$LOG" 2>/dev/null || echo 0)
 
 # Launch test with inspect=true
-RESULT=$(echo "run $TEST_NAME inspect=30" | nc -w2 localhost 9999)
+INSPECT_SECS="${3:-5}"
+RESULT=$(echo "run $TEST_NAME inspect=$INSPECT_SECS" | nc -w2 localhost 9999)
 echo "$RESULT"
 
 if [[ "$RESULT" != OK* ]]; then

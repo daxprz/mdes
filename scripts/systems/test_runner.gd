@@ -28,9 +28,7 @@ var _current_test_script: Array = []  # Copy of the script being run
 var _test_vars: Dictionary = {}      # Test variables from "var <name> default=<val>"
 var _test_state: String = ""         # Current state: INITIALIZING/RUNNING/COMPLETE/FINALIZED
 var _state_timestamps: Dictionary = {} # {state: msec}
-var _waiting_for_notify: bool = false # True only during TASK_NOTIFY wait
-var _waiting_for_inspect: bool = false # True during TASK_INSPECT wait
-var _inspect_result: String = ""       # "OK", "BAD", or "BROKEN" after inspect
+var _waiting_for_notify: bool = false # True while waiting for notify/inspect dismiss
 var _last_leap_eval: Array = []  # Captured leap edges with per-edge match detail from last bounded_leaps check
 var _check_log: Array[String] = []  # Captured log lines during check execution
 var _check_log_capture: bool = false  # True while capturing _log output into _check_log
@@ -113,8 +111,10 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 	var trailing_modal: Dictionary = _queue_script(script, test_name)
 
 	_task_queue.append({"type": TASK_RESULTS})
-	# Inspect gate: inspect=0 skips, inspect=N shows modal for N seconds, inspect=-1 waits forever
-	_task_queue.append({"type": TASK_INSPECT, "test_name": test_name})
+	# Trailing notify becomes the inspect modal — {inspect} controls timeout
+	# 0=auto-dismiss (no inspection), N=N seconds, -1=wait forever
+	if not trailing_modal.is_empty():
+		_task_queue.append(trailing_modal)
 	_start_queue()
 
 
@@ -749,35 +749,6 @@ func _advance_queue() -> void:
 					_line_states[monitor["line_idx"]] = "verifying"
 				_log("  VERIFY [%d]: %s" % [monitor["id"], vline.substr(7)], Color(0.4, 0.8, 1.0))
 			_wait_timer = 0.1
-		TASK_INSPECT:
-			# Manual visual inspection gate — replaces the trailing notify.
-			# inspect variable: -1=wait forever, 0=skip, +N=wait N seconds
-			# Only fires when test passed. Falls back to trailing notify when skipped.
-			var inspect_secs: float = float(_test_vars.get("inspect", "0"))
-			var all_passed: bool = true
-			for r in _results:
-				if not r.get("passed", false):
-					all_passed = false
-					break
-			if inspect_secs != 0.0 and all_passed:
-				var inspect_rcon: Node = get_node_or_null("/root/Rcon")
-				if inspect_rcon:
-					inspect_rcon._notify_dismissed_button = ""
-					var test_nm: String = task.get("test_name", _current_test_name)
-					var timeout_val: int = int(inspect_secs)
-					inspect_rcon._execute(
-						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] %d blocking' % [test_nm, timeout_val])
-				_waiting_for_inspect = true
-				_inspect_result = ""
-				_wait_timer = 999.0
-				if inspect_secs < 0:
-					_log("  INSPECT: Waiting for visual verification (no timeout)...", Color(1.0, 0.9, 0.3))
-				else:
-					_log("  INSPECT: Waiting for visual verification (%ds)..." % int(inspect_secs), Color(1.0, 0.9, 0.3))
-			else:
-				# inspect=0 — skip inspection, finalize immediately
-				_set_test_state("FINALIZED")
-				_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
@@ -810,40 +781,30 @@ func _process(delta: float) -> void:
 					breach_entity, breach_pos.x, breach_pos.y],
 					Color(1.0, 0.8, 0.2))
 				_breach_conditions.clear()
-		# Check if inspect modal was dismissed
-		if _waiting_for_inspect:
-			var rcon_inspect: Node = get_node_or_null("/root/Rcon")
-			if rcon_inspect and not rcon_inspect._notify_active:
-				_waiting_for_inspect = false
-				_inspect_result = rcon_inspect._notify_dismissed_button
-				rcon_inspect._notify_dismissed_button = ""
-				if _inspect_result == "OK":
-					# Check if this was a timeout auto-dismiss or a human click
-					var was_timeout: bool = (rcon_inspect._notify_timeout > 0 and rcon_inspect._notify_timer <= 0)
-					if was_timeout:
-						_log("  INSPECT: OK (timeout — inspection skipped)", Color(0.6, 0.8, 0.4))
-					else:
-						_log("  INSPECT: PASSED — visual verification OK", Color(0.4, 1.0, 0.4))
-				elif _inspect_result == "BAD":
-					_log("  INSPECT: BAD — test passed but should have failed", Color(1.0, 0.3, 0.2))
-					_results.append({"name": "inspect", "passed": false,
-						"checks": [{"label": "visual", "passed": false, "value": "bad"}]})
-				elif _inspect_result == "BROKEN":
-					_log("  INSPECT: BROKEN — test is invalid/broken", Color(1.0, 0.5, 0.0))
-					_results.append({"name": "inspect", "passed": false,
-						"checks": [{"label": "visual", "passed": false, "value": "broken"}]})
-				else:
-					_log("  INSPECT: dismissed (%s)" % _inspect_result, Color(0.6, 0.6, 0.6))
-				_set_test_state("FINALIZED")
-				_wait_timer = 0.0
-		# Check if modal was dismissed — advance the queue (only during TASK_NOTIFY)
+		# Check if notify/inspect modal was dismissed
 		if _waiting_for_notify:
 			var rcon_modal: Node = get_node_or_null("/root/Rcon")
 			if rcon_modal and not rcon_modal._notify_active:
-				_wait_timer = 0.0
 				_waiting_for_notify = false
-				_set_test_state("FINALIZED")
+				var button: String = rcon_modal._notify_dismissed_button
 				rcon_modal._notify_dismissed_button = ""
+				# Handle inspect buttons (BAD/BROKEN mark test as failed)
+				if button == "BAD":
+					_log("  INSPECT: BAD — test passed but should have failed", Color(1.0, 0.3, 0.2))
+					_results.append({"name": "inspect", "passed": false,
+						"checks": [{"label": "visual", "passed": false, "value": "bad"}]})
+				elif button == "BROKEN":
+					_log("  INSPECT: BROKEN — test is invalid/broken", Color(1.0, 0.5, 0.0))
+					_results.append({"name": "inspect", "passed": false,
+						"checks": [{"label": "visual", "passed": false, "value": "broken"}]})
+				elif button == "OK":
+					var was_timeout: bool = (rcon_modal._notify_timeout > 0 and rcon_modal._notify_timer <= 0)
+					if was_timeout:
+						_log("  INSPECT: OK (timeout — inspection skipped)", Color(0.6, 0.8, 0.4))
+					elif rcon_modal._notify_timeout != 0:
+						_log("  INSPECT: PASSED — visual verification OK", Color(0.4, 1.0, 0.4))
+				_set_test_state("FINALIZED")
+				_wait_timer = 0.0
 		# Check verify monitors every frame
 		_tick_verify_monitors(delta)
 		# Poll bounded leap graph monitoring

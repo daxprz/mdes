@@ -30,6 +30,7 @@
     "check hp extract:damage_taken > 0.0 label:damage",
     "check fps extract:fps > 20.0",
     "check ik extract:ik_peak < 2000.0 label:ik_peak",
-    "check bounded_leaps P1-to-P3 leap graph edge"
+    "check bounded_leaps P1-to-P3 leap graph edge",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

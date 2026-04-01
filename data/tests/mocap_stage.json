@@ -14,7 +14,8 @@
   "script": [
     "var inspect default=0",
     "wait 0.5",
-    "mocap connect"
+    "mocap connect",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ],
   "checks": [],
   "debug": {

@@ -24,6 +24,7 @@
     "debug off body_mechanics/leg_debug",
     "debug off body_mechanics/tail_segments",
     "debug nolog monster/state",
-    "check fps extract:fps > 20.0"
+    "check fps extract:fps > 20.0",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

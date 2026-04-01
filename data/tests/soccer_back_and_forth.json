@@ -17,6 +17,7 @@
     "wait 5",
     "set cycles = {cycles}-1",
     "endwhile",
-    "enablejoins"
+    "enablejoins",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

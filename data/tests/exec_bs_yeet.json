@@ -28,6 +28,7 @@
     "wait 3",
     "ai_off",
     "enablejoins",
-    "gameconfig multiple_players_same_class true"
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

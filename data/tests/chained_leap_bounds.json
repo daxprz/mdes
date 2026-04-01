@@ -31,6 +31,7 @@
     "debug on testing/violations",
     "# Monster may leap but gets yanked back by chain (chain daze). No damage should reach the dummy.",
     "check hp extract:damage_taken = 0.0 label:no_damage",
-    "check fps extract:fps > 20.0 label:fps"
+    "check fps extract:fps > 20.0 label:fps",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

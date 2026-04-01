@@ -31,6 +31,7 @@
     "debug off body_mechanics/leg_debug",
     "debug off body_mechanics/spine_debug",
     "debug off state_info/state_text_panel",
-    "check fps extract:fps > 20.0"
+    "check fps extract:fps > 20.0",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

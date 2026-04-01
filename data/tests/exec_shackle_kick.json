@@ -59,6 +59,7 @@
     "set cycles = {cycles}-1",
     "endwhile",
     "ai_off",
-    "enablejoins"
+    "enablejoins",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }

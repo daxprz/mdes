@@ -14,6 +14,7 @@
     "wait 25 unless exit_circle 669 523 40 dummy*",
     "standdown off",
     "check fps extract:fps > 15.0",
-    "check ik extract:ik_peak < 3000.0 label:ik_peak"
+    "check ik extract:ik_peak < 3000.0 label:ik_peak",
+    "notify {SCRIPT} \"How does {SCRIPT} look?\" [\"OK\",\"BAD\",\"BROKEN\"] {inspect} blocking"
   ]
 }
