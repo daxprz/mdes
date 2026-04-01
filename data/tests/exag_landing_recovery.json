@@ -2,7 +2,7 @@
   "name": "exag_landing_recovery",
   "description": "Monster on P1 leaps to floor target. Exercises landing recovery compression and speed blend after impact.",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level title_screen",
     "wait 0.2",
@@ -22,7 +22,6 @@
     "debug off body_mechanics/spine_debug",
     "debug off body_mechanics/leg_debug",
     "debug nolog monster/blend",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

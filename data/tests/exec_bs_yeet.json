@@ -1,7 +1,7 @@
 {
   "name": "exec_bs_yeet",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -28,7 +28,6 @@
     "wait 3",
     "ai_off",
     "enablejoins",
-    "gameconfig multiple_players_same_class true",
-    "notify observations exec_bs_yeet [\"OK\",\"RETRY\"] 0 editor"
+    "gameconfig multiple_players_same_class true"
   ]
 }

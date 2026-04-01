@@ -2,7 +2,7 @@
   "name": "exag_gait_oscillation",
   "description": "Monster chases dummy back and forth at floor level. Exercises leg gait oscillation and depth ordering.",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level flat_floor",
     "wait 0.2",
@@ -31,7 +31,6 @@
     "debug off body_mechanics/leg_debug",
     "debug off body_mechanics/spine_debug",
     "debug off state_info/state_text_panel",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

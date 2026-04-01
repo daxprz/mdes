@@ -2483,6 +2483,13 @@ func _draw_sub_editor(x: float, y: float, pw: float, h: float, font: Font, te: N
 							dvar = dvar.substr(1, dvar.length() - 2)
 						var dval: String = rcon._test_runner._test_vars.get(dvar, "0")
 						_panel.draw_string(font, Vector2(x + pw - 80, ry + 14), "%s=%s" % [dvar, dval], HORIZONTAL_ALIGNMENT_RIGHT, 68, 9, Color(0.5, 0.7, 0.5))
+			# Override state: "override:<value>" — rendered with lightning icon + gold highlight
+			# This is outside the match because the state string has a dynamic suffix.
+			if line_state.begins_with("override:"):
+				var ov_val: String = line_state.substr(9)
+				_panel.draw_string(font, Vector2(x + 24, ry + 14), "⚡", HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.8, 0.2))
+				_panel.draw_rect(Rect2(x, ry, pw - 8, this_row_h), Color(0.3, 0.25, 0.05, 0.4))
+				_panel.draw_string(font, Vector2(x + pw - 100, ry + 14), "= %s" % ov_val, HORIZONTAL_ALIGNMENT_RIGHT, 90, 10, Color(1.0, 0.85, 0.2))
 
 		# Command text with soft-wrap
 		var cmd_text: String = te._script[si]

@@ -3091,9 +3091,10 @@ func _draw_blocking_notify() -> void:
 	# Dialog box
 	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.08, 0.09, 0.08, 0.97))
 	panel.draw_rect(Rect2(px, py, pw, ph), Color(0.4, 0.7, 0.4, 0.7), false, 2.0)
-	# Name label (small, top-left)
-	panel.draw_string(font, Vector2(px + 12, py + 18), _notify_name,
-		HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.45, 0.45, 0.45))
+	# Name label (small, top-left) — skip for inspect modal
+	if _notify_name != "inspect":
+		panel.draw_string(font, Vector2(px + 12, py + 18), _notify_name,
+			HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 10, Color(0.45, 0.45, 0.45))
 	# Message (large, centered)
 	var display_msg: String = _notify_message if not _notify_message.is_empty() else _notify_name.to_upper()
 	var msg_size: Vector2 = font.get_string_size(display_msg, HORIZONTAL_ALIGNMENT_LEFT, -1, 18)

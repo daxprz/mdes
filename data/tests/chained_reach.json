@@ -1,7 +1,7 @@
 {
   "name": "chained_reach",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on chain/tether_arc",
     "debug on chain/chain_barrier",
@@ -21,7 +21,6 @@
     "debug off chain/chain_barrier",
     "debug on testing/violations",
     "check hp extract:damage_taken = 0.0 label:no_damage",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

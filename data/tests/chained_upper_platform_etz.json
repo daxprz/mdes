@@ -1,7 +1,7 @@
 {
   "name": "chained_upper_platform_etz",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on chain/tether_arc",
     "debug on chain/chain_barrier",
@@ -38,7 +38,6 @@
     "debug on testing/violations",
     "check hp extract:damage_taken > 0.0",
     "check zones",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

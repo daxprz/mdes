@@ -1,7 +1,7 @@
 {
   "name": "giant_floor_to_P3",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level title_screen",
     "wait 0.2",
@@ -14,7 +14,6 @@
     "wait 25 unless exit_circle 669 523 40 dummy*",
     "standdown off",
     "check fps extract:fps > 15.0",
-    "check ik extract:ik_peak < 3000.0 label:ik_peak",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check ik extract:ik_peak < 3000.0 label:ik_peak"
   ]
 }

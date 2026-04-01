@@ -2,7 +2,7 @@
   "name": "exag_floor_sprint",
   "description": "Monster sprints back and forth across floor chasing teleporting dummy. Exercises speed blend ramp-up/ramp-down and turn transitions at full speed.",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level flat_floor",
     "wait 0.2",
@@ -26,7 +26,6 @@
     "debug off body_mechanics/spine_debug",
     "debug off body_mechanics/leg_debug",
     "debug nolog monster/blend",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

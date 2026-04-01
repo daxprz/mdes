@@ -1,7 +1,7 @@
 {
   "name": "leap_cross_platforms",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on precog/platform_list",
     "debug on precog/graph_edges",
@@ -40,7 +40,6 @@
     "debug on testing/violations",
     "check hp extract:damage_taken > 0.0 label:damage",
     "check fps extract:fps > 20.0",
-    "check bounded_leaps P1-to-P2 direct leap",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check bounded_leaps P1-to-P2 direct leap"
   ]
 }

@@ -2,7 +2,7 @@
   "name": "exag_attack_showcase",
   "description": "Monster attacks a close dummy repeatedly. Exercises bite, swipe, tail whip, and lunge wind-up/follow-through animations with exaggerated timings.",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level title_screen",
     "wait 0.2",
@@ -24,7 +24,6 @@
     "debug off body_mechanics/leg_debug",
     "debug off body_mechanics/tail_segments",
     "debug nolog monster/state",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

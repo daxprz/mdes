@@ -2,7 +2,7 @@
   "name": "gait_tuning_loop",
   "description": "Peaceful monster walks back and forth on a flat floor forever. For tuning gait parameters with sliders.",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "var looping default=true",
     "level flat_floor",
@@ -24,7 +24,6 @@
     "tp 300 885",
     "endwhile",
     "standdown on",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

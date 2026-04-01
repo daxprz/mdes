@@ -1,7 +1,7 @@
 {
   "name": "soccer_back_and_forth",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -17,7 +17,6 @@
     "wait 5",
     "set cycles = {cycles}-1",
     "endwhile",
-    "enablejoins",
-    "notify observations soccer_back_and_forth [\"OK\"] 0 editor"
+    "enablejoins"
   ]
 }

@@ -1,7 +1,7 @@
 {
   "name": "chained_above_slow_turn",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "level title_screen",
     "wait 0.2",
@@ -19,7 +19,6 @@
     "wait 15 unless breach 738 888 876 295 monster* dummy* unless breach 1040 299 1196 888 monster* dummy* unless breach 745 439 1175 438 monster* dummy*",
     "standdown on",
     "debug nolog monster/blend",
-    "check fps extract:fps > 20.0",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0"
   ]
 }

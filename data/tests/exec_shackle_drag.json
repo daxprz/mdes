@@ -11,7 +11,7 @@
     ]
   },
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -45,7 +45,6 @@
     "ai_cmd move_right 4.0",
     "wait 5",
     "ai_off",
-    "enablejoins",
-    "notify observations exec_shackle_drag [\"OK\",\"RETRY\"] 0 editor"
+    "enablejoins"
   ]
 }

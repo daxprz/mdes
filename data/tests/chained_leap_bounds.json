@@ -1,7 +1,7 @@
 {
   "name": "chained_leap_bounds",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on chain/tether_arc",
     "debug on chain/chain_barrier",
@@ -31,7 +31,6 @@
     "debug on testing/violations",
     "# Monster may leap but gets yanked back by chain (chain daze). No damage should reach the dummy.",
     "check hp extract:damage_taken = 0.0 label:no_damage",
-    "check fps extract:fps > 20.0 label:fps",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps extract:fps > 20.0 label:fps"
   ]
 }

@@ -113,10 +113,8 @@ func run_test_script(script: Array[String], test_name: String, console: Node) ->
 	var trailing_modal: Dictionary = _queue_script(script, test_name)
 
 	_task_queue.append({"type": TASK_RESULTS})
-	# Inspect gate replaces the trailing notify when enabled.
-	# When inspect=false, the original observations notify fires as before.
-	_task_queue.append({"type": TASK_INSPECT, "test_name": test_name,
-		"fallback_notify": trailing_modal})
+	# Inspect gate: inspect=0 skips, inspect=N shows modal for N seconds, inspect=-1 waits forever
+	_task_queue.append({"type": TASK_INSPECT, "test_name": test_name})
 	_start_queue()
 
 
@@ -124,7 +122,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 	## Queue tasks from a flat script array. Returns trailing modal task (if any).
 	## Caller should append TASK_RESULTS then the modal AFTER this returns.
 	var trailing_modal: Dictionary = {}
-	_test_vars = {}
+	_test_vars = {"SCRIPT": test_name}  # Built-in: test script name, usable as {SCRIPT}
 	_state_timestamps = {}
 	_waiting_for_notify = false
 	_verify_monitors.clear()
@@ -144,7 +142,7 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 	# Mark all executable lines as pending
 	for li in range(script.size()):
 		var sl: String = str(script[li]).strip_edges()
-		if not sl.is_empty() and not sl.begins_with("#") and not sl.begins_with("var "):
+		if not sl.is_empty() and not sl.begins_with("#"):
 			_line_states[li] = "pending"
 
 	var line_idx: int = -1
@@ -167,8 +165,9 @@ func _queue_script(script: Array, test_name: String) -> Dictionary:
 						default_val = vp.substr(8)
 				if _override_vars.has(var_name):
 					_test_vars[var_name] = str(_override_vars[var_name])
-					_log("  var %s = %s (override, default=%s)" % [var_name, _test_vars[var_name], default_val],
-						Color(1.0, 0.8, 0.3))
+					# Mark this line as overridden so the test editor renders it visually
+					_line_states[line_idx] = "override:%s" % _test_vars[var_name]
+					print("  var %s = %s (OVERRIDE, default=%s)" % [var_name, _test_vars[var_name], default_val])
 				else:
 					_test_vars[var_name] = default_val
 			continue
@@ -752,39 +751,33 @@ func _advance_queue() -> void:
 			_wait_timer = 0.1
 		TASK_INSPECT:
 			# Manual visual inspection gate — replaces the trailing notify.
-			# When inspect=true AND test passed: show OK/BAD/BROKEN modal.
-			# When inspect=false OR test failed: fall back to the original notify.
-			var inspect_val: String = _test_vars.get("inspect", "false").to_lower()
+			# inspect variable: -1=wait forever, 0=skip, +N=wait N seconds
+			# Only fires when test passed. Falls back to trailing notify when skipped.
+			var inspect_secs: float = float(_test_vars.get("inspect", "0"))
 			var all_passed: bool = true
 			for r in _results:
 				if not r.get("passed", false):
 					all_passed = false
 					break
-			if inspect_val in ["true", "1", "yes"] and all_passed:
+			if inspect_secs != 0.0 and all_passed:
 				var inspect_rcon: Node = get_node_or_null("/root/Rcon")
 				if inspect_rcon:
 					inspect_rcon._notify_dismissed_button = ""
 					var test_nm: String = task.get("test_name", _current_test_name)
-					# timeout=0 means NO auto-dismiss — waits forever for human click
+					var timeout_val: int = int(inspect_secs)
 					inspect_rcon._execute(
-						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] -1 blocking' % test_nm)
+						'notify inspect "How does %s look?" ["OK","BAD","BROKEN"] %d blocking' % [test_nm, timeout_val])
 				_waiting_for_inspect = true
 				_inspect_result = ""
 				_wait_timer = 999.0
-				_log("  INSPECT: Waiting for visual verification...", Color(1.0, 0.9, 0.3))
-			else:
-				# Not inspecting — fire the original trailing notify if there is one
-				var fallback: Dictionary = task.get("fallback_notify", {})
-				if not fallback.is_empty():
-					var fb_rcon: Node = get_node_or_null("/root/Rcon")
-					if fb_rcon:
-						fb_rcon._notify_dismissed_button = ""
-						fb_rcon._execute(fallback.get("command", ""))
-					_waiting_for_notify = true
-					_wait_timer = 999.0
+				if inspect_secs < 0:
+					_log("  INSPECT: Waiting for visual verification (no timeout)...", Color(1.0, 0.9, 0.3))
 				else:
-					_set_test_state("FINALIZED")
-					_wait_timer = 0.1
+					_log("  INSPECT: Waiting for visual verification (%ds)..." % int(inspect_secs), Color(1.0, 0.9, 0.3))
+			else:
+				# inspect=0 — skip inspection, finalize immediately
+				_set_test_state("FINALIZED")
+				_wait_timer = 0.1
 		TASK_NOTIFY:
 			# Execute modal command via RCON and wait for dismiss
 			var rcon: Node = get_node_or_null("/root/Rcon")
@@ -825,7 +818,12 @@ func _process(delta: float) -> void:
 				_inspect_result = rcon_inspect._notify_dismissed_button
 				rcon_inspect._notify_dismissed_button = ""
 				if _inspect_result == "OK":
-					_log("  INSPECT: PASSED — visual verification OK", Color(0.4, 1.0, 0.4))
+					# Check if this was a timeout auto-dismiss or a human click
+					var was_timeout: bool = (rcon_inspect._notify_timeout > 0 and rcon_inspect._notify_timer <= 0)
+					if was_timeout:
+						_log("  INSPECT: OK (timeout — inspection skipped)", Color(0.6, 0.8, 0.4))
+					else:
+						_log("  INSPECT: PASSED — visual verification OK", Color(0.4, 1.0, 0.4))
 				elif _inspect_result == "BAD":
 					_log("  INSPECT: BAD — test passed but should have failed", Color(1.0, 0.3, 0.2))
 					_results.append({"name": "inspect", "passed": false,

@@ -1,7 +1,7 @@
 {
   "name": "verify_leap_graph_P0_P1",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on precog/platform_list",
     "debug on precog/graph_edges",
@@ -32,7 +32,6 @@
     "debug nolog precog/current_path",
     "debug on testing/violations",
     "check bounded_leaps P0-to-P1 leap graph edge",
-    "check fps > 20",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check fps > 20"
   ]
 }

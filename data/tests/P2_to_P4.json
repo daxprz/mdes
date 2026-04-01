@@ -1,7 +1,7 @@
 {
   "name": "P2_to_P4",
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "var owait default=0",
     "debug on precog/platform_list",
     "debug on precog/graph_edges",
@@ -30,7 +30,6 @@
     "check hp extract:damage_taken > 0.0 label:damage",
     "check fps extract:fps > 20.0",
     "check ik extract:ik_peak < 2000.0 label:ik_peak",
-    "check bounded_leaps P2-to-P4 leap graph edge",
-    "notify observations DONE [\"OK\"] {owait} editor"
+    "check bounded_leaps P2-to-P4 leap graph edge"
   ]
 }

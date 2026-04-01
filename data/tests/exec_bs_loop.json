@@ -8,7 +8,7 @@
     ]
   },
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "level flat_floor",
     "wait 0.3",
     "clear",
@@ -31,7 +31,6 @@
     "set cycles = {cycles}-1",
     "endwhile",
     "ai_off",
-    "enablejoins",
-    "notify observations exec_bs_loop [\"OK\",\"RETRY\"] 0 editor"
+    "enablejoins"
   ]
 }

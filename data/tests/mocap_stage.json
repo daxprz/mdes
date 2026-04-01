@@ -12,7 +12,7 @@
     "tab"
   ],
   "script": [
-    "var inspect default=false",
+    "var inspect default=0",
     "wait 0.5",
     "mocap connect"
   ],
