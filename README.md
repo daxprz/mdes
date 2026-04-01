@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.40
+**Unified inspect system, standardized test endings, {SCRIPT} built-in**
+
+- **Unified inspect/notify**: every test ends with `notify {SCRIPT} "How does {SCRIPT} look?" ["OK","BAD","BROKEN"] {inspect} blocking`
+- **`inspect` variable**: `0`=auto-dismiss (default), `N`=N second countdown, `-1`=wait forever
+- **OK/BAD/BROKEN buttons**: color-coded (green/red/orange) with hover tooltips describing each action
+- **BAD/BROKEN mark test failed**: clicking BAD or BROKEN adds a failed `inspect` result to the test
+- **Timeout auto-OK**: logs "inspection skipped" to distinguish from human-clicked OK
+- **`{SCRIPT}` built-in variable**: auto-set to test name, available in all test scripts
+- **Override visibility**: overridden vars show ⚡ icon + gold highlight on the var line in test editor
+- **Blocking notify rewrite**: wider dialog, centered message, proper multi-word parsing, countdown display
+- **Negative timeout**: `timeout=-1` means wait forever (no auto-dismiss)
+- **Removed old observations notify**: replaced by the unified inspect system
+- **`run_inspect.sh`**: defaults to `inspect=5` for quick refactoring verification
+
 ### v0.10.39
 **Inspect gate, blocking notify overhaul, refactor foundation**
 
