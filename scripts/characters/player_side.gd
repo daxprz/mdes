@@ -550,6 +550,7 @@ var _mana_bar: Node2D = null
 
 func _ready() -> void:
 	add_to_group("players")
+	_init_class_dispatch()
 	_init_class_config()
 	_apply_class_sprite()
 	_update_player_label()
@@ -884,22 +885,7 @@ func _physics_process(delta: float) -> void:
 		_controller_just_pressed.clear()
 		queue_redraw()
 		return
-	_handle_demo_refuel()
-	_handle_healer_wind_gust()
-	_handle_tank_fortify(delta)
-	_handle_balloonist_float(delta)
-	_handle_jumper_dash()
-	_handle_jumper_momentum(delta)
-	_handle_melee_enrage(delta)
-	_handle_mage_airwalk_toggle()
-	_handle_mage_airwalk(delta)
-	_handle_guitarist_amp_up(delta)
-	_handle_werewolf_frenzy(delta)
-	_handle_executioner(delta)
-	_handle_rogue_stealth_toggle()
-	_handle_rogue_stealth(delta)
-	_handle_ranger_reload(delta)
-	_handle_archer_aim(delta)
+	_class_tick(delta)
 	_handle_block()
 	if _delegate_active:
 		# Summoner is frozen in delegate mode - skip normal input
@@ -1462,34 +1448,133 @@ func _handle_attack(_delta: float) -> void:
 	_perform_attack()
 
 
+## Class dispatch tables — map class enum to callables.
+## When a class is extracted to a ClassComponent, its entry gets removed from here.
+var _class_attack_fn: Dictionary = {}
+var _class_special_fn: Dictionary = {}
+var _class_charged_fn: Dictionary = {}
+var _class_tick_fn: Dictionary = {}
+
+func _init_class_dispatch() -> void:
+	## Build dispatch tables. Called from _ready().
+	_class_attack_fn = {
+		PlayerManager.CharacterClass.MELEE: _attack_melee,
+		PlayerManager.CharacterClass.RANGED: _attack_ranged,
+		PlayerManager.CharacterClass.MAGE: _attack_mage,
+		PlayerManager.CharacterClass.SUMMONER: _attack_summoner,
+		PlayerManager.CharacterClass.ROGUE: _attack_rogue,
+		PlayerManager.CharacterClass.DEMOLITIONIST: _attack_demolitionist,
+		PlayerManager.CharacterClass.HEALER: _attack_healer,
+		PlayerManager.CharacterClass.TANK: _attack_tank,
+		PlayerManager.CharacterClass.NINJA: _attack_jumper,
+		PlayerManager.CharacterClass.BALLOONIST: _attack_balloonist,
+		PlayerManager.CharacterClass.GUITARIST: _attack_guitarist,
+		PlayerManager.CharacterClass.WEREWOLF: _attack_werewolf,
+		PlayerManager.CharacterClass.EXECUTIONER: _attack_executioner,
+	}
+	_class_special_fn = {
+		PlayerManager.CharacterClass.MELEE: _special_shield_charge,
+		PlayerManager.CharacterClass.RANGED: _special_grappling_hook,
+		PlayerManager.CharacterClass.MAGE: _special_frosting_freeze,
+		PlayerManager.CharacterClass.SUMMONER: _special_summon_donut,
+		PlayerManager.CharacterClass.ROGUE: _special_shadow_dash,
+		PlayerManager.CharacterClass.DEMOLITIONIST: _special_big_bomb,
+		PlayerManager.CharacterClass.HEALER: _special_healing_burst,
+		PlayerManager.CharacterClass.TANK: _special_tank_slam,
+		PlayerManager.CharacterClass.NINJA: _special_jumper_dive,
+		PlayerManager.CharacterClass.BALLOONIST: _special_balloonist_burst,
+		PlayerManager.CharacterClass.GUITARIST: _special_guitarist_blast_wave,
+		PlayerManager.CharacterClass.WEREWOLF: _special_werewolf_roar_push,
+		PlayerManager.CharacterClass.EXECUTIONER: _special_executioner_cleave,
+	}
+	_class_charged_fn = {
+		PlayerManager.CharacterClass.MELEE: _charged_melee_slam,
+		PlayerManager.CharacterClass.RANGED: _charged_ranged_shot,
+		PlayerManager.CharacterClass.MAGE: _charged_mage_bolt,
+		PlayerManager.CharacterClass.SUMMONER: _charged_summoner_donut,
+		PlayerManager.CharacterClass.ROGUE: _charged_rogue_backstab,
+		PlayerManager.CharacterClass.DEMOLITIONIST: _charged_demo_mega_bomb,
+		PlayerManager.CharacterClass.HEALER: _charged_healer_wave,
+		PlayerManager.CharacterClass.TANK: _charged_tank_shockwave,
+		PlayerManager.CharacterClass.NINJA: _charged_jumper_meteor,
+		PlayerManager.CharacterClass.BALLOONIST: _charged_balloonist_barrage,
+		PlayerManager.CharacterClass.GUITARIST: _charged_guitarist_power_chord,
+		PlayerManager.CharacterClass.WEREWOLF: _charged_werewolf_pounce,
+		PlayerManager.CharacterClass.EXECUTIONER: _charged_executioner_overhead,
+	}
+	# Per-frame class handlers — each class gets ONE tick function
+	# that consolidates all its per-frame logic (was scattered _handle_* calls)
+	_class_tick_fn = {
+		PlayerManager.CharacterClass.MELEE: _tick_melee,
+		PlayerManager.CharacterClass.RANGED: _tick_ranged,
+		PlayerManager.CharacterClass.MAGE: _tick_mage,
+		PlayerManager.CharacterClass.SUMMONER: _tick_summoner,
+		PlayerManager.CharacterClass.ROGUE: _tick_rogue,
+		PlayerManager.CharacterClass.DEMOLITIONIST: _tick_demolitionist,
+		PlayerManager.CharacterClass.HEALER: _tick_healer,
+		PlayerManager.CharacterClass.TANK: _tick_tank,
+		PlayerManager.CharacterClass.NINJA: _tick_ninja,
+		PlayerManager.CharacterClass.BALLOONIST: _tick_balloonist,
+		PlayerManager.CharacterClass.GUITARIST: _tick_guitarist,
+		PlayerManager.CharacterClass.WEREWOLF: _tick_werewolf,
+		PlayerManager.CharacterClass.EXECUTIONER: _tick_executioner,
+	}
+
+
+func _class_tick(delta: float) -> void:
+	## Per-frame class-specific logic — replaces scattered _handle_* calls.
+	var fn: Variant = _class_tick_fn.get(character_class)
+	if fn is Callable:
+		fn.call(delta)
+
+func _tick_melee(delta: float) -> void:
+	_handle_melee_enrage(delta)
+
+func _tick_ranged(delta: float) -> void:
+	_handle_ranger_reload(delta)
+	_handle_archer_aim(delta)
+
+func _tick_mage(delta: float) -> void:
+	_handle_mage_airwalk_toggle()
+	_handle_mage_airwalk(delta)
+
+func _tick_summoner(_delta: float) -> void:
+	pass  # Summoner delegate is handled separately in _physics_process
+
+func _tick_rogue(delta: float) -> void:
+	_handle_rogue_stealth_toggle()
+	_handle_rogue_stealth(delta)
+
+func _tick_demolitionist(_delta: float) -> void:
+	_handle_demo_refuel()
+
+func _tick_healer(_delta: float) -> void:
+	_handle_healer_wind_gust()
+
+func _tick_tank(delta: float) -> void:
+	_handle_tank_fortify(delta)
+
+func _tick_ninja(_delta: float) -> void:
+	_handle_jumper_dash()
+	_handle_jumper_momentum(_delta)
+
+func _tick_balloonist(delta: float) -> void:
+	_handle_balloonist_float(delta)
+
+func _tick_guitarist(delta: float) -> void:
+	_handle_guitarist_amp_up(delta)
+
+func _tick_werewolf(delta: float) -> void:
+	_handle_werewolf_frenzy(delta)
+
+func _tick_executioner(delta: float) -> void:
+	_handle_executioner(delta)
+
+
 func _perform_attack() -> void:
-	match character_class:
-		PlayerManager.CharacterClass.MELEE:
-			_attack_melee()
-		PlayerManager.CharacterClass.RANGED:
-			_attack_ranged()
-		PlayerManager.CharacterClass.MAGE:
-			_attack_mage()
-		PlayerManager.CharacterClass.SUMMONER:
-			_attack_summoner()
-		PlayerManager.CharacterClass.ROGUE:
-			_attack_rogue()
-		PlayerManager.CharacterClass.DEMOLITIONIST:
-			_attack_demolitionist()
-		PlayerManager.CharacterClass.HEALER:
-			_attack_healer()
-		PlayerManager.CharacterClass.TANK:
-			_attack_tank()
-		PlayerManager.CharacterClass.NINJA:
-			_attack_jumper()
-		PlayerManager.CharacterClass.BALLOONIST:
-			_attack_balloonist()
-		PlayerManager.CharacterClass.GUITARIST:
-			_attack_guitarist()
-		PlayerManager.CharacterClass.WEREWOLF:
-			_attack_werewolf()
-		PlayerManager.CharacterClass.EXECUTIONER:
-			_attack_executioner()
+	var fn: Variant = _class_attack_fn.get(character_class)
+	if fn is Callable:
+		fn.call()
 
 
 func _attack_melee() -> void:
@@ -2201,33 +2286,9 @@ func _handle_special() -> void:
 
 
 func _perform_special() -> void:
-	match character_class:
-		PlayerManager.CharacterClass.MELEE:
-			_special_shield_charge()
-		PlayerManager.CharacterClass.RANGED:
-			_special_grappling_hook()
-		PlayerManager.CharacterClass.MAGE:
-			_special_frosting_freeze()
-		PlayerManager.CharacterClass.SUMMONER:
-			_special_summon_donut()
-		PlayerManager.CharacterClass.ROGUE:
-			_special_shadow_dash()
-		PlayerManager.CharacterClass.DEMOLITIONIST:
-			_special_big_bomb()
-		PlayerManager.CharacterClass.HEALER:
-			_special_healing_burst()
-		PlayerManager.CharacterClass.TANK:
-			_special_tank_slam()
-		PlayerManager.CharacterClass.NINJA:
-			_special_jumper_dive()
-		PlayerManager.CharacterClass.BALLOONIST:
-			_special_balloonist_burst()
-		PlayerManager.CharacterClass.GUITARIST:
-			_special_guitarist_blast_wave()
-		PlayerManager.CharacterClass.WEREWOLF:
-			_special_werewolf_roar_push()
-		PlayerManager.CharacterClass.EXECUTIONER:
-			_special_executioner_cleave()
+	var fn: Variant = _class_special_fn.get(character_class)
+	if fn is Callable:
+		fn.call()
 
 
 var _shield_charging: bool = false
@@ -5707,34 +5768,9 @@ func _handle_charge(delta: float) -> void:
 
 func _perform_charged_attack() -> void:
 	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0)
-
-	match character_class:
-		PlayerManager.CharacterClass.MELEE:
-			_charged_melee_slam(charge_ratio)
-		PlayerManager.CharacterClass.RANGED:
-			_charged_ranged_shot(charge_ratio)
-		PlayerManager.CharacterClass.MAGE:
-			_charged_mage_bolt(charge_ratio)
-		PlayerManager.CharacterClass.SUMMONER:
-			_charged_summoner_donut(charge_ratio)
-		PlayerManager.CharacterClass.ROGUE:
-			_charged_rogue_backstab(charge_ratio)
-		PlayerManager.CharacterClass.DEMOLITIONIST:
-			_charged_demo_mega_bomb(charge_ratio)
-		PlayerManager.CharacterClass.HEALER:
-			_charged_healer_wave(charge_ratio)
-		PlayerManager.CharacterClass.TANK:
-			_charged_tank_shockwave(charge_ratio)
-		PlayerManager.CharacterClass.NINJA:
-			_charged_jumper_meteor(charge_ratio)
-		PlayerManager.CharacterClass.BALLOONIST:
-			_charged_balloonist_barrage(charge_ratio)
-		PlayerManager.CharacterClass.GUITARIST:
-			_charged_guitarist_power_chord(charge_ratio)
-		PlayerManager.CharacterClass.WEREWOLF:
-			_charged_werewolf_pounce(charge_ratio)
-		PlayerManager.CharacterClass.EXECUTIONER:
-			_charged_executioner_overhead(charge_ratio)
+	var fn: Variant = _class_charged_fn.get(character_class)
+	if fn is Callable:
+		fn.call(charge_ratio)
 
 
 func _charged_tank_shockwave(charge_ratio: float) -> void:
