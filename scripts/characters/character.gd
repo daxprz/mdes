@@ -8,14 +8,16 @@ class_name Character extends CharacterBody2D
 ## through compatibility methods that delegate to the new components.
 
 # -- Composition nodes (set by subclass or scene tree) -------------------------
+# Typed as Variant to avoid class_name resolution order issues during loading.
+# Runtime type is enforced in _build_context().
 
-var _ctx: CharacterContext
-var _input_controller: InputController
-var _movement_fsm: StateMachine
-var _action_fsm: StateMachine
-var _health_comp: HealthComponent
-var _stats_comp: StatsComponent
-var _class_comp: ClassComponent
+var _ctx: Variant                       ## CharacterContext
+var _input_controller: Variant          ## InputController
+var _movement_fsm: Variant              ## StateMachine
+var _action_fsm: Variant                ## StateMachine
+var _health_comp: Variant               ## HealthComponent
+var _stats_comp: Variant                ## StatsComponent
+var _class_comp: Variant                ## ClassComponent
 
 # -- Shared state (accessed by states and components via ctx.body) -------------
 
@@ -26,7 +28,8 @@ var mass: float = 70.0
 func _build_context() -> void:
 	## Build the CharacterContext and inject into all components.
 	## Called by subclass after all component nodes are in place.
-	_ctx = CharacterContext.new()
+	var CharCtx := preload("res://scripts/components/character_context.gd")
+	_ctx = CharCtx.new()
 	_ctx.body = self
 	_ctx.input = _input_controller
 	_ctx.movement = _movement_fsm
@@ -68,12 +71,12 @@ func cfg(key: String, default_val: float) -> float:
 
 
 func push_config(provider: Variant) -> void:
-	if _stats_comp and provider is ConfigProvider:
+	if _stats_comp:
 		_stats_comp.push_config(provider)
 
 
 func remove_config(provider: Variant) -> void:
-	if _stats_comp and provider is ConfigProvider:
+	if _stats_comp:
 		_stats_comp.remove_config(provider)
 
 

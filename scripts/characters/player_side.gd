@@ -1,4 +1,4 @@
-extends CharacterBody2D
+extends "res://scripts/characters/character.gd"
 
 ## Tower player character (side-scrolling platformer).
 ## Uses {class}_side.png spritesheets: 192x32, 6 frames at 32x32.
@@ -25,7 +25,7 @@ enum AnimFrame { IDLE = 0, WALK1 = 1, WALK2 = 2, JUMP = 3, ATTACK1 = 4, ATTACK2 
 @export var player_index: int = 0
 @export var device_id: int = -1
 @export var character_class: PlayerManager.CharacterClass = PlayerManager.CharacterClass.MELEE
-var mass := 70.0
+## mass: inherited from character.gd (default 70.0)
 
 # -- Config provider stack (same pattern as quadruped_monster) -----------------
 var _config_stack: Array = []  # Array[MonsterConfigProvider-compatible]
@@ -174,7 +174,7 @@ const ATTACK_DURATION := 0.3
 const ATTACK_COOLDOWN_TIME := 0.4
 const SPECIAL_COOLDOWN_TIME := 1.5
 
-var _facing_right: bool = true
+## _facing_right: inherited from character.gd (default true)
 var _walk_timer: float = 0.0
 var _walk_frame_toggle: bool = false
 var _is_attacking: bool = false
