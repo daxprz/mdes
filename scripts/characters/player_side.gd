@@ -598,6 +598,10 @@ func _ready() -> void:
 			_init_class_component("guitarist")
 		PlayerManager.CharacterClass.WEREWOLF:
 			_init_class_component("werewolf")
+	# Initialize charge system component
+	_charge_comp = preload("res://scripts/components/charge_component.gd").new()
+	add_child(_charge_comp)
+	_charge_comp.setup(self)
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
 	ProfileManager.profile_loaded.connect(_on_profile_changed)
@@ -929,7 +933,8 @@ func _physics_process(delta: float) -> void:
 	_handle_jump()
 	_handle_rocket(delta)
 	_handle_wall_slide(delta)
-	_handle_charge(delta)
+	if _charge_comp:
+		_charge_comp.tick(delta)
 	_check_ground_slam_landing()
 	_check_werewolf_pounce_landing()
 	_update_health_bar()
@@ -1596,6 +1601,7 @@ func _tick_guitarist(delta: float) -> void:
 func _tick_werewolf(delta: float) -> void:
 	_handle_werewolf_frenzy(delta)
 
+var _charge_comp: Variant = null         # ChargeComponent instance
 var _executioner_class: Variant = null  # ExecutionerClass instance (when active)
 var _ranger_class: Variant = null       # RangerClass instance (when active)
 
@@ -2964,127 +2970,8 @@ func _apply_stagger() -> void:
 	add_child(stars)
 
 
-# -- Charge Attack System ------------------------------------------------------
+# -- Charge system moved to ChargeComponent ---
 
-func _handle_charge(delta: float) -> void:
-	var pressing_attack: bool = _is_device_action_pressed("attack")
-
-	if pressing_attack and not _was_pressing_attack:
-		# Button just pressed - reset charge tracking
-		_charge_time = 0.0
-		_charge_smoke_timer = 0.0
-		_charge_hover_time = 0.0
-		_healer_channel_heal_timer = 0.0
-		_healer_channel_pulse_timer = 0.0
-
-		# EXCEPTION: Melee airborne → instant charge (ground pound hover)
-		if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE and _attack_cooldown <= 0.0:
-			_is_charging = true
-			velocity.y = 0.0  # Freeze in air immediately
-
-		# Werewolf: track press start but DON'T charge instantly
-		# (quick taps need to do triple slash, hold does pounce)
-		if character_class == PlayerManager.CharacterClass.WEREWOLF:
-			_charge_time = 0.0
-
-	# Transition from normal hold to charge (0.15s for werewolf, 0.3s others)
-	if pressing_attack and _was_pressing_attack and not _is_charging and _attack_cooldown <= 0.0:
-		_charge_time += delta
-		var charge_threshold: float = 0.15 if character_class == PlayerManager.CharacterClass.WEREWOLF else 0.3
-		if _charge_time >= charge_threshold:
-			# Now start charging
-			_is_charging = true
-			_charge_time = 0.3
-			# Melee airborne: freeze in air
-			if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
-				velocity.y = 0.0
-			# Healer: stop movement and start channeling
-			if character_class == PlayerManager.CharacterClass.HEALER:
-				velocity.x = 0.0
-				_healer_channel_start_vfx()
-
-	if pressing_attack and _is_charging:
-		# Button held - charging (charge speed scales with charge skill)
-		var charge_speed_bonus: float = PlayerManager.get_skill_bonus(player_index, "charge")
-		_charge_time = minf(_charge_time + delta * charge_speed_bonus, CHARGE_MAX)
-		var charge_ratio: float = clampf(_charge_time / CHARGE_MAX, 0.0, 1.0)
-
-		# Healer: constant healing aura while channeling
-		if character_class == PlayerManager.CharacterClass.HEALER:
-			# Freeze in place - cannot move while channeling
-			velocity.x = 0.0
-			# Green glow instead of yellow
-			var glow_intensity: float = 0.5 + sin(_charge_time * 4.0) * 0.2
-			modulate = Color(0.6, 1.0, 0.6, 1.0).lerp(Color(0.3, 1.0, 0.3, 1.0), glow_intensity)
-			# Heal nearby allies continuously (~5 HP/sec, scaled by proximity)
-			_healer_channel_heal_timer += delta
-			if _healer_channel_heal_timer >= 0.2:
-				_healer_channel_heal_timer -= 0.2
-				_healer_channel_heal_tick()
-			# Pulsing ring VFX
-			_healer_channel_pulse_timer += delta
-			if _healer_channel_pulse_timer >= 0.8:
-				_healer_channel_pulse_timer -= 0.8
-				_spawn_expanding_ring(global_position, HEALER_CHANNEL_RADIUS, Color(0.3, 1.0, 0.4, 0.35), 0.7)
-			# Update glow VFX size based on charge
-			_healer_channel_update_vfx(charge_ratio)
-		elif character_class == PlayerManager.CharacterClass.WEREWOLF:
-			# Werewolf crouches while charging pounce
-			sprite.scale.y = 0.7
-			var shake_x: float = randf_range(-1.0, 1.0)
-			position.x += shake_x * 0.5
-			modulate = Color(0.7, 0.5, 0.3, 1.0)
-			if _charge_time > 0.3 and fmod(_charge_time, 0.4) < 0.05:
-				AudioManager.play("boss_roar", -6.0, 0.4)
-		else:
-			# Non-healer: glow toward yellow while charging
-			var glow_color := Color(1.0, 1.0, 1.0 - charge_ratio * 0.7, 1.0)
-			modulate = glow_color
-
-		# Spawn small charge particles periodically
-		_charge_smoke_timer += delta
-		if _charge_smoke_timer >= 0.1:
-			_charge_smoke_timer -= 0.1
-			if character_class == PlayerManager.CharacterClass.HEALER:
-				var particle_color := Color(0.3, 1.0, 0.4, 0.3 + charge_ratio * 0.3)
-				_spawn_vfx(particle_color, Vector2(6, 6))
-			else:
-				var particle_color := Color(1.0, 0.9, 0.3, 0.4 * charge_ratio)
-				_spawn_vfx(particle_color, Vector2(6, 6))
-
-		# If airborne + melee, hover and oscillate every frame
-		if not is_on_floor() and character_class == PlayerManager.CharacterClass.MELEE:
-			velocity.y = 0.0
-			_charge_hover_time += delta
-			position.x += sin(_charge_hover_time * 20.0) * 2.0 * delta * 20.0
-
-	elif not pressing_attack and _was_pressing_attack and _is_charging:
-		# Button released while charging
-		_is_charging = false
-		modulate = Color.WHITE
-		# Clean up healer channel VFX
-		if character_class == PlayerManager.CharacterClass.HEALER:
-			_healer_channel_stop_vfx()
-		# Reset werewolf crouch
-		if character_class == PlayerManager.CharacterClass.WEREWOLF:
-			sprite.scale.y = 1.0
-		if _charge_time >= CHARGE_MIN:
-			# Fire charged attack
-			_attack_cooldown = cfg("attack_cooldown", ATTACK_COOLDOWN_TIME)
-			_is_attacking = true
-			_attack_timer = ATTACK_DURATION
-			PlayerManager.add_skill_xp(player_index, "charge", 5)
-			_perform_charged_attack()
-		_charge_time = 0.0
-
-	_was_pressing_attack = pressing_attack
-
-
-func _perform_charged_attack() -> void:
-	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0)
-	var fn: Variant = _class_charged_fn.get(character_class)
-	if fn is Callable:
-		fn.call(charge_ratio)
 func _charged_ranged_shot(charge_ratio: float) -> void:
 	var damage: int = int(lerpf(20.0, 50.0, charge_ratio))
 	AudioManager.play("crossbow_shoot", 2.0, 0.7)

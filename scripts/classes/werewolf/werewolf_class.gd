@@ -373,3 +373,20 @@ func _check_werewolf_pounce_landing() -> void:
 				body.apply_knockback(kb)
 
 
+
+
+# -- Charge Hooks (called by ChargeComponent) ----------------------------------
+
+func on_charge_tick(_delta: float, _charge_ratio: float) -> void:
+	p.sprite.scale.y = 0.7
+	var shake_x: float = randf_range(-1.0, 1.0)
+	p.position.x += shake_x * 0.5
+	p.modulate = Color(0.7, 0.5, 0.3, 1.0)
+	if p._charge_time > 0.3 and fmod(p._charge_time, 0.4) < 0.05:
+		AudioManager.play("boss_roar", -6.0, 0.4)
+
+func on_charge_release() -> void:
+	p.sprite.scale.y = 1.0
+
+func get_charge_threshold() -> float:
+	return 0.15

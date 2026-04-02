@@ -440,3 +440,29 @@ func _charged_melee_slam(charge_ratio: float) -> void:
 					body.apply_knockback(kb * (200.0 + charge_ratio * 150.0))
 
 
+
+
+# -- Charge Hooks (called by ChargeComponent) ----------------------------------
+
+func on_charge_press() -> void:
+	# Melee airborne: instant charge (ground pound hover)
+	if not p.is_on_floor() and p._attack_cooldown <= 0.0:
+		p._is_charging = true
+		p.velocity.y = 0.0
+
+func on_charge_start() -> void:
+	if not p.is_on_floor():
+		p.velocity.y = 0.0
+
+func on_charge_tick(delta: float, charge_ratio: float) -> void:
+	# Glow yellow
+	var glow_color := Color(1.0, 1.0, 1.0 - charge_ratio * 0.7, 1.0)
+	p.modulate = glow_color
+	# Airborne hover
+	if not p.is_on_floor():
+		p.velocity.y = 0.0
+		p._charge_hover_time += delta
+		p.position.x += sin(p._charge_hover_time * 20.0) * 2.0 * delta * 20.0
+
+func get_charge_threshold() -> float:
+	return 0.3

@@ -178,3 +178,27 @@ func _charged_healer_wave(charge_ratio: float) -> void:
 	_healer_channel_burst()
 
 
+
+
+# -- Charge Hooks (called by ChargeComponent) ----------------------------------
+
+func on_charge_start() -> void:
+	p.velocity.x = 0.0
+	p._healer_channel_start_vfx()
+
+func on_charge_tick(delta: float, charge_ratio: float) -> void:
+	p.velocity.x = 0.0
+	var glow_intensity: float = 0.5 + sin(p._charge_time * 4.0) * 0.2
+	p.modulate = Color(0.6, 1.0, 0.6, 1.0).lerp(Color(0.3, 1.0, 0.3, 1.0), glow_intensity)
+	p._healer_channel_heal_timer += delta
+	if p._healer_channel_heal_timer >= 0.2:
+		p._healer_channel_heal_timer -= 0.2
+		p._healer_channel_heal_tick()
+	p._healer_channel_pulse_timer += delta
+	if p._healer_channel_pulse_timer >= 0.8:
+		p._healer_channel_pulse_timer -= 0.8
+		p._spawn_expanding_ring(p.global_position, p.HEALER_CHANNEL_RADIUS, Color(0.3, 1.0, 0.4, 0.35), 0.7)
+	p._healer_channel_update_vfx(charge_ratio)
+
+func on_charge_release() -> void:
+	p._healer_channel_stop_vfx()
