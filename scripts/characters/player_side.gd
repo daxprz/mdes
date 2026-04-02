@@ -7418,68 +7418,8 @@ func _handle_werewolf_frenzy(delta: float) -> void:
 # EXECUTIONER — Ball-and-chain + Shackle + Axe
 # ==============================================================================
 
-# -- Configurable Constants (debug menu: executioner/*) ------------------------
 
-# Ball-and-chain throw (spike ball end)
-const EXEC_BALL_RADIUS := 14.0
-const EXEC_BALL_THROW_SPEED := 1200.0     # Base throw speed (fast, heavy projectile)
-const EXEC_BALL_MAX_THROW_SPEED := 6000.0 # Max throw speed at full charge
-const EXEC_BALL_SPIN_SPEED := 4.0         # rad/s windup spin (much slower than grapple)
-const EXEC_BALL_SPIN_ACCEL := 3.0
-const EXEC_BALL_MAX_SPIN := 10.0
-const EXEC_BALL_GRAVITY := 900.0          # Very heavy — same as player gravity, no air drag
-const EXEC_BALL_WALL_DRAG := 12.0         # px/s drag when stuck to wall (slides down slowly)
-const EXEC_BALL_PLAT_DRAG := 15.0         # px/s drag when stuck to platform (slides if pulled)
-const EXEC_BALL_CEILING_DRAG := 20.0      # px/s — drags out of ceiling and falls
-const EXEC_BALL_SPIKE_COUNT := 12
-const EXEC_BALL_SPIKE_LEN := 8.0
-const EXEC_BALL_DAMAGE := 35
-const EXEC_BALL_STUN_DURATION := 3.0      # Seconds enemies are stunned on ball impact
-const EXEC_BALL_MASS := 140.0             # Absolute mass of the spike ball (kg)
-const EXEC_CHAIN_ELASTICITY := 0.25       # 25% elastic chain-pull (1.0 = perfect elastic)
-
-# Shackle throw (other end — only sticks to enemies)
-const EXEC_SHACKLE_THROW_SPEED := 400.0
-const EXEC_SHACKLE_MAX_THROW_SPEED := 700.0
-const EXEC_SHACKLE_SPIN_SPEED := 8.0
-const EXEC_SHACKLE_SPIN_ACCEL := 6.0
-const EXEC_SHACKLE_MAX_SPIN := 20.0
-const EXEC_SHACKLE_GRAVITY := 600.0
-const EXEC_SHACKLE_DRAG := 0.97
-const EXEC_SHACKLE_DAMAGE := 15
-const EXEC_SHACKLE_SNAP_RANGE := 40.0     # Hitbox proximity snap range
-const EXEC_SHACKLE_MASS := 5.0            # Shackle mass — very light so ball barely notices it in B-S mode
-
-# Chain — ONE total chain, player in middle, ball on one end, shackle on other
-const EXEC_CHAIN_TOTAL_LEN := 400.0       # Total fixed chain length (ball + shackle)
-const EXEC_CHAIN_SPLIT_DEFAULT := 0.5     # Default split: 50% ball, 50% shackle
-const EXEC_CHAIN_SPLIT_MIN := 0.1         # Minimum split (10% to one side)
-const EXEC_CHAIN_SPLIT_MAX := 0.9         # Maximum split (90% to one side)
-const EXEC_CHAIN_ADJUST_SPEED := 0.5      # Split change per second (L2/R2)
-const EXEC_CHAIN_CLANK_INTERVAL := 0.08   # Seconds between chain clanks during throw
-const EXEC_CHAIN_DOUBLETAP_WINDOW := 0.3  # Seconds to register a double-tap
-
-# Swing slam (Square — hold to spin, release to slam)
-const EXEC_SWING_SPIN_SPEED := 3.0
-const EXEC_SWING_SPIN_ACCEL := 4.0
-const EXEC_SWING_MAX_SPIN := 18.0
-const EXEC_SWING_MIN_HOLD := 0.3
-const EXEC_SWING_BASE_DAMAGE := 20
-const EXEC_SWING_MAX_DAMAGE := 80
-const EXEC_SWING_SLAM_RADIUS := 60.0
-const EXEC_SWING_DUST_COUNT := 16
-const EXEC_SWING_DUST_SPEED := 200.0
-const EXEC_SWING_KNOCKBACK := 300.0
-
-# Cleave (Triangle — charged massive strike)
-const EXEC_CLEAVE_CHARGE_TIME := 2.0
-const EXEC_CLEAVE_MIN_CHARGE := 0.5
-const EXEC_CLEAVE_BASE_DAMAGE := 40
-const EXEC_CLEAVE_MAX_DAMAGE := 150
-const EXEC_CLEAVE_RANGE := 50.0
-const EXEC_CLEAVE_ARC := PI
-const EXEC_CLEAVE_KNOCKBACK := 500.0      # Player self-knockback
-const EXEC_CLEAVE_ENEMY_KB := 400.0
+# Executioner constants moved to executioner_class.gd
 
 # -- State Variables -----------------------------------------------------------
 
@@ -7553,7 +7493,7 @@ var _exec_shackle_chain_node: Node2D:
 	set(v): if _shackle: _shackle.chain_node = v
 
 # Chain split: how much of total goes to ball (rest goes to shackle)
-var _exec_chain_split: float = EXEC_CHAIN_SPLIT_DEFAULT
+var _exec_chain_split: float = 0.5
 
 # Trajectory preview — two arcs forming a probability cone
 var _exec_preview_arc: PackedVector2Array = PackedVector2Array()       # Optimistic (no damping)
