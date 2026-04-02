@@ -604,7 +604,7 @@ func exec_charged_overhead(charge_ratio: float) -> void:
 func exec_main_tick(delta: float) -> void:
 	if p.character_class != PlayerManager.CharacterClass.EXECUTIONER:
 		return
-	p._exec_test_tick(delta)
+	exec_test_tick(delta)
 	exec_handle_mode_toggle()
 	exec_handle_chain_length(delta)
 	exec_handle_throw(delta)
