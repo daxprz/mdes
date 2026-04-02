@@ -7617,54 +7617,8 @@ const EXEC_TUNING_KEYS: Array[Array] = [
 # -- Chain Constraint on Player (same as monster chain pull) -------------------
 
 func _exec_apply_chain_constraint() -> void:
-	## When the ball is stuck (wall/platform/ceiling) and the chain is active,
-	## the player CANNOT move beyond the chain's max length from the ball.
-	## Hard position clamp + velocity kill — identical to monster chain constraint.
-	if character_class != PlayerManager.CharacterClass.EXECUTIONER:
-		return
-	if _exec_ball_state not in [ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
-		return
-	# Player is FREE if: entity-yeet mode, or no chain to player (RELEASE mode)
-	if _exec_is_entity_yeet_mode():
-		return
-	if not (_exec_chain_node and is_instance_valid(_exec_chain_node)):
-		return
-	# B-S chain (RELEASE mode) doesn't connect to player — skip
-	if _exec_chain_node.anchor_a.get("is_wall", false):
-		return
-
-	var ball_pos: Vector2 = _exec_get_ball_world_pos()
-	var to_ball: Vector2 = ball_pos - global_position
-	var dist: float = to_ball.length()
-
-	var ball_len: float = _exec_ball_chain_len()
-	if dist <= ball_len:
-		_exec_chain_taut = false
-		return
-
-	var chain_dir: Vector2 = to_ball.normalized()
-	_exec_try_yeet(chain_dir)
-
-	var dir_from_ball: Vector2 = -chain_dir
-	if is_on_floor():
-		var dy: float = global_position.y - ball_pos.y
-		var max_dx_sq: float = ball_len * ball_len - dy * dy
-		if max_dx_sq < 0.0:
-			global_position = ball_pos + dir_from_ball * ball_len
-			velocity = Vector2.ZERO
-		else:
-			var max_dx: float = sqrt(max_dx_sq)
-			var horizontal_dist: float = absf(global_position.x - ball_pos.x)
-			if horizontal_dist > max_dx:
-				var sign_x: float = signf(global_position.x - ball_pos.x)
-				global_position.x = ball_pos.x + sign_x * max_dx
-				if (velocity.x > 0 and sign_x > 0) or (velocity.x < 0 and sign_x < 0):
-					velocity.x = 0
-	else:
-		global_position = ball_pos + dir_from_ball * ball_len
-		var outward_vel: float = velocity.dot(dir_from_ball)
-		if outward_vel > 0.0:
-			velocity -= dir_from_ball * outward_vel
+	if _executioner_class:
+		_executioner_class.exec_apply_chain_constraint()
 
 
 # -- Chain Length Helpers -------------------------------------------------------
