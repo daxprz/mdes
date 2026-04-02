@@ -163,6 +163,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.44
+**Executioner cleanup — removed duplicate constants, 19.7% player_side.gd reduction**
+
+- Removed 54 duplicate EXEC_* constants from player_side.gd (already in executioner_class.gd)
+- player_side.gd: 9,654 → 7,752 lines (−1,902, 19.7% reduction)
+- Remaining executioner on player: state vars + enums (~200 lines for RCON), thin forwarders (~60 lines)
+- Full test gate verified: executioner 7/7, class_basics 13/13
+
 ### v0.10.43
 **Executioner extraction complete — all drawing + tuning migrated**
 
