@@ -2590,7 +2590,7 @@ func _check_out_of_bounds() -> void:
 		if not _exec_is_entity_yeet_mode():
 			if _exec_ball_state in [ExecEndState.THROWN, ExecEndState.STUCK_WALL, ExecEndState.STUCK_PLATFORM, ExecEndState.STUCK_CEILING]:
 				return
-	var cam := get_viewport().get_camera_2d()
+	var cam = get_viewport().get_camera_2d()
 	if not cam:
 		return
 
@@ -2888,7 +2888,7 @@ func _spawn_expanding_ring(center: Vector2, max_radius: float, color: Color, dur
 
 
 func _screen_shake(intensity: float, duration: float) -> void:
-	var camera := get_viewport().get_camera_2d()
+	var camera = get_viewport().get_camera_2d()
 	if not camera:
 		return
 	var original_offset: Vector2 = camera.offset
@@ -4224,25 +4224,6 @@ const EXEC_TUNING_KEYS: Array[Array] = [
 ]
 
 
-# -- Chain Constraint on Player (same as monster chain pull) -------------------
-
-func _exec_apply_chain_constraint() -> void:
-	if _executioner_class:
-		_executioner_class.exec_apply_chain_constraint()
-
-
-# -- Chain Length Helpers -------------------------------------------------------
-
-# -- Chain Length Helpers — delegated to ExecutionerClass ----------------------
-
-func _exec_ball_chain_len() -> float:
-	return _executioner_class.exec_ball_chain_len() if _executioner_class else 0.0
-
-func _exec_shackle_chain_len() -> float:
-	return _executioner_class.exec_shackle_chain_len() if _executioner_class else 0.0
-
-func _exec_is_bs_release() -> bool:
-	return _executioner_class.exec_is_bs_release() if _executioner_class else false
 
 
 # -- Executioner Drawing + Tuning — delegated to ExecutionerClass --------------

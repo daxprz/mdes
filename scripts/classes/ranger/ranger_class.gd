@@ -1006,7 +1006,7 @@ func _handle_archer_aim(delta: float) -> void:
 			p._archer_fired_this_pull = false
 
 			# Clamp reticle onto visible screen if it was off-screen
-			var cam := p.get_viewport().get_camera_2d()
+			var cam = p.get_viewport().get_camera_2d()
 			if cam:
 				var vp_size: Vector2 = p.get_viewport_rect().size
 				var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE

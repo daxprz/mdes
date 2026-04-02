@@ -1850,7 +1850,7 @@ func draw_exec_tuning() -> void:
 
 	# Draw in screen space — fixed p.position top-right of viewport
 	var vp_size: Vector2 = p.get_viewport_rect().size
-	var cam := get_viewport().get_camera_2d()
+	var cam = get_viewport().get_camera_2d()
 	var cam_pos: Vector2 = cam.global_position if cam else vp_size * 0.5
 	var zoom: Vector2 = cam.zoom if cam and cam.zoom.x > 0 else Vector2.ONE
 
@@ -1922,7 +1922,7 @@ func exec_tuning_handle_input(event: InputEvent) -> void:
 		return
 
 	var vp_size: Vector2 = p.get_viewport_rect().size
-	var cam := get_viewport().get_camera_2d()
+	var cam = get_viewport().get_camera_2d()
 	var cam_pos: Vector2 = cam.global_position if cam else vp_size * 0.5
 	var zoom: Vector2 = cam.zoom if cam and cam.zoom.x > 0 else Vector2.ONE
 
