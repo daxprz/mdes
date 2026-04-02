@@ -187,7 +187,8 @@ const WALL_JUMP_STAMINA_MAX: int = 3
 var _donut_buddy_count: int = 0
 var _shadow_dash_active: bool = false
 var _hud_aura_fade: float = 0.0  # Grapple aura HUD fade
-var _tank_fortify: bool = false   # Tank fortify state (shared with healer)
+var _tank_fortify: bool = false
+var _balloonist_floating: bool = false   # Tank fortify state (shared with healer)
 var _healer_gust_cooldown: float = 0.0
 const HEALER_GUST_COOLDOWN := 8.0
 const HEALER_GUST_RADIUS := 120.0
@@ -585,6 +586,18 @@ func _ready() -> void:
 			_init_class_component("balloonist")
 		PlayerManager.CharacterClass.NINJA:
 			_init_class_component("ninja")
+		PlayerManager.CharacterClass.ROGUE:
+			_init_class_component("rogue")
+		PlayerManager.CharacterClass.DEMOLITIONIST:
+			_init_class_component("demolitionist")
+		PlayerManager.CharacterClass.HEALER:
+			_init_class_component("healer")
+		PlayerManager.CharacterClass.SUMMONER:
+			_init_class_component("summoner")
+		PlayerManager.CharacterClass.GUITARIST:
+			_init_class_component("guitarist")
+		PlayerManager.CharacterClass.WEREWOLF:
+			_init_class_component("werewolf")
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
 	ProfileManager.profile_loaded.connect(_on_profile_changed)
@@ -1655,7 +1668,15 @@ func _init_class_component(cls_name: String) -> void:
 		"tank": _tank_class = comp
 		"balloonist": _balloonist_class = comp
 		"ninja": _ninja_class = comp
-	var cls_map := {"melee": 0, "mage": 2, "tank": 7, "balloonist": 9, "ninja": 8}
+		"rogue": _rogue_class = comp
+		"demolitionist": _demolitionist_class = comp
+		"healer": _healer_class = comp
+		"summoner": _summoner_class = comp
+		"guitarist": _guitarist_class = comp
+		"werewolf": _werewolf_class = comp
+	var cls_map := {"melee": 0, "mage": 2, "tank": 7, "balloonist": 9, "ninja": 8,
+		"rogue": 4, "demolitionist": 5, "healer": 6, "summoner": 3,
+		"guitarist": 10, "werewolf": 11}
 	var e: int = cls_map.get(cls_name, -1)
 	if e >= 0:
 		_class_attack_fn[e] = comp.perform_attack
@@ -2180,156 +2201,154 @@ func _spawn_smoke_particle() -> void:
 
 	get_parent().add_child(fireball)
 
+# -- Remaining class forwarders -----------------------------------------------
 
-func _attack_summoner() -> void:
-	# Homing mark spell - slow projectile that seeks nearest enemy
-	# When it hits, marks the target so donut buddies deal +20-40% damage
-	AudioManager.play("summon", -4.0, 1.6)
-	_attack_cooldown = 0.8
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
-
-	# Find nearest enemy to home toward
-	var nearest_enemy: Node2D = null
-	var nearest_dist: float = 200.0
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if body is Node2D:
-			var dist: float = global_position.distance_to(body.global_position)
-			if dist < nearest_dist:
-				nearest_dist = dist
-				nearest_enemy = body
-
-	# Spawn homing orb
-	var orb := ColorRect.new()
-	orb.color = Color(1.0, 0.6, 0.2, 0.9)
-	orb.size = Vector2(6, 6)
-	orb.position = global_position
-	orb.z_index = 6
-	get_parent().add_child(orb)
-
-	# Homing flight
-	var orb_speed: float = 120.0
-	var orb_age: float = 0.0
-	var orb_max_age: float = 3.0
-	var hit := false
-
-	while orb_age < orb_max_age and is_instance_valid(orb) and is_inside_tree():
-		var dt: float = get_process_delta_time()
-		orb_age += dt
-
-		# Re-acquire nearest enemy each frame for true homing
-		var current_target: Node2D = null
-		var best_dist: float = 250.0
-		for body in get_tree().get_nodes_in_group("enemies"):
-			if body is Node2D:
-				var d: float = orb.position.distance_to(body.global_position)
-				if d < best_dist:
-					best_dist = d
-					current_target = body
-
-		if current_target:
-			var to_target: Vector2 = (current_target.global_position - orb.position).normalized()
-			orb.position += to_target * orb_speed * dt
-
-			# Trail particle
-			if randi() % 3 == 0:
-				var trail := ColorRect.new()
-				trail.color = Color(1.0, 0.7, 0.3, 0.5)
-				trail.size = Vector2(3, 3)
-				trail.position = orb.position + Vector2(randf_range(-2, 2), randf_range(-2, 2))
-				trail.z_index = 5
-				get_parent().add_child(trail)
-				var tt := trail.create_tween()
-				tt.tween_property(trail, "modulate:a", 0.0, 0.3)
-				tt.tween_callback(trail.queue_free)
-
-			# Check if hit
-			if orb.position.distance_to(current_target.global_position) < 12.0:
-				# HIT - deal small damage and MARK the enemy
-				var scaled_dmg: int = int(5 * PlayerManager.get_skill_bonus(player_index, "attack"))
-				if current_target.has_method("take_damage"):
-					current_target.take_damage(scaled_dmg, player_index)
-				# Mark the enemy for bonus donut buddy damage
-				current_target.set_meta("summoner_marked", true)
-				current_target.set_meta("summoner_mark_owner", player_index)
-				# Visual mark - orange glow
-				current_target.modulate = Color(1.2, 0.9, 0.6)
-				# Mark expires after 6 seconds
-				_expire_mark_after(current_target, 6.0)
-				AudioManager.play("mark_target")
-				_spawn_vfx(Color(1.0, 0.6, 0.2, 0.6), Vector2(20, 20))
-				hit = true
-				break
-		else:
-			# No target - drift in aimed direction
-			var aim: Vector2 = _get_aim_direction()
-			orb.position += aim * orb_speed * dt
-
-		await get_tree().process_frame
-
-	if is_instance_valid(orb):
-		orb.queue_free()
-
-
-func _expire_mark_after(enemy: Node2D, duration: float) -> void:
-	await get_tree().create_timer(duration).timeout
-	if is_instance_valid(enemy):
-		enemy.remove_meta("summoner_marked")
-		enemy.remove_meta("summoner_mark_owner")
-		enemy.modulate = Color.WHITE
-
+var _rogue_class: Variant = null
+var _demolitionist_class: Variant = null
+var _healer_class: Variant = null
+var _summoner_class: Variant = null
+var _guitarist_class: Variant = null
+var _werewolf_class: Variant = null
 
 func _attack_rogue() -> void:
-	# Throw 3 knives in a fan spread, 0.5s cooldown
-	AudioManager.play("dagger_stab")
-	_attack_cooldown = 0.5
-	var base_dir: Vector2 = _get_aim_direction()
-	var angles := [-0.2, 0.0, 0.2]
-	var base_dmg: int = int(12 * PlayerManager.get_skill_bonus(player_index, "attack"))
+	if _rogue_class:
+		_rogue_class._attack_rogue()
 
-	# STEALTH: close-range backstab instead of throwing knives
-	if _rogue_stealth:
-		var backstab_dmg: int = int(base_dmg * ROGUE_STEALTH_DAMAGE_MULT)
-		_exit_stealth()
+func _handle_rogue_stealth_toggle() -> void:
+	if _rogue_class:
+		_rogue_class._handle_rogue_stealth_toggle()
 
-		# Small square melee hit in front of rogue
-		attack_area.position = base_dir * 14.0
-		attack_area.monitoring = true
-		await get_tree().physics_frame
-		if not is_inside_tree():
-			return
-		var hit_something := false
-		for body in attack_area.get_overlapping_bodies():
-			if body.has_method("take_damage"):
-				body.take_damage(backstab_dmg, player_index)
-				_spawn_blood_particles(body.global_position)
-				PlayerManager.add_skill_xp(player_index, "attack", 5)
-				hit_something = true
-		# Only show BACK STAB text + sound if we actually hit an enemy
-		if hit_something:
-			AudioManager.play("backstab_hit")
-			_stealth_backstab_vfx(global_position + base_dir * 16.0)
-		await get_tree().create_timer(0.1).timeout
-		if is_inside_tree():
-			attack_area.monitoring = false
-		return
+func _handle_rogue_stealth(delta: float) -> void:
+	if _rogue_class:
+		_rogue_class._handle_rogue_stealth(delta)
 
-	# Normal: throw 3 knives in a fan spread
-	var scaled_dmg: int = base_dmg
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
-	for angle in angles:
-		var dir: Vector2 = base_dir.rotated(angle)
-		var knife_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
-		if not knife_scene:
-			continue
-		var knife := knife_scene.instantiate()
-		knife.damage = scaled_dmg
-		knife.speed = 400.0
-		knife.direction = dir
-		knife.projectile_type = "knife"
-		knife.owner_index = player_index
-		knife.global_position = global_position + base_dir * 12.0
-		get_parent().add_child(knife)
+func _exit_stealth() -> void:
+	if _rogue_class:
+		_rogue_class._exit_stealth()
 
+func _stealth_backstab_vfx(hit_pos: Vector2) -> void:
+	if _rogue_class:
+		_rogue_class._stealth_backstab_vfx(hit_pos)
+
+func _special_shadow_dash() -> void:
+	if _rogue_class:
+		_rogue_class._special_shadow_dash()
+
+func _charged_rogue_backstab(charge_ratio: float) -> void:
+	if _rogue_class:
+		_rogue_class._charged_rogue_backstab(charge_ratio)
+
+func _attack_demolitionist() -> void:
+	if _demolitionist_class:
+		_demolitionist_class._attack_demolitionist()
+
+func _handle_demo_refuel() -> void:
+	if _demolitionist_class:
+		_demolitionist_class._handle_demo_refuel()
+
+func _special_big_bomb() -> void:
+	if _demolitionist_class:
+		_demolitionist_class._special_big_bomb()
+
+func _charged_demo_mega_bomb(charge_ratio: float) -> void:
+	if _demolitionist_class:
+		_demolitionist_class._charged_demo_mega_bomb(charge_ratio)
+
+func _attack_healer() -> void:
+	if _healer_class:
+		_healer_class._attack_healer()
+
+func _handle_healer_wind_gust() -> void:
+	if _healer_class:
+		_healer_class._handle_healer_wind_gust()
+
+func _special_healing_burst() -> void:
+	if _healer_class:
+		_healer_class._special_healing_burst()
+
+func _charged_healer_wave(charge_ratio: float) -> void:
+	if _healer_class:
+		_healer_class._charged_healer_wave(charge_ratio)
+
+func _attack_summoner() -> void:
+	if _summoner_class:
+		_summoner_class._attack_summoner()
+
+func _expire_mark_after(enemy: Node2D, duration: float) -> void:
+	if _summoner_class:
+		_summoner_class._expire_mark_after(enemy, duration)
+
+func _special_summon_donut() -> void:
+	if _summoner_class:
+		_summoner_class._special_summon_donut()
+
+func _charged_summoner_donut(charge_ratio: float) -> void:
+	if _summoner_class:
+		_summoner_class._charged_summoner_donut(charge_ratio)
+
+func _handle_delegate_toggle() -> void:
+	if _summoner_class:
+		_summoner_class._handle_delegate_toggle()
+
+func _enter_delegate_mode() -> void:
+	if _summoner_class:
+		_summoner_class._enter_delegate_mode()
+
+func _exit_delegate_mode() -> void:
+	if _summoner_class:
+		_summoner_class._exit_delegate_mode()
+
+func _spawn_aether_rift(pos: Vector2) -> void:
+	if _summoner_class:
+		_summoner_class._spawn_aether_rift(pos)
+
+func _spawn_aether_particle_delayed(rift: Node2D, pos: Vector2, delay: float) -> void:
+	if _summoner_class:
+		_summoner_class._spawn_aether_particle_delayed(rift, pos, delay)
+
+func _apply_aether_growth_to(enemy: Node2D) -> void:
+	if _summoner_class:
+		_summoner_class._apply_aether_growth_to(enemy)
+
+func _spawn_aether_aura(enemy: Node2D) -> void:
+	if _summoner_class:
+		_summoner_class._spawn_aether_aura(enemy)
+
+func _update_delegate(delta: float) -> void:
+	if _summoner_class:
+		_summoner_class._update_delegate(delta)
+
+func _update_buddy_target() -> void:
+	if _summoner_class:
+		_summoner_class._update_buddy_target()
+
+func _handle_guitarist_amp_up(delta: float) -> void:
+	if _guitarist_class:
+		_guitarist_class._handle_guitarist_amp_up(delta)
+
+func _charged_guitarist_power_chord(charge_ratio: float) -> void:
+	if _guitarist_class:
+		_guitarist_class._charged_guitarist_power_chord(charge_ratio)
+
+func _attack_werewolf() -> void:
+	if _werewolf_class:
+		_werewolf_class._attack_werewolf()
+
+func _handle_werewolf_frenzy(delta: float) -> void:
+	if _werewolf_class:
+		_werewolf_class._handle_werewolf_frenzy(delta)
+
+func _special_werewolf_roar_push() -> void:
+	if _werewolf_class:
+		_werewolf_class._special_werewolf_roar_push()
+
+func _charged_werewolf_pounce(charge_ratio: float) -> void:
+	if _werewolf_class:
+		_werewolf_class._charged_werewolf_pounce(charge_ratio)
+
+func _check_werewolf_pounce_landing() -> void:
+	if _werewolf_class:
+		_werewolf_class._check_werewolf_pounce_landing()
 
 func _get_aim_direction_analog() -> Vector2:
 	## Returns full analog aim direction. Right stick takes priority over left.
@@ -2414,158 +2433,6 @@ var _shield_charging: bool = false
 func _special_grappling_hook() -> void:
 	# Grapple moved to left bumper — this is now a no-op for the special button
 	pass
-func _special_summon_donut() -> void:
-	# Summon donut buddy (up to 3)
-	if _donut_buddy_count >= 3:
-		_special_cooldown = 0.0
-		_spawn_fail_flash()
-		return
-	if not PlayerManager.use_mana(player_index, 30):
-		_special_cooldown = 0.0
-		_spawn_fail_flash()
-		return
-
-	AudioManager.play("summon")
-	_spawn_vfx(Color(1.0, 0.6, 0.2, 0.7), Vector2(30, 30))
-	var buddy_scene := load("res://scenes/characters/donut_buddy.tscn") as PackedScene
-	if not buddy_scene:
-		return
-	var buddy := buddy_scene.instantiate()
-	buddy.owner_index = player_index
-	buddy.global_position = global_position + Vector2(24.0 if _facing_right else -24.0, 0.0)
-	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
-	get_parent().add_child(buddy)
-	_donut_buddy_count += 1
-
-
-# -- Demolitionist Refuel (Circle) ---------------------------------------------
-
-func _handle_demo_refuel() -> void:
-	if character_class != PlayerManager.CharacterClass.DEMOLITIONIST:
-		return
-	if not _is_device_action_pressed("interact"):
-		return
-	if _rocket_active:
-		return  # Can't refuel while flying!
-	if _rocket_fuel >= ROCKET_FUEL_MAX:
-		return
-
-	# Refuel 1 unit per second while holding Circle
-	var dt: float = get_process_delta_time()
-	_rocket_fuel = minf(_rocket_fuel + dt * 1.5, ROCKET_FUEL_MAX)
-
-	# VFX: orange fuel particles rising
-	if randi() % 5 == 0:
-		var fuel_p := ColorRect.new()
-		fuel_p.color = Color(1.0, 0.6, 0.1, 0.6)
-		fuel_p.size = Vector2(3, 3)
-		fuel_p.position = global_position + Vector2(randf_range(-5, 5), randf_range(4, 10))
-		fuel_p.z_index = 5
-		get_parent().add_child(fuel_p)
-		var ft := fuel_p.create_tween()
-		ft.tween_property(fuel_p, "position:y", fuel_p.position.y - 15, 0.3)
-		ft.parallel().tween_property(fuel_p, "modulate:a", 0.0, 0.3)
-		ft.tween_callback(fuel_p.queue_free)
-
-		# Show fuel level
-		var fuel_pct: int = int(_rocket_fuel / ROCKET_FUEL_MAX * 100)
-		var fuel_text := Label.new()
-		fuel_text.text = "FUEL %d%%" % fuel_pct
-		fuel_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		fuel_text.add_theme_font_size_override("font_size", 7)
-		fuel_text.modulate = Color(1.0, 0.6, 0.1)
-		fuel_text.position = global_position + Vector2(-15, -35)
-		fuel_text.z_index = 12
-		get_parent().add_child(fuel_text)
-		var tt := fuel_text.create_tween()
-		tt.tween_property(fuel_text, "modulate:a", 0.0, 0.4)
-		tt.tween_callback(fuel_text.queue_free)
-
-
-# -- Balloonist Abilities ------------------------------------------------------
-
-var _balloonist_pop_cooldown: float = 0.0
-var _balloonist_floating: bool = false
-var _balloonist_float_timer: float = 0.0
-const BALLOONIST_FLOAT_DURATION := 6.0
-const BALLOONIST_FLOAT_COOLDOWN := 12.0
-var _balloonist_float_cooldown: float = 0.0
-func _handle_healer_wind_gust() -> void:
-	if character_class != PlayerManager.CharacterClass.HEALER:
-		return
-	if _healer_gust_cooldown > 0.0:
-		_healer_gust_cooldown -= get_process_delta_time()
-	if not _is_device_action_just_pressed("interact"):
-		return
-	if _healer_gust_cooldown > 0.0:
-		_spawn_fail_flash()
-		return
-
-	_healer_gust_cooldown = HEALER_GUST_COOLDOWN
-	AudioManager.play("wind_gust")
-	AudioManager.play("jump", 2.0, 0.5)
-
-	# Expanding wind ring VFX
-	for ring_i in range(3):
-		var ring := ColorRect.new()
-		ring.color = Color(0.8, 0.9, 1.0, 0.4 - ring_i * 0.1)
-		var ring_size: float = 16.0 + ring_i * 8.0
-		ring.size = Vector2(ring_size, ring_size)
-		ring.position = global_position - Vector2(ring_size / 2.0, ring_size / 2.0)
-		ring.pivot_offset = Vector2(ring_size / 2.0, ring_size / 2.0)
-		ring.z_index = 8
-		get_parent().add_child(ring)
-		var scale_target: float = HEALER_GUST_RADIUS * 2.0 / ring_size
-		var rt := ring.create_tween()
-		rt.set_parallel(true)
-		rt.tween_property(ring, "scale", Vector2(scale_target, scale_target), 0.3 + ring_i * 0.1)
-		rt.tween_property(ring, "modulate:a", 0.0, 0.35 + ring_i * 0.1)
-		rt.chain().tween_callback(ring.queue_free)
-
-	# Wind line particles shooting outward
-	for i in range(16):
-		var angle: float = float(i) * TAU / 16.0
-		var dir: Vector2 = Vector2(cos(angle), sin(angle))
-		var wind_p := ColorRect.new()
-		wind_p.color = Color(0.85, 0.9, 1.0, 0.6)
-		wind_p.size = Vector2(6, 2)
-		wind_p.rotation = angle
-		wind_p.position = global_position + dir * 8.0
-		wind_p.z_index = 9
-		get_parent().add_child(wind_p)
-		var wt := wind_p.create_tween()
-		wt.tween_property(wind_p, "position", wind_p.position + dir * HEALER_GUST_RADIUS, 0.25)
-		wt.parallel().tween_property(wind_p, "modulate:a", 0.0, 0.3)
-		wt.tween_callback(wind_p.queue_free)
-
-	# Push ALL enemies away
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < HEALER_GUST_RADIUS and dist > 1.0:
-			var push_dir: Vector2 = (body.global_position - global_position).normalized()
-			var push_strength: float = HEALER_GUST_FORCE * (1.0 - dist / HEALER_GUST_RADIUS)
-			if body.has_method("apply_knockback"):
-				body.apply_knockback(push_dir * push_strength)
-			elif "velocity" in body:
-				body.velocity += push_dir * push_strength
-			# Small damage from the gust
-			if body.has_method("take_damage"):
-				body.take_damage(5, player_index)
-
-	# Push other players away too (friendly push, no damage)
-	for body in get_tree().get_nodes_in_group("players"):
-		if body == self or not body is Node2D:
-			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < HEALER_GUST_RADIUS and dist > 1.0:
-			var push_dir: Vector2 = (body.global_position - global_position).normalized()
-			var push_strength: float = HEALER_GUST_FORCE * 0.6 * (1.0 - dist / HEALER_GUST_RADIUS)
-			if "velocity" in body:
-				body.velocity += push_dir * push_strength
-
-	_screen_shake(3.0, 0.15)
 func _rumble(weak: float, strong: float, duration: float) -> void:
 	## Trigger controller vibration. No-op for keyboard (device -1).
 	if device_id >= 0:
@@ -2713,185 +2580,6 @@ func _draw_debug() -> void:
 				draw_line(pred_end, pred_end - pred_dir * 10.0 - perp * 6.0, Color(1.0, 0.15, 0.1, 0.8), 2.5)
 				var speed_text: String = "%d" % int(predicted.length())
 				draw_string(ThemeDB.fallback_font, pred_end + Vector2(5, -5), speed_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(1.0, 0.3, 0.2, 0.9))
-func _handle_rogue_stealth_toggle() -> void:
-	if character_class != PlayerManager.CharacterClass.ROGUE:
-		return
-	if not _is_device_action_just_pressed("interact"):
-		return
-	if _rogue_stealth:
-		return
-	if _rogue_stealth_cooldown > 0.0:
-		_spawn_fail_flash()
-		return
-
-	_rogue_stealth = true
-	_rogue_stealth_timer = ROGUE_STEALTH_DURATION
-	AudioManager.play("stealth_activate")
-	# Go nearly invisible + enemies can't see us
-	remove_from_group("players")
-	modulate = Color(1.0, 1.0, 1.0, 0.15)
-
-
-func _handle_rogue_stealth(delta: float) -> void:
-	if _rogue_stealth_cooldown > 0.0:
-		_rogue_stealth_cooldown -= delta
-	if not _rogue_stealth:
-		return
-
-	_rogue_stealth_timer -= delta
-
-	# Subtle shimmer while stealthed
-	modulate.a = 0.1 + sin(_rogue_stealth_timer * 8.0) * 0.05
-
-	# Warning: flicker more when almost out
-	if _rogue_stealth_timer <= 1.5:
-		modulate.a = 0.15 + sin(_rogue_stealth_timer * 20.0) * 0.1
-
-	# Time's up
-	if _rogue_stealth_timer <= 0.0:
-		_exit_stealth()
-
-
-func _exit_stealth() -> void:
-	_rogue_stealth = false
-	_rogue_stealth_cooldown = ROGUE_STEALTH_COOLDOWN
-	add_to_group("players")  # Enemies can see us again
-	modulate = Color.WHITE
-	AudioManager.play("stealth_activate", -4.0, 1.3)
-
-
-func _stealth_backstab_vfx(hit_pos: Vector2) -> void:
-	# "BACK STAB!" text in orange, floats up, flickers, disappears
-	var label := Label.new()
-	label.text = "BACK STAB!"
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 14)
-	label.modulate = Color(1.0, 0.6, 0.1)
-	label.position = hit_pos + Vector2(-30, -30)
-	label.z_index = 15
-	get_parent().add_child(label)
-
-	# Float up + flicker + fade
-	var tween := label.create_tween()
-	tween.tween_property(label, "position:y", label.position.y - 35, 1.0)
-	# Flicker by toggling alpha
-	for i in range(6):
-		tween.parallel().tween_property(label, "modulate:a", 0.2, 0.08).set_delay(0.1 * i)
-		tween.parallel().tween_property(label, "modulate:a", 1.0, 0.08).set_delay(0.1 * i + 0.08)
-	tween.tween_property(label, "modulate:a", 0.0, 0.2)
-	tween.tween_callback(label.queue_free)
-func _handle_delegate_toggle() -> void:
-	if character_class != PlayerManager.CharacterClass.SUMMONER:
-		return
-	if _delegate_cooldown > 0.0:
-		_delegate_cooldown -= get_process_delta_time()
-	if not _is_device_action_just_pressed("interact"):
-		return
-
-	if _delegate_active:
-		_exit_delegate_mode()
-	elif _delegate_cooldown <= 0.0:
-		_enter_delegate_mode()
-	else:
-		_spawn_fail_flash()
-
-
-func _enter_delegate_mode() -> void:
-	_delegate_active = true
-	_delegate_timer = DELEGATE_DURATION
-	AudioManager.play("summon", -3.0, 1.5)
-	# Summoner goes into trance
-	modulate = Color(0.6, 0.5, 0.8, 0.5)
-
-	# Countdown label on the summoner
-	_delegate_countdown_label = Label.new()
-	_delegate_countdown_label.name = "DelegateCountdown"
-	_delegate_countdown_label.text = "10"
-	_delegate_countdown_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_delegate_countdown_label.add_theme_font_size_override("font_size", 14)
-	_delegate_countdown_label.position = Vector2(-8, -40)
-	_delegate_countdown_label.modulate = Color(0.8, 0.5, 1.0)
-	add_child(_delegate_countdown_label)
-
-	# Spawn ghost delegate
-	_delegate_node = CharacterBody2D.new()
-	_delegate_node.collision_layer = 0
-	_delegate_node.collision_mask = 1
-	_delegate_node.global_position = global_position
-
-	var ghost_sprite := ColorRect.new()
-	ghost_sprite.name = "GhostSprite"
-	ghost_sprite.color = Color(0.8, 0.5, 1.0, 0.4)
-	ghost_sprite.size = Vector2(12, 20)
-	ghost_sprite.position = Vector2(-6, -14)
-	_delegate_node.add_child(ghost_sprite)
-
-	var glow := ColorRect.new()
-	glow.name = "Glow"
-	glow.color = Color(0.7, 0.4, 1.0, 0.15)
-	glow.size = Vector2(20, 24)
-	glow.position = Vector2(-10, -16)
-	_delegate_node.add_child(glow)
-
-	var col := CollisionShape2D.new()
-	var shape := RectangleShape2D.new()
-	shape.size = Vector2(10, 18)
-	col.shape = shape
-	_delegate_node.add_child(col)
-
-	get_parent().add_child(_delegate_node)
-	_update_buddy_target()
-
-
-func _exit_delegate_mode() -> void:
-	if not _delegate_active:
-		return
-	_delegate_active = false
-	_delegate_cooldown = DELEGATE_COOLDOWN
-
-	var teleport_target: Vector2 = global_position
-	if is_instance_valid(_delegate_node):
-		teleport_target = _delegate_node.global_position
-
-	# --- Aether Dig-In at old position ---
-	AudioManager.play("explosion", -2.0, 0.5)
-	_spawn_aether_rift(global_position)
-
-	# Screen rumble
-	_screen_shake(4.0, 0.2)
-
-	# Summoner "digs into the aether" - shrink + purple flash
-	modulate = Color(0.6, 0.2, 1.0)
-	var dig_in := create_tween()
-	dig_in.tween_property(self, "scale", Vector2(0.1, 0.1), 0.3).set_ease(Tween.EASE_IN)
-	await dig_in.finished
-
-	# --- Teleport ---
-	global_position = teleport_target
-	if is_instance_valid(_delegate_node):
-		_delegate_node.queue_free()
-		_delegate_node = null
-
-	# --- Aether Dig-Out at new position ---
-	AudioManager.play("summon", 0.0, 0.7)
-	_spawn_aether_rift(global_position)
-	_screen_shake(4.0, 0.2)
-
-	# Summoner "digs out" - grow back + flash
-	var dig_out := create_tween()
-	dig_out.tween_property(self, "scale", Vector2(1.0, 1.0), 0.3).set_ease(Tween.EASE_OUT)
-	await dig_out.finished
-
-	modulate = Color.WHITE
-
-	# Clean up countdown label
-	if is_instance_valid(_delegate_countdown_label):
-		_delegate_countdown_label.queue_free()
-		_delegate_countdown_label = null
-
-	_update_buddy_target()
-
-
 func _check_out_of_bounds() -> void:
 	## Teleport player back in-bounds if they escape the playable area
 	# Skip during YEET launch — player is flying on the chain
@@ -2946,213 +2634,6 @@ func _check_out_of_bounds() -> void:
 	_spawn_aether_rift(global_position)
 
 	AudioManager.play("summon", -2.0, 1.2)
-
-
-func _spawn_aether_rift(pos: Vector2) -> void:
-	# Purple tear in space that emits particles
-	var rift := Node2D.new()
-	rift.global_position = pos
-	rift.z_index = 10
-	get_parent().add_child(rift)
-
-	# The rift visual - a jagged purple tear
-	var tear := ColorRect.new()
-	tear.color = Color(0.5, 0.1, 0.9, 0.8)
-	tear.size = Vector2(6, 40)
-	tear.position = Vector2(-3, -20)
-	rift.add_child(tear)
-
-	# Inner glow
-	var inner := ColorRect.new()
-	inner.color = Color(0.8, 0.3, 1.0, 0.5)
-	inner.size = Vector2(2, 36)
-	inner.position = Vector2(-1, -18)
-	rift.add_child(inner)
-
-	# Emit purple particles for 4 seconds
-	var particle_count := 40
-	for i in range(particle_count):
-		# Stagger particle spawns
-		_spawn_aether_particle_delayed(rift, pos, float(i) * 0.1)
-
-	# Rift fades out after 4 seconds
-	var rift_tween := rift.create_tween()
-	rift_tween.tween_interval(4.0)
-	rift_tween.tween_property(tear, "modulate:a", 0.0, 1.0)
-	rift_tween.parallel().tween_property(inner, "modulate:a", 0.0, 1.0)
-	rift_tween.tween_callback(rift.queue_free)
-
-
-func _spawn_aether_particle_delayed(rift: Node2D, pos: Vector2, delay: float) -> void:
-	if not is_inside_tree():
-		return
-	await get_tree().create_timer(delay).timeout
-	if not is_instance_valid(rift) or not is_inside_tree():
-		return
-
-	var particle := Area2D.new()
-	particle.collision_layer = 0
-	particle.collision_mask = 8  # Detect enemies
-	particle.global_position = pos + Vector2(randf_range(-4, 4), randf_range(-15, 15))
-
-	var pcol := CollisionShape2D.new()
-	var pshape := CircleShape2D.new()
-	pshape.radius = 5.0
-	pcol.shape = pshape
-	particle.add_child(pcol)
-
-	# Purple glowing dot
-	var dot := ColorRect.new()
-	dot.color = Color(0.7, 0.2, 1.0, 0.8)
-	dot.size = Vector2(6, 6)
-	dot.position = Vector2(-3, -3)
-	particle.add_child(dot)
-
-	get_parent().add_child(particle)
-
-	# Float outward in random direction
-	var vel: Vector2 = Vector2(randf_range(-40, 40), randf_range(-60, 10))
-	var lifetime := 2.0
-	var age := 0.0
-
-	# Check for enemy contact
-	particle.body_entered.connect(func(body: Node2D) -> void:
-		if body.is_in_group("enemies") and body.has_method("_apply_aether_growth"):
-			body._apply_aether_growth()
-		elif body.is_in_group("enemies"):
-			_apply_aether_growth_to(body)
-	)
-
-	while age < lifetime and is_instance_valid(particle):
-		var dt: float = get_process_delta_time()
-		age += dt
-		particle.global_position += vel * dt
-		vel.y += 20.0 * dt  # Slight gravity
-		vel *= (1.0 - 0.5 * dt)  # Drag
-		# Fade
-		dot.modulate.a = lerpf(0.8, 0.0, age / lifetime)
-		if not is_inside_tree():
-			break
-		await get_tree().process_frame
-
-	if is_instance_valid(particle):
-		particle.queue_free()
-
-
-func _apply_aether_growth_to(enemy: Node2D) -> void:
-	# Enemy grows 300% in size and power!
-	if enemy.has_meta("aether_grown"):
-		return  # Don't stack
-	enemy.set_meta("aether_grown", true)
-
-	AudioManager.play("boss_roar", -4.0, 1.5)
-
-	# Visual: purple flash then grow
-	enemy.modulate = Color(0.7, 0.3, 1.0)
-	var grow_tween := enemy.create_tween()
-	grow_tween.tween_property(enemy, "scale", enemy.scale * 3.0, 0.5).set_ease(Tween.EASE_OUT)
-	grow_tween.parallel().tween_property(enemy, "modulate", Color(0.9, 0.6, 1.0), 0.5)
-
-	# Buff stats if possible
-	if "health" in enemy:
-		enemy.health *= 3
-	if "MAX_HEALTH" in enemy:
-		pass  # Can't change const, but health is tripled
-	# Update health bar if it has one
-	if "_health_bar" in enemy and enemy._health_bar != null:
-		enemy._health_bar.set_health(enemy.health, enemy.health)
-
-	# Purple particle aura on the grown enemy
-	_spawn_aether_aura(enemy)
-
-
-func _spawn_aether_aura(enemy: Node2D) -> void:
-	# Continuous purple particles around the empowered enemy
-	for i in range(20):
-		if not is_instance_valid(enemy):
-			break
-		var p := ColorRect.new()
-		p.color = Color(0.6, 0.2, 1.0, 0.5)
-		p.size = Vector2(4, 4)
-		p.position = enemy.global_position + Vector2(randf_range(-20, 20), randf_range(-20, 20))
-		p.z_index = 5
-		get_parent().add_child(p)
-		var pt := p.create_tween()
-		pt.tween_property(p, "position:y", p.position.y - randf_range(15, 40), 0.8)
-		pt.parallel().tween_property(p, "modulate:a", 0.0, 0.8)
-		pt.tween_callback(p.queue_free)
-		await get_tree().create_timer(0.3).timeout
-
-
-func _update_delegate(delta: float) -> void:
-	if not is_instance_valid(_delegate_node):
-		_exit_delegate_mode()
-		return
-
-	# Countdown timer
-	_delegate_timer -= delta
-	if _delegate_timer <= 0.0:
-		_exit_delegate_mode()
-		return
-
-	# Update countdown display
-	if is_instance_valid(_delegate_countdown_label):
-		var secs: int = int(ceil(_delegate_timer))
-		_delegate_countdown_label.text = str(secs)
-		# Flash red when low
-		if _delegate_timer <= 3.0:
-			_delegate_countdown_label.modulate = Color(1.0, 0.3, 0.3) if fmod(_delegate_timer, 0.5) < 0.25 else Color(0.8, 0.5, 1.0)
-
-	var speed: float = PlayerManager.get_player(player_index).get("speed", 95) * DELEGATE_SPEED_MULT
-
-	# Gravity
-	if not _delegate_node.is_on_floor():
-		_delegate_node.velocity.y += GRAVITY * delta
-		_delegate_node.velocity.y = minf(_delegate_node.velocity.y, 600.0)
-	else:
-		_delegate_node.velocity.y = 0.0
-
-	# Movement
-	var h_input := 0.0
-	if _is_device_action_pressed("move_left"):
-		h_input -= 1.0
-	if _is_device_action_pressed("move_right"):
-		h_input += 1.0
-	_delegate_node.velocity.x = h_input * speed
-
-	# Jump (1.5x height)
-	if _is_device_action_just_pressed("jump") and _delegate_node.is_on_floor():
-		_delegate_node.velocity.y = JUMP_VELOCITY * DELEGATE_JUMP_MULT
-		AudioManager.play("jump", -8.0, 1.5)
-
-	# Dash (special button)
-	if _is_device_action_just_pressed("special"):
-		var dash_dir := 1.0 if h_input >= 0 else -1.0
-		_delegate_node.global_position.x += dash_dir * 80.0
-		AudioManager.play("shadow_dash", -6.0, 1.3)
-
-	_delegate_node.move_and_slide()
-
-	# Pulsing glow
-	var glow := _delegate_node.get_node_or_null("Glow")
-	if glow:
-		glow.modulate.a = 0.1 + sin(Time.get_ticks_msec() * 0.005) * 0.08
-
-	_update_buddy_target()
-
-
-func _update_buddy_target() -> void:
-	# Point all donut buddies toward the delegate (or back to summoner)
-	var target_node: Node2D = _delegate_node if _delegate_active and is_instance_valid(_delegate_node) else self
-	for buddy in get_tree().get_nodes_in_group("donut_buddies"):
-		if buddy.get("owner_index") == player_index:
-			# Override the buddy's follow target
-			if buddy.has_method("set_follow_target"):
-				buddy.set_follow_target(target_node)
-			elif "follow_target" in buddy:
-				buddy.follow_target = target_node
-
-
 func take_damage(amount: int, source_index: int = -1) -> void:
 	if _shadow_dash_active or _is_dead:
 		return
@@ -3362,53 +2843,6 @@ func _update_health_bar() -> void:
 		_health_bar.set_health(p_data["health"], p_data["max_health"])
 	if _mana_bar:
 		_mana_bar.set_health(p_data["mana"], p_data["max_mana"])
-
-
-func _special_shadow_dash() -> void:
-	# Teleport short distance with ghost trail + invincibility
-	# Use physics raycast to stop at walls
-	var dash_distance := 120.0
-	var direction := Vector2(1.0 if _facing_right else -1.0, 0.0)
-
-	# Raycast to find wall
-	var space := get_world_2d().direct_space_state
-	var query := PhysicsRayQueryParameters2D.create(
-		global_position,
-		global_position + direction * dash_distance,
-		1  # mask layer 1 = world/walls
-	)
-	query.exclude = [get_rid()]
-	var result: Dictionary = space.intersect_ray(query)
-
-	var target_pos: Vector2
-	if result:
-		# Stop short of the wall
-		target_pos = result["position"] - direction * 12.0
-	else:
-		target_pos = global_position + direction * dash_distance
-
-	AudioManager.play("shadow_dash")
-	_spawn_vfx(Color(0.8, 0.2, 0.2, 0.5), Vector2(14, 28))
-	var dash_start: Vector2 = global_position
-	global_position = target_pos
-	# Arrive flash
-	_spawn_vfx(Color(0.8, 0.2, 0.2, 0.5), Vector2(14, 28))
-	modulate = Color(1.0, 1.0, 1.0, 0.4)
-	collision_layer = 0
-	_shadow_dash_active = true
-
-	# Dash wave - perpendicular to dash direction, rogue deals 10 damage
-	_spawn_dash_wave(dash_start, direction, 10)
-
-	await get_tree().create_timer(0.3).timeout
-	if is_inside_tree():
-		collision_layer = 2
-		_shadow_dash_active = false
-		modulate = Color.WHITE
-
-
-# -- Visual Effects ------------------------------------------------------------
-
 func _spawn_vfx(color: Color, size: Vector2) -> void:
 	var vfx := ColorRect.new()
 	vfx.color = color
@@ -3669,129 +3103,6 @@ func _charged_ranged_shot(charge_ratio: float) -> void:
 	proj.global_position = global_position + Vector2(16.0 if _facing_right else -16.0, 0.0)
 	proj.scale = Vector2(1.5 + charge_ratio, 1.5 + charge_ratio)
 	get_parent().add_child(proj)
-func _charged_summoner_donut(charge_ratio: float) -> void:
-	if _donut_buddy_count >= 3:
-		_spawn_fail_flash()
-		return
-	if not PlayerManager.use_mana(player_index, 40):
-		_spawn_fail_flash()
-		return
-
-	var buddy_scale: float = lerpf(1.5, 2.5, charge_ratio)
-	var buddy_hp: int = int(lerpf(30.0, 80.0, charge_ratio))
-	var buddy_dmg: int = int(lerpf(8.0, 20.0, charge_ratio))
-
-	AudioManager.play("summon", 2.0, 0.8)
-	_spawn_vfx(Color(1.0, 0.8, 0.2, 0.8), Vector2(40, 40))
-	var buddy_scene := load("res://scenes/characters/donut_buddy.tscn") as PackedScene
-	if not buddy_scene:
-		return
-	var buddy := buddy_scene.instantiate()
-	buddy.owner_index = player_index
-	if buddy.has_method("set_empowered"):
-		buddy.set_empowered(buddy_hp, buddy_dmg)
-	buddy.scale = Vector2(buddy_scale, buddy_scale)
-	buddy.global_position = global_position + Vector2(24.0 if _facing_right else -24.0, 0.0)
-	buddy.tree_exited.connect(func(): _donut_buddy_count -= 1)
-	get_parent().add_child(buddy)
-	_donut_buddy_count += 1
-
-
-func _charged_rogue_backstab(charge_ratio: float) -> void:
-	# Charged knife fan: more charge = more knives, wider spread, bigger hitbox, more damage
-	var knife_count: int = int(lerpf(3.0, 9.0, charge_ratio))
-	var spread_angle: float = lerpf(0.3, 1.2, charge_ratio)  # radians total spread
-	var damage_per_knife: int = int(lerpf(10.0, 25.0, charge_ratio))
-	var knife_speed: float = lerpf(350.0, 500.0, charge_ratio)
-	var knife_size: float = lerpf(1.0, 2.0, charge_ratio)  # scale multiplier
-
-	AudioManager.play("dagger_stab", 2.0, lerpf(1.0, 0.6, charge_ratio))
-	PlayerManager.add_skill_xp(player_index, "charge", 5)
-
-	var base_dir: Vector2 = Vector2(1.0 if _facing_right else -1.0, 0.0)
-
-	# Spawn VFX sweep arc
-	var arc_width: float = lerpf(30.0, 80.0, charge_ratio)
-	var arc_height: float = lerpf(20.0, 50.0, charge_ratio)
-	var arc_vfx := ColorRect.new()
-	arc_vfx.color = Color(0.8, 0.15, 0.15, 0.5)
-	arc_vfx.size = Vector2(arc_width, arc_height)
-	arc_vfx.position = global_position + Vector2(
-		-arc_width / 2.0 if not _facing_right else 0,
-		-arc_height / 2.0
-	)
-	arc_vfx.z_index = 7
-	get_parent().add_child(arc_vfx)
-	var arc_tween := arc_vfx.create_tween()
-	arc_tween.set_parallel(true)
-	arc_tween.tween_property(arc_vfx, "modulate:a", 0.0, 0.25)
-	arc_tween.tween_property(arc_vfx, "scale:x", 1.5, 0.25)
-	arc_tween.chain().tween_callback(arc_vfx.queue_free)
-
-	# Spawn knives in a fan
-	for i in range(knife_count):
-		var t: float = 0.0
-		if knife_count > 1:
-			t = float(i) / float(knife_count - 1)
-		var angle: float = lerpf(-spread_angle / 2.0, spread_angle / 2.0, t)
-		var dir: Vector2 = base_dir.rotated(angle)
-
-		var knife_scene := load("res://scenes/characters/projectile.tscn") as PackedScene
-		if not knife_scene:
-			continue
-		var knife := knife_scene.instantiate()
-		knife.damage = damage_per_knife
-		knife.speed = knife_speed
-		knife.direction = dir
-		knife.projectile_type = "knife"
-		knife.owner_index = player_index
-		knife.global_position = global_position + base_dir * 12.0
-		if knife_size > 1.1:
-			knife.scale = Vector2(knife_size, knife_size)
-		get_parent().add_child(knife)
-
-	# Red/crimson particle burst
-	for p_i in range(int(lerpf(4.0, 12.0, charge_ratio))):
-		var particle := ColorRect.new()
-		particle.color = Color(0.8, 0.1, 0.1, 0.7)
-		particle.size = Vector2(3 + charge_ratio * 3, 3 + charge_ratio * 3)
-		particle.position = global_position + Vector2(randf_range(-10, 10), randf_range(-10, 10))
-		particle.z_index = 8
-		get_parent().add_child(particle)
-		var p_dir: Vector2 = base_dir.rotated(randf_range(-spread_angle, spread_angle))
-		var pt := particle.create_tween()
-		pt.tween_property(particle, "position", particle.position + p_dir * randf_range(20, 50), 0.3)
-		pt.parallel().tween_property(particle, "modulate:a", 0.0, 0.3)
-		pt.tween_callback(particle.queue_free)
-
-
-func _charged_demo_mega_bomb(charge_ratio: float) -> void:
-	var blast_radius: float = lerpf(60.0, 140.0, charge_ratio)
-	var damage: int = int(lerpf(30.0, 70.0, charge_ratio))
-	var fragment_count: int = int(lerpf(0.0, 5.0, charge_ratio))
-
-	AudioManager.play("explosion", 2.0, 0.7)
-	_spawn_vfx(Color(1.0, 0.4, 0.1, 0.8), Vector2(blast_radius * 2.0, blast_radius * 2.0))
-	_screen_shake(charge_ratio * 6.0 + 2.0, 0.25)
-
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < blast_radius and body.has_method("take_damage"):
-			body.take_damage(damage, player_index)
-			if body.has_method("apply_knockback"):
-				var kb: Vector2 = (body.global_position - global_position).normalized()
-				body.apply_knockback(kb * 300.0)
-
-	# Spawn fragment mini-bombs
-	for i in range(fragment_count):
-		var angle: float = randf() * TAU
-		var frag_offset := Vector2(cos(angle), sin(angle)) * (blast_radius * 0.5)
-		var frag_pos: Vector2 = global_position + frag_offset
-		_spawn_fragment_bomb(frag_pos, int(damage * 0.3))
-
-
 func _spawn_fragment_bomb(pos: Vector2, damage: int) -> void:
 	var frag_vfx := ColorRect.new()
 	frag_vfx.color = Color(1.0, 0.6, 0.1, 0.7)
@@ -3815,13 +3126,6 @@ func _spawn_fragment_bomb(pos: Vector2, damage: int) -> void:
 	var tween := frag_vfx.create_tween()
 	tween.tween_property(frag_vfx, "modulate:a", 0.0, 0.2)
 	tween.tween_callback(frag_vfx.queue_free)
-
-
-func _charged_healer_wave(charge_ratio: float) -> void:
-	# Final burst heal on release - proportional to charge time
-	_healer_channel_burst()
-
-
 func _healer_channel_burst() -> void:
 	var charge_ratio: float = clampf((_charge_time - CHARGE_MIN) / (CHARGE_MAX - CHARGE_MIN), 0.0, 1.0)
 	var burst_radius: float = lerpf(HEALER_BURST_MIN_RADIUS, HEALER_BURST_MAX_RADIUS, charge_ratio)
@@ -3945,62 +3249,6 @@ func _spawn_dash_wave(start_pos: Vector2, dash_dir: Vector2, damage: int) -> voi
 			if body.has_method("apply_knockback"):
 				var push_dir: Vector2 = (body.global_position - mid_pos).normalized()
 				body.apply_knockback(push_dir * 120.0)
-
-
-# -- Demolitionist -------------------------------------------------------------
-
-func _attack_demolitionist() -> void:
-	AudioManager.play("explosion", -6.0, 1.3)
-	var aim: Vector2 = _get_aim_direction()
-	# Spawn a bomb projectile that arcs with gravity
-	var bomb := ColorRect.new()
-	bomb.color = Color(0.9, 0.6, 0.1)
-	bomb.size = Vector2(8, 8)
-	bomb.z_index = 5
-	get_parent().add_child(bomb)
-	bomb.global_position = global_position + aim * 12.0
-
-	var bomb_vel: Vector2 = aim * 180.0 + Vector2(0, -200.0)
-	var bomb_gravity := 500.0
-	var bomb_time := 0.0
-	var bomb_max_time := 1.5
-	var bomb_bounced := false
-
-	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
-		var dt: float = get_process_delta_time()
-		bomb_time += dt
-		bomb_vel.y += bomb_gravity * dt
-		bomb.global_position += bomb_vel * dt
-
-		# Bounce once off floor
-		if bomb.global_position.y > global_position.y + 8.0 and not bomb_bounced:
-			bomb_bounced = true
-			bomb_vel.y = -120.0
-			bomb_vel.x *= 0.5
-
-		# Check enemy hit
-		var hit_enemy := false
-		for body in get_tree().get_nodes_in_group("enemies"):
-			if not body is Node2D:
-				continue
-			var dist: float = bomb.global_position.distance_to(body.global_position)
-			if dist < 20.0:
-				hit_enemy = true
-				break
-		if hit_enemy:
-			break
-		await get_tree().process_frame
-
-	# Explode
-	if is_instance_valid(bomb):
-		var explode_pos: Vector2 = bomb.global_position
-		bomb.queue_free()
-		var base_dmg: int = int(25 * (1.0 + _demo_power_tier * 0.25) * PlayerManager.get_skill_bonus(player_index, "attack"))
-		var base_rad: float = 60.0 * (1.0 + _demo_size_tier * 0.20)
-		PlayerManager.add_skill_xp(player_index, "attack", 2)
-		_demolitionist_explode(explode_pos, base_dmg, base_rad)
-
-
 func _demolitionist_explode(pos: Vector2, damage: int, radius: float) -> void:
 	AudioManager.play("explosion")
 
@@ -4262,89 +3510,6 @@ func _demo_spawn_napalm(pos: Vector2) -> void:
 
 	if is_instance_valid(napalm_area):
 		napalm_area.queue_free()
-
-
-func _special_big_bomb() -> void:
-	if not PlayerManager.use_mana(player_index, 40):
-		_special_cooldown = 0.0
-		_spawn_fail_flash()
-		return
-
-	AudioManager.play("explosion", -3.0, 0.8)
-	# Spawn a bigger bomb projectile
-	var bomb := ColorRect.new()
-	bomb.color = Color(1.0, 0.4, 0.0)
-	bomb.size = Vector2(12, 12)
-	bomb.z_index = 5
-	get_parent().add_child(bomb)
-	bomb.global_position = global_position + Vector2(12.0 if _facing_right else -12.0, -4.0)
-
-	var bomb_vel := Vector2(160.0 if _facing_right else -160.0, -220.0)
-	var bomb_gravity := 450.0
-	var bomb_time := 0.0
-	var bomb_max_time := 1.5
-	var bomb_bounced := false
-
-	while bomb_time < bomb_max_time and is_instance_valid(bomb) and is_inside_tree():
-		var dt: float = get_process_delta_time()
-		bomb_time += dt
-		bomb_vel.y += bomb_gravity * dt
-		bomb.global_position += bomb_vel * dt
-
-		if bomb.global_position.y > global_position.y + 8.0 and not bomb_bounced:
-			bomb_bounced = true
-			bomb_vel.y = -100.0
-			bomb_vel.x *= 0.4
-
-		var hit_enemy := false
-		for body in get_tree().get_nodes_in_group("enemies"):
-			if not body is Node2D:
-				continue
-			var dist: float = bomb.global_position.distance_to(body.global_position)
-			if dist < 24.0:
-				hit_enemy = true
-				break
-		if hit_enemy:
-			break
-		await get_tree().process_frame
-
-	if is_instance_valid(bomb):
-		var explode_pos: Vector2 = bomb.global_position
-		bomb.queue_free()
-		var big_dmg: int = int(50 * (1.0 + _demo_power_tier * 0.25) * PlayerManager.get_skill_bonus(player_index, "attack"))
-		var big_rad: float = 90.0 * (1.0 + _demo_size_tier * 0.20)
-		_demolitionist_explode(explode_pos, big_dmg, big_rad)
-
-
-# -- Healer -------------------------------------------------------------------
-
-func _attack_healer() -> void:
-	# Throw a healing potion in aimed direction
-	AudioManager.play("summon", -3.0, 1.2)
-	var throw_dir: Vector2 = _get_aim_direction()
-
-	# Default target: aimed direction. Override if injured ally nearby in that direction.
-	var target_pos: Vector2 = global_position + throw_dir * 80.0
-	for p in get_tree().get_nodes_in_group("players"):
-		if p == self or not (p is CharacterBody2D):
-			continue
-		if p.get("_is_dead"):
-			continue
-		var p_idx: int = p.get("player_index")
-		var p_data: Dictionary = PlayerManager.get_player(p_idx)
-		if p_data.is_empty():
-			continue
-		if p_data["health"] < p_data["max_health"]:
-			var dist: float = global_position.distance_to(p.global_position)
-			if dist < 150.0:
-				target_pos = p.global_position
-				break
-
-	# Spawn the potion projectile
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
-	_spawn_healing_potion(target_pos)
-
-
 func _spawn_healing_potion(target_pos: Vector2) -> void:
 	var potion := ColorRect.new()
 	potion.color = Color(0.2, 0.9, 0.3, 0.9)
@@ -4438,50 +3603,6 @@ func _spawn_healing_zone(pos: Vector2) -> void:
 		var fade := zone.create_tween()
 		fade.tween_property(visual, "modulate:a", 0.0, 0.5)
 		fade.tween_callback(zone.queue_free)
-
-
-func _special_healing_burst() -> void:
-	if not PlayerManager.use_mana(player_index, 50):
-		_special_cooldown = 0.0
-		_spawn_fail_flash()
-		return
-
-	AudioManager.play("player_revive")
-	# Green pulse VFX expanding outward
-	var pulse := ColorRect.new()
-	pulse.color = Color(0.3, 0.9, 0.4, 0.5)
-	pulse.size = Vector2(20, 20)
-	pulse.position = global_position - Vector2(10, 10)
-	pulse.pivot_offset = Vector2(10, 10)
-	get_parent().add_child(pulse)
-	var pulse_tween := pulse.create_tween()
-	pulse_tween.set_parallel(true)
-	pulse_tween.tween_property(pulse, "scale", Vector2(8.0, 8.0), 0.4)
-	pulse_tween.tween_property(pulse, "modulate:a", 0.0, 0.4)
-	pulse_tween.chain().tween_callback(pulse.queue_free)
-
-	# Heal all allies within 80px for 30 HP
-	for p in get_tree().get_nodes_in_group("players"):
-		if not (p is CharacterBody2D):
-			continue
-		if p.get("_is_dead"):
-			continue
-		var dist: float = global_position.distance_to(p.global_position)
-		if dist < 80.0:
-			var p_idx: int = p.get("player_index")
-			PlayerManager.heal_player(p_idx, 30)
-
-
-# -- Guitarist -----------------------------------------------------------------
-
-var _guitarist_amp_up_active: bool = false
-var _guitarist_amp_up_timer: float = 0.0
-var _guitarist_amp_up_cooldown: float = 0.0
-const GUITARIST_AMP_DURATION := 15.0
-const GUITARIST_AMP_COOLDOWN := 30.0
-const GUITARIST_AMP_RADIUS := 80.0
-
-
 func _attack_guitarist() -> void:
 	# Musical Notes - 3 sine-wave notes in quick succession
 	AudioManager.play("menu_confirm", -2.0, 1.0)
@@ -4729,103 +3850,6 @@ func _apply_damage_and_push() -> void:
 	wave.origin_pos = global_position
 
 	get_parent().add_child(wave)
-
-
-func _handle_guitarist_amp_up(delta: float) -> void:
-	if character_class != PlayerManager.CharacterClass.GUITARIST:
-		return
-	if _guitarist_amp_up_cooldown > 0.0:
-		_guitarist_amp_up_cooldown -= delta
-
-	# Toggle amp up on Circle press
-	if _is_device_action_just_pressed("interact"):
-		if _guitarist_amp_up_active:
-			return  # Can't cancel early
-		if _guitarist_amp_up_cooldown > 0.0:
-			_spawn_fail_flash()
-			return
-		# AMP UP!
-		_guitarist_amp_up_active = true
-		_guitarist_amp_up_timer = GUITARIST_AMP_DURATION
-		AudioManager.play("shield_charge", 2.0, 0.6)
-		AudioManager.play("menu_confirm", 0.0, 0.8)
-		modulate = Color(1.2, 1.0, 0.5)
-
-		# "AMP UP!" text
-		var amp_text := Label.new()
-		amp_text.text = "AMP UP!"
-		amp_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		amp_text.add_theme_font_size_override("font_size", 14)
-		amp_text.modulate = Color(1.0, 0.9, 0.2)
-		amp_text.position = global_position + Vector2(-22, -40)
-		amp_text.z_index = 15
-		get_parent().add_child(amp_text)
-		var tt := amp_text.create_tween()
-		tt.tween_property(amp_text, "position:y", amp_text.position.y - 20, 0.8)
-		tt.parallel().tween_property(amp_text, "modulate:a", 0.0, 0.8)
-		tt.tween_callback(amp_text.queue_free)
-
-	# While amp up is active
-	if _guitarist_amp_up_active:
-		_guitarist_amp_up_timer -= delta
-
-		# Golden aura pulse
-		var pulse: float = 0.15 + sin(_guitarist_amp_up_timer * 4.0) * 0.1
-		modulate = Color(1.2, 1.0 + pulse, 0.5 + pulse)
-
-		# Golden particles
-		if randi() % 5 == 0:
-			var gp := ColorRect.new()
-			gp.color = Color(1.0, 0.9, 0.3, 0.5)
-			gp.size = Vector2(2, 2)
-			gp.position = global_position + Vector2(randf_range(-12, 12), randf_range(-12, 12))
-			gp.z_index = 7
-			get_parent().add_child(gp)
-			var gt := gp.create_tween()
-			gt.tween_property(gp, "position:y", gp.position.y - randf_range(5, 12), 0.4)
-			gt.parallel().tween_property(gp, "modulate:a", 0.0, 0.4)
-			gt.tween_callback(gp.queue_free)
-
-		# Boost nearby allies
-		for p in get_tree().get_nodes_in_group("players"):
-			if not (p is CharacterBody2D):
-				continue
-			if p == self:
-				continue
-			var dist: float = global_position.distance_to(p.global_position)
-			if dist < GUITARIST_AMP_RADIUS:
-				# Speed boost (temporary per-frame)
-				if "velocity" in p:
-					p.velocity *= 1.0 + 0.20 * delta * 60.0 * 0.016
-
-		if _guitarist_amp_up_timer <= 0.0:
-			_guitarist_amp_up_active = false
-			_guitarist_amp_up_cooldown = GUITARIST_AMP_COOLDOWN
-			modulate = Color.WHITE
-
-
-func _charged_guitarist_power_chord(charge_ratio: float) -> void:
-	# Charged power chord: bigger blast wave
-	var mana_cost: int = int(lerpf(15.0, 40.0, charge_ratio))
-	if not PlayerManager.use_mana(player_index, mana_cost):
-		_spawn_fail_flash()
-		return
-
-	AudioManager.play("explosion", 6.0, 0.25)
-	AudioManager.play("shield_charge", 4.0, 0.35)
-	PlayerManager.add_skill_xp(player_index, "charge", 5)
-
-	var aim: Vector2 = _get_aim_direction()
-	var aim_angle: float = aim.angle()
-	var arc_half: float = deg_to_rad(lerpf(30.0, 45.0, charge_ratio))
-	var radius: float = lerpf(150.0, 200.0, charge_ratio)
-	var push: float = lerpf(300.0, 500.0, charge_ratio)
-	var dmg: int = int(lerpf(5.0, 12.0, charge_ratio))
-
-	_screen_shake(lerpf(3.0, 8.0, charge_ratio), 0.25)
-	_spawn_blast_wave_arc(aim_angle, arc_half, radius, 200.0, lerpf(0.5, 0.7, charge_ratio), dmg, push)
-
-
 func _spawn_fail_flash() -> void:
 	# Red X flash to show ability can't be used
 	modulate = Color(1.0, 0.3, 0.3)
@@ -4843,33 +3867,6 @@ var _werewolf_pounce_damage: int = 0
 var _werewolf_pounce_radius: float = 0.0
 const WEREWOLF_FRENZY_DURATION := 8.0
 const WEREWOLF_FRENZY_COOLDOWN := 35.0
-
-
-func _attack_werewolf() -> void:
-	# Triple Claw Slash - 3 diagonal white slash lines
-	var base_cooldown: float = 0.5
-	if _werewolf_frenzy_active:
-		base_cooldown *= 0.5
-	_attack_cooldown = base_cooldown
-	PlayerManager.add_skill_xp(player_index, "attack", 2)
-
-	var aim: Vector2 = _get_aim_direction()
-	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
-	if _werewolf_frenzy_active:
-		attack_bonus *= 1.3
-	var slash_damage: int = int(15 * attack_bonus)
-
-	for slash_i in range(3):
-		if not is_inside_tree():
-			return
-		if slash_i > 0:
-			await get_tree().create_timer(0.05).timeout
-			if not is_inside_tree():
-				return
-		AudioManager.play("sword_slash", 2.0, 1.3)
-		_spawn_werewolf_slash(aim, slash_i, slash_damage)
-
-
 func _spawn_werewolf_slash(aim: Vector2, slash_index: int, damage: int) -> void:
 	# Spawn a diagonal white slash line VFX
 	var slash := ColorRect.new()
@@ -4921,326 +3918,6 @@ func _spawn_werewolf_blood(hit_pos: Vector2) -> void:
 		get_parent().add_child(blood)
 
 		_animate_blood_drop(blood, vel)
-
-
-func _special_werewolf_roar_push() -> void:
-	# Roar Push - no mana cost, narrow 30-degree arc blast
-	AudioManager.play("boss_roar", 3.0, 1.2)
-	AudioManager.play("wind_gust", 2.0, 0.7)
-	_special_cooldown = 2.0
-	PlayerManager.add_skill_xp(player_index, "special", 7)
-
-	var aim: Vector2 = _get_aim_direction()
-	var aim_angle: float = aim.angle()
-	var half_arc: float = deg_to_rad(15.0)  # 30-degree arc total
-	var push_range: float = 250.0
-	var push_force: float = 500.0
-	var roar_damage: int = 10
-
-	# Visual: narrow expanding cone
-	var cone := ColorRect.new()
-	cone.color = Color(0.9, 0.9, 0.9, 0.5)
-	cone.size = Vector2(push_range, 30)
-	cone.position = global_position
-	cone.rotation = aim_angle - 0.06
-	cone.pivot_offset = Vector2(0, 15)
-	cone.z_index = 7
-	get_parent().add_child(cone)
-
-	var ct := cone.create_tween()
-	ct.set_parallel(true)
-	ct.tween_property(cone, "scale", Vector2(1.2, 2.0), 0.2)
-	ct.tween_property(cone, "modulate:a", 0.0, 0.3)
-	ct.chain().tween_callback(cone.queue_free)
-
-	# Hit enemies in arc
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		var to_enemy: Vector2 = body.global_position - global_position
-		var dist: float = to_enemy.length()
-		if dist > push_range:
-			continue
-		var angle_to: float = to_enemy.angle()
-		var angle_diff: float = abs(wrapf(angle_to - aim_angle, -PI, PI))
-		if angle_diff > half_arc:
-			continue
-
-		if body.has_method("take_damage"):
-			body.take_damage(roar_damage, player_index)
-		if body.has_method("apply_knockback"):
-			var kb_dir: Vector2 = to_enemy.normalized()
-			var weight: float = 1.0
-			if body.has_method("get_weight"):
-				weight = body.get_weight()
-			body.apply_knockback(kb_dir * push_force / maxf(weight, 0.5))
-
-
-func _charged_werewolf_pounce(charge_ratio: float) -> void:
-	# Pounce - diagonal arc attack
-	AudioManager.play("jump", 2.0, 0.5)
-	PlayerManager.add_skill_xp(player_index, "charge", 5)
-
-	var aim: Vector2 = _get_aim_direction()
-	var h_dir: float = signf(aim.x) if abs(aim.x) > 0.1 else (1.0 if _facing_right else -1.0)
-
-	# Launch in parabolic arc
-	var launch_vy: float = lerpf(-400.0, -700.0, charge_ratio)
-	var launch_vx: float = lerpf(300.0, 600.0, charge_ratio) * h_dir
-	velocity.y = launch_vy
-	velocity.x = launch_vx
-
-	# Set pounce state for landing check
-	_werewolf_pouncing = true
-	_werewolf_pounce_damage = int(lerpf(30.0, 60.0, charge_ratio))
-	_werewolf_pounce_radius = lerpf(40.0, 80.0, charge_ratio)
-
-	# Visual: brief flash
-	modulate = Color(0.8, 0.6, 0.3)
-	_spawn_vfx(Color(0.6, 0.4, 0.2, 0.5), Vector2(20, 20))
-
-
-func _check_werewolf_pounce_landing() -> void:
-	if not _werewolf_pouncing:
-		return
-	if not is_on_floor():
-		return
-
-	_werewolf_pouncing = false
-	modulate = Color.WHITE
-	sprite.scale.y = 1.0
-	AudioManager.play("explosion", 0.0, 0.8)
-	_screen_shake(lerpf(3.0, 8.0, _werewolf_pounce_radius / 80.0), 0.25)
-
-	# AoE slam damage
-	_spawn_vfx(Color(0.6, 0.4, 0.2, 0.7), Vector2(_werewolf_pounce_radius * 2.0, 16))
-
-	var slam_bonus: float = PlayerManager.get_skill_bonus(player_index, "charge")
-	if _werewolf_frenzy_active:
-		slam_bonus *= 1.3
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		var dist: float = global_position.distance_to(body.global_position)
-		if dist < _werewolf_pounce_radius:
-			if body.has_method("take_damage"):
-				body.take_damage(int(_werewolf_pounce_damage * slam_bonus), player_index)
-				_spawn_werewolf_blood(body.global_position)
-			if body.has_method("apply_knockback"):
-				var kb: Vector2 = (body.global_position - global_position).normalized() * 250.0
-				body.apply_knockback(kb)
-
-
-func _handle_werewolf_frenzy(delta: float) -> void:
-	if character_class != PlayerManager.CharacterClass.WEREWOLF:
-		return
-	if _werewolf_frenzy_cooldown > 0.0:
-		_werewolf_frenzy_cooldown -= delta
-
-	# Toggle frenzy on Circle press
-	if _is_device_action_just_pressed("interact"):
-		if _werewolf_frenzy_active:
-			return  # Can't cancel early
-		if _werewolf_frenzy_cooldown > 0.0:
-			_spawn_fail_flash()
-			return
-		# FRENZY!
-		_werewolf_frenzy_active = true
-		_werewolf_frenzy_timer = WEREWOLF_FRENZY_DURATION
-		AudioManager.play("enrage_roar", 2.0, 1.3)
-		modulate = Color(0.7, 0.3, 0.2)
-		# Burst VFX
-		_spawn_vfx(Color(0.8, 0.15, 0.1, 0.7), Vector2(40, 40))
-		# "FRENZY!" text
-		var frenzy_text := Label.new()
-		frenzy_text.text = "FRENZY!"
-		frenzy_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		frenzy_text.add_theme_font_size_override("font_size", 14)
-		frenzy_text.modulate = Color(1.0, 0.2, 0.1)
-		frenzy_text.position = global_position + Vector2(-25, -40)
-		frenzy_text.z_index = 15
-		get_parent().add_child(frenzy_text)
-		var tt := frenzy_text.create_tween()
-		tt.tween_property(frenzy_text, "position:y", frenzy_text.position.y - 20, 0.8)
-		tt.parallel().tween_property(frenzy_text, "modulate:a", 0.0, 0.8)
-		tt.tween_callback(frenzy_text.queue_free)
-
-	# While frenzy active
-	if _werewolf_frenzy_active:
-		_werewolf_frenzy_timer -= delta
-
-		# Reddish-brown pulsing glow (eyes glow red, fur bristles)
-		var pulse: float = 0.15 + sin(_werewolf_frenzy_timer * 6.0) * 0.1
-		modulate = Color(0.7 + pulse, 0.3, 0.2)
-
-		# Red particles while frenzied
-		if randi() % 4 == 0:
-			var rp := ColorRect.new()
-			rp.color = Color(1.0, 0.1, 0.0, 0.6)
-			rp.size = Vector2(3, 3)
-			rp.position = global_position + Vector2(randf_range(-10, 10), randf_range(-8, 8))
-			rp.z_index = 5
-			get_parent().add_child(rp)
-			var rt := rp.create_tween()
-			rt.tween_property(rp, "position:y", rp.position.y - randf_range(10, 20), 0.3)
-			rt.parallel().tween_property(rp, "modulate:a", 0.0, 0.3)
-			rt.tween_callback(rp.queue_free)
-
-		# Warning flicker when almost done
-		if _werewolf_frenzy_timer <= 2.0:
-			if fmod(_werewolf_frenzy_timer, 0.2) < 0.1:
-				modulate = Color.WHITE
-
-		# Frenzy ends
-		if _werewolf_frenzy_timer <= 0.0:
-			_werewolf_frenzy_active = false
-			_werewolf_frenzy_cooldown = WEREWOLF_FRENZY_COOLDOWN
-			modulate = Color.WHITE
-			AudioManager.play("player_hurt", -4.0, 0.8)
-
-
-# ==============================================================================
-# EXECUTIONER — Ball-and-chain + Shackle + Axe
-# ==============================================================================
-
-
-# Executioner constants moved to executioner_class.gd
-
-# -- State Variables -----------------------------------------------------------
-
-enum ExecThrowMode { BALL_FIRST, SHACKLE_FIRST }
-enum ExecEndState { HELD, WINDUP, THROWN, STUCK_WALL, STUCK_PLATFORM, STUCK_CEILING, ATTACHED_ENEMY, RETRACTING }
-
-# Chain mode: what happens with the chain on each throw
-# Circle button cycles through these
-enum ExecChainMode {
-	RELEASE_RELEASE,  # 1st: throw & release, 2nd: N/A (already free)
-	HOLD_RELEASE,     # 1st: throw & hold, 2nd: throw & release (entity YEET)
-	HOLD_HOLD,        # 1st: throw & hold, 2nd: throw & hold (3-body)
-}
-
-const EXEC_CHAIN_MODE_NAMES := ["Release", "Hold+Release", "Hold+Hold"]
-const EXEC_CHAIN_MODE_COLORS: Array[Color] = [
-	Color(0.9, 0.4, 0.2),   # Release: orange-red
-	Color(0.8, 0.7, 0.2),   # Hold+Release: gold
-	Color(0.3, 0.7, 0.9),   # Hold+Hold: blue
-]
-
-var _exec_throw_mode: ExecThrowMode = ExecThrowMode.BALL_FIRST
-var _exec_chain_mode: ExecChainMode = ExecChainMode.HOLD_RELEASE  # Default
-var _exec_chain_mode_changed_timer: float = 0.0  # Flash timer when mode changes
-var _exec_throw_step: int = 0
-
-var _exec_ball_state: ExecEndState = ExecEndState.HELD
-var _exec_ball_pos: Vector2 = Vector2.ZERO
-var _exec_ball_marker: Node2D = null  # SpikeBallEntity — persistent, owns ball config stack
-var _exec_ball_vel: Vector2 = Vector2.ZERO
-var _exec_ball_anchor_body: Node2D = null
-var _exec_ball_anchor_offset: Vector2 = Vector2.ZERO
-var _exec_ball_spin_angle: float = 0.0
-var _exec_ball_angular_vel: float = 0.0
-var _exec_ball_hold_time: float = 0.0
-var _exec_ball_rotation: float = 0.0
-
-# Shackle entity — proper scene node with own config stack and physics.
-# Created on executioner init, persists while player exists.
-var _shackle: Node2D = null  # ShackleEntity instance
-# Legacy accessors for gradual migration (read/write through to _shackle)
-var _exec_shackle_state: int:
-	get: return _shackle.state if _shackle else 0
-	set(v): if _shackle: _shackle.state = v
-var _exec_shackle_pos: Vector2:
-	get: return _shackle.global_position if _shackle else Vector2.ZERO
-	set(v): if _shackle: _shackle.global_position = v
-var _exec_shackle_vel: Vector2:
-	get: return _shackle.vel if _shackle else Vector2.ZERO
-	set(v): if _shackle: _shackle.vel = v
-var _exec_shackle_anchor_body: Node2D:
-	get: return _shackle.anchor_body if _shackle else null
-	set(v): if _shackle: _shackle.anchor_body = v
-var _exec_shackle_anchor_offset: Vector2:
-	get: return _shackle.anchor_offset if _shackle else Vector2.ZERO
-	set(v): if _shackle: _shackle.anchor_offset = v
-var _exec_shackle_spin_angle: float:
-	get: return _shackle.spin_angle if _shackle else 0.0
-	set(v): if _shackle: _shackle.spin_angle = v
-var _exec_shackle_angular_vel: float:
-	get: return _shackle.angular_vel if _shackle else 0.0
-	set(v): if _shackle: _shackle.angular_vel = v
-var _exec_shackle_hold_time: float:
-	get: return _shackle.hold_time if _shackle else 0.0
-	set(v): if _shackle: _shackle.hold_time = v
-
-# Chain nodes (chain.gd instances — splay-chain physics, breakable)
-var _exec_chain_node: Node2D = null       # Ball side chain
-var _exec_shackle_chain_node: Node2D:
-	get: return _shackle.chain_node if _shackle else null
-	set(v): if _shackle: _shackle.chain_node = v
-
-# Chain split: how much of total goes to ball (rest goes to shackle)
-var _exec_chain_split: float = 0.5
-
-# Trajectory preview — two arcs forming a probability cone
-var _exec_preview_arc: PackedVector2Array = PackedVector2Array()       # Optimistic (no damping)
-var _exec_preview_arc_inner: PackedVector2Array = PackedVector2Array()  # Pessimistic (damped)
-var _exec_shackle_preview_arc: PackedVector2Array:
-	get: return _shackle.preview_arc if _shackle else PackedVector2Array()
-	set(v): if _shackle: _shackle.preview_arc = v
-
-var _exec_swing_active: bool = false
-var _exec_swing_time: float = 0.0
-var _exec_swing_angle: float = 0.0
-var _exec_swing_angular_vel: float = 0.0
-
-var _exec_cleave_charging: bool = false
-var _exec_cleave_charge_time: float = 0.0
-var _exec_cleave_flash_timer: float = 0.0
-
-var _exec_r1_was_pressed: bool = false
-var _exec_chain_clank_timer: float = 0.0  # Timer for chain clanking during throw
-var _exec_chain_taut: bool = false        # True once ball chain goes slack→taut (YEET fires once)
-var _exec_shackle_chain_taut: bool:
-	get: return _shackle.chain_taut if _shackle else false
-	set(v): if _shackle: _shackle.chain_taut = v
-var _exec_yeet_immunity: float = 0.0     # Seconds to skip OOB check after YEET
-
-# Legacy accessors — config stack now lives on the ShackleEntity
-var _exec_shackle_config_stack: Array:
-	get: return _shackle._config_stack if _shackle else []
-	set(v): if _shackle: _shackle._config_stack = v
-var _exec_shackle_base_config: Variant:
-	get: return _shackle._base_config if _shackle else null
-	set(v): if _shackle: _shackle._base_config = v
-var _exec_chain_len_changing: bool = false  # True while actively adjusting split
-var _exec_l2_tap_timer: float = 0.0      # Double-tap detection for L2
-var _exec_r2_tap_timer: float = 0.0      # Double-tap detection for R2
-var _exec_l2_was_pressed: bool = false    # Edge detection for L2
-var _exec_r2_was_pressed: bool = false    # Edge detection for R2
-var _exec_chain_radius_fade: float = 0.0 # Fade timer for radius indicator
-var _exec_chain_reel_timer: float = 0.0  # Timer for reel in/out clink sound
-
-# Tuning popup — live sliders for ball/chain feel
-var _exec_tuning_visible: bool = false
-var _exec_tuning_provider: Variant = null  # DictProvider pushed onto config stack
-var _exec_tuning_data: Dictionary = {}     # The data dict inside the provider
-var _exec_tuning_dragging: String = ""     # Which slider is being dragged
-
-const EXEC_TUNING_KEYS: Array[Array] = [
-	# [key, label, default, min, max]
-	["exec_ball_mass", "Ball Mass", 140.0, 10.0, 1000.0],
-	["exec_chain_elasticity", "Elasticity", 0.25, 0.0, 1.0],
-	["exec_ball_throw_speed", "Throw Min", 1200.0, 100.0, 3000.0],
-	["exec_ball_max_throw_speed", "Throw Max", 6000.0, 400.0, 10000.0],
-	["exec_ball_gravity", "Ball Gravity", 900.0, 100.0, 2000.0],
-	["exec_chain_total_len", "Chain Total", 600.0, 200.0, 1500.0],
-	["exec_chain_adjust_speed", "Split Speed", 0.5, 0.1, 2.0],
-	["exec_ball_stun_duration", "Stun Secs", 3.0, 0.5, 10.0],
-	["exec_ball_damage", "Ball Damage", 35.0, 5.0, 200.0],
-]
-
-
-# -- Chain Constraint on Player (same as monster chain pull) -------------------
-
 func _exec_apply_chain_constraint() -> void:
 	if _executioner_class:
 		_executioner_class.exec_apply_chain_constraint()
@@ -5412,6 +4089,160 @@ func _charged_executioner_overhead(charge_ratio: float) -> void:
 	if _executioner_class:
 		_executioner_class.exec_charged_overhead(charge_ratio)
 
+
+
+# -- State Variables -----------------------------------------------------------
+
+enum ExecThrowMode { BALL_FIRST, SHACKLE_FIRST }
+enum ExecEndState { HELD, WINDUP, THROWN, STUCK_WALL, STUCK_PLATFORM, STUCK_CEILING, ATTACHED_ENEMY, RETRACTING }
+
+# Chain mode: what happens with the chain on each throw
+# Circle button cycles through these
+enum ExecChainMode {
+	RELEASE_RELEASE,  # 1st: throw & release, 2nd: N/A (already free)
+	HOLD_RELEASE,     # 1st: throw & hold, 2nd: throw & release (entity YEET)
+	HOLD_HOLD,        # 1st: throw & hold, 2nd: throw & hold (3-body)
+}
+
+const EXEC_CHAIN_MODE_NAMES := ["Release", "Hold+Release", "Hold+Hold"]
+const EXEC_CHAIN_MODE_COLORS: Array[Color] = [
+	Color(0.9, 0.4, 0.2),   # Release: orange-red
+	Color(0.8, 0.7, 0.2),   # Hold+Release: gold
+	Color(0.3, 0.7, 0.9),   # Hold+Hold: blue
+]
+
+var _exec_throw_mode: ExecThrowMode = ExecThrowMode.BALL_FIRST
+var _exec_chain_mode: ExecChainMode = ExecChainMode.HOLD_RELEASE  # Default
+var _exec_chain_mode_changed_timer: float = 0.0  # Flash timer when mode changes
+var _exec_throw_step: int = 0
+
+var _exec_ball_state: ExecEndState = ExecEndState.HELD
+var _exec_ball_pos: Vector2 = Vector2.ZERO
+var _exec_ball_marker: Node2D = null  # SpikeBallEntity — persistent, owns ball config stack
+var _exec_ball_vel: Vector2 = Vector2.ZERO
+var _exec_ball_anchor_body: Node2D = null
+var _exec_ball_anchor_offset: Vector2 = Vector2.ZERO
+var _exec_ball_spin_angle: float = 0.0
+var _exec_ball_angular_vel: float = 0.0
+var _exec_ball_hold_time: float = 0.0
+var _exec_ball_rotation: float = 0.0
+
+# Shackle entity — proper scene node with own config stack and physics.
+# Created on executioner init, persists while player exists.
+var _shackle: Node2D = null  # ShackleEntity instance
+# Legacy accessors for gradual migration (read/write through to _shackle)
+var _exec_shackle_state: int:
+	get: return _shackle.state if _shackle else 0
+	set(v): if _shackle: _shackle.state = v
+var _exec_shackle_pos: Vector2:
+	get: return _shackle.global_position if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.global_position = v
+var _exec_shackle_vel: Vector2:
+	get: return _shackle.vel if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.vel = v
+var _exec_shackle_anchor_body: Node2D:
+	get: return _shackle.anchor_body if _shackle else null
+	set(v): if _shackle: _shackle.anchor_body = v
+var _exec_shackle_anchor_offset: Vector2:
+	get: return _shackle.anchor_offset if _shackle else Vector2.ZERO
+	set(v): if _shackle: _shackle.anchor_offset = v
+var _exec_shackle_spin_angle: float:
+	get: return _shackle.spin_angle if _shackle else 0.0
+	set(v): if _shackle: _shackle.spin_angle = v
+var _exec_shackle_angular_vel: float:
+	get: return _shackle.angular_vel if _shackle else 0.0
+	set(v): if _shackle: _shackle.angular_vel = v
+var _exec_shackle_hold_time: float:
+	get: return _shackle.hold_time if _shackle else 0.0
+	set(v): if _shackle: _shackle.hold_time = v
+
+# Chain nodes (chain.gd instances — splay-chain physics, breakable)
+var _exec_chain_node: Node2D = null       # Ball side chain
+var _exec_shackle_chain_node: Node2D:
+	get: return _shackle.chain_node if _shackle else null
+	set(v): if _shackle: _shackle.chain_node = v
+
+# Chain split: how much of total goes to ball (rest goes to shackle)
+var _exec_chain_split: float = 0.5
+
+# Trajectory preview — two arcs forming a probability cone
+var _exec_preview_arc: PackedVector2Array = PackedVector2Array()       # Optimistic (no damping)
+var _exec_preview_arc_inner: PackedVector2Array = PackedVector2Array()  # Pessimistic (damped)
+var _exec_shackle_preview_arc: PackedVector2Array:
+	get: return _shackle.preview_arc if _shackle else PackedVector2Array()
+	set(v): if _shackle: _shackle.preview_arc = v
+
+var _exec_swing_active: bool = false
+var _exec_swing_time: float = 0.0
+var _exec_swing_angle: float = 0.0
+var _exec_swing_angular_vel: float = 0.0
+
+var _exec_cleave_charging: bool = false
+var _exec_cleave_charge_time: float = 0.0
+var _exec_cleave_flash_timer: float = 0.0
+
+var _exec_r1_was_pressed: bool = false
+var _exec_chain_clank_timer: float = 0.0  # Timer for chain clanking during throw
+var _exec_chain_taut: bool = false        # True once ball chain goes slack→taut (YEET fires once)
+var _exec_shackle_chain_taut: bool:
+	get: return _shackle.chain_taut if _shackle else false
+	set(v): if _shackle: _shackle.chain_taut = v
+var _exec_yeet_immunity: float = 0.0     # Seconds to skip OOB check after YEET
+
+# Legacy accessors — config stack now lives on the ShackleEntity
+var _exec_shackle_config_stack: Array:
+	get: return _shackle._config_stack if _shackle else []
+	set(v): if _shackle: _shackle._config_stack = v
+var _exec_shackle_base_config: Variant:
+	get: return _shackle._base_config if _shackle else null
+	set(v): if _shackle: _shackle._base_config = v
+var _exec_chain_len_changing: bool = false  # True while actively adjusting split
+var _exec_l2_tap_timer: float = 0.0      # Double-tap detection for L2
+var _exec_r2_tap_timer: float = 0.0      # Double-tap detection for R2
+var _exec_l2_was_pressed: bool = false    # Edge detection for L2
+var _exec_r2_was_pressed: bool = false    # Edge detection for R2
+var _exec_chain_radius_fade: float = 0.0 # Fade timer for radius indicator
+var _exec_chain_reel_timer: float = 0.0  # Timer for reel in/out clink sound
+
+# Tuning popup — live sliders for ball/chain feel
+var _exec_tuning_visible: bool = false
+var _exec_tuning_provider: Variant = null  # DictProvider pushed onto config stack
+var _exec_tuning_data: Dictionary = {}     # The data dict inside the provider
+var _exec_tuning_dragging: String = ""     # Which slider is being dragged
+
+const EXEC_TUNING_KEYS: Array[Array] = [
+	# [key, label, default, min, max]
+	["exec_ball_mass", "Ball Mass", 140.0, 10.0, 1000.0],
+	["exec_chain_elasticity", "Elasticity", 0.25, 0.0, 1.0],
+	["exec_ball_throw_speed", "Throw Min", 1200.0, 100.0, 3000.0],
+	["exec_ball_max_throw_speed", "Throw Max", 6000.0, 400.0, 10000.0],
+	["exec_ball_gravity", "Ball Gravity", 900.0, 100.0, 2000.0],
+	["exec_chain_total_len", "Chain Total", 600.0, 200.0, 1500.0],
+	["exec_chain_adjust_speed", "Split Speed", 0.5, 0.1, 2.0],
+	["exec_ball_stun_duration", "Stun Secs", 3.0, 0.5, 10.0],
+	["exec_ball_damage", "Ball Damage", 35.0, 5.0, 200.0],
+]
+
+
+# -- Chain Constraint on Player (same as monster chain pull) -------------------
+
+func _exec_apply_chain_constraint() -> void:
+	if _executioner_class:
+		_executioner_class.exec_apply_chain_constraint()
+
+
+# -- Chain Length Helpers -------------------------------------------------------
+
+# -- Chain Length Helpers — delegated to ExecutionerClass ----------------------
+
+func _exec_ball_chain_len() -> float:
+	return _executioner_class.exec_ball_chain_len() if _executioner_class else 0.0
+
+func _exec_shackle_chain_len() -> float:
+	return _executioner_class.exec_shackle_chain_len() if _executioner_class else 0.0
+
+func _exec_is_bs_release() -> bool:
+	return _executioner_class.exec_is_bs_release() if _executioner_class else false
 
 
 # -- Executioner Drawing + Tuning — delegated to ExecutionerClass --------------
