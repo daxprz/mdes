@@ -163,6 +163,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.45
+**All 13 player classes extracted — player_side.gd reduced 55.8%**
+
+- **All 13 classes now ClassComponents**: Executioner (1963), Ranger (1526), Summoner (510), Melee (442), Werewolf (375), Ninja (322), Mage (313), Rogue (267), Demolitionist (217), Healer (180), Balloonist (160), Tank (155), Guitarist (118)
+- **player_side.gd: 9,654 → 4,268 lines** (−5,386, 55.8% reduction)
+- **Generic `_init_class_component()`**: one function wires any class — loads script, injects context, redirects dispatch tables
+- **Ranger extracted**: grapple FSM (9 states), tether dual-hook, archer aimed shot, crossbow, all drawing
+- **5 small classes batch-extracted**: Melee, Mage, Tank, Balloonist, Ninja
+- **6 remaining classes extracted**: Rogue, Demolitionist, Healer, Summoner, Guitarist, Werewolf
+- **Inline GDScript exclusions**: `_spawn_fireball` (mage), `_attack_guitarist`, `_special_guitarist_blast_wave` stay on player (contain `GDScript.new()` class definitions)
+- **Remaining on player_side.gd**: shared systems (physics, movement, charge, block, stagger), config/setup, dispatch tables, state vars, AI input, VFX helpers
+
 ### v0.10.44
 **Executioner cleanup — removed duplicate constants, 19.7% player_side.gd reduction**
 
