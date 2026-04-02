@@ -565,8 +565,9 @@ func _ready() -> void:
 	# Initialize class component for executioner
 	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
 		_init_executioner_class()
-	# Initialize ranged reticle position
+	# Initialize ranger class component
 	if character_class == PlayerManager.CharacterClass.RANGED:
+		_init_ranger_class()
 		call_deferred("_init_reticle_pos")
 	# Connect level-up signal for VFX and apply existing level bonuses
 	PlayerManager.skill_leveled_up.connect(_on_skill_leveled_up)
@@ -1567,6 +1568,23 @@ func _tick_werewolf(delta: float) -> void:
 	_handle_werewolf_frenzy(delta)
 
 var _executioner_class: Variant = null  # ExecutionerClass instance (when active)
+var _ranger_class: Variant = null       # RangerClass instance (when active)
+
+func _init_ranger_class() -> void:
+	## Create the RangerClass component and wire dispatch through it.
+	var RangerScript := preload("res://scripts/classes/ranger/ranger_class.gd")
+	_ranger_class = Node.new()
+	_ranger_class.set_script(RangerScript)
+	add_child(_ranger_class)
+	var CharCtx := preload("res://scripts/components/character_context.gd")
+	var ranger_ctx = CharCtx.new()
+	ranger_ctx.body = self
+	_ranger_class.inject_context(ranger_ctx)
+	_ranger_class.on_class_enter()
+	# Redirect dispatch entries to the class component
+	_class_attack_fn[PlayerManager.CharacterClass.RANGED] = _ranger_class.perform_attack
+	_class_special_fn[PlayerManager.CharacterClass.RANGED] = _ranger_class.perform_special
+	_class_tick_fn[PlayerManager.CharacterClass.RANGED] = func(delta: float): _ranger_class.tick(delta)
 
 func _init_executioner_class() -> void:
 	## Create the ExecutionerClass component and wire dispatch through it.
