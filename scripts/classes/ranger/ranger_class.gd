@@ -275,7 +275,7 @@ func _grapple_tick_thrown(delta: float) -> void:
 	p._grapple_hook_pos += p._grapple_hook_vel * delta
 
 	# Raycast along movement for collision
-	var space := p.get_world_2d().direct_space_state
+	var space = p.get_world_2d().direct_space_state
 	var query := PhysicsRayQueryParameters2D.create(
 		prev_pos, p._grapple_hook_pos,
 		1 | 8  # world + enemies
@@ -705,7 +705,7 @@ func _tether_tick_thrown(delta: float) -> void:
 	p._tether_hook_pos += p._tether_hook_vel * delta
 
 	# Raycast for collision
-	var space := p.get_world_2d().direct_space_state
+	var space = p.get_world_2d().direct_space_state
 	var query := PhysicsRayQueryParameters2D.create(
 		prev_pos, p._tether_hook_pos,
 		1 | 8  # world + enemies
