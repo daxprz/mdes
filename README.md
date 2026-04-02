@@ -163,6 +163,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.41
+**Composition refactor phases 3-5, class_basics test suite, ExecutionerClass extraction begun**
+
+- **Refactor Phase 3**: `player_side.gd` extends `character.gd` — universal Character base with composition infrastructure
+- **Refactor Phase 4**: Class dispatch tables — 4 dictionaries replace all `match character_class:` blocks and scattered per-frame handler calls
+- **Refactor Phase 5**: ExecutionerClass component wired — dispatch delegates through class, thin `p` accessor for player state
+- **Executioner function migration**: 11 functions moved to `executioner_class.gd` (chain helpers, constraint, YEET physics, position getters)
+- **player_side.gd**: 9,654 → 9,502 lines (−152), with thin forwarders for migrated functions
+- **class_basics gate suite**: 13 tests covering all player classes — spawn, walk, attack x3, jump, special, air attack
+- **Total test count**: 48 tests across 6 gate suites (chained, combat, leaping, scaling, executioner, class_basics)
+- **UID generation**: all new .gd files get .uid files for Godot 4.6 compatibility
+- **Design doc**: `docs/design/player_refactor.md` — full architecture with DI, pooling, FSM, is-a/has-a hierarchy
+
 ### v0.10.40
 **Unified inspect system, standardized test endings, {SCRIPT} built-in**
 

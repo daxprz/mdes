@@ -66,6 +66,19 @@ Do NOT use tumu when:
 | `scripts/autoload/game_manager.gd` | Game state, tower progress, game-wide config settings |
 | `data/modifier_blueprints/` | Modifier blueprint JSON files (heavy_ball, bouncy_chain, ghost_shackle, etc.) |
 | `data/tests/exec_release_ball_wall.json` | Test: ball must not sink through floor when stuck to wall |
+| `scripts/characters/character.gd` | Universal character base (CharacterBody2D) — composition infrastructure |
+| `scripts/classes/class_component.gd` | Base class for all character classes (player AND enemy) |
+| `scripts/classes/executioner/executioner_class.gd` | Executioner class component — chain/ball/shackle logic migration in progress |
+| `scripts/fsm/state_machine.gd` | Generic FSM node with DI via CharacterContext |
+| `scripts/fsm/state.gd` | Base state for all FSMs |
+| `scripts/components/character_context.gd` | Typed dependency container (DI hub for components) |
+| `scripts/components/health_component.gd` | HP, damage, death, revive component |
+| `scripts/components/stats_component.gd` | Config stack wrapper component |
+| `scripts/components/input_controller.gd` | Base input intent interface (Player/AI) |
+| `scripts/resources/config_provider.gd` | Resource-based config provider (Inspector-visible) |
+| `scripts/autoload/object_pool.gd` | Node recycling pool for VFX, projectiles, chains |
+| `docs/design/player_refactor.md` | Composition architecture design — unified Character system |
+| `data/tests/suites/class_basics.json` | Gate suite: movement + combat tests for all 13 classes |
 
 ## Conventions
 
