@@ -101,9 +101,7 @@ func on_class_exit() -> void:
 
 
 func tick(delta: float) -> void:
-	## Per-frame executioner logic — delegates to player's existing code.
-	## Functions will migrate here incrementally.
-	p._handle_executioner(delta)
+	exec_main_tick(delta)
 
 
 func perform_attack(_intent: Dictionary) -> void:
@@ -231,12 +229,12 @@ func exec_try_yeet(chain_dir: Vector2) -> void:
 		return
 	p._exec_chain_taut = true
 
-	var m_ball: float = p.ball_cfg("mass", EXEC_BALL_MASS)
+	var m_ball: float = p.ball_cfg("p.mass", EXEC_BALL_MASS)
 	var e: float = p.cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
 
 	if exec_is_entity_yeet_mode():
 		var entity: Node2D = p._exec_shackle_anchor_body
-		var m_entity: float = p.entity_cfg(entity, "mass", 50.0)
+		var m_entity: float = p.entity_cfg(entity, "p.mass", 50.0)
 		var e_entity: float = p.entity_cfg(entity, "chain_elasticity", e)
 		var entity_vel: Vector2 = entity.velocity if "velocity" in entity else Vector2.ZERO
 
@@ -262,7 +260,7 @@ func exec_try_yeet(chain_dir: Vector2) -> void:
 		p._rumble(0.7, 1.0, 0.2)
 
 		DebugOverlay.log("executioner/ball", p,
-			"ENTITY YEET: %s mass=%.1f ball_mass=%.1f impulse=%.1f dir=(%.2f,%.2f)",
+			"ENTITY YEET: %s p.mass=%.1f ball_mass=%.1f impulse=%.1f dir=(%.2f,%.2f)",
 			[entity.name, m_entity, m_ball, impulse_to_entity, chain_dir.x, chain_dir.y])
 		DebugOverlay.log("executioner/ball", p,
 			"ENTITY YEET! %s impulse=%.0f dir=(%.2f,%.2f)",
@@ -302,9 +300,9 @@ func exec_try_yeet(chain_dir: Vector2) -> void:
 
 func exec_bs_stuck_pull(dir: Vector2, overshoot: float, _delta: float) -> void:
 	## In B-S mode, when ball is stuck and chain is too long, yank the shackle
-	## toward the ball (mass-weighted). Ball barely moves.
-	var m_ball_bs: float = p.ball_cfg("mass", EXEC_BALL_MASS)
-	var m_shackle_bs: float = p._shackle.cfg("mass", 5.0) if p._shackle else 5.0
+	## toward the ball (p.mass-weighted). Ball barely moves.
+	var m_ball_bs: float = p.ball_cfg("p.mass", EXEC_BALL_MASS)
+	var m_shackle_bs: float = p._shackle.cfg("p.mass", 5.0) if p._shackle else 5.0
 	var total_mass: float = m_ball_bs + m_shackle_bs
 	var shackle_frac: float = m_ball_bs / total_mass
 	p._exec_shackle_pos -= dir * overshoot * shackle_frac
@@ -583,3 +581,741 @@ func exec_charged_overhead(charge_ratio: float) -> void:
 				body.apply_knockback((body.global_position - slam_pos).normalized() * EXEC_SWING_KNOCKBACK * 1.5)
 	PlayerManager.add_skill_xp(p.player_index, "charge", 6)
 	DebugOverlay.log("executioner/swing", p, "CHARGED OVERHEAD: ratio=%.2f dmg=%d", [charge_ratio, damage])
+
+# -- Main Tick + Throw + Preview + Ball Tick (migrated) -----------------------
+
+func exec_main_tick(delta: float) -> void:
+	if p.character_class != PlayerManager.CharacterClass.EXECUTIONER:
+		return
+	p._exec_test_tick(delta)
+	exec_handle_mode_toggle()
+	exec_handle_chain_length(delta)
+	exec_handle_throw(delta)
+	exec_tick_swing(delta)
+	exec_handle_chain_mode()
+	exec_tick_cleave(delta)
+	exec_tick_ball(delta)
+	exec_tick_shackle(delta)
+	# Update spikeball entity position — persistent, tracks ball position
+	if p._exec_ball_marker and is_instance_valid(p._exec_ball_marker):
+		if p._exec_ball_state == ExecEndState.HELD:
+			p._exec_ball_marker.global_position = p.global_position
+		else:
+			p._exec_ball_marker.global_position = p._exec_ball_pos
+	exec_check_chain_severed()
+	if p._exec_cleave_flash_timer > 0.0:
+		p._exec_cleave_flash_timer -= delta
+	if p._exec_chain_mode_changed_timer > 0.0:
+		p._exec_chain_mode_changed_timer -= delta
+	if p._exec_yeet_immunity > 0.0:
+		p._exec_yeet_immunity -= delta
+	if p._exec_chain_radius_fade > 0.0:
+		p._exec_chain_radius_fade -= delta
+	p._exec_ball_rotation += delta * 1.5
+	p.queue_redraw()
+
+
+func exec_handle_mode_toggle() -> void:
+	## R1 always works:
+	##   - Nothing out: toggle ball/shackle order
+	##   - Ball out: recall ball, ready for next throw
+	##   - Shackle out: recall shackle, ready for next throw
+	##   - Both out: recall both
+	## No stuck states possible.
+	var r1_pressed: bool = false
+	if p.device_id >= 0:
+		r1_pressed = Input.is_joy_button_pressed(p.device_id, JOY_BUTTON_RIGHT_SHOULDER)
+	else:
+		r1_pressed = Input.is_key_pressed(KEY_R)
+	if r1_pressed and not p._exec_r1_was_pressed:
+		var anything_out: bool = p._exec_ball_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING] or \
+			p._exec_shackle_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING]
+
+		if anything_out:
+			# Recall everything that's out
+			if p._exec_ball_state not in [ExecEndState.HELD, ExecEndState.RETRACTING]:
+				p._exec_ball_state = ExecEndState.RETRACTING
+				DebugOverlay.log("executioner/throw", p, "R1 RECALL: ball")
+			if p._exec_shackle_state not in [ExecEndState.HELD, ExecEndState.RETRACTING]:
+				p._exec_shackle_state = ExecEndState.RETRACTING
+				DebugOverlay.log("executioner/throw", p, "R1 RECALL: shackle")
+			p._exec_throw_step = 0
+			# Destroy chain nodes
+			if p._exec_chain_node and is_instance_valid(p._exec_chain_node):
+				p._exec_chain_node.queue_free()
+				p._exec_chain_node = null
+			if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node):
+				p._exec_shackle_chain_node.queue_free()
+				p._exec_shackle_chain_node = null
+		else:
+			# Nothing out — toggle throw order
+			if p._exec_throw_mode == ExecThrowMode.BALL_FIRST:
+				p._exec_throw_mode = ExecThrowMode.SHACKLE_FIRST
+			else:
+				p._exec_throw_mode = ExecThrowMode.BALL_FIRST
+			DebugOverlay.log("executioner/throw", p, "MODE TOGGLE: %s",
+				["BALL_FIRST" if p._exec_throw_mode == ExecThrowMode.BALL_FIRST else "SHACKLE_FIRST"])
+	p._exec_r1_was_pressed = r1_pressed
+
+
+# -- Chain Length Adjustment (L2 shortens, R2 lengthens) -----------------------
+
+func exec_handle_chain_length(delta: float) -> void:
+	## L2 = more chain to ball (less to shackle), R2 = more to shackle (less to ball).
+	## The TOTAL chain length is fixed. L2/R2 adjusts the split ratio.
+	## Double-tap L2 = max ball. Double-tap R2 = max shackle.
+
+	# Tick double-tap timers
+	if p._exec_l2_tap_timer > 0.0:
+		p._exec_l2_tap_timer -= delta
+	if p._exec_r2_tap_timer > 0.0:
+		p._exec_r2_tap_timer -= delta
+
+	# Read trigger values
+	var l2_val: float = 0.0
+	var r2_val: float = 0.0
+	if p.device_id >= 0:
+		l2_val = clampf(Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_LEFT), 0.0, 1.0)
+		r2_val = clampf(Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_RIGHT), 0.0, 1.0)
+	else:
+		if Input.is_key_pressed(KEY_TAB):
+			l2_val = 1.0
+		if Input.is_key_pressed(KEY_ENTER):
+			r2_val = 1.0
+
+	var l2_pressed: bool = l2_val > 0.3
+	var r2_pressed: bool = r2_val > 0.3
+	var old_split: float = p._exec_chain_split
+
+	# Double-tap detection: L2 = max ball
+	if l2_pressed and not p._exec_l2_was_pressed:
+		if p._exec_l2_tap_timer > 0.0:
+			p._exec_chain_split = EXEC_CHAIN_SPLIT_MAX
+			AudioManager.play("grapple_hit", 0.0, 1.5)
+			DebugOverlay.log("executioner/ball", p, "SPLIT SNAP MAX BALL: %.0f%%", [p._exec_chain_split * 100])
+			p._exec_l2_tap_timer = 0.0
+		else:
+			p._exec_l2_tap_timer = EXEC_CHAIN_DOUBLETAP_WINDOW
+
+	# Double-tap detection: R2 = max shackle
+	if r2_pressed and not p._exec_r2_was_pressed:
+		if p._exec_r2_tap_timer > 0.0:
+			p._exec_chain_split = EXEC_CHAIN_SPLIT_MIN
+			AudioManager.play("grapple_hit", 0.0, 0.6)
+			DebugOverlay.log("executioner/ball", p, "SPLIT SNAP MAX SHACKLE: %.0f%%", [p._exec_chain_split * 100])
+			p._exec_r2_tap_timer = 0.0
+		else:
+			p._exec_r2_tap_timer = EXEC_CHAIN_DOUBLETAP_WINDOW
+
+	p._exec_l2_was_pressed = l2_pressed
+	p._exec_r2_was_pressed = r2_pressed
+
+	# Continuous: L2 = more to ball, R2 = more to shackle
+	var adjust_speed: float = p.cfg("exec_chain_adjust_speed", EXEC_CHAIN_ADJUST_SPEED)
+	if l2_val > 0.1:
+		p._exec_chain_split += adjust_speed * l2_val * delta
+	if r2_val > 0.1:
+		p._exec_chain_split -= adjust_speed * r2_val * delta
+
+	p._exec_chain_split = clampf(p._exec_chain_split, EXEC_CHAIN_SPLIT_MIN, EXEC_CHAIN_SPLIT_MAX)
+
+	# Update chain.gd target_lengths — but NOT for B-S chains (they use full length)
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node) and not p._exec_chain_node._severed:
+		if not p._exec_chain_node.anchor_a.get("is_wall", false):
+			# B-P chain: ball side gets split portion
+			p._exec_chain_node.target_length = exec_ball_chain_len()
+		# else: B-S chain keeps its full target_length (set at creation)
+	if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node) and not p._exec_shackle_chain_node._severed:
+		p._exec_shackle_chain_node.target_length = exec_shackle_chain_len()
+
+	# Sync chain physics settings from player config
+	var chain_damp: float = p.cfg("exec_chain_damping", 0.85)
+	var chain_grav: float = p.cfg("exec_chain_gravity", 600.0)
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node) and not p._exec_chain_node._severed:
+		p._exec_chain_node.chain_damping = chain_damp
+		p._exec_chain_node.chain_gravity = chain_grav
+	if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node) and not p._exec_shackle_chain_node._severed:
+		p._exec_shackle_chain_node.chain_damping = chain_damp
+		p._exec_shackle_chain_node.chain_gravity = chain_grav
+
+	# Track whether split is actively changing (for radius display)
+	var split_delta: float = p._exec_chain_split - old_split
+	p._exec_chain_len_changing = absf(split_delta) > 0.001
+
+	# Chain clink sound while reeling
+	var chain_is_out: bool = p._exec_ball_state not in [ExecEndState.HELD, ExecEndState.WINDUP]
+	var shackle_is_out: bool = p._exec_shackle_state not in [ExecEndState.HELD, ExecEndState.WINDUP]
+	if p._exec_chain_len_changing and (chain_is_out or shackle_is_out):
+		p._exec_chain_reel_timer -= delta
+		if p._exec_chain_reel_timer <= 0.0:
+			var pitch: float = 1.4 if split_delta > 0 else 0.9
+			AudioManager.play("grapple_hit", -8.0, pitch + randf_range(-0.1, 0.1))
+			p._exec_chain_reel_timer = 0.06
+	else:
+		p._exec_chain_reel_timer = 0.0
+
+
+func exec_handle_throw(delta: float) -> void:
+	if p._exec_swing_active:
+		return
+	var is_throwing_ball: bool = (
+		(p._exec_throw_step == 0 and p._exec_throw_mode == ExecThrowMode.BALL_FIRST) or
+		(p._exec_throw_step == 1 and p._exec_throw_mode == ExecThrowMode.SHACKLE_FIRST))
+	if p._exec_throw_step >= 2:
+		if p._is_device_action_just_pressed("grapple"):
+			exec_retract_all()
+		return
+	if p._is_device_action_just_pressed("grapple"):
+		DebugOverlay.log("executioner/throw", p,
+			"GRAPPLE PRESSED: step=%d is_ball=%s ball_state=%d shackle_state=%d",
+			[p._exec_throw_step, str(is_throwing_ball), p._exec_ball_state, p._exec_shackle_state])
+		if is_throwing_ball and p._exec_ball_state == ExecEndState.HELD:
+			p._exec_ball_state = ExecEndState.WINDUP
+			p._exec_ball_hold_time = 0.0
+			p._exec_ball_angular_vel = p.ball_cfg("spin_speed", EXEC_BALL_SPIN_SPEED)
+			p._exec_ball_spin_angle = 0.0
+		elif not is_throwing_ball and p._exec_shackle_state == ExecEndState.HELD:
+			p._exec_shackle_state = ExecEndState.WINDUP
+			p._exec_shackle_hold_time = 0.0
+			p._exec_shackle_angular_vel = EXEC_SHACKLE_SPIN_SPEED
+			p._exec_shackle_spin_angle = 0.0
+	if p._exec_ball_state == ExecEndState.WINDUP:
+		p._exec_ball_hold_time += delta
+		p._exec_ball_angular_vel = minf(p._exec_ball_angular_vel + p.ball_cfg("spin_accel", EXEC_BALL_SPIN_ACCEL) * delta, p.ball_cfg("max_spin", EXEC_BALL_MAX_SPIN))
+		var dir_sign: float = 1.0 if p._facing_right else -1.0
+		p._exec_ball_spin_angle += p._exec_ball_angular_vel * delta * dir_sign
+		p.velocity.x *= 0.6
+		# Show trajectory preview (like monster leap) — right stick priority for aiming
+		var aim: Vector2 = p._get_aim_direction_analog()
+		var charge_t: float = clampf(p._exec_ball_hold_time / 1.5, 0.0, 1.0)
+		var speed: float = lerpf(p.ball_cfg("throw_speed", EXEC_BALL_THROW_SPEED), p.ball_cfg("max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
+		exec_update_preview(aim * speed)
+		if not p._is_device_action_pressed("grapple"):
+			p._exec_preview_arc.clear()
+			p._exec_preview_arc_inner.clear()
+			exec_throw_ball()
+	else:
+		if not p._exec_preview_arc.is_empty():
+			p._exec_preview_arc.clear()
+			p._exec_preview_arc_inner.clear()
+	if p._exec_shackle_state == ExecEndState.WINDUP:
+		p._exec_shackle_hold_time += delta
+		p._exec_shackle_angular_vel = minf(p._exec_shackle_angular_vel + EXEC_SHACKLE_SPIN_ACCEL * delta, EXEC_SHACKLE_MAX_SPIN)
+		var dir_sign: float = 1.0 if p._facing_right else -1.0
+		p._exec_shackle_spin_angle += p._exec_shackle_angular_vel * delta * dir_sign
+		# Shackle trajectory preview — narrow line like monster leap
+		var s_aim: Vector2 = p._get_aim_direction_analog()
+		var s_charge_t: float = clampf(p._exec_shackle_hold_time / 1.0, 0.0, 1.0)
+		var s_speed: float = lerpf(EXEC_SHACKLE_THROW_SPEED, EXEC_SHACKLE_MAX_THROW_SPEED, s_charge_t)
+		exec_update_shackle_preview(s_aim * s_speed)
+		if not p._is_device_action_pressed("grapple"):
+			p._exec_shackle_preview_arc.clear()
+			exec_throw_shackle()
+	else:
+		if not p._exec_shackle_preview_arc.is_empty():
+			p._exec_shackle_preview_arc.clear()
+
+
+func exec_update_preview(launch_vel: Vector2) -> void:
+	## Run TWO coupled simulations to form a probability cone:
+	##   Outer arc: optimistic (no floor damping on player)
+	##   Inner arc: pessimistic (player stops on floor, heavy ball friction)
+	## Reality should always fall between the two.
+	var R: float = exec_ball_chain_len()
+	var g: float = p.ball_cfg("gravity", EXEC_BALL_GRAVITY)
+	var mb: float = p.ball_cfg("p.mass", EXEC_BALL_MASS)
+	var e: float = p.cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
+	var space = p.get_world_2d().direct_space_state
+
+	# Floor
+	var floor_y: float = 5000.0
+	if space:
+		var fq := PhysicsRayQueryParameters2D.create(p.global_position, p.global_position + Vector2(0, 300), 1)
+		fq.exclude = [p.get_rid()]
+		var fr: Dictionary = space.intersect_ray(fq)
+		if fr:
+			floor_y = fr["position"].y - p.global_position.y
+
+	# Viewport bounds
+	var cam = p.get_viewport().get_camera_2d()
+	var vp: Vector2 = p.get_viewport_rect().size
+	var zm: Vector2 = cam.zoom if cam and cam.zoom.x > 0 else Vector2.ONE
+	var hv: Vector2 = vp / (2.0 * zm)
+	var cp: Vector2 = (cam.global_position if cam else p.global_position) - p.global_position
+	var v_min: Vector2 = cp - hv
+	var v_max: Vector2 = cp + hv
+
+	# Outer arc: optimistic — no damping, pure physics
+	p._exec_preview_arc = exec_sim_arc(launch_vel, R, g, mb, e, floor_y, 1.0, space, v_min, v_max, true)
+
+	# Inner arc: pessimistic — models chain friction, movement override, air drag
+	# 0.95 per step at 60fps ≈ retains 0.95^60 = 4.6% per second (very aggressive)
+	p._exec_preview_arc_inner = exec_sim_arc(launch_vel, R, g, mb, e, floor_y, 0.95, space, v_min, v_max, false)
+
+
+func exec_sim_arc(launch_vel: Vector2, R: float, g: float, mb: float, e: float,
+		floor_y: float, vel_retain: float,
+		space: PhysicsDirectSpaceState2D, v_min: Vector2, v_max: Vector2,
+		log_yeets: bool) -> PackedVector2Array:
+	## Core two-body string simulation. Returns ball arc points.
+	## vel_retain: p.velocity multiplier per frame (1.0 = no damping, 0.99 = light damping)
+	var dt: float = 0.016
+	var max_steps: int = 600
+	var mp: float = p.mass  # Player's absolute p.mass
+	var bp := Vector2.ZERO
+	var bv := launch_vel
+	var pp := Vector2.ZERO
+	var pv: Vector2 = p.velocity
+	var taut: bool = false
+	var arc := PackedVector2Array()
+	arc.append(bp)
+
+	for _i in range(max_steps):
+		bv.y += g * dt
+		pv.y += g * dt
+		var prev_bp: Vector2 = bp
+		bp += bv * dt
+		pp += pv * dt
+
+		# Velocity damping — models chain friction, movement system, etc.
+		bv *= vel_retain
+		pv *= vel_retain
+
+		# Floor collisions
+		if pp.y >= floor_y:
+			pp.y = floor_y
+			if pv.y > 0:
+				pv.y = 0
+
+		if bp.y >= floor_y:
+			bp.y = floor_y
+			if bv.y > 0:
+				bv.y = 0
+
+		# String constraint
+		var cv: Vector2 = bp - pp
+		var cd: float = cv.length()
+		if cd > R:
+			var cn: Vector2 = cv / cd
+			if not taut:
+				taut = true
+				var vb_c: float = bv.dot(cn)
+				var vp_c: float = pv.dot(cn)
+				var rv: float = vb_c - vp_c
+				if absf(rv) > 1.0:
+					var coeff: float = (1.0 + e) / (mb + mp)
+					var imp_p: float = coeff * mb * rv
+					pv += cn * imp_p
+					bv -= cn * (coeff * mp * rv)
+					if log_yeets:
+						DebugOverlay.log("executioner/ball", p,
+							"SIM YEET #%d: dir=(%.2f,%.2f) imp=%.0f rv=%.0f",
+							[arc.size(), cn.x, cn.y, imp_p, rv])
+			else:
+				var excess: float = cd - R
+				bp -= cn * (excess * mp / (mb + mp))
+				pp += cn * (excess * mb / (mb + mp))
+				var ro: float = (bv - pv).dot(cn)
+				if ro > 0.0:
+					bv -= cn * (ro * mp / (mb + mp))
+					pv += cn * (ro * mb / (mb + mp))
+		else:
+			taut = false
+
+		arc.append(bp)
+
+		# Stop: ball hits physics body (only when slack)
+		if not taut and space and _i % 3 == 0:
+			var wp: Vector2 = p.global_position + prev_bp
+			var wn: Vector2 = p.global_position + bp
+			if wp.distance_squared_to(wn) > 1.0:
+				var q := PhysicsRayQueryParameters2D.create(wp, wn, 1)
+				q.exclude = [p.get_rid()]
+				if not space.intersect_ray(q).is_empty():
+					break
+
+		if bp.x < v_min.x or bp.x > v_max.x or bp.y < v_min.y or bp.y > v_max.y:
+			break
+
+		if _i > 60 and bv.length_squared() < 100.0:
+			break
+
+	if log_yeets:
+		DebugOverlay.log("executioner/ball", p,
+			"SIM DONE: %d pts, ball=(%.0f,%.0f) player=(%.0f,%.0f)",
+			[arc.size(), bp.x, bp.y, pp.x, pp.y])
+	return arc
+
+
+func exec_update_shackle_preview(launch_vel: Vector2) -> void:
+	## Shackle trajectory: narrow precise line (like monster leap arc).
+	var dt: float = 0.02
+	var max_steps: int = 60
+	var pos := Vector2.ZERO
+	var vel := launch_vel
+	p._exec_shackle_preview_arc.clear()
+	p._exec_shackle_preview_arc.append(pos)
+	for _i in range(max_steps):
+		vel.y += EXEC_SHACKLE_GRAVITY * dt
+		pos += vel * dt
+		p._exec_shackle_preview_arc.append(pos)
+		if pos.length() > exec_shackle_chain_len():
+			break
+		if pos.y > 400.0:
+			break
+
+
+func exec_should_hold_on_throw() -> bool:
+	## Based on chain mode and throw step, should the player hold the chain?
+	## p._exec_throw_step is BEFORE increment (0 = first throw, 1 = second throw)
+	var is_first: bool = (p._exec_throw_step == 0)
+	match p._exec_chain_mode:
+		ExecChainMode.RELEASE_RELEASE:
+			return false  # Never hold
+		ExecChainMode.HOLD_RELEASE:
+			return is_first  # Hold on first, release on second
+		ExecChainMode.HOLD_HOLD:
+			return true  # Always hold
+	return true
+
+
+func exec_throw_ball() -> void:
+	var aim: Vector2 = p._get_aim_direction_analog()
+	var charge_t: float = clampf(p._exec_ball_hold_time / 1.5, 0.0, 1.0)
+	var speed: float = lerpf(p.ball_cfg("throw_speed", EXEC_BALL_THROW_SPEED), p.ball_cfg("max_throw_speed", EXEC_BALL_MAX_THROW_SPEED), charge_t)
+	p._exec_ball_vel = aim * speed
+	p._exec_ball_pos = p.global_position + aim * 20.0
+	DebugOverlay.log("executioner/throw", p,
+		"ACTUAL THROW: aim=(%.2f,%.2f) speed=%.0f vel=(%.0f,%.0f) hold=%.2f charge_t=%.2f step=%d mode=%s",
+		[aim.x, aim.y, speed, p._exec_ball_vel.x, p._exec_ball_vel.y, p._exec_ball_hold_time, charge_t,
+		 p._exec_throw_step, EXEC_CHAIN_MODE_NAMES[p._exec_chain_mode]])
+	p._exec_ball_state = ExecEndState.THROWN
+	p._exec_ball_anchor_body = null
+	p._exec_chain_clank_timer = 0.0
+	p._exec_chain_taut = false
+
+	# Decide whether to hold (spawn chain) or release (no chain, ball flies free)
+	var should_hold: bool = exec_should_hold_on_throw()
+	if should_hold:
+		exec_spawn_chain()
+	else:
+		# RELEASE mode: B-S flies as a connected pair. Shackle gets dragged behind.
+		p._exec_shackle_pos = p.global_position + aim * 10.0
+		p._exec_shackle_vel = aim * speed * 0.05  # Shackle is light — barely launches, gets dragged
+		p._exec_shackle_state = ExecEndState.THROWN
+		exec_spawn_ball_to_shackle_chain()
+		p._exec_throw_step = 2  # Both ends deployed — no more throws
+		DebugOverlay.log("executioner/throw", p, "B-S RELEASED: ball + shackle flying free")
+
+	if p._exec_throw_step < 2:
+		p._exec_throw_step += 1
+	AudioManager.play("grapple_throw", 2.0, 0.5)
+	p._rumble(0.4, 0.7, 0.15)
+	DebugOverlay.log("executioner/throw", p, "BALL THROWN: speed=%.0f step=%d hold=%s",
+		[speed, p._exec_throw_step, str(should_hold)])
+
+
+func exec_throw_shackle() -> void:
+	var aim: Vector2 = p._get_aim_direction_analog()
+	var charge_t: float = clampf(p._exec_shackle_hold_time / 1.0, 0.0, 1.0)
+	var speed: float = lerpf(EXEC_SHACKLE_THROW_SPEED, EXEC_SHACKLE_MAX_THROW_SPEED, charge_t)
+	p._exec_shackle_vel = aim * speed
+	p._exec_shackle_pos = p.global_position + aim * 15.0
+	p._exec_shackle_state = ExecEndState.THROWN
+	p._exec_shackle_anchor_body = null
+	p._exec_shackle_chain_taut = false
+
+	var should_hold: bool = exec_should_hold_on_throw()
+	if should_hold:
+		exec_spawn_shackle_chain()
+	else:
+		# RELEASE mode: S-B flies as a connected pair. Ball gets dragged behind.
+		p._exec_ball_pos = p.global_position + aim * 10.0
+		p._exec_ball_vel = aim * speed * 0.3  # Ball trails behind shackle
+		p._exec_ball_state = ExecEndState.THROWN
+		exec_spawn_ball_to_shackle_chain()
+		p._exec_throw_step = 2  # Both ends deployed
+		DebugOverlay.log("executioner/throw", p, "S-B RELEASED: shackle + ball flying free")
+
+	if p._exec_throw_step < 2:
+		p._exec_throw_step += 1
+	AudioManager.play("grapple_throw", 0.0, 0.8)
+	p._rumble(0.3, 0.5, 0.1)
+	DebugOverlay.log("executioner/throw", p, "SHACKLE THROWN: speed=%.0f step=%d hold=%s",
+		[speed, p._exec_throw_step, str(should_hold)])
+
+
+func exec_retract_all() -> void:
+	p._exec_ball_state = ExecEndState.RETRACTING
+	p._exec_shackle_state = ExecEndState.RETRACTING
+	p._exec_throw_step = 0
+	# Destroy both chain nodes
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node):
+		p._exec_chain_node.queue_free()
+		p._exec_chain_node = null
+	if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node):
+		p._exec_shackle_chain_node.queue_free()
+		p._exec_shackle_chain_node = null
+	DebugOverlay.log("executioner/throw", p, "RETRACT ALL")
+
+
+func exec_tick_ball(delta: float) -> void:
+	match p._exec_ball_state:
+		ExecEndState.HELD, ExecEndState.WINDUP:
+			pass
+		ExecEndState.THROWN:
+			# Pure gravity — no air drag. Ball freefalls like a heavy object.
+			p._exec_ball_vel.y += p.ball_cfg("gravity", EXEC_BALL_GRAVITY) * delta
+			var prev_pos: Vector2 = p._exec_ball_pos
+			p._exec_ball_pos += p._exec_ball_vel * delta
+
+			# RIGID chain constraint + YEET physics.
+			# The chain is a rigid rod. When the ball reaches max length, momentum
+			# transfers along the chain as tension (partially elastic collision).
+			#
+			# Physics model (1D elastic collision along chain axis):
+			#   chain_dir = unit vector from player → ball (direction of tension)
+			#   v_b = ball p.velocity component along chain_dir
+			#   v_p = player p.velocity component along chain_dir
+			#   m_b = EXEC_BALL_MASS (absolute p.mass of spike ball)
+			#   m_p = 1.0
+			#   e = EXEC_CHAIN_ELASTICITY (0.75 = 75% elastic)
+			#
+			#   v_p' = v_p + (1+e) * m_b/(m_b+m_p) * (v_b - v_p)
+			#   v_b' = v_b - (1+e) * m_p/(m_b+m_p) * (v_b - v_p)
+			#
+			# The player gets YEETED in the chain direction. With m_b=8, e=0.75:
+			#   coefficient = 1.75 * 8/9 = 1.556 — player gets 155% of the
+			#   relative p.velocity slammed into them along the chain vector.
+			# Chain constraint — only if ball has a chain attached
+			var has_ball_chain: bool = p._exec_chain_node and is_instance_valid(p._exec_chain_node)
+			# Detect B-S chain (RELEASE mode): both anchors are wall anchors, no player
+			var is_bs_chain: bool = has_ball_chain and p._exec_chain_node.anchor_a.get("is_wall", false)
+			# Unified chain constraint for ALL modes: B-P, B-E, and B-S.
+			# is_bs_chain is used only for anchor updates, not physics branching.
+			# In B-S mode with attached entity, exec_is_entity_yeet_mode() returns
+			# true, so _exec_try_yeet uses entity p.mass. Same code path as B-E.
+			if has_ball_chain:
+				# Player↔Ball, Entity↔Ball, or B-S Ball↔Shackle — apply constraint + YEET
+				var chain_anchor_pos: Vector2
+				var chain_max: float
+				if is_bs_chain:
+					# B-S: anchor is the shackle (or the entity it's attached to)
+					chain_anchor_pos = p._exec_shackle_pos
+					chain_max = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+				elif exec_is_entity_yeet_mode():
+					# B-E: anchor is the shackled entity
+					chain_anchor_pos = p._exec_shackle_anchor_body.global_position + p._exec_shackle_anchor_offset
+					chain_max = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+				else:
+					# B-P: anchor is the player
+					chain_anchor_pos = p.global_position
+					chain_max = exec_ball_chain_len()
+				var chain_vec: Vector2 = p._exec_ball_pos - chain_anchor_pos
+				var chain_dist: float = chain_vec.length()
+				if chain_dist > chain_max:
+					var chain_dir: Vector2 = chain_vec.normalized()
+					var overshoot: float = chain_dist - chain_max
+					if is_bs_chain:
+						# B-S: p.mass-weighted constraint — heavy ball barely slows, light shackle gets yanked
+						var m_ball_bs: float = p.ball_cfg("p.mass", EXEC_BALL_MASS)
+						var m_shackle_bs: float = p._shackle.cfg("p.mass", 5.0) if p._shackle else 5.0
+						var total_mass_bs: float = m_ball_bs + m_shackle_bs
+						var ball_frac: float = m_shackle_bs / total_mass_bs   # How much ball moves (small: 5/145 ≈ 3%)
+						var shackle_frac: float = m_ball_bs / total_mass_bs   # How much shackle moves (large: 140/145 ≈ 97%)
+						# Position correction: distribute overshoot by inverse p.mass
+						p._exec_ball_pos -= chain_dir * overshoot * ball_frac
+						p._exec_shackle_pos += chain_dir * overshoot * shackle_frac
+						# Elastic collision (YEET) — once per slack→taut transition
+						if not p._exec_chain_taut:
+							p._exec_chain_taut = true
+							var e_bs: float = p._shackle.cfg("chain_elasticity", 0.25) if p._shackle else 0.25
+							var v_b: float = p._exec_ball_vel.dot(chain_dir)
+							var v_s: float = p._exec_shackle_vel.dot(chain_dir)
+							var relative_v: float = v_b - v_s
+							if absf(relative_v) > 10.0:
+								var imp_to_shackle: float = (1.0 + e_bs) * m_ball_bs / total_mass_bs * relative_v
+								var imp_to_ball: float = (1.0 + e_bs) * m_shackle_bs / total_mass_bs * relative_v
+								p._exec_shackle_vel += chain_dir * imp_to_shackle
+								p._exec_ball_vel -= chain_dir * imp_to_ball
+								p._shackle._settled = false  # Wake shackle from settlement
+								p._shackle._bounce_count = 0
+								DebugOverlay.log("executioner/ball", p,
+									"B-S YEET: ball_imp=%.0f shackle_imp=%.0f rel_v=%.0f m_b=%.0f m_s=%.0f",
+									[imp_to_ball, imp_to_shackle, relative_v, m_ball_bs, m_shackle_bs])
+						else:
+							# Already taut: project out outward p.velocity components (p.mass-weighted)
+							var v_b_out: float = p._exec_ball_vel.dot(chain_dir)
+							if v_b_out > 0.0:
+								p._exec_ball_vel -= chain_dir * v_b_out * ball_frac
+							var v_s_out: float = p._exec_shackle_vel.dot(-chain_dir)
+							if v_s_out > 0.0:
+								p._exec_shackle_vel -= (-chain_dir) * v_s_out * shackle_frac
+					else:
+						# B-P / B-E: ball clamped to anchor, player/entity gets YEETed
+						p._exec_ball_pos = chain_anchor_pos + chain_dir * chain_max
+						exec_try_yeet(chain_dir)
+						var outward_v: float = p._exec_ball_vel.dot(chain_dir)
+						if outward_v > 0.0:
+							p._exec_ball_vel -= chain_dir * outward_v
+				else:
+					p._exec_chain_taut = false
+
+				# Chain clanking sound as links flow out during throw
+				if chain_dist < chain_max * 0.95:
+					p._exec_chain_clank_timer -= delta
+					if p._exec_chain_clank_timer <= 0.0:
+						p._exec_chain_clank_timer = EXEC_CHAIN_CLANK_INTERVAL
+						AudioManager.play("grapple_hit", -12.0, randf_range(1.2, 1.8))
+
+			# Raycast for collision with world and enemies
+			var space = p.get_world_2d().direct_space_state
+			var query := PhysicsRayQueryParameters2D.create(prev_pos, p._exec_ball_pos, 1 | 8)
+			query.exclude = [p.get_rid()]
+			var result: Dictionary = space.intersect_ray(query)
+			if result:
+				p._exec_ball_pos = result["position"]
+				var collider: Node = result["collider"]
+				var normal: Vector2 = result["normal"]
+				# Damage + stun on enemy hit (same stagger as chain-yank on monster)
+				if collider.has_method("take_damage"):
+					collider.take_damage(int(p.ball_cfg("damage", EXEC_BALL_DAMAGE)), p.player_index)
+					p._spawn_blood_particles(result["position"])
+				var EntityEffects := preload("res://scripts/systems/entity_effects.gd")
+				EntityEffects.apply(collider, "stun", p.ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
+				if collider.has_method("apply_stun"):
+					collider.apply_stun(p.ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
+				elif collider.has_method("apply_slow"):
+					collider.apply_slow(p.ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION))
+				DebugOverlay.log("executioner/ball", p, "BALL HIT: target=%s stunned=%.1fs",
+					[collider.name, p.ball_cfg("stun_duration", EXEC_BALL_STUN_DURATION)])
+
+				# Determine surface type by normal direction
+				if collider is Node2D:
+					p._exec_ball_anchor_body = collider
+					p._exec_ball_anchor_offset = result["position"] - collider.global_position
+
+				if normal.y > 0.7:
+					# Ceiling hit — ball cannot stick, drags out and falls
+					p._exec_ball_state = ExecEndState.STUCK_CEILING
+					DebugOverlay.log("executioner/ball", p,
+						"BALL HIT CEILING — will drag out and fall")
+				elif absf(normal.x) > 0.7:
+					# Wall hit — sticks, drags slowly downward
+					p._exec_ball_state = ExecEndState.STUCK_WALL
+				else:
+					# Floor/platform hit — sticks, drags slowly if pulled
+					p._exec_ball_state = ExecEndState.STUCK_PLATFORM
+
+				AudioManager.play("grapple_hit", 2.0, 0.4)
+				p._rumble(0.8, 1.0, 0.25)
+				p._exec_ball_vel = Vector2.ZERO
+
+			# Update chain anchor while in flight
+			exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_WALL:
+			# Ball drags slowly down the wall under its own weight
+			var prev_wall_y: float = p._exec_ball_pos.y
+			p._exec_ball_pos.y += p.ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
+			if p._exec_ball_anchor_body and is_instance_valid(p._exec_ball_anchor_body):
+				p._exec_ball_anchor_offset.y += p.ball_cfg("wall_drag", EXEC_BALL_WALL_DRAG) * delta
+				p._exec_ball_pos = p._exec_ball_anchor_body.global_position + p._exec_ball_anchor_offset
+			# Floor check — if ball slides down past a floor, transition to STUCK_PLATFORM
+			var wall_space = p.get_world_2d().direct_space_state
+			if wall_space:
+				var wall_query := PhysicsRayQueryParameters2D.create(
+					Vector2(p._exec_ball_pos.x, prev_wall_y),
+					Vector2(p._exec_ball_pos.x, p._exec_ball_pos.y + 4.0), 1)
+				wall_query.exclude = [p.get_rid()]
+				var wall_result: Dictionary = wall_space.intersect_ray(wall_query)
+				if wall_result and wall_result["normal"].y < -0.5:
+					p._exec_ball_pos.y = wall_result["position"].y
+					p._exec_ball_anchor_body = wall_result["collider"] if wall_result["collider"] is Node2D else null
+					if p._exec_ball_anchor_body:
+						p._exec_ball_anchor_offset = p._exec_ball_pos - p._exec_ball_anchor_body.global_position
+					p._exec_ball_state = ExecEndState.STUCK_PLATFORM
+					DebugOverlay.log("executioner/ball", p,
+						"BALL SLID OFF WALL → STUCK_PLATFORM at y=%.0f", [p._exec_ball_pos.y])
+			# Chain tension — resolve anchor: shackle in B-S, player otherwise
+			var bw_anchor: Vector2 = exec_stuck_chain_anchor()
+			var bw_len: float = exec_stuck_chain_max()
+			var bw_vec: Vector2 = p._exec_ball_pos - bw_anchor
+			var bw_dist: float = bw_vec.length()
+			if bw_dist > bw_len:
+				var bw_dir: Vector2 = bw_vec / bw_dist
+				var bw_over: float = bw_dist - bw_len
+				if exec_is_bs_release():
+					# B-S: p.mass-weighted — yank shackle, barely move ball
+					exec_bs_stuck_pull(bw_dir, bw_over, delta)
+				else:
+					# B-P: drag ball toward player, tug player toward ball
+					var ball_pull: float = bw_over * 8.0
+					p._exec_ball_pos -= bw_dir * ball_pull * delta
+					if p._exec_ball_anchor_body and is_instance_valid(p._exec_ball_anchor_body):
+						p._exec_ball_anchor_offset -= bw_dir * ball_pull * delta
+					p.velocity += bw_dir * minf(bw_over * 3.0, 300.0) * delta
+				# If dragged far enough, pop off wall → freefall
+				if bw_over > 30.0 and not exec_is_bs_release():
+					p._exec_ball_state = ExecEndState.THROWN
+					p._exec_ball_vel = -bw_dir * 100.0
+					p._exec_ball_anchor_body = null
+					DebugOverlay.log("executioner/ball", p, "BALL PULLED OFF WALL by chain")
+			exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_PLATFORM:
+			var bp_anchor: Vector2 = exec_stuck_chain_anchor()
+			var bp_len: float = exec_stuck_chain_max()
+			var bp_vec: Vector2 = p._exec_ball_pos - bp_anchor
+			var bp_dist: float = bp_vec.length()
+			if exec_is_bs_release():
+				# B-S: ball stays stuck, shackle gets yanked if too far
+				if bp_dist > bp_len:
+					var bp_dir: Vector2 = bp_vec / bp_dist
+					var bp_over: float = bp_dist - bp_len
+					exec_bs_stuck_pull(bp_dir, bp_over, delta)
+			else:
+				# B-P: drag ball along platform, tug player
+				if bp_dist > bp_len * 0.8:
+					var bp_dir: Vector2 = bp_vec / bp_dist
+					var bp_over: float = bp_dist - bp_len * 0.8
+					var plat_pull: float = bp_over * 6.0
+					p._exec_ball_pos -= bp_dir * plat_pull * delta
+					if p._exec_ball_anchor_body and is_instance_valid(p._exec_ball_anchor_body):
+						p._exec_ball_anchor_offset -= bp_dir * plat_pull * delta
+				if bp_dist > bp_len:
+					var bp_dir2: Vector2 = bp_vec / bp_dist
+					var bp_over2: float = bp_dist - bp_len
+					p.velocity += bp_dir2 * minf(bp_over2 * 3.0, 300.0) * delta
+					if bp_over2 > 30.0:
+						p._exec_ball_state = ExecEndState.THROWN
+						p._exec_ball_vel = -bp_dir2 * 100.0
+						p._exec_ball_anchor_body = null
+						DebugOverlay.log("executioner/ball", p, "BALL PULLED OFF PLATFORM by chain")
+			exec_update_chain_ball_anchor()
+
+		ExecEndState.STUCK_CEILING:
+			# Ball is in ceiling — drags out quickly and then freefalls
+			p._exec_ball_pos.y += p.ball_cfg("ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
+			if p._exec_ball_anchor_body and is_instance_valid(p._exec_ball_anchor_body):
+				p._exec_ball_anchor_offset.y += p.ball_cfg("ceiling_drag", EXEC_BALL_CEILING_DRAG) * delta
+				p._exec_ball_pos = p._exec_ball_anchor_body.global_position + p._exec_ball_anchor_offset
+			# After dragging ~10px out, the ball pops free and freefalls
+			# Check if we've moved far enough from impact to consider it "popped out"
+			p._exec_ball_vel.y += p.ball_cfg("gravity", EXEC_BALL_GRAVITY) * delta * 0.3  # Partial gravity while dragging
+			if p._exec_ball_vel.y > 50.0:
+				# Ball has popped free — back to THROWN state (freefall with chain constraint)
+				p._exec_ball_state = ExecEndState.THROWN
+				p._exec_ball_vel = Vector2(0, 100.0)  # Falls downward
+				p._exec_ball_anchor_body = null
+				DebugOverlay.log("executioner/ball", p, "BALL FELL FROM CEILING")
+			exec_update_chain_ball_anchor()
+
+		ExecEndState.RETRACTING:
+			var to_player: Vector2 = p.global_position - p._exec_ball_pos
+			if to_player.length() < 20.0:
+				p._exec_ball_state = ExecEndState.HELD
+			else:
+				p._exec_ball_pos += to_player.normalized() * 600.0 * delta
+
+
