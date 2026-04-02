@@ -562,10 +562,9 @@ func _ready() -> void:
 	_demo_power_tier = PlayerManager.demo_power_tier
 	_demo_size_tier = PlayerManager.demo_size_tier
 	_demo_napalm = PlayerManager.demo_napalm
-	# Initialize executioner shackle entity
+	# Initialize class component for executioner
 	if character_class == PlayerManager.CharacterClass.EXECUTIONER:
-		_init_shackle_entity()
-		_init_spikeball_entity()
+		_init_executioner_class()
 	# Initialize ranged reticle position
 	if character_class == PlayerManager.CharacterClass.RANGED:
 		call_deferred("_init_reticle_pos")
@@ -1566,6 +1565,27 @@ func _tick_guitarist(delta: float) -> void:
 
 func _tick_werewolf(delta: float) -> void:
 	_handle_werewolf_frenzy(delta)
+
+var _executioner_class: Variant = null  # ExecutionerClass instance (when active)
+
+func _init_executioner_class() -> void:
+	## Create the ExecutionerClass component and wire dispatch through it.
+	var ExecScript := preload("res://scripts/classes/executioner/executioner_class.gd")
+	_executioner_class = Node.new()
+	_executioner_class.set_script(ExecScript)
+	add_child(_executioner_class)
+	# Build minimal context for the class component
+	var CharCtx := preload("res://scripts/components/character_context.gd")
+	var exec_ctx = CharCtx.new()
+	exec_ctx.body = self
+	_executioner_class.ctx = exec_ctx
+	# Let the class component handle init
+	_executioner_class.on_class_enter()
+	# Redirect dispatch entries to the class component
+	_class_attack_fn[PlayerManager.CharacterClass.EXECUTIONER] = _executioner_class.perform_attack
+	_class_special_fn[PlayerManager.CharacterClass.EXECUTIONER] = _executioner_class.perform_special
+	_class_charged_fn[PlayerManager.CharacterClass.EXECUTIONER] = _executioner_class.perform_charged
+	_class_tick_fn[PlayerManager.CharacterClass.EXECUTIONER] = func(delta: float): _executioner_class.tick(delta)
 
 func _tick_executioner(delta: float) -> void:
 	_handle_executioner(delta)

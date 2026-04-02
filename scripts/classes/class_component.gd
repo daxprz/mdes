@@ -10,12 +10,12 @@ signal attack_performed(data: Dictionary)
 signal special_performed(data: Dictionary)
 signal class_state_changed(state_name: String)
 
-@export var class_definition: ClassDefinition
+@export var class_definition: Resource  ## ClassDefinition
 
-var ctx: CharacterContext
+var ctx: Variant  ## CharacterContext
 
 
-func inject_context(c: CharacterContext) -> void:
+func inject_context(c: Variant) -> void:
 	## Receive dependencies. Called by Character during setup.
 	ctx = c
 
@@ -32,12 +32,12 @@ func on_class_exit() -> void:
 	pass
 
 
-func inject_movement_states(_movement_fsm: StateMachine) -> void:
+func inject_movement_states(_movement_fsm: Variant) -> void:
 	## Override to add class-specific movement states (Airwalk, Fly, Crawl, etc.)
 	pass
 
 
-func inject_action_states(_action_fsm: StateMachine) -> void:
+func inject_action_states(_action_fsm: Variant) -> void:
 	## Override to add class-specific action states.
 	pass
 
