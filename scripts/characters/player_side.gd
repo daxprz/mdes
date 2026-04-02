@@ -7669,34 +7669,22 @@ func _exec_apply_chain_constraint() -> void:
 
 # -- Chain Length Helpers -------------------------------------------------------
 
+# -- Chain Length Helpers — delegated to ExecutionerClass ----------------------
+
 func _exec_ball_chain_len() -> float:
-	## How much chain the ball side gets.
-	var total: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
-	return total * _exec_chain_split
+	return _executioner_class.exec_ball_chain_len() if _executioner_class else 0.0
 
 func _exec_shackle_chain_len() -> float:
-	## Delegate to shackle entity.
-	if _shackle and is_instance_valid(_shackle):
-		return _shackle.chain_len()
-	var total: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
-	return total * (1.0 - _exec_chain_split)
+	return _executioner_class.exec_shackle_chain_len() if _executioner_class else 0.0
 
 func _exec_is_bs_release() -> bool:
-	## True when in Release mode — ball is chained to shackle, not player.
-	var chain: Node2D = _exec_chain_node
-	return chain and is_instance_valid(chain) and chain.anchor_a.get("is_wall", false)
+	return _executioner_class.exec_is_bs_release() if _executioner_class else false
 
 func _exec_stuck_chain_anchor() -> Vector2:
-	## Get the chain anchor for stuck states: shackle in B-S, player in B-P.
-	if _exec_is_bs_release():
-		return _exec_shackle_pos
-	return global_position
+	return _executioner_class.exec_stuck_chain_anchor() if _executioner_class else global_position
 
 func _exec_stuck_chain_max() -> float:
-	## Get the chain max length for stuck states: total in B-S, split in B-P.
-	if _exec_is_bs_release():
-		return cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
-	return _exec_ball_chain_len()
+	return _executioner_class.exec_stuck_chain_max() if _executioner_class else 0.0
 
 func _exec_bs_stuck_pull(dir: Vector2, overshoot: float, delta: float) -> void:
 	## In B-S mode, when ball is stuck and chain is too long, yank the shackle
@@ -7727,9 +7715,7 @@ static func entity_cfg(entity: Node, key: String, default_val: float) -> float:
 
 
 func _exec_is_entity_yeet_mode() -> bool:
-	## True when shackle is attached to an entity — ball YEETs the entity, not the player.
-	return _exec_shackle_state == ExecEndState.ATTACHED_ENEMY and \
-		_exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body)
+	return _executioner_class.exec_is_entity_yeet_mode() if _executioner_class else false
 
 
 func _exec_try_yeet(chain_dir: Vector2) -> void:
@@ -8839,23 +8825,10 @@ func _exec_check_chain_severed() -> void:
 
 
 func _exec_get_ball_world_pos() -> Vector2:
-	match _exec_ball_state:
-		ExecEndState.HELD:
-			return global_position + Vector2(20.0 if _facing_right else -20.0, -5.0)
-		ExecEndState.WINDUP:
-			return global_position + Vector2(cos(_exec_ball_spin_angle), sin(_exec_ball_spin_angle)) * 25.0
-		_:
-			return _exec_ball_pos
-
+	return _executioner_class.exec_get_ball_world_pos() if _executioner_class else global_position
 
 func _exec_get_shackle_world_pos() -> Vector2:
-	match _exec_shackle_state:
-		ExecEndState.HELD:
-			return global_position + Vector2(-15.0 if _facing_right else 15.0, 0.0)
-		ExecEndState.WINDUP:
-			return global_position + Vector2(cos(_exec_shackle_spin_angle), sin(_exec_shackle_spin_angle)) * 20.0
-		_:
-			return _exec_shackle_pos
+	return _executioner_class.exec_get_shackle_world_pos() if _executioner_class else global_position
 
 
 func _exec_tick_swing(delta: float) -> void:

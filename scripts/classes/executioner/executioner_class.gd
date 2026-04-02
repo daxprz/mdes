@@ -105,3 +105,58 @@ func perform_special(_intent: Dictionary) -> void:
 
 func perform_charged(charge_ratio: float) -> void:
 	p._charged_executioner_overhead(charge_ratio)
+
+
+# -- Chain Length Helpers (migrated from player_side.gd) -----------------------
+
+func exec_ball_chain_len() -> float:
+	## How much chain the ball side gets.
+	var total: float = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	return total * p._exec_chain_split
+
+func exec_shackle_chain_len() -> float:
+	## Delegate to shackle entity.
+	if p._shackle and is_instance_valid(p._shackle):
+		return p._shackle.chain_len()
+	var total: float = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	return total * (1.0 - p._exec_chain_split)
+
+func exec_is_bs_release() -> bool:
+	## True when in Release mode — ball is chained to shackle, not player.
+	var chain: Node2D = p._exec_chain_node
+	return chain and is_instance_valid(chain) and chain.anchor_a.get("is_wall", false)
+
+func exec_stuck_chain_anchor() -> Vector2:
+	## Get the chain anchor for stuck states: shackle in B-S, player in B-P.
+	if exec_is_bs_release():
+		return p._exec_shackle_pos
+	return p.global_position
+
+func exec_stuck_chain_max() -> float:
+	## Get the chain max length for stuck states: total in B-S, split in B-P.
+	if exec_is_bs_release():
+		return p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	return exec_ball_chain_len()
+
+func exec_is_entity_yeet_mode() -> bool:
+	## True when shackle is attached to an entity — ball YEETs the entity, not the player.
+	return p._exec_shackle_state == p.ExecEndState.ATTACHED_ENEMY and \
+		p._exec_shackle_anchor_body and is_instance_valid(p._exec_shackle_anchor_body)
+
+func exec_get_ball_world_pos() -> Vector2:
+	match p._exec_ball_state:
+		p.ExecEndState.HELD:
+			return p.global_position + Vector2(20.0 if p._facing_right else -20.0, -5.0)
+		p.ExecEndState.WINDUP:
+			return p.global_position + Vector2(cos(p._exec_ball_spin_angle), sin(p._exec_ball_spin_angle)) * 25.0
+		_:
+			return p._exec_ball_pos
+
+func exec_get_shackle_world_pos() -> Vector2:
+	match p._exec_shackle_state:
+		p.ExecEndState.HELD:
+			return p.global_position + Vector2(-15.0 if p._facing_right else 15.0, 0.0)
+		p.ExecEndState.WINDUP:
+			return p.global_position + Vector2(cos(p._exec_shackle_spin_angle), sin(p._exec_shackle_spin_angle)) * 20.0
+		_:
+			return p._exec_shackle_pos
