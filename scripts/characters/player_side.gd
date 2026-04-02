@@ -7673,87 +7673,8 @@ func _exec_is_entity_yeet_mode() -> bool:
 
 
 func _exec_try_yeet(chain_dir: Vector2) -> void:
-	## Partially elastic collision along the chain axis using ABSOLUTE masses.
-	## Fires ONCE per slack→taut transition.
-	##
-	## Two modes:
-	##   Normal: ball vs player (player gets YEETed)
-	##   Entity mode: ball vs shackled entity (entity gets YEETed, player is free)
-	if _exec_chain_taut:
-		return
-	_exec_chain_taut = true
-
-	# Query each participant for its own config (supports per-entity overrides/artifacts)
-	var m_ball: float = ball_cfg("mass", EXEC_BALL_MASS)
-	var e: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
-
-	if _exec_is_entity_yeet_mode():
-		# ENTITY YEET: ball momentum transfers to the shackled entity
-		var entity: Node2D = _exec_shackle_anchor_body
-		# Entity provides its own mass (via cfg() if it has artifacts, or .mass property)
-		var m_entity: float = entity_cfg(entity, "mass", 50.0)
-		# Entity can override elasticity for its own interactions
-		var e_entity: float = entity_cfg(entity, "chain_elasticity", e)
-		var entity_vel: Vector2 = entity.velocity if "velocity" in entity else Vector2.ZERO
-
-		var v_b: float = _exec_ball_vel.dot(chain_dir)
-		var v_e: float = entity_vel.dot(chain_dir)
-		var relative_v: float = v_b - v_e
-
-		if absf(relative_v) < 10.0:
-			return
-
-		var impulse_to_entity: float = (1.0 + e_entity) * m_ball / (m_ball + m_entity) * relative_v
-		var impulse_to_ball: float = (1.0 + e_entity) * m_entity / (m_ball + m_entity) * relative_v
-
-		var yeet_vec: Vector2 = chain_dir * impulse_to_entity
-		if entity.has_method("apply_knockback"):
-			entity.apply_knockback(yeet_vec)
-		elif "velocity" in entity:
-			entity.velocity += yeet_vec
-		_exec_ball_vel -= chain_dir * impulse_to_ball
-
-		_exec_yeet_immunity = 1.5
-		AudioManager.play("grapple_hit", 2.0, 0.6)
-		_rumble(0.7, 1.0, 0.2)
-
-		DebugOverlay.log("executioner/ball", self,
-			"ENTITY YEET: %s mass=%.1f ball_mass=%.1f impulse=%.1f dir=(%.2f,%.2f)",
-			[entity.name, m_entity, m_ball, impulse_to_entity, chain_dir.x, chain_dir.y])
-
-		DebugOverlay.log("executioner/ball", self,
-			"ENTITY YEET! %s impulse=%.0f dir=(%.2f,%.2f)",
-			[entity.name, impulse_to_entity, chain_dir.x, chain_dir.y])
-		return
-
-	# NORMAL YEET: ball vs player
-	var m_player: float = mass
-	var v_b: float = _exec_ball_vel.dot(chain_dir)
-	var v_p: float = velocity.dot(chain_dir)
-	var relative_v: float = v_b - v_p
-
-	if absf(relative_v) < 10.0:
-		return
-
-	var pre_vel: Vector2 = velocity
-	var impulse_to_player: float = (1.0 + e) * m_ball / (m_ball + m_player) * relative_v
-	var impulse_to_ball: float = (1.0 + e) * m_player / (m_ball + m_player) * relative_v
-
-	velocity += chain_dir * impulse_to_player
-	_exec_ball_vel -= chain_dir * impulse_to_ball
-
-	_exec_yeet_immunity = 1.5
-	AudioManager.play("grapple_hit", 2.0, 0.6)
-	_rumble(0.7, 1.0, 0.2)
-
-	DebugOverlay.log("executioner/ball", self,
-		"YEET: dir=(%.1f,%.1f) vel=(%.1f,%.1f)->(%.1f,%.1f) impulse=%.1f m_b=%.1f m_p=%.1f e=%.2f",
-		[chain_dir.x, chain_dir.y, pre_vel.x, pre_vel.y, velocity.x, velocity.y, impulse_to_player, m_ball, m_player, e])
-
-	DebugOverlay.log("executioner/ball", self,
-		"YEET! vel=(%.0f,%.0f)->(%.0f,%.0f) impulse=%.0f dir=(%.2f,%.2f)",
-		[pre_vel.x, pre_vel.y, velocity.x, velocity.y, impulse_to_player,
-		 chain_dir.x, chain_dir.y])
+	if _executioner_class:
+		_executioner_class.exec_try_yeet(chain_dir)
 
 
 # -- Main Tick -----------------------------------------------------------------
