@@ -163,6 +163,25 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.42
+**Executioner class extraction — all core logic migrated to ExecutionerClass**
+
+- **43 executioner functions migrated** from player_side.gd to executioner_class.gd
+- **player_side.gd**: 9,654 → 8,412 lines (−1,242, 12.9% reduction)
+- **executioner_class.gd**: 1,321 lines — owns all executioner behavior
+- **Chain helpers**: ball/shackle chain length, B-S release detection, stuck anchors
+- **Chain physics**: constraint, YEET elastic collisions, B-S stuck pull, chain severed
+- **Chain spawning**: ball chain, shackle chain, ball-to-shackle chain, anchor updates
+- **Throw system**: windup, aim preview, throw ball/shackle, retract, hold-on-throw
+- **Ball tick**: full ball physics (thrown, stuck wall/platform/ceiling, retracting)
+- **Preview arc**: two-body string simulation (optimistic + pessimistic cone)
+- **Combat**: swing/slam, cleave (charge + fire), charged overhead
+- **Mode management**: R1 toggle, chain mode cycling, L2/R2 length adjustment
+- **Main tick**: orchestrator delegates to all sub-functions
+- Thin forwarders on player_side.gd for backwards compatibility
+- Godot 4.6 compat: explicit typing, p.get_world_2d(), local enum declarations
+- Executioner suite: 7/7 pass throughout all migrations
+
 ### v0.10.41
 **Composition refactor phases 3-5, class_basics test suite, ExecutionerClass extraction begun**
 
