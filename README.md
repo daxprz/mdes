@@ -163,6 +163,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.43
+**Executioner extraction complete — all drawing + tuning migrated**
+
+- **All executioner functions extracted**: 55+ functions in executioner_class.gd (1,963 lines)
+- **player_side.gd reduced 19.1%**: 9,654 → 7,812 lines
+- **Drawing migrated**: ball, shackle, chain radius, trajectory preview, swing, cleave charge, mode indicator, tuning popup — all using `p.draw_*()` delegation
+- **Tuning migrated**: live slider popup, drag handling, config push/pop
+- **Test tick migrated**: virtual input simulation for throw prediction
+- **Remaining on player_side.gd**: state vars + enums (~200 lines for RCON compat), thin forwarders (~60 lines)
+- Executioner suite: 7/7 pass with inspect=5
+
 ### v0.10.42
 **Executioner class extraction — all core logic migrated to ExecutionerClass**
 
