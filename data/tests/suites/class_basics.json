@@ -1,0 +1,20 @@
+{
+  "name": "class_basics",
+  "description": "Basic movement tests for all player classes",
+  "gate": true,
+  "tests": [
+    "class_melee_basics",
+    "class_ranged_basics",
+    "class_mage_basics",
+    "class_summoner_basics",
+    "class_rogue_basics",
+    "class_demolitionist_basics",
+    "class_healer_basics",
+    "class_tank_basics",
+    "class_ninja_basics",
+    "class_balloonist_basics",
+    "class_guitarist_basics",
+    "class_werewolf_basics",
+    "class_executioner_basics"
+  ]
+}

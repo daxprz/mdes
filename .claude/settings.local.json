@@ -101,7 +101,15 @@
       "Bash(nc -w1 localhost 9999 echo \"mocap connect\")",
       "Bash(nc -w1 localhost 9999 sleep 2 echo \"mocap status\")",
       "Bash(md5 -q /Users/jeremy/dev/dax/test123/assets/sprites/characters/executioner_side.png)",
-      "Bash(md5 -q /Users/jeremy/dev/dax/test123/assets/sprites/characters/executioner_topdown.png)"
+      "Bash(md5 -q /Users/jeremy/dev/dax/test123/assets/sprites/characters/executioner_topdown.png)",
+      "Bash(cp /var/tumu/aid/sessions/byid/c9e84bc4-8c33-496e-8142-1d84f680bc45/summary.md /var/tumu/aid/sessions/recent/04-02-executioner-fsm-config-refactor.md)",
+      "Bash(rm -f /var/tumu/aid/sessions/recent/03-29-config-refactor-shackle-blueprints.md)",
+      "Bash(cp /var/tumu/aid/sessions/byid/45a30bef-41ac-448a-a2b1-149e8a39a123/summary.md /var/tumu/aid/sessions/recent/03-28-consolidate-mocap-factions.md)",
+      "Bash(rm -f /var/tumu/aid/sessions/recent/03-28-session-consolidate-command.md)",
+      "Read(//private/var/tumu/aid/sessions/recent/**)",
+      "Bash(mkdir -p /var/tumu/aid/sessions/archive/2026)",
+      "Bash(mv /var/tumu/aid/sessions/recent/03-17-initial-game-setup.md /var/tumu/aid/sessions/archive/2026/)",
+      "Read(//private/var/tumu/aid/sessions/archive/2026/**)"
     ]
   }
 }
