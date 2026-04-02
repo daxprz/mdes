@@ -1578,7 +1578,7 @@ func _init_executioner_class() -> void:
 	var CharCtx := preload("res://scripts/components/character_context.gd")
 	var exec_ctx = CharCtx.new()
 	exec_ctx.body = self
-	_executioner_class.ctx = exec_ctx
+	_executioner_class.inject_context(exec_ctx)
 	# Let the class component handle init
 	_executioner_class.on_class_enter()
 	# Redirect dispatch entries to the class component
@@ -8430,190 +8430,11 @@ func _exec_update_chain_shackle_anchor() -> void:
 
 
 func _exec_tick_shackle(delta: float) -> void:
-	## Delegate to ShackleEntity for all physics.
-	if _shackle and is_instance_valid(_shackle):
-		_shackle.tick(delta)
-	return
-	# --- Legacy code below (kept for reference, unreachable) ---
-	match _exec_shackle_state:
-		ExecEndState.HELD, ExecEndState.WINDUP:
-			pass
-		ExecEndState.THROWN:
-			# Shackle physics — gravity from shackle's own config stack
-			_exec_shackle_vel.y += shackle_cfg("gravity", EXEC_SHACKLE_GRAVITY) * delta
-			var prev_shackle_pos: Vector2 = _exec_shackle_pos
-			_exec_shackle_pos += _exec_shackle_vel * delta
-
-			# Shackle world collision — cannot pass through floor/walls
-			var s_space := get_world_2d().direct_space_state
-			if s_space:
-				var s_query := PhysicsRayQueryParameters2D.create(prev_shackle_pos, _exec_shackle_pos, 1)
-				s_query.exclude = [get_rid()]
-				var s_result: Dictionary = s_space.intersect_ray(s_query)
-				if s_result:
-					var normal: Vector2 = s_result["normal"]
-					_exec_shackle_pos = s_result["position"] + normal * 2.0
-					_exec_shackle_vel = _exec_shackle_vel.bounce(normal) * 0.4
-					AudioManager.play("grapple_hit", -8.0, 1.5)
-
-			# RIGID chain constraint — only if shackle has a chain attached
-			var has_shackle_chain: bool = _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node)
-			if has_shackle_chain:
-				var shackle_len: float = _exec_shackle_chain_len()
-				var chain_vec: Vector2 = _exec_shackle_pos - global_position
-				var chain_dist: float = chain_vec.length()
-				if chain_dist > shackle_len:
-					var chain_dir: Vector2 = chain_vec.normalized()
-					_exec_shackle_pos = global_position + chain_dir * shackle_len
-					var outward_v: float = _exec_shackle_vel.dot(chain_dir)
-					if outward_v > 0.0:
-						_exec_shackle_vel -= chain_dir * outward_v
-			else:
-				# B-S chain constraint: shackle dragged by ball (RELEASE mode)
-				# YEET impulse is applied on the ball side — here we just enforce
-				# the positional constraint so the shackle can't drift past chain length.
-				var has_bs_chain: bool = _exec_chain_node and is_instance_valid(_exec_chain_node) and \
-					_exec_chain_node.anchor_a.get("is_wall", false)
-				if has_bs_chain:
-					var total_len: float = cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
-					var bs_vec: Vector2 = _exec_shackle_pos - _exec_ball_pos
-					var bs_dist: float = bs_vec.length()
-					if bs_dist > total_len:
-						var bs_dir: Vector2 = bs_vec / bs_dist
-						_exec_shackle_pos = _exec_ball_pos + bs_dir * total_len
-						# Only strip outward velocity if YEET hasn't already handled it
-						var outward_v: float = _exec_shackle_vel.dot(bs_dir)
-						if outward_v > 0.0:
-							_exec_shackle_vel -= bs_dir * outward_v
-				else:
-					_exec_shackle_chain_taut = false
-
-			# Shackle ONLY connects to enemies — check hitbox proximity
-			var snapped: bool = _exec_try_snap_shackle_to_enemy()
-
-			# Update shackle chain anchor
-			_exec_update_chain_shackle_anchor()
-
-		ExecEndState.ATTACHED_ENEMY:
-			# Track the attached enemy (shackle locks onto hitbox)
-			if _exec_shackle_anchor_body and is_instance_valid(_exec_shackle_anchor_body):
-				_exec_shackle_pos = _exec_shackle_anchor_body.global_position + _exec_shackle_anchor_offset
-
-				# Enforce shackle chain constraint on the attached entity.
-				# If entity exceeds chain length from player, pull it back + YEET.
-				var has_shackle_chain_ce: bool = _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node)
-				if has_shackle_chain_ce:
-					var shackle_len: float = _exec_shackle_chain_len()
-					var chain_vec: Vector2 = _exec_shackle_pos - global_position
-					var chain_dist: float = chain_vec.length()
-					if chain_dist > shackle_len:
-						var chain_dir: Vector2 = chain_vec / chain_dist
-						var overshoot: float = chain_dist - shackle_len
-						# YEET: elastic collision between player and entity (once per taut)
-						if not _exec_shackle_chain_taut:
-							_exec_shackle_chain_taut = true
-							var m_player: float = mass
-							var m_entity: float = entity_cfg(_exec_shackle_anchor_body, "mass", 20.0)
-							var e_col: float = cfg("exec_chain_elasticity", EXEC_CHAIN_ELASTICITY)
-							var entity_vel: Vector2 = _exec_shackle_anchor_body.velocity if "velocity" in _exec_shackle_anchor_body else Vector2.ZERO
-							var v_e: float = entity_vel.dot(chain_dir)
-							var v_p: float = velocity.dot(chain_dir)
-							var relative_v: float = v_e - v_p
-							if absf(relative_v) > 10.0:
-								var impulse_to_player: float = (1.0 + e_col) * m_entity / (m_player + m_entity) * relative_v
-								var impulse_to_entity: float = (1.0 + e_col) * m_player / (m_player + m_entity) * relative_v
-								velocity += chain_dir * impulse_to_player
-								if _exec_shackle_anchor_body.has_method("apply_knockback"):
-									_exec_shackle_anchor_body.apply_knockback(-chain_dir * impulse_to_entity)
-								elif "velocity" in _exec_shackle_anchor_body:
-									_exec_shackle_anchor_body.velocity -= chain_dir * impulse_to_entity
-								DebugOverlay.log("executioner/chain_radius", self,
-									"SHACKLE YEET: entity_imp=%.0f player_imp=%.0f dist=%.0f len=%.0f",
-									[impulse_to_entity, impulse_to_player, chain_dist, shackle_len])
-						# Leash: clamp entity to chain boundary at end of frame.
-						# Uses call_deferred so it runs AFTER the entity's own move_and_slide.
-						var clamped_pos: Vector2 = global_position + chain_dir * shackle_len
-						_exec_shackle_anchor_body.call_deferred("set", "global_position",
-							Vector2(clamped_pos.x - _exec_shackle_anchor_offset.x,
-									_exec_shackle_anchor_body.global_position.y))
-						# Strip outward velocity so entity doesn't fight the leash
-						if "velocity" in _exec_shackle_anchor_body:
-							var outward_v: float = _exec_shackle_anchor_body.velocity.dot(chain_dir)
-							if outward_v > 0.0:
-								_exec_shackle_anchor_body.velocity -= chain_dir * outward_v
-					else:
-						_exec_shackle_chain_taut = false
-			else:
-				_exec_shackle_state = ExecEndState.RETRACTING
-			_exec_update_chain_shackle_anchor()
-
-		ExecEndState.RETRACTING:
-			var to_player: Vector2 = global_position - _exec_shackle_pos
-			if to_player.length() < 20.0:
-				_exec_shackle_state = ExecEndState.HELD
-				if _exec_ball_state == ExecEndState.HELD:
-					_exec_throw_step = 0
-				# Destroy shackle chain
-				if _exec_shackle_chain_node and is_instance_valid(_exec_shackle_chain_node):
-					_exec_shackle_chain_node.queue_free()
-					_exec_shackle_chain_node = null
-			else:
-				_exec_shackle_pos += to_player.normalized() * 700.0 * delta
-			_exec_update_chain_shackle_anchor()
-
+	if _executioner_class:
+		_executioner_class.exec_tick_shackle(delta)
 
 func _exec_try_snap_shackle_to_enemy() -> bool:
-	## Delegate to shackle entity.
-	if _shackle and is_instance_valid(_shackle):
-		return _shackle.try_snap_to_enemy()
-	return false
-	# --- Legacy code below (kept for reference, unreachable) ---
-	## Check if the shackle is near any damageable entity. Snaps to hitbox or center.
-	## Checks enemies, attack dummies, and players (but not self).
-	var targets: Array = []
-	targets.append_array(get_tree().get_nodes_in_group("enemies"))
-	targets.append_array(get_tree().get_nodes_in_group("attack_dummies"))
-	# Also check other players/dummies (soccer balls are in "players" group)
-	for p in get_tree().get_nodes_in_group("players"):
-		if p != self and p not in targets:
-			targets.append(p)
-	for enemy in targets:
-		if not enemy is Node2D:
-			continue
-		# Check hitbox parts if available
-		if "_hitboxes" in enemy:
-			for part_name in enemy._hitboxes:
-				var hitbox: Area2D = enemy._hitboxes[part_name]
-				var hitbox_world: Vector2 = enemy.global_position + hitbox.position
-				var dist: float = _exec_shackle_pos.distance_to(hitbox_world)
-				if dist < EXEC_SHACKLE_SNAP_RANGE:
-					_exec_shackle_state = ExecEndState.ATTACHED_ENEMY
-					_exec_shackle_anchor_body = enemy
-					_exec_shackle_anchor_offset = hitbox.position
-					_exec_shackle_pos = hitbox_world
-					if enemy.has_method("take_damage"):
-						enemy.take_damage(EXEC_SHACKLE_DAMAGE, player_index)
-					AudioManager.play("grapple_hit", 2.0, 0.6)
-					_rumble(0.6, 0.8, 0.2)
-					DebugOverlay.log("executioner/throw", self,
-						"SHACKLE ATTACHED: %s/%s", [enemy.name, part_name])
-					return true
-		else:
-			# Simple distance check for enemies without hitbox parts
-			var dist: float = _exec_shackle_pos.distance_to(enemy.global_position)
-			if dist < EXEC_SHACKLE_SNAP_RANGE:
-				_exec_shackle_state = ExecEndState.ATTACHED_ENEMY
-				_exec_shackle_anchor_body = enemy
-				_exec_shackle_anchor_offset = Vector2.ZERO
-				_exec_shackle_pos = enemy.global_position
-				if enemy.has_method("take_damage"):
-					enemy.take_damage(EXEC_SHACKLE_DAMAGE, player_index)
-				AudioManager.play("grapple_hit", 2.0, 0.6)
-				_rumble(0.6, 0.8, 0.2)
-				DebugOverlay.log("executioner/throw", self,
-					"SHACKLE ATTACHED: %s", [enemy.name])
-				return true
-	return false
+	return _executioner_class.exec_try_snap_shackle_to_enemy() if _executioner_class else false
 
 
 func _exec_check_chain_severed() -> void:
@@ -8629,175 +8450,37 @@ func _exec_get_shackle_world_pos() -> Vector2:
 
 
 func _exec_tick_swing(delta: float) -> void:
-	if not _exec_swing_active:
-		return
-	_exec_swing_time += delta
-	_exec_swing_angular_vel = minf(_exec_swing_angular_vel + EXEC_SWING_SPIN_ACCEL * delta, EXEC_SWING_MAX_SPIN)
-	var dir_sign: float = 1.0 if _facing_right else -1.0
-	_exec_swing_angle += _exec_swing_angular_vel * delta * dir_sign
-	velocity.x *= 0.85
-	if not _is_device_action_pressed("attack"):
-		_exec_perform_slam()
-		_exec_swing_active = false
-
+	if _executioner_class:
+		_executioner_class.exec_tick_swing(delta)
 
 func _attack_executioner() -> void:
-	if _exec_swing_active:
-		return
-	_exec_swing_active = true
-	_exec_swing_time = 0.0
-	_exec_swing_angle = -PI * 0.5
-	_exec_swing_angular_vel = EXEC_SWING_SPIN_SPEED
-	AudioManager.play("sword_slash", -2.0, 0.5)
+	if _executioner_class:
+		_executioner_class.exec_attack()
 
 
 func _exec_perform_slam() -> void:
-	var hold_t: float = clampf(_exec_swing_time / 2.0, 0.0, 1.0)
-	if _exec_swing_time < EXEC_SWING_MIN_HOLD:
-		DebugOverlay.log("executioner/swing", self, "SWING CANCEL: too short %.2fs", [_exec_swing_time])
-		return
-	var damage: int = int(lerpf(EXEC_SWING_BASE_DAMAGE, EXEC_SWING_MAX_DAMAGE, hold_t))
-	var slam_pos: Vector2 = global_position + Vector2(30.0 if _facing_right else -30.0, 10.0)
-	AudioManager.play("explosion", 2.0, 0.35)
-	_rumble(0.8, 1.0, 0.3)
-	_screen_shake(lerpf(3.0, 10.0, hold_t), 0.25)
-	# Dust puff — fast dissipating radial particles
-	for i in range(EXEC_SWING_DUST_COUNT):
-		var angle: float = float(i) / float(EXEC_SWING_DUST_COUNT) * TAU
-		var dust := ColorRect.new()
-		dust.color = Color(0.6, 0.55, 0.4, 0.7)
-		dust.size = Vector2(randf_range(3, 6), randf_range(3, 6))
-		dust.position = slam_pos
-		dust.z_index = 4
-		get_parent().add_child(dust)
-		var target_pos: Vector2 = slam_pos + Vector2(cos(angle), sin(angle)) * EXEC_SWING_DUST_SPEED * randf_range(0.5, 1.0) * 0.3
-		var dt := dust.create_tween()
-		dt.tween_property(dust, "position", target_pos, 0.3).set_ease(Tween.EASE_OUT)
-		dt.parallel().tween_property(dust, "modulate:a", 0.0, 0.25)
-		dt.tween_callback(dust.queue_free)
-	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		if slam_pos.distance_to(body.global_position) < EXEC_SWING_SLAM_RADIUS:
-			if body.has_method("take_damage"):
-				body.take_damage(int(damage * attack_bonus), player_index)
-				_spawn_blood_particles(body.global_position)
-			if body.has_method("apply_knockback"):
-				body.apply_knockback((body.global_position - slam_pos).normalized() * EXEC_SWING_KNOCKBACK * hold_t)
-	DebugOverlay.log("executioner/swing", self, "SLAM: hold=%.2fs dmg=%d", [_exec_swing_time, damage])
-	PlayerManager.add_skill_xp(player_index, "attack", 4)
-
+	if _executioner_class:
+		_executioner_class.exec_perform_slam()
 
 func _exec_handle_chain_mode() -> void:
-	## Circle toggles chain mode: Release / Hold+Release / Hold+Hold
-	if not _is_device_action_just_pressed("interact"):
-		return
-	_exec_chain_mode = ((_exec_chain_mode + 1) % 3) as ExecChainMode
-	_exec_chain_mode_changed_timer = 1.5
-	AudioManager.play("grapple_hit", -4.0, 1.0 + _exec_chain_mode * 0.3)
-	DebugOverlay.log("executioner/throw", self, "CHAIN MODE: %s",
-		[EXEC_CHAIN_MODE_NAMES[_exec_chain_mode]])
-
+	if _executioner_class:
+		_executioner_class.exec_handle_chain_mode()
 
 func _special_executioner_cleave() -> void:
-	_exec_cleave_charging = true
-	_exec_cleave_charge_time = 0.0
-	AudioManager.play("shield_charge", -2.0, 0.4)
-
+	if _executioner_class:
+		_executioner_class.exec_special_cleave()
 
 func _exec_tick_cleave(delta: float) -> void:
-	if not _exec_cleave_charging:
-		return
-	_exec_cleave_charge_time += delta
-	velocity.x *= 0.5
-	if _exec_cleave_charge_time > 0.5:
-		position.x += sin(Time.get_ticks_msec() * 0.05) * (_exec_cleave_charge_time * 0.5)
-	if _exec_cleave_charge_time >= EXEC_CLEAVE_CHARGE_TIME or not _is_device_action_pressed("special"):
-		_exec_fire_cleave()
-		_exec_cleave_charging = false
-
+	if _executioner_class:
+		_executioner_class.exec_tick_cleave(delta)
 
 func _exec_fire_cleave() -> void:
-	if _exec_cleave_charge_time < EXEC_CLEAVE_MIN_CHARGE:
-		DebugOverlay.log("executioner/cleave", self, "CLEAVE CANCEL: charge=%.2f", [_exec_cleave_charge_time])
-		return
-	var charge_t: float = clampf(
-		(_exec_cleave_charge_time - EXEC_CLEAVE_MIN_CHARGE) /
-		(EXEC_CLEAVE_CHARGE_TIME - EXEC_CLEAVE_MIN_CHARGE), 0.0, 1.0)
-	var damage: int = int(lerpf(EXEC_CLEAVE_BASE_DAMAGE, EXEC_CLEAVE_MAX_DAMAGE, charge_t))
-	var aim: Vector2 = _get_aim_direction_analog()
-	AudioManager.play("explosion", 4.0, 0.25)
-	_rumble(1.0, 1.0, 0.4)
-	_screen_shake(lerpf(5.0, 15.0, charge_t), 0.3)
-	_exec_cleave_flash_timer = 0.15
-	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "attack")
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		var to_enemy: Vector2 = body.global_position - global_position
-		if to_enemy.length() > EXEC_CLEAVE_RANGE:
-			continue
-		if absf(aim.angle_to(to_enemy.normalized())) > EXEC_CLEAVE_ARC * 0.5:
-			continue
-		if body.has_method("take_damage"):
-			body.take_damage(int(damage * attack_bonus), player_index)
-			_spawn_blood_particles(body.global_position)
-		if body.has_method("apply_knockback"):
-			body.apply_knockback(to_enemy.normalized() * EXEC_CLEAVE_ENEMY_KB * charge_t)
-	# Player self-knockback from impact power
-	velocity += -aim * EXEC_CLEAVE_KNOCKBACK * charge_t
-	velocity.y = minf(velocity.y, -150.0 * charge_t)
-	# Arc flash VFX
-	var arc_start: float = aim.angle() - EXEC_CLEAVE_ARC * 0.5
-	for i in range(8):
-		var a: float = arc_start + (float(i) / 7.0) * EXEC_CLEAVE_ARC
-		var spark := ColorRect.new()
-		spark.color = Color(1.0, 0.95, 0.85, 0.9)
-		spark.size = Vector2(lerpf(4, 8, charge_t), lerpf(4, 8, charge_t))
-		spark.position = global_position + Vector2(cos(a), sin(a)) * EXEC_CLEAVE_RANGE
-		spark.z_index = 10
-		get_parent().add_child(spark)
-		var st := spark.create_tween()
-		st.tween_property(spark, "position", spark.position + Vector2(cos(a), sin(a)) * 30.0, 0.12)
-		st.parallel().tween_property(spark, "modulate:a", 0.0, 0.15)
-		st.tween_callback(spark.queue_free)
-	PlayerManager.add_skill_xp(player_index, "special", 8)
-	DebugOverlay.log("executioner/cleave", self, "CLEAVE: charge=%.2f dmg=%d kb=%.0f",
-		[_exec_cleave_charge_time, damage, EXEC_CLEAVE_KNOCKBACK * charge_t])
-
+	if _executioner_class:
+		_executioner_class.exec_fire_cleave()
 
 func _charged_executioner_overhead(charge_ratio: float) -> void:
-	var damage: int = int(lerpf(EXEC_SWING_BASE_DAMAGE * 1.5, EXEC_SWING_MAX_DAMAGE * 1.5, charge_ratio))
-	var slam_pos: Vector2 = global_position + Vector2(35.0 if _facing_right else -35.0, 10.0)
-	AudioManager.play("explosion", 4.0, 0.3)
-	_rumble(1.0, 1.0, 0.4)
-	_screen_shake(lerpf(5.0, 14.0, charge_ratio), 0.3)
-	var dust_count: int = int(EXEC_SWING_DUST_COUNT * 1.5)
-	for i in range(dust_count):
-		var angle: float = float(i) / float(dust_count) * TAU
-		var dust := ColorRect.new()
-		dust.color = Color(0.5, 0.45, 0.3, 0.8)
-		dust.size = Vector2(randf_range(4, 8), randf_range(4, 8))
-		dust.position = slam_pos
-		dust.z_index = 4
-		get_parent().add_child(dust)
-		var dt := dust.create_tween()
-		dt.tween_property(dust, "position", slam_pos + Vector2(cos(angle), sin(angle)) * EXEC_SWING_DUST_SPEED * 0.5, 0.4).set_ease(Tween.EASE_OUT)
-		dt.parallel().tween_property(dust, "modulate:a", 0.0, 0.35)
-		dt.tween_callback(dust.queue_free)
-	var attack_bonus: float = PlayerManager.get_skill_bonus(player_index, "charge")
-	for body in get_tree().get_nodes_in_group("enemies"):
-		if not body is Node2D:
-			continue
-		if slam_pos.distance_to(body.global_position) < EXEC_SWING_SLAM_RADIUS * 1.3:
-			if body.has_method("take_damage"):
-				body.take_damage(int(damage * attack_bonus), player_index)
-				_spawn_blood_particles(body.global_position)
-			if body.has_method("apply_knockback"):
-				body.apply_knockback((body.global_position - slam_pos).normalized() * EXEC_SWING_KNOCKBACK * 1.5)
-	PlayerManager.add_skill_xp(player_index, "charge", 6)
-	DebugOverlay.log("executioner/swing", self, "CHARGED OVERHEAD: ratio=%.2f dmg=%d", [charge_ratio, damage])
+	if _executioner_class:
+		_executioner_class.exec_charged_overhead(charge_ratio)
 
 
 func _draw_executioner() -> void:
