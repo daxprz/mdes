@@ -285,3 +285,106 @@ func exec_try_yeet(chain_dir: Vector2) -> void:
 		"YEET! vel=(%.0f,%.0f)->(%.0f,%.0f) impulse=%.0f dir=(%.2f,%.2f)",
 		[pre_vel.x, pre_vel.y, p.velocity.x, p.velocity.y, impulse_to_player,
 		 chain_dir.x, chain_dir.y])
+
+
+# -- B-S Stuck Pull (migrated from player_side.gd) ----------------------------
+
+func exec_bs_stuck_pull(dir: Vector2, overshoot: float, _delta: float) -> void:
+	## In B-S mode, when ball is stuck and chain is too long, yank the shackle
+	## toward the ball (mass-weighted). Ball barely moves.
+	var m_ball_bs: float = p.ball_cfg("mass", EXEC_BALL_MASS)
+	var m_shackle_bs: float = p._shackle.cfg("mass", 5.0) if p._shackle else 5.0
+	var total_mass: float = m_ball_bs + m_shackle_bs
+	var shackle_frac: float = m_ball_bs / total_mass
+	p._exec_shackle_pos -= dir * overshoot * shackle_frac
+	if p._shackle:
+		p._shackle._settled = false
+		p._shackle._bounce_count = 0
+
+
+# -- Chain Spawning (migrated from player_side.gd) ----------------------------
+
+func exec_spawn_chain() -> void:
+	## Spawn chain.gd for the ball side.
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node):
+		p._exec_chain_node.queue_free()
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	p._exec_chain_node = Node2D.new()
+	p._exec_chain_node.set_script(ChainScript)
+	var anchor_a: Dictionary
+	var chain_len: float
+	if exec_is_entity_yeet_mode():
+		anchor_a = ChainScript.make_anchor_body(p._exec_shackle_anchor_body)
+		chain_len = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	else:
+		anchor_a = ChainScript.make_anchor_body(p)
+		chain_len = exec_ball_chain_len()
+	var anchor_b: Dictionary = ChainScript.make_anchor_wall(p._exec_ball_pos)
+	p._exec_chain_node.setup(anchor_a, anchor_b, chain_len, p.player_index)
+	p.get_parent().add_child(p._exec_chain_node)
+	DebugOverlay.log("executioner/ball", p, "BALL CHAIN: len=%.0f entity_mode=%s",
+		[chain_len, str(exec_is_entity_yeet_mode())])
+
+
+func exec_spawn_shackle_chain() -> void:
+	## Delegate to shackle entity.
+	if p._shackle and is_instance_valid(p._shackle):
+		p._shackle.spawn_chain_to_player()
+		return
+	# Legacy fallback
+	if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node):
+		p._exec_shackle_chain_node.queue_free()
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	p._exec_shackle_chain_node = Node2D.new()
+	p._exec_shackle_chain_node.set_script(ChainScript)
+	var anchor_a: Dictionary = ChainScript.make_anchor_body(p)
+	var anchor_b: Dictionary = ChainScript.make_anchor_wall(p._exec_shackle_pos)
+	p._exec_shackle_chain_node.setup(anchor_a, anchor_b, exec_shackle_chain_len(), p.player_index)
+	p.get_parent().add_child(p._exec_shackle_chain_node)
+	DebugOverlay.log("executioner/throw", p, "SHACKLE CHAIN: len=%.0f (split=%.0f%%)",
+		[exec_shackle_chain_len(), (1.0 - p._exec_chain_split) * 100])
+
+
+func exec_spawn_ball_to_shackle_chain() -> void:
+	## Spawn a chain.gd between ball and shackle — NO player connection (RELEASE mode).
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node):
+		p._exec_chain_node.queue_free()
+	var ChainScript: GDScript = load("res://scripts/systems/chain.gd")
+	p._exec_chain_node = Node2D.new()
+	p._exec_chain_node.set_script(ChainScript)
+	var anchor_a: Dictionary = ChainScript.make_anchor_wall(p._exec_ball_pos)
+	var anchor_b: Dictionary = ChainScript.make_anchor_wall(p._exec_shackle_pos)
+	var total_len: float = p.cfg("exec_chain_total_len", EXEC_CHAIN_TOTAL_LEN)
+	p._exec_chain_node.setup(anchor_a, anchor_b, total_len, p.player_index)
+	p.get_parent().add_child(p._exec_chain_node)
+	DebugOverlay.log("executioner/throw", p, "B-S CHAIN: len=%.0f (no player)", [total_len])
+
+
+func exec_update_chain_ball_anchor() -> void:
+	## Keep chain anchors in sync with ball (and shackle if B-S mode).
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node) and not p._exec_chain_node._severed:
+		if p._exec_chain_node.anchor_a.get("is_wall", false):
+			p._exec_chain_node.anchor_a["pos"] = p._exec_ball_pos
+			p._exec_chain_node.anchor_b["pos"] = p._exec_shackle_pos
+		else:
+			p._exec_chain_node.anchor_b["pos"] = p._exec_ball_pos
+
+
+func exec_update_chain_shackle_anchor() -> void:
+	## Delegate to shackle entity.
+	if p._shackle and is_instance_valid(p._shackle):
+		p._shackle.update_chain_anchor()
+
+
+func exec_check_chain_severed() -> void:
+	## If either chain was severed (broken by damage), retract that side.
+	if p._exec_chain_node and is_instance_valid(p._exec_chain_node):
+		if p._exec_chain_node._severed:
+			p._exec_chain_node = null
+			p._exec_ball_state = p.ExecEndState.RETRACTING
+			DebugOverlay.log("executioner/ball", p, "BALL CHAIN BROKEN — retracting ball")
+	if p._exec_shackle_chain_node and is_instance_valid(p._exec_shackle_chain_node):
+		if p._exec_shackle_chain_node._severed:
+			p._exec_shackle_chain_node = null
+			p._exec_shackle_state = p.ExecEndState.RETRACTING
+			DebugOverlay.log("executioner/throw", p, "SHACKLE CHAIN BROKEN — retracting shackle")
