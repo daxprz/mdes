@@ -181,7 +181,7 @@ var _is_attacking: bool = false
 var _attack_timer: float = 0.0
 var _attack_cooldown: float = 0.0
 var _special_cooldown: float = 0.0
-var _is_wall_sliding: bool = false
+## _is_wall_sliding: inherited from character.gd
 var _wall_jump_stamina: int = 3
 const WALL_JUMP_STAMINA_MAX: int = 3
 var _donut_buddy_count: int = 0
@@ -193,7 +193,7 @@ var _healer_gust_cooldown: float = 0.0
 const HEALER_GUST_COOLDOWN := 8.0
 const HEALER_GUST_RADIUS := 120.0
 const HEALER_GUST_FORCE := 400.0
-var _is_dead: bool = false
+## _is_dead: inherited from character.gd
 
 # Melee combo system
 var _combo_count: int = 0

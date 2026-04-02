@@ -87,6 +87,43 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 		_health_comp.take_damage(amount, source_index)
 
 
+# -- Shared physics constants --------------------------------------------------
+# Subclasses can override via cfg() or direct assignment.
+
+const DEFAULT_GRAVITY := 900.0
+const DEFAULT_JUMP_VELOCITY := -550.0
+const DEFAULT_MAX_FALL_SPEED := 600.0
+const DEFAULT_WALL_SLIDE_SPEED := 60.0
+
+
+# -- Shared state (accessed by components and class scripts) -------------------
+
+var _is_dead: bool = false
+var _is_wall_sliding: bool = false
+
+
+# -- Virtual methods for shared systems ----------------------------------------
+# These provide default behavior that subclasses and ClassComponents can use.
+# player_side.gd overrides most of these with class-specific logic.
+
+func apply_gravity(delta: float) -> void:
+	## Default gravity — simple downward acceleration. Override for airwalk, float, etc.
+	if not is_on_floor():
+		var grav: float = cfg("gravity", DEFAULT_GRAVITY)
+		velocity.y += grav * delta
+		velocity.y = minf(velocity.y, DEFAULT_MAX_FALL_SPEED)
+
+
+func apply_knockback(force: Vector2) -> void:
+	## Apply a knockback impulse. Override for immunity, resistance, etc.
+	velocity += force
+
+
+func get_aim_direction() -> Vector2:
+	## Default aim direction — facing direction. Override for analog stick, mouse, etc.
+	return Vector2(1.0 if _facing_right else -1.0, 0.0)
+
+
 # -- Entity interface (for @e[...] selectors) ---------------------------------
 
 var entity_id: String = ""
