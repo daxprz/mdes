@@ -1492,66 +1492,14 @@ var _class_tick_fn: Dictionary = {}
 func _init_class_dispatch() -> void:
 	## Build dispatch tables. Called from _ready().
 	_class_attack_fn = {
-		PlayerManager.CharacterClass.MELEE: _attack_melee,
-		PlayerManager.CharacterClass.RANGED: _attack_ranged,
-		PlayerManager.CharacterClass.MAGE: _attack_mage,
-		PlayerManager.CharacterClass.SUMMONER: _attack_summoner,
-		PlayerManager.CharacterClass.ROGUE: _attack_rogue,
-		PlayerManager.CharacterClass.DEMOLITIONIST: _attack_demolitionist,
-		PlayerManager.CharacterClass.HEALER: _attack_healer,
-		PlayerManager.CharacterClass.TANK: _attack_tank,
-		PlayerManager.CharacterClass.NINJA: _attack_jumper,
-		PlayerManager.CharacterClass.BALLOONIST: _attack_balloonist,
-		PlayerManager.CharacterClass.GUITARIST: _attack_guitarist,
-		PlayerManager.CharacterClass.WEREWOLF: _attack_werewolf,
-		PlayerManager.CharacterClass.EXECUTIONER: _attack_executioner,
 	}
 	_class_special_fn = {
-		PlayerManager.CharacterClass.MELEE: _special_shield_charge,
-		PlayerManager.CharacterClass.RANGED: _special_grappling_hook,
-		PlayerManager.CharacterClass.MAGE: _special_frosting_freeze,
-		PlayerManager.CharacterClass.SUMMONER: _special_summon_donut,
-		PlayerManager.CharacterClass.ROGUE: _special_shadow_dash,
-		PlayerManager.CharacterClass.DEMOLITIONIST: _special_big_bomb,
-		PlayerManager.CharacterClass.HEALER: _special_healing_burst,
-		PlayerManager.CharacterClass.TANK: _special_tank_slam,
-		PlayerManager.CharacterClass.NINJA: _special_jumper_dive,
-		PlayerManager.CharacterClass.BALLOONIST: _special_balloonist_burst,
-		PlayerManager.CharacterClass.GUITARIST: _special_guitarist_blast_wave,
-		PlayerManager.CharacterClass.WEREWOLF: _special_werewolf_roar_push,
-		PlayerManager.CharacterClass.EXECUTIONER: _special_executioner_cleave,
 	}
 	_class_charged_fn = {
-		PlayerManager.CharacterClass.MELEE: _charged_melee_slam,
-		PlayerManager.CharacterClass.RANGED: _charged_ranged_shot,
-		PlayerManager.CharacterClass.MAGE: _charged_mage_bolt,
-		PlayerManager.CharacterClass.SUMMONER: _charged_summoner_donut,
-		PlayerManager.CharacterClass.ROGUE: _charged_rogue_backstab,
-		PlayerManager.CharacterClass.DEMOLITIONIST: _charged_demo_mega_bomb,
-		PlayerManager.CharacterClass.HEALER: _charged_healer_wave,
-		PlayerManager.CharacterClass.TANK: _charged_tank_shockwave,
-		PlayerManager.CharacterClass.NINJA: _charged_jumper_meteor,
-		PlayerManager.CharacterClass.BALLOONIST: _charged_balloonist_barrage,
-		PlayerManager.CharacterClass.GUITARIST: _charged_guitarist_power_chord,
-		PlayerManager.CharacterClass.WEREWOLF: _charged_werewolf_pounce,
-		PlayerManager.CharacterClass.EXECUTIONER: _charged_executioner_overhead,
 	}
 	# Per-frame class handlers — each class gets ONE tick function
 	# that consolidates all its per-frame logic (was scattered _handle_* calls)
 	_class_tick_fn = {
-		PlayerManager.CharacterClass.MELEE: _tick_melee,
-		PlayerManager.CharacterClass.RANGED: _tick_ranged,
-		PlayerManager.CharacterClass.MAGE: _tick_mage,
-		PlayerManager.CharacterClass.SUMMONER: _tick_summoner,
-		PlayerManager.CharacterClass.ROGUE: _tick_rogue,
-		PlayerManager.CharacterClass.DEMOLITIONIST: _tick_demolitionist,
-		PlayerManager.CharacterClass.HEALER: _tick_healer,
-		PlayerManager.CharacterClass.TANK: _tick_tank,
-		PlayerManager.CharacterClass.NINJA: _tick_ninja,
-		PlayerManager.CharacterClass.BALLOONIST: _tick_balloonist,
-		PlayerManager.CharacterClass.GUITARIST: _tick_guitarist,
-		PlayerManager.CharacterClass.WEREWOLF: _tick_werewolf,
-		PlayerManager.CharacterClass.EXECUTIONER: _tick_executioner,
 	}
 
 
@@ -3814,24 +3762,11 @@ func _exec_apply_chain_constraint() -> void:
 
 # -- Chain Length Helpers — delegated to ExecutionerClass ----------------------
 
-func _exec_ball_chain_len() -> float:
-	return _executioner_class.exec_ball_chain_len() if _executioner_class else 0.0
 
-func _exec_shackle_chain_len() -> float:
-	return _executioner_class.exec_shackle_chain_len() if _executioner_class else 0.0
 
-func _exec_is_bs_release() -> bool:
-	return _executioner_class.exec_is_bs_release() if _executioner_class else false
 
-func _exec_stuck_chain_anchor() -> Vector2:
-	return _executioner_class.exec_stuck_chain_anchor() if _executioner_class else global_position
 
-func _exec_stuck_chain_max() -> float:
-	return _executioner_class.exec_stuck_chain_max() if _executioner_class else 0.0
 
-func _exec_bs_stuck_pull(dir: Vector2, overshoot: float, delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_bs_stuck_pull(dir, overshoot, delta)
 
 
 # -- YEET Physics (shared by thrown + stuck states) ----------------------------
@@ -3852,9 +3787,6 @@ func _exec_is_entity_yeet_mode() -> bool:
 	return _executioner_class.exec_is_entity_yeet_mode() if _executioner_class else false
 
 
-func _exec_try_yeet(chain_dir: Vector2) -> void:
-	if _executioner_class:
-		_executioner_class.exec_try_yeet(chain_dir)
 
 
 # -- Main Tick -----------------------------------------------------------------
@@ -3863,118 +3795,41 @@ func _handle_executioner(delta: float) -> void:
 	if _executioner_class:
 		_executioner_class.exec_main_tick(delta)
 
-func _exec_handle_mode_toggle() -> void:
-	if _executioner_class:
-		_executioner_class.exec_handle_mode_toggle()
-
-func _exec_handle_chain_length(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_handle_chain_length(delta)
-
-func _exec_handle_throw(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_handle_throw(delta)
-
-func _exec_throw_ball() -> void:
-	if _executioner_class:
-		_executioner_class.exec_throw_ball()
-
-func _exec_throw_shackle() -> void:
-	if _executioner_class:
-		_executioner_class.exec_throw_shackle()
-
-func _exec_retract_all() -> void:
-	if _executioner_class:
-		_executioner_class.exec_retract_all()
-
-func _exec_tick_ball(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_tick_ball(delta)
-
-func _exec_update_preview(launch_vel: Vector2) -> void:
-	if _executioner_class:
-		_executioner_class.exec_update_preview(launch_vel)
-
-func _exec_should_hold_on_throw() -> bool:
-	return _executioner_class.exec_should_hold_on_throw() if _executioner_class else true
 
 
-func _exec_spawn_chain() -> void:
-	if _executioner_class:
-		_executioner_class.exec_spawn_chain()
 
 
-func _exec_spawn_shackle_chain() -> void:
-	if _executioner_class:
-		_executioner_class.exec_spawn_shackle_chain()
 
 
-func _exec_spawn_ball_to_shackle_chain() -> void:
-	if _executioner_class:
-		_executioner_class.exec_spawn_ball_to_shackle_chain()
 
 
-func _exec_update_chain_ball_anchor() -> void:
-	if _executioner_class:
-		_executioner_class.exec_update_chain_ball_anchor()
-
-func _exec_update_chain_shackle_anchor() -> void:
-	if _executioner_class:
-		_executioner_class.exec_update_chain_shackle_anchor()
 
 
-func _exec_tick_shackle(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_tick_shackle(delta)
-
-func _exec_try_snap_shackle_to_enemy() -> bool:
-	return _executioner_class.exec_try_snap_shackle_to_enemy() if _executioner_class else false
 
 
-func _exec_check_chain_severed() -> void:
-	if _executioner_class:
-		_executioner_class.exec_check_chain_severed()
 
 
-func _exec_get_ball_world_pos() -> Vector2:
-	return _executioner_class.exec_get_ball_world_pos() if _executioner_class else global_position
-
-func _exec_get_shackle_world_pos() -> Vector2:
-	return _executioner_class.exec_get_shackle_world_pos() if _executioner_class else global_position
 
 
-func _exec_tick_swing(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_tick_swing(delta)
-
-func _attack_executioner() -> void:
-	if _executioner_class:
-		_executioner_class.exec_attack()
 
 
-func _exec_perform_slam() -> void:
-	if _executioner_class:
-		_executioner_class.exec_perform_slam()
 
-func _exec_handle_chain_mode() -> void:
-	if _executioner_class:
-		_executioner_class.exec_handle_chain_mode()
 
-func _special_executioner_cleave() -> void:
-	if _executioner_class:
-		_executioner_class.exec_special_cleave()
 
-func _exec_tick_cleave(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_tick_cleave(delta)
 
-func _exec_fire_cleave() -> void:
-	if _executioner_class:
-		_executioner_class.exec_fire_cleave()
 
-func _charged_executioner_overhead(charge_ratio: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_charged_overhead(charge_ratio)
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -4119,17 +3974,11 @@ func _draw_executioner() -> void:
 	if _executioner_class:
 		_executioner_class.draw_executioner()
 
-func _exec_test_tick(delta: float) -> void:
-	if _executioner_class:
-		_executioner_class.exec_test_tick(delta)
 
 func exec_tuning_set(key: String, value: float) -> void:
 	if _executioner_class:
 		_executioner_class.exec_tuning_set(key, value)
 
-func _draw_exec_tuning() -> void:
-	if _executioner_class:
-		_executioner_class.draw_exec_tuning()
 
 func _exec_tuning_handle_input(event: InputEvent) -> void:
 	if _executioner_class:
