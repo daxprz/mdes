@@ -188,6 +188,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.50
+**Strudel voices, test suites, Music Drawer sync, bug fixes**
+
+- **87 SiON voice presets**: `s=flute`, `s=bass`, `s=strings`, `s=marimba`, `s=saw`, `s=pad`, `s=trumpet`, etc. — use `strudel voices` to list all
+- **148 unit tests** across 8 suites: `strudel test` runs algebra, composers, combinators, signals, mini, integration, voices
+- **18 listening tests**: `run music_listen_features` plays each Strudel feature live so you can hear it — uses the existing Ctrl+D test runner
+- **Music Drawer syncs**: editor text, pianoroll, and source highlights now update when patterns change from RCON, console, or test runner
+- **Fix**: note stacking — SiON `note_on` now passes duration so notes auto-release instead of holding forever
+- **Fix**: parser infinite loop on unrecognized characters (e.g. `=`) — parser now skips bad chars
+- **Fix**: pianoroll empty after RCON pattern change — rolling buffer detects external pattern swaps and resets
+- **Fix**: dict value resolution — pianoroll and trigger both handle `{value: "c4", s: "strings"}` format
+- **Full editor keybindings**: selection (Shift+arrows), Ctrl+C/X/V clipboard, Ctrl+K/U/W/Y kill ring, word navigation
+- **`music help`** RCON command: comprehensive inline reference for all commands, mini-notation syntax, and drawer keybindings
+- **`strudel listen`** shortcut to run listening tests from the console
+
 ### v0.10.49
 **Fix Strudel audio dropout + pianoroll flashing**
 
