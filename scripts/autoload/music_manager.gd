@@ -81,6 +81,7 @@ var _cyclist: StrudelCyclist = null
 var _sion_trigger: StrudelSionTrigger = null
 ## Current strudel pattern being played
 var _strudel_pattern: StrudelPattern = null
+var _strudel_source_text: String = ""  ## Mini-notation text that produced the current pattern
 ## Elapsed time for the clock (seconds since start)
 var _strudel_time: float = 0.0
 ## Whether strudel engine is active
@@ -580,7 +581,7 @@ func _init_strudel() -> void:
 
 var _sion_streaming: bool = false  ## Track whether SiON is in streaming mode
 
-func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
+func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: String = "") -> void:
 	## Play a Strudel pattern. Hot-swaps if already playing.
 	if not _cyclist or not driver:
 		print("MUSIC: Cannot play pattern — Strudel engine not initialized")
@@ -608,6 +609,7 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
 	_cyclist.start()
 	_strudel_playing = true
 	_strudel_pattern = pattern
+	_strudel_source_text = source_text
 
 	DebugOverlay.log("music/status", null, "MUSIC: Strudel playing (cps=%.2f)" % _cyclist.cps)
 	print("MUSIC: Strudel pattern playing (cps=%.2f)" % _cyclist.cps)
@@ -632,7 +634,7 @@ func _strudel_play_title() -> void:
 		Strudel.pure("g3"), Strudel.pure("c4"),
 	])
 	# Slow it down: 0.25 cps = 1 cycle every 4 seconds
-	strudel_play(pat, 0.25)
+	strudel_play(pat, 0.25, "c3 eb3 g3 c4")
 
 
 func strudel_set_cps(cps: float) -> void:

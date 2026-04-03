@@ -359,7 +359,8 @@ func _play_current() -> void:
 	var pat: StrudelPattern = StrudelMini.mini(text)
 	if not sound_name.is_empty():
 		pat = pat.set_in(Strudel.pure({"s": sound_name}))
-	MusicManager.strudel_play(pat, _cps)
+	var display: String = text + (" s=%s" % sound_name if not sound_name.is_empty() else "")
+	MusicManager.strudel_play(pat, _cps, display)
 	_is_playing = true
 	# Reset rolling buffer on pattern change
 	_visible_haps.clear()
@@ -393,13 +394,19 @@ func _update_pianoroll() -> void:
 		_last_known_pattern = null
 		return
 
-	# Detect external pattern change (e.g. RCON strudel command)
+	# Detect external pattern change (e.g. RCON strudel command, test runner)
 	if MusicManager._strudel_pattern != _last_known_pattern:
 		_last_known_pattern = MusicManager._strudel_pattern
 		_visible_haps.clear()
 		_last_query_end = 0.0
 		_active_locations.clear()
-		DebugOverlay.log("strudel/pattern", null, "DRAWER: pattern changed externally, resetting buffer")
+		# Sync editor text from the source that created this pattern
+		if not MusicManager._strudel_source_text.is_empty():
+			_editor_text = MusicManager._strudel_source_text
+			_editor_cursor = _editor_text.length()
+			_select_start = -1
+		_is_playing = MusicManager._strudel_playing
+		DebugOverlay.log("strudel/pattern", null, "DRAWER: synced to '%s'" % _editor_text)
 
 	_current_time = MusicManager._cyclist.now()
 	var lookbehind: float = PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD

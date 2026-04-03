@@ -1303,10 +1303,11 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 						mini_sound = p_val
 					mini_text = (mini_text.substr(0, p_idx) + mini_text.substr(p_idx + param.length() + p_val.length())).strip_edges()
 			var pat: StrudelPattern = StrudelMini.mini(mini_text)
+			var display_text: String = mini_text + (" s=%s" % mini_sound if not mini_sound.is_empty() else "")
 			# Apply sound/voice if specified
 			if not mini_sound.is_empty():
 				pat = pat.set_in(Strudel.pure({"s": mini_sound}))
-			MusicManager.strudel_play(pat, mini_cps)
+			MusicManager.strudel_play(pat, mini_cps, display_text)
 			var hap_count: int = pat.first_cycle().size()
 			return "OK: strudel '%s' (%d haps/cycle%s)" % [
 				mini_text, hap_count,
@@ -1478,7 +1479,11 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 			if notes.is_empty():
 				return "ERR: no notes specified"
 			var pat: StrudelPattern = Strudel.sequence(notes)
-			MusicManager.strudel_play(pat, pat_cps)
+			var note_names: Array = []
+			for i in range(2, parts.size()):
+				if not parts[i].begins_with("cps="):
+					note_names.append(parts[i])
+			MusicManager.strudel_play(pat, pat_cps, " ".join(PackedStringArray(note_names)))
 			return "OK: playing pattern (%d notes, cps=%.2f)" % [notes.size(), MusicManager._cyclist.cps if MusicManager._cyclist else 0.0]
 		"cps":
 			if parts.size() < 3:
@@ -1501,7 +1506,7 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 					mini_cps = float(mini_text.substr(cps_idx + 4).strip_edges())
 					mini_text = mini_text.substr(0, cps_idx).strip_edges()
 			var mini_pat: StrudelPattern = StrudelMini.mini(mini_text)
-			MusicManager.strudel_play(mini_pat, mini_cps)
+			MusicManager.strudel_play(mini_pat, mini_cps, mini_text)
 			var hap_count: int = mini_pat.first_cycle().size()
 			return "OK: strudel '%s' (%d haps/cycle, cps=%.2f)" % [
 				mini_text, hap_count, MusicManager._cyclist.cps if MusicManager._cyclist else 0.0]
