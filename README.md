@@ -203,6 +203,23 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.51
+**Multi-line editor, per-line visualizers, Strudel v1.2.0 viz compatibility**
+
+- **Multi-line editor**: Enter creates lines, Ctrl+Enter evaluates all stacked, Up/Down navigates, Backspace@col0 joins
+- **Named lines**: `drums: "c4(3,8)".pianoroll()` — Strudel label syntax with per-line naming
+- **Per-line mute**: Ctrl+/ toggles mute, muted lines dimmed and excluded from playback
+- **All Strudel v1.2.0 visualizers**: `.pianoroll()`, `.scope()`, `.wordfall()`, `.spiral()`, `.pitchwheel()`, `.fscope()` — each renders a strip below its code line
+- **Strudel-compatible syntax**: `"c4 e4 g4 c5".pianoroll()` — quoted mini-notation + method chain, `note()` wrapper stripped
+- **Per-line pattern isolation**: each line's visualizer only shows its own haps, not the combined output
+- **Source highlighting fixed**: offsets account for name prefix and quotes, highlights land on correct characters
+- **Polymeter**: `{a b c, d e}` properly aligns sub-patterns to shared step count
+- **Note duration**: CPS-derived BPM synced to SiON for correct note lengths at all tempos
+- **strudel start/stop**: resume last pattern after stop
+- **strudel edit**: `strudel edit "melody".pianoroll() | "bass".scope()` — set drawer lines from RCON with viz
+- **9 listening test suites** (60+ audible tests): features, voices, multiline, rhythm, duration, compositions, named lines, viz showcase, viz multiline
+- Removed invented visualizers (.bar/.dots/.meter) — only Strudel-compatible types
+
 ### v0.10.50
 **Strudel voices, test suites, Music Drawer sync, bug fixes**
 
