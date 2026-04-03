@@ -1079,62 +1079,64 @@ func _draw_line_bar(x: float, y: float, w: float, h: float, font: Font, line_idx
 		HORIZONTAL_ALIGNMENT_LEFT, w - 8, 8, Color(0.5, 0.5, 0.6))
 
 
-func _draw_line_waveform(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
-	## Draw hap values as a continuous line over time — good for melodic contours.
-	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+func _draw_line_waveform(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
+	## Oscilloscope-style waveform — draws the synthesized wave shape of
+	## currently active notes, matching Strudel's .scope() visualizer.
+	## Shows a sine wave at the pitch frequency, amplitude modulated by
+	## the note's progress. When no note is active, draws a flat line.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
 
 	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
-	if haps.is_empty():
-		return
+	var cy: float = y + h * 0.5
+	var amplitude: float = h * 0.35
 
-	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
-	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
-	var time_range: float = to_time - from_time
-	if time_range <= 0:
-		return
-
-	# Collect pitch values for range
-	var min_p: float = INF
-	var max_p: float = -INF
-	for hap in haps:
-		var p: float = _hap_to_pitch(hap)
-		if p >= 0:
-			min_p = minf(min_p, p)
-			max_p = maxf(max_p, p)
-	if min_p == INF:
-		return
-	var p_range: float = maxf(max_p - min_p, 1.0)
-
-	# Draw connected line segments through hap onsets
-	var points: PackedVector2Array = PackedVector2Array()
-	var colors: PackedColorArray = PackedColorArray()
+	# Find active notes
+	var active_pitches: Array = []
 	for hap in haps:
 		if hap.whole == null:
 			continue
+		if not hap.is_active(_current_time):
+			continue
 		var pitch: float = _hap_to_pitch(hap)
-		if pitch < 0:
-			continue
-		var hap_begin: float = hap.w().begin.to_float()
-		var px_x: float = x + ((hap_begin - from_time) / time_range) * w
-		if px_x < x - 10 or px_x > x + w + 10:
-			continue
-		var py: float = y + h - ((pitch - min_p) / p_range) * (h - 4) - 2
-		points.append(Vector2(px_x, py))
-		var is_active: bool = hap.is_active(_current_time)
-		colors.append(Color(1.0, 0.8, 0.2, 0.9) if is_active else Color(0.3, 0.6, 1.0, 0.6))
+		if pitch >= 0:
+			# Calculate progress through this note for amplitude envelope
+			var dur: float = hap.get_duration().to_float()
+			var progress: float = 0.0
+			if dur > 0:
+				progress = clampf((_current_time - hap.w().begin.to_float()) / dur, 0.0, 1.0)
+			active_pitches.append({"pitch": pitch, "progress": progress})
 
-	# Draw line segments
-	if points.size() >= 2:
-		for i in range(points.size() - 1):
-			_panel.draw_line(points[i], points[i + 1], colors[i], 1.5)
+	if active_pitches.is_empty():
+		# Flat line when silent
+		_panel.draw_line(Vector2(x, cy), Vector2(x + w, cy), Color(0.15, 0.2, 0.15), 1.0)
+		return
 
-	# Draw dots at each onset
-	for i in range(points.size()):
-		_panel.draw_circle(points[i], 2.5, colors[i])
+	# Draw the composite waveform across the strip width
+	var step_count: int = int(w)
+	var prev_point := Vector2(x, cy)
+	var phase_offset: float = _current_time * 20.0  # Scroll the wave with time
 
-	# Playhead
-	var ph_x: float = x + PIANOROLL_PLAYHEAD * w
-	_panel.draw_line(Vector2(ph_x, y), Vector2(ph_x, y + h), Color(1.0, 1.0, 1.0, 0.3), 1.0)
+	for i in range(step_count):
+		var t: float = float(i) / float(step_count)
+		var sample: float = 0.0
+
+		for note in active_pitches:
+			# Convert MIDI pitch to a visual frequency
+			# Higher pitches = more cycles across the strip
+			var freq: float = (note["pitch"] - 48.0) * 0.5 + 2.0  # ~2-20 cycles across strip
+			freq = maxf(freq, 1.0)
+			# Amplitude envelope: attack then decay
+			var env: float = 1.0 - note["progress"] * 0.7  # Fade out as note progresses
+			sample += sin(TAU * (t * freq + phase_offset)) * env
+
+		# Clamp and normalize for multiple notes
+		sample = clampf(sample / maxf(active_pitches.size(), 1), -1.0, 1.0)
+		var py: float = cy - sample * amplitude
+		var point := Vector2(x + i, py)
+
+		if i > 0:
+			_panel.draw_line(prev_point, point, Color(0.3, 0.9, 0.4, 0.8), 1.5)
+		prev_point = point
 
 
 func _draw_line_dots(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
