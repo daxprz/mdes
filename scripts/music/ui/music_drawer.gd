@@ -100,7 +100,7 @@ const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_BAR]
 const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
 
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
-	return {"text": text, "name": name, "muted": muted, "viz": viz}
+	return {"text": text, "name": name, "muted": muted, "viz": viz, "pattern_offset": 0}
 
 
 func _line_viz(idx: int) -> String:
@@ -495,20 +495,28 @@ func _word_boundary_right() -> int:
 # -- Playback ------------------------------------------------------------------
 
 func _parse_line_text(line: Dictionary) -> Dictionary:
-	## Parse a line dict into {pattern_text, name, sound, is_valid, viz}.
+	## Parse a line dict into {pattern_text, name, sound, is_valid, viz, pattern_offset}.
+	## pattern_offset = character position in the raw line where the mini-notation starts.
+	## This is needed so source highlights align with the displayed text.
+	##
 	## Supports Strudel-style syntax:
 	##   "name: pattern"           — named line (label)
 	##   "pattern s=voice"         — voice override
-	##   "pattern.pianoroll()"     — inline visualizer
-	##   "pattern.punchcard()"     — alias for pianoroll
-	##   "pattern.bar()"           — bar visualizer
-	var raw: String = line.get("text", "").strip_edges()
-	var result := {"pattern_text": "", "name": line.get("name", ""), "sound": "", "is_valid": false, "viz": VIZ_NONE}
+	##   "pattern .pianoroll()"    — inline visualizer (at end of line)
+	##   "pattern .punchcard()"    — alias for pianoroll
+	##   "pattern .bar()"          — bar visualizer
+	var raw: String = line.get("text", "")
+	var result := {
+		"pattern_text": "", "name": line.get("name", ""), "sound": "",
+		"is_valid": false, "viz": VIZ_NONE, "pattern_offset": 0,
+	}
 
-	if raw.is_empty() or raw.begins_with("#"):
+	var stripped: String = raw.strip_edges()
+	if stripped.is_empty() or stripped.begins_with("#"):
 		return result
 
 	var text: String = raw
+	var offset: int = 0  # Track how many chars we've consumed from the front
 
 	# Check for "name: pattern" syntax (Strudel label style)
 	var colon_idx: int = text.find(": ")
@@ -517,23 +525,44 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		if candidate.is_valid_identifier():
 			result["name"] = candidate
 			line["name"] = candidate
-			text = text.substr(colon_idx + 2).strip_edges()
+			offset = colon_idx + 2
+			text = text.substr(offset)
+			# Skip leading whitespace after ": "
+			while not text.is_empty() and text[0] == " ":
+				offset += 1
+				text = text.substr(1)
 
-	# Extract inline visualizer methods: .pianoroll() .punchcard() .bar()
-	# These are stripped from the pattern text and set the line's viz type.
+	result["pattern_offset"] = offset
+
+	# Extract inline visualizer: must be at the END of the line
+	# Match ".pianoroll()" etc. only when preceded by space or end of pattern
 	var viz_methods := {
 		".pianoroll()": VIZ_PIANOROLL,
-		".punchcard()": VIZ_PIANOROLL,  # alias
+		".punchcard()": VIZ_PIANOROLL,
 		".bar()": VIZ_BAR,
-		"._pianoroll()": VIZ_PIANOROLL,  # Strudel underscore variant
+		"._pianoroll()": VIZ_PIANOROLL,
 	}
 	for method in viz_methods:
-		var m_idx: int = text.find(method)
-		if m_idx >= 0:
+		if text.strip_edges().ends_with(method):
 			result["viz"] = viz_methods[method]
 			line["viz"] = viz_methods[method]
-			text = (text.substr(0, m_idx) + text.substr(m_idx + method.length())).strip_edges()
-			break  # Only one viz per line
+			# Strip the viz method from the end
+			var end_idx: int = text.rfind(method)
+			text = text.substr(0, end_idx).strip_edges()
+			break
+	# If no viz found in text, clear stored viz (so removing .pianoroll() hides it)
+	if result["viz"] == VIZ_NONE and line.get("viz", VIZ_NONE) != VIZ_NONE:
+		# Only clear if the line was using text-based viz (not Ctrl+. manual toggle)
+		# We detect manual toggle by checking if the text never had a viz method
+		var has_any_viz_text: bool = false
+		for method in viz_methods:
+			if method in raw:
+				has_any_viz_text = true
+				break
+		if not has_any_viz_text:
+			pass  # Keep manual Ctrl+. setting
+		else:
+			line["viz"] = VIZ_NONE
 
 	# Extract key=value parameters
 	for param in ["cps=", "sound=", "s="]:
@@ -587,6 +616,7 @@ func _play_current() -> void:
 			pat = pat.set_in(Strudel.pure({"s": sound_name}))
 
 		_line_patterns[i] = pat
+		_lines[i]["pattern_offset"] = parsed["pattern_offset"]
 		active_patterns.append(pat)
 
 		var pname: String = parsed["name"]
@@ -836,7 +866,9 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	var text_w: float = w - label_w - 4
 
 	# Draw source highlights behind text (active notes glow)
-	# Keys are "line_idx:start:end" — only draw highlights for this line
+	# Keys are "line_idx:start:end" where start/end are offsets into the PATTERN text.
+	# We need to shift them by pattern_offset to align with the displayed line text.
+	var pat_offset: int = _lines[line_idx].get("pattern_offset", 0) if line_idx < _lines.size() else 0
 	for key in _active_locations:
 		var loc_parts: PackedStringArray = key.split(":")
 		if loc_parts.size() != 3:
@@ -844,8 +876,9 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 		var loc_line: int = int(loc_parts[0])
 		if loc_line != line_idx:
 			continue
-		var loc_start: int = int(loc_parts[1])
-		var loc_end: int = int(loc_parts[2])
+		# Shift parser offsets to line text space
+		var loc_start: int = int(loc_parts[1]) + pat_offset
+		var loc_end: int = int(loc_parts[2]) + pat_offset
 		# Only highlight if this location falls within this line's text
 		if loc_start >= line_text.length() or loc_end <= 0:
 			continue
