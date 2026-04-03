@@ -643,6 +643,7 @@ func _play_current() -> void:
 		combined = Strudel.stack(active_patterns)
 
 	var display: String = " | ".join(PackedStringArray(display_parts))
+	_self_triggered = true
 	MusicManager.strudel_play(combined, _cps, display)
 	_is_playing = true
 	# Reset rolling buffer on pattern change
@@ -668,6 +669,7 @@ func _update_leaf_locations() -> void:
 # -- Pianoroll Update ----------------------------------------------------------
 
 var _last_known_pattern: StrudelPattern = null  ## Track pattern changes from outside
+var _self_triggered: bool = false  ## True when we initiated the pattern change (skip sync)
 
 func _update_pianoroll() -> void:
 	if not MusicManager._cyclist or not MusicManager._strudel_playing:
@@ -683,16 +685,17 @@ func _update_pianoroll() -> void:
 		_visible_haps.clear()
 		_last_query_end = 0.0
 		_active_locations.clear()
-		# Sync editor text from the source that created this pattern
-		if not MusicManager._strudel_source_text.is_empty():
+
+		if _self_triggered:
+			# We caused this change — don't overwrite our lines or patterns
+			_self_triggered = false
+		elif not MusicManager._strudel_source_text.is_empty():
 			var src: String = MusicManager._strudel_source_text
-			# If source contains " | ", it was multiple patterns stacked — split into lines
 			if " | " in src:
 				_lines.clear()
 				for part in src.split(" | "):
 					_lines.append(_make_line(part.strip_edges()))
 			else:
-				# Single pattern — put in first line, keep others
 				if _lines.is_empty():
 					_lines.append(_make_line(src))
 				else:
@@ -700,24 +703,24 @@ func _update_pianoroll() -> void:
 			_current_line = 0
 			_editor_cursor = _editor_text.length()
 			_select_start = -1
+			# Populate per-line patterns for external sync
+			_line_patterns.clear()
+			_line_haps.clear()
+			_line_query_ends.clear()
+			for i in range(_lines.size()):
+				var parsed: Dictionary = _parse_line_text(_lines[i])
+				if parsed["is_valid"]:
+					var pat: StrudelPattern = StrudelMini.mini(parsed["pattern_text"])
+					var snd: String = parsed["sound"]
+					if not snd.is_empty():
+						pat = pat.set_in(Strudel.pure({"s": snd}))
+					_line_patterns.append(pat)
+					_lines[i]["pattern_offset"] = parsed["pattern_offset"]
+				else:
+					_line_patterns.append(null)
+				_line_haps.append([])
+				_line_query_ends.append(0.0)
 		_is_playing = MusicManager._strudel_playing
-		# Populate per-line patterns from the synced text so pianoroll + highlights work
-		_line_patterns.clear()
-		_line_haps.clear()
-		_line_query_ends.clear()
-		for i in range(_lines.size()):
-			var parsed: Dictionary = _parse_line_text(_lines[i])
-			if parsed["is_valid"]:
-				var pat: StrudelPattern = StrudelMini.mini(parsed["pattern_text"])
-				var snd: String = parsed["sound"]
-				if not snd.is_empty():
-					pat = pat.set_in(Strudel.pure({"s": snd}))
-				_line_patterns.append(pat)
-				_lines[i]["pattern_offset"] = parsed["pattern_offset"]
-			else:
-				_line_patterns.append(null)
-			_line_haps.append([])
-			_line_query_ends.append(0.0)
 		DebugOverlay.log("strudel/pattern", null, "DRAWER: synced to '%s' (%d line patterns)" % [
 			_editor_text, _line_patterns.filter(func(p): return p != null).size()])
 
@@ -843,8 +846,12 @@ func _draw_panel() -> void:
 		draw_y += LINE_HEIGHT
 
 		# Draw the per-line visualizer strip (if enabled)
-		if viz != VIZ_NONE and i < _line_haps.size():
-			_draw_line_viz(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT, font, i, viz)
+		if viz != VIZ_NONE:
+			if i < _line_haps.size():
+				_draw_line_viz(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT, font, i, viz)
+			else:
+				# Hap buffer not ready yet — draw empty viz background
+				_panel.draw_rect(Rect2(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT), Color(0.03, 0.03, 0.05))
 			draw_y += VIZ_STRIP_HEIGHT
 
 		# Stop if we run out of panel space
