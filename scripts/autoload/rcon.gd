@@ -165,6 +165,8 @@ func _execute(command: String) -> String:
   exec_tuning (et)              — toggle ball/chain tuning popup
   exec_set <key> <value>        — set executioner tuning value
   music [play|stop|off|score|scores|mml|intensity|tempo|layer|...] — music
+  strudel <mini-notation>       — play Strudel pattern (or stop/cps/status)
+  musicdrawer (md)              — toggle music drawer (Ctrl+M)
   quit                          — quit game"""
 
 		"debug":
@@ -1044,6 +1046,13 @@ func _execute(command: String) -> String:
 		"music", "m":
 			return _cmd_music(parts, command)
 
+		"strudel":
+			return _cmd_strudel(parts, command)
+
+		"musicdrawer", "md":
+			MusicDrawer.toggle()
+			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
+
 		"ai_spawn":
 			# Spawn an AI-controlled player at a position.
 			# ai_spawn [x y | @e[...] ~dx ~dy] [class=executioner] [name=id]
@@ -1200,6 +1209,65 @@ func _cmd_gameconfig(parts: PackedStringArray) -> String:
 	return "OK: game/%s = %s" % [key, str(new_val)]
 
 
+func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
+	## Strudel pattern engine — play mini-notation directly.
+	## Usage:
+	##   strudel <mini-notation>              — parse and play
+	##   strudel stop                         — stop playback
+	##   strudel cps <value>                  — set cycles per second
+	##   strudel status                       — show scheduler state
+	##   strudel hush                         — silence all
+	##   strudel drawer                       — toggle music drawer
+	if parts.size() < 2:
+		# Show status
+		var playing: String = "playing" if MusicManager._strudel_playing else "stopped"
+		var cps_val: float = MusicManager._cyclist.cps if MusicManager._cyclist else 0.0
+		var cycle: float = MusicManager._cyclist.now() if MusicManager._cyclist and MusicManager._strudel_playing else 0.0
+		return "Strudel: %s  cps=%.2f  cycle=%.1f" % [playing, cps_val, cycle]
+
+	var sub: String = parts[1].to_lower()
+	match sub:
+		"stop", "hush":
+			MusicManager.strudel_stop()
+			return "OK: strudel stopped"
+		"cps":
+			if parts.size() < 3:
+				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
+			MusicManager.strudel_set_cps(float(parts[2]))
+			return "OK: cps → %.2f" % float(parts[2])
+		"status":
+			var lines: Array[String] = ["Strudel Engine:"]
+			lines.append("  playing: %s" % str(MusicManager._strudel_playing))
+			if MusicManager._cyclist:
+				lines.append("  cps: %.2f  (%.0f BPM)" % [MusicManager._cyclist.cps, MusicManager._cyclist.cps * 120.0])
+				lines.append("  cycle: %.2f" % MusicManager._cyclist.now())
+				lines.append("  started: %s" % str(MusicManager._cyclist.started))
+			if MusicManager._strudel_pattern:
+				var haps: Array = MusicManager._strudel_pattern.first_cycle()
+				lines.append("  pattern: %d haps/cycle" % haps.size())
+				for h in haps.slice(0, 8):
+					lines.append("    %s" % h.show(true))
+				if haps.size() > 8:
+					lines.append("    ... +%d more" % (haps.size() - 8))
+			return "\n".join(lines)
+		"drawer":
+			MusicDrawer.toggle()
+			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
+		_:
+			# Everything else is mini-notation
+			var mini_text: String = command.substr(command.find(" ") + 1).strip_edges()
+			# Parse optional cps= at the end
+			var mini_cps: float = -1.0
+			var cps_idx: int = mini_text.find("cps=")
+			if cps_idx >= 0:
+				mini_cps = float(mini_text.substr(cps_idx + 4).strip_edges())
+				mini_text = mini_text.substr(0, cps_idx).strip_edges()
+			var pat: StrudelPattern = StrudelMini.mini(mini_text)
+			MusicManager.strudel_play(pat, mini_cps)
+			var hap_count: int = pat.first_cycle().size()
+			return "OK: strudel '%s' (%d haps/cycle)" % [mini_text, hap_count]
+
+
 func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 	## Music system control.
 	## Usage: music [subcmd] [args...]
@@ -1285,13 +1353,57 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 			MusicManager.play_mml(mml_text)
 			return "OK: playing MML (%d chars)" % mml_text.length()
 		"off":
-			# Stop everything (layered, title, direct)
+			# Stop everything (layered, title, direct, strudel)
 			MusicManager.stop()
 			MusicManager.stop_title_music()
 			MusicManager.stop_direct()
+			MusicManager.strudel_stop()
 			return "OK: all music stopped"
+		"pat", "pattern":
+			# Play a Strudel pattern from note names
+			# music pat c4 e4 g4 c5          — sequence of notes
+			# music pat c4 e4 g4 c5 cps=0.5  — with CPS
+			if parts.size() < 3:
+				return "ERR: usage: music pat <note1> <note2> ... [cps=<value>]"
+			var notes: Array = []
+			var pat_cps: float = -1.0
+			for i in range(2, parts.size()):
+				if parts[i].begins_with("cps="):
+					pat_cps = float(parts[i].substr(4))
+				else:
+					notes.append(Strudel.pure(parts[i]))
+			if notes.is_empty():
+				return "ERR: no notes specified"
+			var pat: StrudelPattern = Strudel.sequence(notes)
+			MusicManager.strudel_play(pat, pat_cps)
+			return "OK: playing pattern (%d notes, cps=%.2f)" % [notes.size(), MusicManager._cyclist.cps if MusicManager._cyclist else 0.0]
+		"cps":
+			if parts.size() < 3:
+				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
+			MusicManager.strudel_set_cps(float(parts[2]))
+			return "OK: cps → %.2f" % float(parts[2])
+		"strudel", "s":
+			# Play a mini-notation string via Strudel engine
+			# music strudel c4 e4 [g4 g4] c5
+			# Everything after "strudel" is the mini-notation
+			if parts.size() < 3:
+				return "ERR: usage: music strudel <mini-notation>"
+			var mini_idx: int = command.find(sub) + sub.length()
+			var mini_text: String = command.substr(mini_idx).strip_edges()
+			# Parse optional cps= at the end
+			var mini_cps: float = -1.0
+			if mini_text.ends_with(")") or mini_text.find("cps=") >= 0:
+				var cps_idx: int = mini_text.find("cps=")
+				if cps_idx >= 0:
+					mini_cps = float(mini_text.substr(cps_idx + 4).strip_edges())
+					mini_text = mini_text.substr(0, cps_idx).strip_edges()
+			var mini_pat: StrudelPattern = StrudelMini.mini(mini_text)
+			MusicManager.strudel_play(mini_pat, mini_cps)
+			var hap_count: int = mini_pat.first_cycle().size()
+			return "OK: strudel '%s' (%d haps/cycle, cps=%.2f)" % [
+				mini_text, hap_count, MusicManager._cyclist.cps if MusicManager._cyclist else 0.0]
 		_:
-			return "ERR: unknown music command '%s'. Try: play, stop, off, test, score, scores, mml, intensity, tempo, layer, mute, unmute, push, combat, calm" % sub
+			return "ERR: unknown music command '%s'. Try: play, stop, off, test, score, scores, mml, pat, cps, intensity, tempo, layer, mute, unmute, push, combat, calm" % sub
 
 
 func _cmd_teleport(parts: PackedStringArray) -> String:

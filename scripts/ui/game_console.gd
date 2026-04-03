@@ -146,6 +146,10 @@ const COMMANDS := [
 	"mocap", "skeleton",
 	# -- Announce / comment --
 	"announce", "comment",
+	# -- Strudel --
+	"strudel", "strudel stop", "strudel hush",
+	"strudel cps", "strudel status", "strudel drawer",
+	"musicdrawer", "md",
 ]
 
 var _panel: Control = null

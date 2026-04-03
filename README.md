@@ -163,6 +163,22 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.48
+**Strudel pattern engine — live-coding music in Godot**
+
+- **Strudel v1.2.0 pattern algebra**: Fraction (exact rationals), TimeSpan, Hap, State, Pattern with full applicative/monadic composition — ported to GDScript
+- **Mini-notation parser**: recursive descent parser for `"c4 e4 [g4 b4] c5"` — sequences, sub-cycles, stacks, fast/slow, angle brackets, euclidean rhythms, degrade, random choose
+- **45+ pattern combinators**: fast, slow, early, late, every, rev, ply, palindrome, jux, off, inside, outside, zoom, chunk, hurry, compress, focus
+- **Composers**: add, sub, mul, div, set, keep, keepif with In/Out/Both/Squeeze structure modes; struct, mask
+- **Continuous signals**: saw, sine, tri, square, cosine, rand + segment, range; run, scan, irand, choose
+- **Cyclist scheduler**: cycle-based pattern scheduler with CPS tempo, frame-tick clock, SiON trigger bridge
+- **Music Drawer (Ctrl+M)**: slide-out panel with text editor, pianoroll visualization, source highlighting (active notes glow in the text)
+- **Live editing**: type mini-notation, press Enter, pattern hot-swaps; pianoroll scrolls, playhead tracks current position
+- **RCON commands**: `strudel <mini-notation>`, `strudel stop/cps/status/drawer`; `musicdrawer` (md) toggle
+- **Debug aspects**: `strudel/trigger`, `strudel/scheduler`, `strudel/parse`, `strudel/pattern`
+- **7 test suites**: Fraction, TimeSpan, Pattern, Composers, Combinators, Signals, Mini — all pass
+- **Design document**: `docs/epics/EPIC_strudel_integration.md` — 5 EPICs, 22 stories, full architecture
+
 ### v0.10.47
 **Procedural adaptive music system powered by GDSiON**
 

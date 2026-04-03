@@ -73,6 +73,19 @@ var _voices: Dictionary = {}
 ## Track ID allocation counter (GDSiON tracks)
 var _next_track_id: int = 10
 
+# -- Strudel Engine ------------------------------------------------------------
+
+## The Strudel cyclist (pattern scheduler)
+var _cyclist: StrudelCyclist = null
+## The SiON trigger bridge
+var _sion_trigger: StrudelSionTrigger = null
+## Current strudel pattern being played
+var _strudel_pattern: StrudelPattern = null
+## Elapsed time for the clock (seconds since start)
+var _strudel_time: float = 0.0
+## Whether strudel engine is active
+var _strudel_playing: bool = false
+
 # -- Layer State ---------------------------------------------------------------
 
 class LayerState:
@@ -168,9 +181,12 @@ func gen_presets():
 
 	DebugOverlay.log("music/status", null, "MUSIC: driver initialized, %d layers defined", [_layers.size()])
 
-	# Auto-start title music if we're on the title screen
+	# Initialize the Strudel pattern engine
+	_init_strudel()
+
+	# Auto-start Strudel pattern on the title screen
 	if GameManager.current_state == GameManager.GameState.TITLE:
-		_enter_title_music()
+		_strudel_play_title()
 
 
 func _setup_voices() -> void:
@@ -259,6 +275,11 @@ func _setup_layers() -> void:
 
 
 func _process(delta: float) -> void:
+	# Advance Strudel clock regardless of MML layer state
+	if _strudel_playing and _cyclist != null:
+		_strudel_time += delta
+		_cyclist.process()
+
 	if not driver or not is_playing:
 		return
 
@@ -531,6 +552,83 @@ func _load_scores() -> void:
 	print("MUSIC: loaded %d scores from %s" % [_loaded_scores.size(), SCORES_PATH])
 
 
+# -- Strudel Engine ------------------------------------------------------------
+
+func _init_strudel() -> void:
+	## Initialize the Strudel pattern engine and connect to GDSiON.
+	if not driver:
+		return
+
+	_sion_trigger = StrudelSionTrigger.new(driver, presets)
+	_cyclist = StrudelCyclist.new(
+		_sion_trigger.trigger,      # on_trigger callback
+		func() -> float: return _strudel_time,  # get_time
+		Callable(),                 # on_toggle (unused)
+		0.1,                        # latency
+		0.05                        # interval
+	)
+	_cyclist.set_cps(0.5)  # Default: 120 BPM
+
+	print("MUSIC: Strudel engine initialized")
+	DebugOverlay.log("music/status", null, "MUSIC: Strudel engine initialized")
+
+
+func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
+	## Play a Strudel pattern. Stops any old Strudel or MML playback.
+	if not _cyclist or not driver:
+		print("MUSIC: Cannot play pattern — Strudel engine not initialized")
+		return
+
+	# Stop old playback (cyclist only — keep SiON streaming)
+	if _strudel_playing:
+		_cyclist.stop()
+		_strudel_playing = false
+	stop_title_music()
+	if is_playing:
+		stop()
+
+	# Start the SiON streaming if not already (needed for note_on to produce sound)
+	if not driver.call("is_streaming"):
+		driver.call("stream", false)
+
+	if cps > 0.0:
+		_cyclist.set_cps(cps)
+
+	_strudel_time = 0.0
+	_cyclist.set_pattern(pattern)
+	_cyclist.start()
+	_strudel_playing = true
+	_strudel_pattern = pattern
+
+	DebugOverlay.log("music/status", null, "MUSIC: Strudel playing (cps=%.2f)" % _cyclist.cps)
+	print("MUSIC: Strudel pattern playing (cps=%.2f)" % _cyclist.cps)
+
+
+func strudel_stop() -> void:
+	## Stop the Strudel pattern engine. Does NOT stop the SiON driver
+	## (stream must keep running for note_on to work).
+	if _cyclist and _strudel_playing:
+		_cyclist.stop()
+	_strudel_playing = false
+	_strudel_pattern = null
+
+
+func _strudel_play_title() -> void:
+	## Play a Strudel-based title screen pattern.
+	## C minor arpeggio: C3, Eb3, G3, C4 cycling slowly.
+	var pat: StrudelPattern = Strudel.sequence([
+		Strudel.pure("c3"), Strudel.pure("eb3"),
+		Strudel.pure("g3"), Strudel.pure("c4"),
+	])
+	# Slow it down: 0.25 cps = 1 cycle every 4 seconds
+	strudel_play(pat, 0.25)
+
+
+func strudel_set_cps(cps: float) -> void:
+	if _cyclist:
+		_cyclist.set_cps(cps)
+
+
 func play_score(score_name: String) -> String:
 	## Play a named score. Returns OK or error message.
 	if not _all_scores.has(score_name):
@@ -626,10 +724,11 @@ func connect_player_health(health_comp: Node) -> void:
 func _on_game_state_changed(new_state: GameManager.GameState) -> void:
 	match new_state:
 		GameManager.GameState.TITLE:
-			# Play subtle ambient title music
+			# Play Strudel-based title pattern
 			if is_playing:
 				stop()
-			_enter_title_music()
+			stop_title_music()
+			_strudel_play_title()
 		GameManager.GameState.TOWER, GameManager.GameState.BOSS:
 			if not is_playing:
 				play()
