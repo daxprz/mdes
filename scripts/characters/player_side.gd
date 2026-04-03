@@ -1509,45 +1509,9 @@ func _class_tick(delta: float) -> void:
 	if fn is Callable:
 		fn.call(delta)
 
-func _tick_melee(delta: float) -> void:
-	_handle_melee_enrage(delta)
-
 func _tick_ranged(delta: float) -> void:
 	_handle_ranger_reload(delta)
 	_handle_archer_aim(delta)
-
-func _tick_mage(delta: float) -> void:
-	_handle_mage_airwalk_toggle()
-	_handle_mage_airwalk(delta)
-
-func _tick_summoner(_delta: float) -> void:
-	pass  # Summoner delegate is handled separately in _physics_process
-
-func _tick_rogue(delta: float) -> void:
-	_handle_rogue_stealth_toggle()
-	_handle_rogue_stealth(delta)
-
-func _tick_demolitionist(_delta: float) -> void:
-	_handle_demo_refuel()
-
-func _tick_healer(_delta: float) -> void:
-	_handle_healer_wind_gust()
-
-func _tick_tank(delta: float) -> void:
-	_handle_tank_fortify(delta)
-
-func _tick_ninja(_delta: float) -> void:
-	_handle_jumper_dash()
-	_handle_jumper_momentum(_delta)
-
-func _tick_balloonist(delta: float) -> void:
-	_handle_balloonist_float(delta)
-
-func _tick_guitarist(delta: float) -> void:
-	_handle_guitarist_amp_up(delta)
-
-func _tick_werewolf(delta: float) -> void:
-	_handle_werewolf_frenzy(delta)
 
 var _charge_comp: Variant = null         # ChargeComponent instance
 var _executioner_class: Variant = null  # ExecutionerClass instance (when active)

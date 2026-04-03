@@ -9,7 +9,8 @@ func inject_context(c: Variant) -> void:
 	p = c.body if c else null
 
 func tick(delta: float) -> void:
-	p._tick_guitarist(delta)
+	_handle_guitarist_amp_up(delta)
+
 
 func perform_attack(_intent: Dictionary) -> void:
 	_handle_guitarist_amp_up()

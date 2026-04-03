@@ -8,8 +8,9 @@ func inject_context(c: Variant) -> void:
 	ctx = c
 	p = c.body if c else null
 
-func tick(delta: float) -> void:
-	p._tick_summoner(delta)
+func tick(_delta: float) -> void:
+	pass  # Delegate handled in _physics_process
+
 
 func perform_attack(_intent: Dictionary) -> void:
 	_attack_summoner()

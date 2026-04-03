@@ -9,7 +9,9 @@ func inject_context(c: Variant) -> void:
 	p = c.body if c else null
 
 func tick(delta: float) -> void:
-	p._tick_mage(delta)
+	_handle_mage_airwalk_toggle(delta)
+	_handle_mage_airwalk(delta)
+
 
 func perform_attack(_intent: Dictionary) -> void:
 	_attack_mage()

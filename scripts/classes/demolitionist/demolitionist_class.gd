@@ -9,7 +9,8 @@ func inject_context(c: Variant) -> void:
 	p = c.body if c else null
 
 func tick(delta: float) -> void:
-	p._tick_demolitionist(delta)
+	_handle_demo_refuel()
+
 
 func perform_attack(_intent: Dictionary) -> void:
 	_attack_demolitionist()

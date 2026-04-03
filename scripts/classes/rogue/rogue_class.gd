@@ -9,7 +9,9 @@ func inject_context(c: Variant) -> void:
 	p = c.body if c else null
 
 func tick(delta: float) -> void:
-	p._tick_rogue(delta)
+	_handle_rogue_stealth_toggle(delta)
+	_handle_rogue_stealth(delta)
+
 
 func perform_attack(_intent: Dictionary) -> void:
 	_attack_rogue()
