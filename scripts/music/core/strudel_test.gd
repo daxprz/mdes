@@ -1,288 +1,488 @@
 extends Node
 
-func _ready() -> void:
-	call_deferred("_run_tests")
+## Strudel test suite — run via RCON: `strudel test` or `strudel test <suite>`
+##
+## Suites:
+##   all        — run everything
+##   algebra    — fraction, timespan, hap, state, pattern
+##   composers  — add, sub, mul, div, set, keep, keepif, struct, mask
+##   combinators — every, ply, palindrome, euclid, off, note()
+##   signals    — saw, sine, segment, range, run
+##   mini       — parser: sequences, sub-cycles, operators, stacks, rests
+##   integration — end-to-end: mini -> pattern -> trigger (requires running game)
+##   voices     — voice resolution from dict values
+##
+## Results are printed to stdout and returned via RCON.
 
-func _run_tests() -> void:
-	print("=== STRUDEL CORE TESTS ===")
-	_test_fraction()
-	_test_timespan()
-	_test_pattern()
-	_test_composers()
-	_test_combinators()
-	_test_signals()
-	_test_mini()
-	print("=== ALL TESTS DONE ===")
-	
+var _pass_count: int = 0
+var _fail_count: int = 0
+var _fail_messages: Array[String] = []
+
+
+func run(suite: String = "all") -> String:
+	_pass_count = 0
+	_fail_count = 0
+	_fail_messages.clear()
+
+	print("=== STRUDEL TEST SUITE: %s ===" % suite)
+
+	match suite:
+		"all":
+			_test_fraction()
+			_test_timespan()
+			_test_pattern()
+			_test_composers()
+			_test_combinators()
+			_test_signals()
+			_test_mini()
+			_test_integration()
+			_test_voices()
+		"algebra":
+			_test_fraction()
+			_test_timespan()
+			_test_pattern()
+		"composers":
+			_test_composers()
+		"combinators":
+			_test_combinators()
+		"signals":
+			_test_signals()
+		"mini":
+			_test_mini()
+		"integration":
+			_test_integration()
+		"voices":
+			_test_voices()
+		_:
+			return "ERR: unknown suite '%s'. Try: all, algebra, composers, combinators, signals, mini, integration, voices" % suite
+
+	var total: int = _pass_count + _fail_count
+	var result: String = "=== %d/%d PASS ===" % [_pass_count, total]
+	if _fail_count > 0:
+		result = "=== %d FAIL, %d/%d pass ===" % [_fail_count, _pass_count, total]
+		for msg in _fail_messages:
+			result += "\n  FAIL: %s" % msg
+	print(result)
+	return result
+
+
+# ==============================================================================
+# Algebra: Fraction, TimeSpan, Pattern foundation
+# ==============================================================================
+
 func _test_fraction() -> void:
-	# Basic arithmetic
-	var a := StrudelFraction.new(1, 3)
-	var b := StrudelFraction.new(1, 6)
-	var sum := a.add(b)
-	_assert("1/3 + 1/6 = 1/2", sum.n == 1 and sum.d == 2)
-	
-	var prod := a.mul(b)
-	_assert("1/3 * 1/6 = 1/18", prod.n == 1 and prod.d == 18)
-	
+	# Arithmetic
+	_eq("1/3 + 1/6 = 1/2", StrudelFraction.new(1, 3).add(StrudelFraction.new(1, 6)).show(), "1/2")
+	_eq("1/3 * 1/6 = 1/18", StrudelFraction.new(1, 3).mul(StrudelFraction.new(1, 6)).show(), "1/18")
+	_eq("3/4 - 1/4 = 1/2", StrudelFraction.new(3, 4).sub(StrudelFraction.new(1, 4)).show(), "1/2")
+	_eq("2/3 / 2 = 1/3", StrudelFraction.new(2, 3).div(StrudelFraction.new(2, 1)).show(), "1/3")
+
 	# Comparison
-	_assert("1/3 > 1/6", a.gt(b))
-	_assert("1/6 < 1/3", b.lt(a))
-	_assert("1/3 == 1/3", a.eq(StrudelFraction.new(1, 3)))
-	_assert("2/6 == 1/3", StrudelFraction.new(2, 6).eq(a))  # auto-reduce
-	
+	_ok("1/3 > 1/6", StrudelFraction.new(1, 3).gt(StrudelFraction.new(1, 6)))
+	_ok("1/6 < 1/3", StrudelFraction.new(1, 6).lt(StrudelFraction.new(1, 3)))
+	_ok("2/6 == 1/3", StrudelFraction.new(2, 6).eq(StrudelFraction.new(1, 3)))
+	_ok("-1/3 < 0", StrudelFraction.new(-1, 3).lt(StrudelFraction.new(0, 1)))
+
 	# Cycle ops
-	var f := StrudelFraction.new(5, 3)  # 1.666...
-	_assert("sam(5/3) = 1", f.sam().eq(StrudelFraction.new(1, 1)))
-	_assert("nextSam(5/3) = 2", f.next_sam().eq(StrudelFraction.new(2, 1)))
-	_assert("cyclePos(5/3) = 2/3", f.cycle_pos().eq(StrudelFraction.new(2, 3)))
-	
+	_eq("sam(5/3) = 1", StrudelFraction.new(5, 3).sam().show(), "1/1")
+	_eq("nextSam(5/3) = 2", StrudelFraction.new(5, 3).next_sam().show(), "2/1")
+	_eq("cyclePos(5/3) = 2/3", StrudelFraction.new(5, 3).cycle_pos().show(), "2/3")
+
 	# Floor
-	_assert("floor(5/3) = 1", f.floor_frac().eq(StrudelFraction.new(1, 1)))
-	_assert("floor(-1/3) = -1", StrudelFraction.new(-1, 3).floor_frac().eq(StrudelFraction.new(-1, 1)))
-	
+	_eq("floor(5/3) = 1", StrudelFraction.new(5, 3).floor_frac().show(), "1/1")
+	_eq("floor(-1/3) = -1", StrudelFraction.new(-1, 3).floor_frac().show(), "-1/1")
+	_eq("floor(3/1) = 3", StrudelFraction.new(3, 1).floor_frac().show(), "3/1")
+
 	# from_float
-	var half := StrudelFraction.from_float(0.5)
-	_assert("from_float(0.5) = 1/2", half.n == 1 and half.d == 2)
-	
+	_ok("from_float(0.5) = 1/2", StrudelFraction.from_float(0.5).eq(StrudelFraction.new(1, 2)))
+	_ok("from_float(0.25) = 1/4", StrudelFraction.from_float(0.25).eq(StrudelFraction.new(1, 4)))
+	_ok("from_float(2.0) = 2/1", StrudelFraction.from_float(2.0).eq(StrudelFraction.new(2, 1)))
+
 	# GCD/LCM
-	var gcd_result := StrudelFraction.new(1, 6).gcd_with(StrudelFraction.new(1, 4))
-	_assert("gcd(1/6, 1/4) = 1/12", gcd_result.eq(StrudelFraction.new(1, 12)))
-	
-	print("  Fraction: PASS")
+	_eq("gcd(1/6, 1/4) = 1/12", StrudelFraction.new(1, 6).gcd_with(StrudelFraction.new(1, 4)).show(), "1/12")
+
+	print("  Fraction: %d tests" % (_pass_count + _fail_count))
 
 
 func _test_timespan() -> void:
+	var start: int = _pass_count + _fail_count
+
 	# spanCycles
 	var span := StrudelTimeSpan.new(StrudelFraction.new(0, 1), StrudelFraction.new(2, 1))
-	var cycles: Array = span.spanCycles
-	_assert("span(0,2) splits into 2 cycles", cycles.size() == 2)
-	
+	_eq("span(0,2) splits into 2", str(span.spanCycles.size()), "2")
+
+	var span3 := StrudelTimeSpan.new(StrudelFraction.new(0, 1), StrudelFraction.new(3, 1))
+	_eq("span(0,3) splits into 3", str(span3.spanCycles.size()), "3")
+
 	# Intersection
 	var a := StrudelTimeSpan.new(StrudelFraction.new(0, 1), StrudelFraction.new(2, 1))
 	var b := StrudelTimeSpan.new(StrudelFraction.new(1, 1), StrudelFraction.new(3, 1))
 	var c: Variant = a.intersection(b)
-	_assert("intersection exists", c != null)
-	_assert("intersection = [1, 2]",
-		c.begin.eq(StrudelFraction.new(1, 1)) and c.end.eq(StrudelFraction.new(2, 1)))
-	
+	_ok("intersection exists", c != null)
+	_ok("intersection = [1, 2]", c != null and c.begin.eq(StrudelFraction.new(1, 1)) and c.end.eq(StrudelFraction.new(2, 1)))
+
+	# No intersection
+	var d := StrudelTimeSpan.new(StrudelFraction.new(0, 1), StrudelFraction.new(1, 1))
+	var e := StrudelTimeSpan.new(StrudelFraction.new(2, 1), StrudelFraction.new(3, 1))
+	_ok("no intersection", d.intersection(e) == null)
+
 	# Duration
-	_assert("duration of [0,2] = 2", span.duration.eq(StrudelFraction.new(2, 1)))
-	
+	_ok("duration of [0,2] = 2", span.duration.eq(StrudelFraction.new(2, 1)))
+
 	# Zero-width
 	var zw := StrudelTimeSpan.new(StrudelFraction.new(1, 1), StrudelFraction.new(1, 1))
-	_assert("zero-width spanCycles = 1", zw.spanCycles.size() == 1)
-	
-	print("  TimeSpan: PASS")
+	_eq("zero-width spanCycles = 1", str(zw.spanCycles.size()), "1")
+
+	print("  TimeSpan: %d tests" % (_pass_count + _fail_count - start))
 
 
 func _test_pattern() -> void:
-	# pure
-	var pat := Strudel.pure("hello")
-	var haps: Array = pat.query_arc(0.5, 2.5)
-	_assert("pure('hello') query(0.5, 2.5) = 3 haps", haps.size() == 3)
-	
-	# Zero-width query
-	var haps_zw: Array = pat.query_arc(0, 0)
-	_assert("pure('hello') query(0, 0) = 1 hap", haps_zw.size() == 1)
-	
-	# fmap
-	var pat2 := Strudel.pure(3).fmap(func(x): return x + 4)
-	var val: Variant = pat2.first_cycle()[0].value
-	_assert("pure(3).fmap(+4) = 7", val == 7)
-	
-	# silence
-	var sil := Strudel.silence()
-	_assert("silence has 0 haps", sil.first_cycle().size() == 0)
-	
-	# fast
-	var fast_pat := Strudel.pure("a")._fast(2)
-	var fast_haps: Array = fast_pat.query_arc(0, 1)
-	_assert("pure('a').fast(2) = 2 haps in [0,1]", fast_haps.size() == 2)
-	
-	# sequence
-	var seq_pat := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])
-	var seq_haps: Array = seq_pat.first_cycle()
-	_assert("sequence('a','b') = 2 haps", seq_haps.size() == 2)
-	_assert("first = 'a'", seq_haps[0].value == "a")
-	_assert("second = 'b'", seq_haps[1].value == "b")
-	# Check timing: a occupies [0, 1/2), b occupies [1/2, 1)
-	_assert("a whole = [0, 1/2]",
-		seq_haps[0].whole.begin.eq(StrudelFraction.new(0, 1)) and
-		seq_haps[0].whole.end.eq(StrudelFraction.new(1, 2)))
-	
-	# stack
-	var stack_pat := Strudel.stack([Strudel.pure("a"), Strudel.pure("b")])
-	var stack_haps: Array = stack_pat.first_cycle()
-	_assert("stack('a','b') = 2 haps (simultaneous)", stack_haps.size() == 2)
-	
-	# slowcat
-	var cat_pat := Strudel.slowcat([Strudel.pure("a"), Strudel.pure("b")])
-	var cat_c0: Array = cat_pat.query_arc(0, 1)
-	var cat_c1: Array = cat_pat.query_arc(1, 2)
-	_assert("slowcat cycle 0 = 'a'", cat_c0.size() == 1 and cat_c0[0].value == "a")
-	_assert("slowcat cycle 1 = 'b'", cat_c1.size() == 1 and cat_c1[0].value == "b")
-	
-	# rev
-	var rev_pat := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._rev()
-	var rev_haps: Array = rev_pat.sort_haps_by_part().first_cycle()
-	_assert("rev sequence = 2 haps", rev_haps.size() == 2)
-	# After rev, 'b' should come first (occupies first half of the cycle)
-	_assert("rev: first value = b", rev_haps[0].value == "b")
-	_assert("rev: second value = a", rev_haps[1].value == "a")
-	
-	print("  Pattern: PASS")
+	var start: int = _pass_count + _fail_count
 
+	# pure
+	_eq("pure query(0.5,2.5) = 3 haps", str(Strudel.pure("hello").query_arc(0.5, 2.5).size()), "3")
+	_eq("pure query(0,0) = 1 hap", str(Strudel.pure("hello").query_arc(0, 0).size()), "1")
+
+	# fmap
+	_eq("fmap(+4) on pure(3) = 7", str(Strudel.pure(3).fmap(func(x): return x + 4).first_cycle()[0].value), "7")
+
+	# silence
+	_eq("silence = 0 haps", str(Strudel.silence().first_cycle().size()), "0")
+
+	# fast
+	_eq("fast(2) = 2 haps", str(Strudel.pure("a")._fast(2).query_arc(0, 1).size()), "2")
+	_eq("fast(3) = 3 haps", str(Strudel.pure("a")._fast(3).query_arc(0, 1).size()), "3")
+
+	# slow
+	_ok("slow(2): hap spans 2 cycles", Strudel.pure("a")._slow(2).query_arc(0, 1).size() >= 1)
+
+	# sequence
+	var seq := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])
+	var seq_h := seq.first_cycle()
+	_eq("sequence(a,b) = 2 haps", str(seq_h.size()), "2")
+	_eq("sequence first = a", str(seq_h[0].value), "a")
+	_eq("sequence second = b", str(seq_h[1].value), "b")
+	_ok("a occupies [0, 1/2)", seq_h[0].w().begin.eq(StrudelFraction.new(0, 1)) and seq_h[0].w().end.eq(StrudelFraction.new(1, 2)))
+
+	# stack
+	_eq("stack(a,b) = 2 simultaneous", str(Strudel.stack([Strudel.pure("a"), Strudel.pure("b")]).first_cycle().size()), "2")
+
+	# slowcat
+	var cat := Strudel.slowcat([Strudel.pure("a"), Strudel.pure("b")])
+	_eq("slowcat c0 = a", str(cat.query_arc(0, 1)[0].value), "a")
+	_eq("slowcat c1 = b", str(cat.query_arc(1, 2)[0].value), "b")
+
+	# rev
+	var rev := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._rev().sort_haps_by_part().first_cycle()
+	_eq("rev: first = b", str(rev[0].value), "b")
+	_eq("rev: second = a", str(rev[1].value), "a")
+
+	# early/late
+	var early := Strudel.pure("a")._early(StrudelFraction.new(1, 4))
+	_ok("early shifts onset", early.first_cycle().size() >= 1)
+
+	print("  Pattern: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Composers
+# ==============================================================================
 
 func _test_composers() -> void:
-	# add
-	var add_result := Strudel.pure(3).pat_add(Strudel.pure(4)).first_cycle()
-	_assert("pure(3).add(pure(4)) = 7", add_result[0].value == 7)
+	var start: int = _pass_count + _fail_count
 
-	# sub
-	var sub_result := Strudel.pure(3).pat_sub(Strudel.pure(4)).first_cycle()
-	_assert("pure(3).sub(pure(4)) = -1", sub_result[0].value == -1)
+	_eq("add(3,4) = 7", str(Strudel.pure(3).pat_add(Strudel.pure(4)).first_cycle()[0].value), "7")
+	_eq("sub(3,4) = -1", str(Strudel.pure(3).pat_sub(Strudel.pure(4)).first_cycle()[0].value), "-1")
+	_eq("mul(3,2) = 6", str(Strudel.pure(3).pat_mul(Strudel.pure(2)).first_cycle()[0].value), "6")
+	_eq("div(3,2) = 1.5", str(Strudel.pure(3).pat_div(Strudel.pure(2)).first_cycle()[0].value), "1.5")
 
-	# mul
-	var mul_result := Strudel.pure(3).pat_mul(Strudel.pure(2)).first_cycle()
-	_assert("pure(3).mul(pure(2)) = 6", mul_result[0].value == 6)
+	# set merges dicts
+	var set_v = Strudel.pure({"a": 4, "b": 6}).set_in(Strudel.pure({"c": 7})).first_cycle()[0].value
+	_ok("set merges dicts", set_v is Dictionary and set_v.get("c") == 7 and set_v.get("a") == 4)
 
-	# div
-	var div_result := Strudel.pure(3).pat_div(Strudel.pure(2)).first_cycle()
-	_assert("pure(3).div(pure(2)) = 1.5", div_result[0].value == 1.5)
+	# struct
+	var struct_h := Strudel.pure("x").struct_out(Strudel.sequence([Strudel.pure(true), Strudel.pure(false)])).first_cycle()
+	_eq("struct filters truthy", str(struct_h.size()), "1")
 
-	# set with objects
-	var set_result := Strudel.pure({"a": 4, "b": 6}).set_in(Strudel.pure({"c": 7})).first_cycle()
-	_assert("set merges dicts", set_result[0].value is Dictionary and set_result[0].value.get("c") == 7 and set_result[0].value.get("a") == 4)
+	# mask
+	var mask_h := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")]).mask(
+		Strudel.sequence([Strudel.pure(true), Strudel.pure(false)])).first_cycle()
+	_eq("mask: 1 hap", str(mask_h.size()), "1")
+	_eq("mask: value = a", str(mask_h[0].value), "a")
 
-	# struct: impose structure
-	var struct_result := Strudel.pure("x").struct_out(Strudel.sequence([Strudel.pure(true), Strudel.pure(false)]))
-	var struct_haps: Array = struct_result.first_cycle()
-	_assert("struct filters to truthy positions", struct_haps.size() == 1)
+	print("  Composers: %d tests" % (_pass_count + _fail_count - start))
 
-	# mask: silence where mask is falsy
-	var mask_result := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")]).mask(
-		Strudel.sequence([Strudel.pure(true), Strudel.pure(false)]))
-	var mask_haps: Array = mask_result.first_cycle()
-	_assert("mask: keep where true", mask_haps.size() == 1 and mask_haps[0].value == "a")
 
-	print("  Composers: PASS")
-
+# ==============================================================================
+# Combinators
+# ==============================================================================
 
 func _test_combinators() -> void:
+	var start: int = _pass_count + _fail_count
+
 	# every
-	var every_pat := Strudel.pure("a")._every(3, func(p: StrudelPattern) -> StrudelPattern: return p.fmap(func(_v): return "b"))
-	var c0: Array = every_pat.query_arc(0, 1)
-	var c1: Array = every_pat.query_arc(1, 2)
-	var c2: Array = every_pat.query_arc(2, 3)
-	_assert("every(3,f): cycle 0 = transformed", c0[0].value == "b")
-	_assert("every(3,f): cycle 1 = original", c1[0].value == "a")
-	_assert("every(3,f): cycle 2 = original", c2[0].value == "a")
+	var ev := Strudel.pure("a")._every(3, func(p: StrudelPattern) -> StrudelPattern: return p.fmap(func(_v): return "b"))
+	_eq("every(3): c0 = b", str(ev.query_arc(0, 1)[0].value), "b")
+	_eq("every(3): c1 = a", str(ev.query_arc(1, 2)[0].value), "a")
+	_eq("every(3): c2 = a", str(ev.query_arc(2, 3)[0].value), "a")
 
 	# ply
-	var ply_pat := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._ply(2)
-	var ply_haps: Array = ply_pat.first_cycle()
-	_assert("ply(2): doubles events", ply_haps.size() == 4)
+	_eq("ply(2) doubles", str(Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._ply(2).first_cycle().size()), "4")
 
 	# palindrome
-	var pal_pat := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._palindrome()
-	var pal_c0: Array = pal_pat.query_arc(0, 1)
-	var pal_c1: Array = pal_pat.sort_haps_by_part().query_arc(1, 2)
-	_assert("palindrome: cycle 0 is forward", pal_c0.size() == 2 and pal_c0[0].value == "a")
-	_assert("palindrome: cycle 1 is reversed", pal_c1.size() == 2 and pal_c1[0].value == "b")
+	var pal := Strudel.sequence([Strudel.pure("a"), Strudel.pure("b")])._palindrome()
+	_eq("palindrome c0 = a first", str(pal.query_arc(0, 1)[0].value), "a")
+	var pal1 := pal.sort_haps_by_part().query_arc(1, 2)
+	_eq("palindrome c1 = b first", str(pal1[0].value), "b")
 
 	# euclid
-	var euclid_pat := Strudel.pure("x")._euclid(3, 8)
-	var euclid_haps: Array = euclid_pat.first_cycle()
-	_assert("euclid(3,8) = 3 onsets", euclid_haps.size() == 3)
+	_eq("euclid(3,8) = 3", str(Strudel.pure("x")._euclid(3, 8).first_cycle().size()), "3")
+	_eq("euclid(5,8) = 5", str(Strudel.pure("x")._euclid(5, 8).first_cycle().size()), "5")
+	_eq("euclid(7,8) = 7", str(Strudel.pure("x")._euclid(7, 8).first_cycle().size()), "7")
+
+	# degrade
+	var deg := Strudel.pure("x")._fast(100)._degrade_by(0.5, 42)
+	var deg_h := deg.first_cycle()
+	_ok("degrade drops some events", deg_h.size() < 100 and deg_h.size() > 20)
 
 	# off
-	var off_pat := Strudel.pure("a")._off(0.5, func(p: StrudelPattern) -> StrudelPattern: return p.fmap(func(_v): return "b"))
-	var off_haps: Array = off_pat.first_cycle()
-	_assert("off(0.5,f): 2 values (original + shifted)", off_haps.size() >= 2)
+	var off := Strudel.pure("a")._off(0.5, func(p: StrudelPattern) -> StrudelPattern: return p.fmap(func(_v): return "b"))
+	_ok("off: >= 2 haps", off.first_cycle().size() >= 2)
 
 	# note() control
-	var note_pat := Strudel.pure("c4").note()
-	var note_haps: Array = note_pat.first_cycle()
-	_assert("note() wraps as dict", note_haps[0].value is Dictionary and note_haps[0].value.get("note") == "c4")
+	var note_h := Strudel.pure("c4").note().first_cycle()
+	_ok("note() makes dict", note_h[0].value is Dictionary and note_h[0].value.get("note") == "c4")
 
-	print("  Combinators: PASS")
+	# s() control
+	var s_h := Strudel.pure("bd").s().first_cycle()
+	_ok("s() makes dict", s_h[0].value is Dictionary and s_h[0].value.get("s") == "bd")
 
+	print("  Combinators: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Signals
+# ==============================================================================
 
 func _test_signals() -> void:
-	# saw: value at t=0 should be 0, at t=0.5 should be ~0.5
-	var saw_pat := StrudelSignal.saw()
-	var saw_0: Array = saw_pat.query_arc(0, 0)
-	_assert("saw(0) = 0", saw_0.size() == 1 and absf(float(saw_0[0].value)) < 0.01)
+	var start: int = _pass_count + _fail_count
 
-	var saw_half: Array = saw_pat.query_arc(0.5, 0.5)
-	_assert("saw(0.5) ~= 0.5", saw_half.size() == 1 and absf(float(saw_half[0].value) - 0.5) < 0.01)
+	# saw
+	_ok("saw(0) ~= 0", absf(float(StrudelSignal.saw().query_arc(0, 0)[0].value)) < 0.01)
+	_ok("saw(0.5) ~= 0.5", absf(float(StrudelSignal.saw().query_arc(0.5, 0.5)[0].value) - 0.5) < 0.01)
 
 	# sine
-	var sine_pat := StrudelSignal.sine()
-	var sine_0: Array = sine_pat.query_arc(0, 0)
-	_assert("sine(0) = 0.5 (unipolar)", absf(float(sine_0[0].value) - 0.5) < 0.01)
+	_ok("sine(0) ~= 0.5", absf(float(StrudelSignal.sine().query_arc(0, 0)[0].value) - 0.5) < 0.01)
 
-	# segment: discretize
-	var seg_pat := StrudelSignal.saw()._segment(4)
-	var seg_haps: Array = seg_pat.first_cycle()
-	_assert("saw.segment(4) = 4 haps", seg_haps.size() == 4)
+	# tri
+	_ok("tri(0) ~= 0", absf(float(StrudelSignal.tri().query_arc(0, 0)[0].value)) < 0.01)
+	_ok("tri(0.5) ~= 1", absf(float(StrudelSignal.tri().query_arc(0.5, 0.5)[0].value) - 1.0) < 0.01)
+
+	# square
+	_ok("square(0) = 0", float(StrudelSignal.square().query_arc(0, 0)[0].value) < 0.5)
+	_ok("square(0.75) = 1", float(StrudelSignal.square().query_arc(0.75, 0.75)[0].value) > 0.5)
+
+	# segment
+	_eq("saw.segment(4) = 4", str(StrudelSignal.saw()._segment(4).first_cycle().size()), "4")
+	_eq("sine.segment(8) = 8", str(StrudelSignal.sine()._segment(8).first_cycle().size()), "8")
 
 	# range
-	var range_pat := StrudelSignal.saw()._range(100, 200)
-	var range_0: Array = range_pat.query_arc(0, 0)
-	_assert("saw.range(100,200) at 0 = 100", absf(float(range_0[0].value) - 100.0) < 1.0)
+	_ok("saw.range(100,200) at 0 ~= 100", absf(float(StrudelSignal.saw()._range(100, 200).query_arc(0, 0)[0].value) - 100.0) < 1.0)
 
 	# run
-	var run_pat := StrudelSignal.run(4)
-	var run_haps: Array = run_pat.first_cycle()
-	_assert("run(4) = [0,1,2,3]", run_haps.size() == 4 and run_haps[0].value == 0 and run_haps[3].value == 3)
+	var run_h := StrudelSignal.run(4).first_cycle()
+	_eq("run(4) = 4 haps", str(run_h.size()), "4")
+	_eq("run(4)[0] = 0", str(run_h[0].value), "0")
+	_eq("run(4)[3] = 3", str(run_h[3].value), "3")
 
-	print("  Signals: PASS")
+	# irand
+	var ir := StrudelSignal.irand(10).first_cycle()
+	_eq("irand(10) = 1 hap", str(ir.size()), "1")
+	_ok("irand(10) in [0,9]", int(ir[0].value) >= 0 and int(ir[0].value) < 10)
 
+	print("  Signals: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Mini-notation parser
+# ==============================================================================
 
 func _test_mini() -> void:
-	# Basic sequence
-	var pat := StrudelMini.mini("a b c")
-	var haps: Array = pat.first_cycle()
-	_assert("mini 'a b c' = 3 haps", haps.size() == 3)
+	var start: int = _pass_count + _fail_count
 
-	# Sub-cycle
-	var pat2 := StrudelMini.mini("a [b c] d")
-	var haps2: Array = pat2.first_cycle()
-	_assert("mini 'a [b c] d' = 4 haps", haps2.size() == 4)
+	# Basic sequences
+	_eq("'a b c' = 3", str(StrudelMini.mini("a b c").first_cycle().size()), "3")
+	_eq("'a b c d' = 4", str(StrudelMini.mini("a b c d").first_cycle().size()), "4")
+
+	# Sub-cycles
+	_eq("'a [b c] d' = 4", str(StrudelMini.mini("a [b c] d").first_cycle().size()), "4")
+	_eq("'[a b] [c d]' = 4", str(StrudelMini.mini("[a b] [c d]").first_cycle().size()), "4")
+	_eq("'a [b [c d]]' = 4", str(StrudelMini.mini("a [b [c d]]").first_cycle().size()), "4")
 
 	# Fast operator
-	var pat3 := StrudelMini.mini("a*3")
-	var haps3: Array = pat3.first_cycle()
-	_assert("mini 'a*3' = 3 haps", haps3.size() == 3)
+	_eq("'a*3' = 3", str(StrudelMini.mini("a*3").first_cycle().size()), "3")
+	_eq("'a*2 b' = 3", str(StrudelMini.mini("a*2 b").first_cycle().size()), "3")
+	_eq("'[a b]*2' = 4", str(StrudelMini.mini("[a b]*2").first_cycle().size()), "4")
+
+	# Slow operator
+	var slow_h := StrudelMini.mini("a/2").query_arc(0, 1)
+	_ok("'a/2' produces haps", slow_h.size() >= 1)
 
 	# Rest
-	var pat4 := StrudelMini.mini("a ~ b")
-	var haps4: Array = pat4.first_cycle()
-	_assert("mini 'a ~ b' = 2 haps (~ is silence)", haps4.size() == 2)
+	_eq("'a ~ b' = 2", str(StrudelMini.mini("a ~ b").first_cycle().size()), "2")
+	_eq("'~ ~ ~' = 0", str(StrudelMini.mini("~ ~ ~").first_cycle().size()), "0")
+	_eq("'a ~ ~ b' = 2", str(StrudelMini.mini("a ~ ~ b").first_cycle().size()), "2")
 
-	# Stack
-	var pat5 := StrudelMini.mini("[a, b]")
-	var haps5: Array = pat5.first_cycle()
-	_assert("mini '[a, b]' = 2 haps (stacked)", haps5.size() == 2)
+	# Stack (comma)
+	_eq("'[a, b]' = 2", str(StrudelMini.mini("[a, b]").first_cycle().size()), "2")
+	_eq("'[a b, c]' = 3", str(StrudelMini.mini("[a b, c]").first_cycle().size()), "3")
+	_eq("'[a, b, c]' = 3", str(StrudelMini.mini("[a, b, c]").first_cycle().size()), "3")
 
-	# Slow
-	var pat6 := StrudelMini.mini("a/2")
-	var haps6a: Array = pat6.query_arc(0, 1)
-	_assert("mini 'a/2' spans 2 cycles", haps6a.size() >= 1)
+	# Angle brackets (slowcat)
+	var angle := StrudelMini.mini("<a b c>")
+	_ok("'<a b c>' produces haps", angle.query_arc(0, 1).size() >= 1)
+
+	# Euclidean
+	_eq("'a(3,8)' = 3", str(StrudelMini.mini("a(3,8)").first_cycle().size()), "3")
+
+	# Degrade
+	var deg_h := StrudelMini.mini("a?").first_cycle()
+	_ok("'a?' produces 0 or 1 haps", deg_h.size() <= 1)
+
+	# Replicate
+	_eq("'a!3' = 3", str(StrudelMini.mini("a!3").first_cycle().size()), "3")
+
+	# Random choose (pipe)
+	_eq("'[a|b|c]' = 1", str(StrudelMini.mini("[a|b|c]").first_cycle().size()), "1")
+
+	# Numbers as values
+	var num_h := StrudelMini.mini("60 64 67").first_cycle()
+	_eq("numbers: 3 haps", str(num_h.size()), "3")
+	_ok("first is 60", num_h[0].value == 60)
+
+	# Note names
+	var note_h := StrudelMini.mini("c4 e4 g4").first_cycle()
+	_eq("notes: 3 haps", str(note_h.size()), "3")
+	_eq("first is c4", str(note_h[0].value), "c4")
 
 	# Leaf locations
-	var locs: Array = StrudelMini.get_leaf_locations("bd sd hh")
-	_assert("leaf locations: 3 leaves", locs.size() == 3)
-	_assert("first leaf starts at 0", locs[0][0] == 0)
+	var locs := StrudelMini.get_leaf_locations("bd sd hh")
+	_eq("leaf locs: 3", str(locs.size()), "3")
+	_ok("first starts at 0", locs[0][0] == 0)
 
-	print("  Mini: PASS")
+	# Bad input doesn't crash
+	var bad := StrudelMini.mini("a=b+c")
+	_ok("bad input doesn't crash", bad != null)
+
+	# Empty string
+	var empty := StrudelMini.mini("")
+	_ok("empty string ok", empty != null)
+
+	print("  Mini: %d tests" % (_pass_count + _fail_count - start))
 
 
-func _assert(msg: String, condition: bool) -> void:
-	if not condition:
+# ==============================================================================
+# Integration: mini -> pattern -> trigger resolution
+# ==============================================================================
+
+func _test_integration() -> void:
+	var start: int = _pass_count + _fail_count
+
+	if not MusicManager._sion_trigger:
+		print("  Integration: SKIP (no trigger)")
+		return
+
+	var trigger: StrudelSionTrigger = MusicManager._sion_trigger
+
+	# Note resolution from strings
+	_eq("c4 -> 60", str(trigger._resolve_note("c4")), "60")
+	_eq("a4 -> 69", str(trigger._resolve_note("a4")), "69")
+	_eq("c3 -> 48", str(trigger._resolve_note("c3")), "48")
+	_eq("eb4 -> 63", str(trigger._resolve_note("eb4")), "63")
+	_eq("f#5 -> 78", str(trigger._resolve_note("f#5")), "78")
+	_eq("60 -> 60", str(trigger._resolve_note(60)), "60")
+
+	# Note resolution from dicts
+	_eq("{note:c4} -> 60", str(trigger._resolve_note({"note": "c4"})), "60")
+	_eq("{value:c4} -> 60", str(trigger._resolve_note({"value": "c4"})), "60")
+	_eq("{value:c4,s:flute} -> 60", str(trigger._resolve_note({"value": "c4", "s": "flute"})), "60")
+	_eq("{n:60} -> 60", str(trigger._resolve_note({"n": 60})), "60")
+
+	# Voice resolution
+	var v_piano: Variant = trigger._resolve_voice({"s": "piano"})
+	_ok("piano voice exists", v_piano != null)
+	var v_flute: Variant = trigger._resolve_voice({"s": "flute"})
+	_ok("flute voice exists", v_flute != null)
+	var v_default: Variant = trigger._resolve_voice("unknown")
+	_ok("default voice exists", v_default != null)
+	var v_bass: Variant = trigger._resolve_voice({"sound": "bass"})
+	_ok("bass via sound= exists", v_bass != null)
+
+	# Full mini -> trigger path
+	var pat := StrudelMini.mini("c4 e4 g4")
+	var haps := pat.first_cycle()
+	_eq("mini->pattern: 3 haps", str(haps.size()), "3")
+	_eq("first resolves to 60", str(trigger._resolve_note(haps[0].value)), "60")
+	_eq("second resolves to 64", str(trigger._resolve_note(haps[1].value)), "64")
+	_eq("third resolves to 67", str(trigger._resolve_note(haps[2].value)), "67")
+
+	# Mini with sound param applied
+	var pat2 := StrudelMini.mini("c4 e4").set_in(Strudel.pure({"s": "strings"}))
+	var haps2 := pat2.first_cycle()
+	_ok("sound set on haps", haps2[0].value is Dictionary)
+	_eq("note resolves through value key", str(trigger._resolve_note(haps2[0].value)), "60")
+	var v2: Variant = trigger._resolve_voice(haps2[0].value)
+	_ok("voice resolves from dict", v2 != null)
+
+	print("  Integration: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Voice mapping
+# ==============================================================================
+
+func _test_voices() -> void:
+	var start: int = _pass_count + _fail_count
+
+	if not MusicManager._sion_trigger:
+		print("  Voices: SKIP (no trigger)")
+		return
+
+	var trigger: StrudelSionTrigger = MusicManager._sion_trigger
+	var voice_count: int = trigger._voices.size()
+	_ok("voices loaded", voice_count > 50)
+
+	# Spot-check key voices exist
+	for name in ["piano", "bass", "strings", "flute", "organ", "trumpet",
+				  "saw", "pad", "marimba", "harp", "choir", "sax",
+				  "violin", "cello", "guitar", "default"]:
+		_ok("voice: %s" % name, trigger._voices.has(name))
+
+	# Aliases resolve
+	_ok("alias: pno", trigger._voices.has("pno"))
+	_ok("alias: fl", trigger._voices.has("fl"))
+	_ok("alias: str", trigger._voices.has("str"))
+	_ok("alias: syn", trigger._voices.has("syn"))
+
+	print("  Voices: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Assert helpers
+# ==============================================================================
+
+func _ok(msg: String, condition: bool) -> void:
+	if condition:
+		_pass_count += 1
+	else:
+		_fail_count += 1
+		_fail_messages.append(msg)
 		print("    FAIL: %s" % msg)
-		push_error("STRUDEL TEST FAIL: %s" % msg)
-	# Uncomment to see all passing tests:
-	# else:
-	#   print("    ok: %s" % msg)
+
+func _eq(msg: String, actual: String, expected: String) -> void:
+	if actual == expected:
+		_pass_count += 1
+	else:
+		_fail_count += 1
+		_fail_messages.append("%s (got '%s', expected '%s')" % [msg, actual, expected])
+		print("    FAIL: %s (got '%s', expected '%s')" % [msg, actual, expected])

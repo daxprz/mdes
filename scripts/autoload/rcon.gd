@@ -1230,6 +1230,17 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"stop", "hush":
 			MusicManager.strudel_stop()
 			return "OK: strudel stopped"
+		"test":
+			# Run strudel test suite: strudel test [suite_name]
+			var test_node: Node = get_node_or_null("/root/StrudelTest")
+			if not test_node:
+				# Create it on the fly
+				var script: GDScript = load("res://scripts/music/core/strudel_test.gd")
+				test_node = script.new()
+				test_node.name = "StrudelTestRunner"
+				get_tree().root.add_child(test_node)
+			var suite_name: String = parts[2] if parts.size() > 2 else "all"
+			return test_node.run(suite_name)
 		"voices":
 			if MusicManager._sion_trigger:
 				var names: Array = MusicManager._sion_trigger._voices.keys()
@@ -1328,6 +1339,7 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
   strudel cps <value>      — set cycles per second
   strudel status           — show scheduler state
   strudel drawer           — toggle music drawer
+  strudel test [suite]     — run test suite (all/algebra/mini/integration/voices/...)
 
   --- Mini-Notation Syntax ---
   c4 e4 g4         sequence (space-separated)
