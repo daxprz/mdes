@@ -1,6 +1,6 @@
 {
   "name": "music_visualizers",
-  "description": "Listening test: per-line visualizers — open Ctrl+M to watch pianoroll strips",
+  "description": "Listening test: per-line visualizers using Strudel syntax — open Ctrl+M to watch",
   "script": [
     "var inspect default=5",
 
@@ -8,37 +8,37 @@
     "md open",
     "wait 1",
 
-    "# === 1. Single line with pianoroll ===",
-    "announce 1/6: Single pianoroll — arpeggio scrolling",
-    "strudel edit c4 e4 g4 c5.pianoroll() cps=0.5",
+    "# === 1. Pianoroll ===",
+    "announce 1/6: pianoroll — scrolling note bars",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() cps=0.5",
     "wait 5",
 
-    "# === 2. Two lines, each with pianoroll ===",
-    "announce 2/6: Two pianorolls — melody vs bass",
-    "strudel edit melody: [c4 e4 g4 c5]*2.pianoroll() | bass: c2 ~ c2 ~ e2 ~.pianoroll() cps=0.5",
+    "# === 2. Scope ===",
+    "announce 2/6: scope — oscilloscope waveform",
+    "strudel edit \"c3 e3 g3 c4\".scope() cps=0.5",
+    "wait 5",
+
+    "# === 3. Wordfall ===",
+    "announce 3/6: wordfall — vertical pianoroll with labels",
+    "strudel edit \"[c4,e4,g4] [f4,a4,c5]\".wordfall() cps=0.4",
     "wait 6",
 
-    "# === 3. Pianoroll + bar ===",
-    "announce 3/6: Pianoroll + Bar — different viz types",
-    "strudel edit melody: c4 e4 g4 c5.pianoroll() | rhythm: c4(3,8).bar() cps=0.7",
+    "# === 4. Spiral ===",
+    "announce 4/6: spiral — archimedean spiral",
+    "strudel edit \"c4(3,8)\".spiral() cps=0.8",
     "wait 5",
 
-    "# === 4. Three layers: pianoroll, bar, none ===",
-    "announce 4/6: Three layers — pianoroll + bar + plain",
-    "strudel edit chords: [c3,e3,g3] [f3,a3,c4].pianoroll() | bass: c2 ~ e2 ~.bar() | drums: c5(3,8) cps=0.4",
-    "wait 7",
+    "# === 5. Pitchwheel ===",
+    "announce 5/6: pitchwheel — chromatic pitch circle",
+    "strudel edit \"[c4,e4,g4,c5]\".pitchwheel() cps=0.5",
+    "wait 5",
 
-    "# === 5. Named lines with voices ===",
-    "announce 5/6: Named + voiced + visualized",
-    "strudel edit strings: [c3,e3,g3] [f3,a3,c4] s=strings.pianoroll() | flute: [c4 e4 g4 c5]*2 s=flute.pianoroll() | bass: c2 ~ c2 ~ s=bass.bar() cps=0.35",
+    "# === 6. Multiple viz types together ===",
+    "announce 6/6: All types — one per line",
+    "strudel edit melody: \"c4 e4 g4 c5\".pianoroll() | bass: \"c2 ~ c2 ~ e2 ~\".scope() | chords: \"[c3,e3,g3] [f3,a3,c4]\".spiral() cps=0.4",
     "wait 8",
 
-    "# === 6. Full composition ===",
-    "announce 6/6: Full composition — 4 lines, all visualized",
-    "strudel edit pad: [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] s=pad.pianoroll() | melody: [c4 e4 g4 c5]*2 s=flute.pianoroll() | bass: c2 ~ c2 ~ e2 ~ g2 ~ s=bass.bar() | rhythm: c5(5,8).bar() cps=0.3",
-    "wait 10",
-
     "strudel stop",
-    "notify {SCRIPT} \"How did the visualizers look and sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+    "notify {SCRIPT} \"How did the visualizers look?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
   ]
 }

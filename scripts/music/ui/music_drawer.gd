@@ -51,13 +51,14 @@ extends CanvasLayer
 ##     # this is a comment           — skipped on eval
 ##   Muted lines (Ctrl+/) are dimmed and excluded from playback.
 ##
-##   Inline visualizers (Strudel v1.2.0 compatible):
-##     .pianoroll() / .punchcard()  — scrolling horizontal note bars
-##     .scope() / .tscope()         — oscilloscope waveform
-##     .wordfall()                  — vertical pianoroll with labels
-##     .spiral()                    — notes on an archimedean spiral
-##     .pitchwheel()                — pitch circle (12-EDO chromatic)
-##     .fscope()                    — frequency spectrum bars
+##   Inline visualizers (Strudel v1.2.0 syntax):
+##     "c4 e4 g4 c5".pianoroll()    — quoted mini + pianoroll
+##     note("c4 e4 g4").scope()     — note() wrapper + scope
+##     "c4 e4 g4 c5".wordfall()     — vertical pianoroll with labels
+##     "c4(3,8)".spiral()           — archimedean spiral
+##     "[c4,e4,g4]".pitchwheel()    — pitch circle (12-EDO)
+##     "c3 e3 g3".fscope()          — frequency spectrum
+##     c4 e4 g4 c5                  — bare mini (no viz, no quotes needed)
 ##   Or toggle with Ctrl+. to cycle through all types
 
 const SLIDE_SPEED := 1200.0
@@ -119,19 +120,17 @@ func _line_viz(idx: int) -> String:
 	if stored != VIZ_NONE:
 		return stored
 	# Also detect inline viz methods in the text (live, before eval)
+	# These can appear anywhere but typically at the end: "...".pianoroll()
 	var text: String = _lines[idx].get("text", "")
-	if ".pianoroll()" in text or ".punchcard()" in text or "._pianoroll()" in text:
-		return VIZ_PIANOROLL
-	if ".scope()" in text or ".tscope()" in text or "._scope()" in text:
-		return VIZ_SCOPE
-	if ".wordfall()" in text:
-		return VIZ_WORDFALL
-	if ".spiral()" in text or "._spiral()" in text:
-		return VIZ_SPIRAL
-	if ".pitchwheel()" in text or "._pitchwheel()" in text:
-		return VIZ_PITCHWHEEL
-	if ".fscope()" in text:
-		return VIZ_FSCOPE
+	for pair in [[".pianoroll()", VIZ_PIANOROLL], [".punchcard()", VIZ_PIANOROLL],
+				  ["._pianoroll()", VIZ_PIANOROLL],
+				  [".scope()", VIZ_SCOPE], [".tscope()", VIZ_SCOPE], ["._scope()", VIZ_SCOPE],
+				  [".wordfall()", VIZ_WORDFALL],
+				  [".spiral()", VIZ_SPIRAL], ["._spiral()", VIZ_SPIRAL],
+				  [".pitchwheel()", VIZ_PITCHWHEEL], ["._pitchwheel()", VIZ_PITCHWHEEL],
+				  [".fscope()", VIZ_FSCOPE]]:
+		if pair[0] in text:
+			return pair[1]
 	return VIZ_NONE
 
 
@@ -558,8 +557,18 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 
 	result["pattern_offset"] = offset
 
-	# Extract inline visualizer: must be at the END of the line
-	# Match ".pianoroll()" etc. only when preceded by space or end of pattern
+	# Strudel-compatible method chain parsing.
+	# In Strudel, the syntax is: "mini-notation".method1().method2()
+	# or: note("mini-notation").pianoroll()
+	#
+	# We support:
+	#   "c4 e4 g4 c5".pianoroll()    — quoted mini + viz chain
+	#   note("c4 e4 g4").scope()     — note() wrapper (strip note(), keep inner)
+	#   s("bd sd hh").pianoroll()    — s() wrapper
+	#   c4 e4 g4 c5                  — bare unquoted mini (no method chain)
+	#
+	# Method chain: strip .method() suffixes from right to left
+
 	var viz_methods := {
 		".pianoroll()": VIZ_PIANOROLL,
 		".punchcard()": VIZ_PIANOROLL,
@@ -574,27 +583,47 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		"._pitchwheel()": VIZ_PITCHWHEEL,
 		".fscope()": VIZ_FSCOPE,
 	}
+
+	# Strip viz methods from the end of the text
+	var stripped_text: String = text.strip_edges()
 	for method in viz_methods:
-		if text.strip_edges().ends_with(method):
+		if stripped_text.ends_with(method):
 			result["viz"] = viz_methods[method]
 			line["viz"] = viz_methods[method]
-			# Strip the viz method from the end
-			var end_idx: int = text.rfind(method)
-			text = text.substr(0, end_idx).strip_edges()
+			stripped_text = stripped_text.substr(0, stripped_text.length() - method.length()).strip_edges()
 			break
-	# If no viz found in text, clear stored viz (so removing .pianoroll() hides it)
-	if result["viz"] == VIZ_NONE and line.get("viz", VIZ_NONE) != VIZ_NONE:
-		# Only clear if the line was using text-based viz (not Ctrl+. manual toggle)
-		# We detect manual toggle by checking if the text never had a viz method
-		var has_any_viz_text: bool = false
+
+	# If no viz found, clear stored text-based viz (keep manual Ctrl+. toggle)
+	if result["viz"] == VIZ_NONE:
+		var had_viz_text: bool = false
 		for method in viz_methods:
 			if method in raw:
-				has_any_viz_text = true
+				had_viz_text = true
 				break
-		if not has_any_viz_text:
-			pass  # Keep manual Ctrl+. setting
-		else:
+		if had_viz_text:
 			line["viz"] = VIZ_NONE
+
+	# Strip Strudel wrappers: note("..."), s("...")
+	# These are JS function calls that wrap mini-notation in Strudel
+	for wrapper in ["note(", "s(", "sound("]:
+		if stripped_text.begins_with(wrapper) and stripped_text.ends_with(")"):
+			stripped_text = stripped_text.substr(wrapper.length(), stripped_text.length() - wrapper.length() - 1).strip_edges()
+			break
+
+	# Strip surrounding quotes (Strudel mini-notation is quoted in JS)
+	if stripped_text.length() >= 2:
+		if (stripped_text[0] == '"' and stripped_text[-1] == '"') or \
+		   (stripped_text[0] == "'" and stripped_text[-1] == "'") or \
+		   (stripped_text[0] == '`' and stripped_text[-1] == '`'):
+			var inner: String = stripped_text.substr(1, stripped_text.length() - 2)
+			# Recalculate offset: quotes shifted the pattern start
+			var quote_pos: int = text.find(stripped_text[0])
+			if quote_pos >= 0:
+				offset += quote_pos + 1
+				result["pattern_offset"] = offset
+			stripped_text = inner
+
+	text = stripped_text
 
 	# Extract key=value parameters
 	for param in ["cps=", "sound=", "s="]:
