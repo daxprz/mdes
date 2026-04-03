@@ -50,6 +50,12 @@ extends CanvasLayer
 ##     c4 e4 g4 c5                   — auto-named "d1", "d2", etc.
 ##     # this is a comment           — skipped on eval
 ##   Muted lines (Ctrl+/) are dimmed and excluded from playback.
+##
+##   Inline visualizers (Strudel syntax):
+##     drums: c4(3,8).pianoroll()    — pianoroll strip below the line
+##     bass: c2 ~ e2 ~.punchcard()  — same as pianoroll
+##     melody: c4 e4 g4 c5.bar()    — simple activity bar
+##   Or toggle with Ctrl+. (cycles none → pianoroll → bar → none)
 
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0
@@ -100,7 +106,17 @@ func _make_line(text: String = "", name: String = "", muted: bool = false, viz: 
 func _line_viz(idx: int) -> String:
 	if idx >= _lines.size():
 		return VIZ_NONE
-	return _lines[idx].get("viz", VIZ_NONE)
+	# Check stored viz (set by Ctrl+. or by eval parsing)
+	var stored: String = _lines[idx].get("viz", VIZ_NONE)
+	if stored != VIZ_NONE:
+		return stored
+	# Also detect inline viz methods in the text (live, before eval)
+	var text: String = _lines[idx].get("text", "")
+	if ".pianoroll()" in text or ".punchcard()" in text or "._pianoroll()" in text:
+		return VIZ_PIANOROLL
+	if ".bar()" in text:
+		return VIZ_BAR
+	return VIZ_NONE
 
 
 func _cycle_line_viz(idx: int) -> void:
@@ -479,10 +495,15 @@ func _word_boundary_right() -> int:
 # -- Playback ------------------------------------------------------------------
 
 func _parse_line_text(line: Dictionary) -> Dictionary:
-	## Parse a line dict into {pattern_text, name, sound, is_valid}.
-	## Supports "name: pattern s=voice" syntax.
+	## Parse a line dict into {pattern_text, name, sound, is_valid, viz}.
+	## Supports Strudel-style syntax:
+	##   "name: pattern"           — named line (label)
+	##   "pattern s=voice"         — voice override
+	##   "pattern.pianoroll()"     — inline visualizer
+	##   "pattern.punchcard()"     — alias for pianoroll
+	##   "pattern.bar()"           — bar visualizer
 	var raw: String = line.get("text", "").strip_edges()
-	var result := {"pattern_text": "", "name": line.get("name", ""), "sound": "", "is_valid": false}
+	var result := {"pattern_text": "", "name": line.get("name", ""), "sound": "", "is_valid": false, "viz": VIZ_NONE}
 
 	if raw.is_empty() or raw.begins_with("#"):
 		return result
@@ -492,13 +513,27 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	# Check for "name: pattern" syntax (Strudel label style)
 	var colon_idx: int = text.find(": ")
 	if colon_idx > 0 and colon_idx < 20:
-		# Everything before ": " is the name, rest is pattern
 		var candidate: String = text.substr(0, colon_idx).strip_edges()
-		# Only treat as name if it's a simple identifier (no spaces, brackets, etc.)
 		if candidate.is_valid_identifier():
 			result["name"] = candidate
-			line["name"] = candidate  # Persist the name
+			line["name"] = candidate
 			text = text.substr(colon_idx + 2).strip_edges()
+
+	# Extract inline visualizer methods: .pianoroll() .punchcard() .bar()
+	# These are stripped from the pattern text and set the line's viz type.
+	var viz_methods := {
+		".pianoroll()": VIZ_PIANOROLL,
+		".punchcard()": VIZ_PIANOROLL,  # alias
+		".bar()": VIZ_BAR,
+		"._pianoroll()": VIZ_PIANOROLL,  # Strudel underscore variant
+	}
+	for method in viz_methods:
+		var m_idx: int = text.find(method)
+		if m_idx >= 0:
+			result["viz"] = viz_methods[method]
+			line["viz"] = viz_methods[method]
+			text = (text.substr(0, m_idx) + text.substr(m_idx + method.length())).strip_edges()
+			break  # Only one viz per line
 
 	# Extract key=value parameters
 	for param in ["cps=", "sound=", "s="]:
