@@ -52,10 +52,13 @@ extends CanvasLayer
 ##   Muted lines (Ctrl+/) are dimmed and excluded from playback.
 ##
 ##   Inline visualizers (Strudel v1.2.0 compatible):
-##     drums: c4(3,8).pianoroll()    — pianoroll strip below the line
-##     bass: c2 ~ e2 ~.punchcard()  — same as pianoroll
-##     melody: c4 e4 g4 c5.scope()  — oscilloscope waveform
-##   Or toggle with Ctrl+. (cycles none → pianoroll → scope → none)
+##     .pianoroll() / .punchcard()  — scrolling horizontal note bars
+##     .scope() / .tscope()         — oscilloscope waveform
+##     .wordfall()                  — vertical pianoroll with labels
+##     .spiral()                    — notes on an archimedean spiral
+##     .pitchwheel()                — pitch circle (12-EDO chromatic)
+##     .fscope()                    — frequency spectrum bars
+##   Or toggle with Ctrl+. to cycle through all types
 
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0
@@ -94,10 +97,14 @@ var _editor_text: String:
 
 ## Visualizer types — matches Strudel v1.2.0 visualizer methods.
 ## Only types that exist in Strudel are supported.
-const VIZ_NONE := "none"          ## No visualizer (default)
-const VIZ_PIANOROLL := "pianoroll" ## .pianoroll() / .punchcard() / ._pianoroll()
-const VIZ_SCOPE := "scope"        ## .scope() / .tscope() / ._scope() — oscilloscope
-const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_SCOPE]
+const VIZ_NONE := "none"            ## No visualizer (default)
+const VIZ_PIANOROLL := "pianoroll"   ## .pianoroll() / .punchcard() / ._pianoroll()
+const VIZ_SCOPE := "scope"          ## .scope() / .tscope() / ._scope() — oscilloscope
+const VIZ_WORDFALL := "wordfall"    ## .wordfall() — vertical pianoroll with labels
+const VIZ_SPIRAL := "spiral"        ## .spiral() / ._spiral() — archimedean spiral
+const VIZ_PITCHWHEEL := "pitchwheel" ## .pitchwheel() / ._pitchwheel() — pitch circle
+const VIZ_FSCOPE := "fscope"        ## .fscope() — frequency spectrum
+const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_SCOPE, VIZ_WORDFALL, VIZ_SPIRAL, VIZ_PITCHWHEEL, VIZ_FSCOPE]
 const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
 
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
@@ -117,6 +124,14 @@ func _line_viz(idx: int) -> String:
 		return VIZ_PIANOROLL
 	if ".scope()" in text or ".tscope()" in text or "._scope()" in text:
 		return VIZ_SCOPE
+	if ".wordfall()" in text:
+		return VIZ_WORDFALL
+	if ".spiral()" in text or "._spiral()" in text:
+		return VIZ_SPIRAL
+	if ".pitchwheel()" in text or "._pitchwheel()" in text:
+		return VIZ_PITCHWHEEL
+	if ".fscope()" in text:
+		return VIZ_FSCOPE
 	return VIZ_NONE
 
 
@@ -552,6 +567,12 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		".scope()": VIZ_SCOPE,
 		".tscope()": VIZ_SCOPE,
 		"._scope()": VIZ_SCOPE,
+		".wordfall()": VIZ_WORDFALL,
+		".spiral()": VIZ_SPIRAL,
+		"._spiral()": VIZ_SPIRAL,
+		".pitchwheel()": VIZ_PITCHWHEEL,
+		"._pitchwheel()": VIZ_PITCHWHEEL,
+		".fscope()": VIZ_FSCOPE,
 	}
 	for method in viz_methods:
 		if text.strip_edges().ends_with(method):
@@ -907,7 +928,11 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	var viz_char: String = ""
 	match viz:
 		VIZ_PIANOROLL: viz_char = "P"
-		VIZ_SCOPE: viz_char = "S"
+		VIZ_SCOPE: viz_char = "~"
+		VIZ_WORDFALL: viz_char = "W"
+		VIZ_SPIRAL: viz_char = "@"
+		VIZ_PITCHWHEEL: viz_char = "O"
+		VIZ_FSCOPE: viz_char = "F"
 	if not viz_char.is_empty():
 		label += viz_char
 	_panel.draw_string(font, Vector2(x + 3, y + h * 0.72), label,
@@ -986,6 +1011,14 @@ func _draw_line_viz(x: float, y: float, w: float, h: float, font: Font, line_idx
 			_draw_line_pianoroll(x, y, w, h, font, line_idx)
 		VIZ_SCOPE:
 			_draw_line_scope(x, y, w, h, font, line_idx)
+		VIZ_WORDFALL:
+			_draw_line_wordfall(x, y, w, h, font, line_idx)
+		VIZ_SPIRAL:
+			_draw_line_spiral(x, y, w, h, font, line_idx)
+		VIZ_PITCHWHEEL:
+			_draw_line_pitchwheel(x, y, w, h, font, line_idx)
+		VIZ_FSCOPE:
+			_draw_line_fscope(x, y, w, h, font, line_idx)
 
 
 func _draw_line_pianoroll(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
@@ -1097,6 +1130,181 @@ func _draw_line_scope(x: float, y: float, w: float, h: float, _font: Font, line_
 			_panel.draw_line(prev_point, point, Color(0.3, 0.9, 0.4, 0.8), 1.5)
 		prev_point = point
 
+
+
+func _draw_line_wordfall(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
+	## Vertical pianoroll with labels — Strudel's .wordfall().
+	## Notes fall downward. Active notes filled white with label text.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	# Collect unique values for X-axis (fold mode)
+	var values: Array = []
+	for hap in haps:
+		var v: float = _hap_to_pitch(hap)
+		if v >= 0 and v not in values:
+			values.append(v)
+	if values.is_empty():
+		return
+	values.sort()
+
+	var val_count: int = maxi(values.size(), 1)
+	var col_w: float = w / val_count
+	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
+	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	var time_range: float = to_time - from_time
+
+	for hap in haps:
+		if hap.whole == null:
+			continue
+		var pitch: float = _hap_to_pitch(hap)
+		if pitch < 0:
+			continue
+		var is_active: bool = hap.is_active(_current_time)
+		var hap_begin: float = hap.w().begin.to_float()
+		var hap_end: float = hap.get_end_clipped().to_float()
+		# Vertical: time on Y axis (top = future, bottom = past)
+		var py: float = y + h - ((hap_begin - from_time) / time_range) * h
+		var ph: float = ((hap_end - hap_begin) / time_range) * h
+		var val_idx: int = values.find(pitch)
+		var px: float = x + val_idx * col_w
+		if py + ph < y or py > y + h:
+			continue
+		var color: Color = Color(1.0, 1.0, 1.0, 0.9) if is_active else Color(0.3, 0.5, 0.8, 0.4)
+		_panel.draw_rect(Rect2(px + 1, py + 1, col_w - 2, maxf(ph - 2, 1)), color)
+		# Label on active haps
+		if is_active and col_w > 12:
+			var label: String = str(hap.value) if not (hap.value is Dictionary) else str(hap.value.get("note", hap.value.get("value", "")))
+			_panel.draw_string(font, Vector2(px + 2, py + 9), label,
+				HORIZONTAL_ALIGNMENT_LEFT, col_w - 4, 7, Color(0, 0, 0, 0.8))
+
+	# Playhead (horizontal line)
+	var ph_y: float = y + h - PIANOROLL_PLAYHEAD * h
+	_panel.draw_line(Vector2(x, ph_y), Vector2(x + w, ph_y), Color(1.0, 1.0, 1.0, 0.4), 1.0)
+
+
+func _draw_line_spiral(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
+	## Archimedean spiral — Strudel's .spiral().
+	## Haps are drawn as arc segments on a spiral. Active segments are bright.
+	## The playhead is at a fixed inset position; the spiral rotates with time.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	var size: float = minf(w, h)
+	var cx: float = x + w * 0.5
+	var cy: float = y + h * 0.5
+	var margin: float = size * 0.12  # Spiral expansion per rotation
+	var inset: float = 3.0           # Playhead position (rotations from center)
+	var rotate: float = _current_time  # Spiral rotates with time
+
+	# Draw hap segments as spiral arcs
+	for hap in haps:
+		if hap.whole == null:
+			continue
+		var is_active: bool = hap.is_active(_current_time)
+		var from_angle: float = hap.w().begin.to_float() - _current_time + inset
+		var to_angle: float = hap.get_end_clipped().to_float() - _current_time + inset
+		var color: Color = Color(0.3, 0.7, 1.0, 0.8) if is_active else Color(0.2, 0.3, 0.5, 0.3)
+		# Draw arc segments along the spiral
+		var steps: int = maxi(int((to_angle - from_angle) * 30), 2)
+		var prev := Vector2.ZERO
+		for i in range(steps + 1):
+			var t: float = from_angle + (to_angle - from_angle) * float(i) / float(steps)
+			var angle_rad: float = (t + rotate) * TAU
+			var radius: float = margin * t
+			var px: float = cx + cos(angle_rad) * radius
+			var py: float = cy + sin(angle_rad) * radius
+			var pt := Vector2(px, py)
+			if i > 0 and pt.x > x and pt.x < x + w and pt.y > y and pt.y < y + h:
+				_panel.draw_line(prev, pt, color, 2.5 if is_active else 1.5)
+			prev = pt
+
+	# Playhead dot at the inset position
+	var ph_angle: float = (inset + rotate) * TAU
+	var ph_r: float = margin * inset
+	var ph_pos := Vector2(cx + cos(ph_angle) * ph_r, cy + sin(ph_angle) * ph_r)
+	if ph_pos.x > x and ph_pos.x < x + w and ph_pos.y > y and ph_pos.y < y + h:
+		_panel.draw_circle(ph_pos, 3.0, Color(1.0, 1.0, 1.0, 0.8))
+
+
+func _draw_line_pitchwheel(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
+	## Pitch circle — Strudel's .pitchwheel().
+	## Notes placed on a circle at their chromatic position (12-EDO).
+	## Active notes shown as bright circles; lines from center (flake mode).
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	var size: float = minf(w, h)
+	var cx: float = x + w * 0.5
+	var cy: float = y + h * 0.5
+	var radius: float = size * 0.38
+	var dot_r: float = 3.0
+
+	# Draw 12-EDO reference dots (faint)
+	for i in range(12):
+		var angle: float = float(i) / 12.0 * TAU - TAU / 4.0  # Start from top
+		var dx: float = cx + cos(angle) * radius
+		var dy: float = cy + sin(angle) * radius
+		_panel.draw_circle(Vector2(dx, dy), 2.0, Color(0.2, 0.2, 0.3, 0.4))
+
+	# Draw active notes
+	for hap in haps:
+		if hap.whole == null or not hap.is_active(_current_time):
+			continue
+		var pitch: float = _hap_to_pitch(hap)
+		if pitch < 0:
+			continue
+		# Map MIDI pitch to position on the circle (chromatic, mod 12)
+		var chroma: float = fmod(pitch, 12.0) / 12.0
+		var angle: float = chroma * TAU - TAU / 4.0  # Start from top
+		var dx: float = cx + cos(angle) * radius
+		var dy: float = cy + sin(angle) * radius
+		var color: Color = Color(0.3, 0.8, 1.0, 0.9)
+		# Flake mode: line from center to note
+		_panel.draw_line(Vector2(cx, cy), Vector2(dx, dy), Color(color.r, color.g, color.b, 0.3), 1.0)
+		# Note dot
+		_panel.draw_circle(Vector2(dx, dy), dot_r + 1.5, color)
+
+
+func _draw_line_fscope(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
+	## Frequency spectrum — Strudel's .fscope().
+	## Since we don't have a real audio analyser, we simulate the spectrum
+	## by showing vertical bars at each active note's frequency position.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	# Frequency range: map MIDI 24-96 to the strip width (log scale)
+	var min_midi: float = 24.0
+	var max_midi: float = 96.0
+	var midi_range: float = max_midi - min_midi
+
+	for hap in haps:
+		if hap.whole == null or not hap.is_active(_current_time):
+			continue
+		var pitch: float = _hap_to_pitch(hap)
+		if pitch < 0:
+			continue
+		# Map pitch to x position (linear in MIDI = log in frequency)
+		var norm: float = clampf((pitch - min_midi) / midi_range, 0.0, 1.0)
+		var bx: float = x + norm * (w - 4)
+		# Bar height based on velocity/gain or fixed
+		var bar_h: float = h * 0.7
+		# Amplitude decay based on note progress
+		var dur: float = hap.get_duration().to_float()
+		var progress: float = 0.0
+		if dur > 0:
+			progress = clampf((_current_time - hap.w().begin.to_float()) / dur, 0.0, 1.0)
+		bar_h *= (1.0 - progress * 0.5)
+		var bar_w: float = maxf(w / 72.0, 2.0)  # ~1 bar per MIDI note
+		var by: float = y + h - bar_h
+		var color: Color = Color(0.3, 0.7, 1.0, 0.7 - progress * 0.3)
+		_panel.draw_rect(Rect2(bx, by, bar_w, bar_h), color)
 
 
 func _draw_pianoroll(x: float, y: float, w: float, h: float, font: Font) -> void:
