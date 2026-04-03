@@ -109,7 +109,41 @@ const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_SCOPE, VIZ_WORDFALL, VIZ_SPIRAL
 const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
 
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
-	return {"text": text, "name": name, "muted": muted, "viz": viz, "pattern_offset": 0}
+	return {"text": text, "name": name, "muted": muted, "viz": viz, "viz_options": {}, "pattern_offset": 0}
+
+
+static func _parse_viz_options(opts_str: String) -> Dictionary:
+	## Parse simple JS-like options: {labels:1, fold:0} or {labels: true}
+	## Returns a Dictionary of key→value (values are int/float/bool/string).
+	var result: Dictionary = {}
+	# Strip surrounding braces if present
+	opts_str = opts_str.strip_edges()
+	if opts_str.begins_with("{"):
+		opts_str = opts_str.substr(1)
+	if opts_str.ends_with("}"):
+		opts_str = opts_str.substr(0, opts_str.length() - 1)
+	# Split by comma
+	for pair in opts_str.split(","):
+		pair = pair.strip_edges()
+		if pair.is_empty():
+			continue
+		var sep: int = pair.find(":")
+		if sep < 0:
+			sep = pair.find("=")
+		if sep < 0:
+			continue
+		var key: String = pair.substr(0, sep).strip_edges().replace("'", "").replace('"', '')
+		var val_str: String = pair.substr(sep + 1).strip_edges().replace("'", "").replace('"', '')
+		# Parse value
+		if val_str == "true":
+			result[key] = true
+		elif val_str == "false":
+			result[key] = false
+		elif val_str.is_valid_float():
+			result[key] = float(val_str) if "." in val_str else int(val_str)
+		else:
+			result[key] = val_str
+	return result
 
 
 func _line_viz(idx: int) -> String:
@@ -120,17 +154,19 @@ func _line_viz(idx: int) -> String:
 	if stored != VIZ_NONE:
 		return stored
 	# Also detect inline viz methods in the text (live, before eval)
-	# These can appear anywhere but typically at the end: "...".pianoroll()
 	var text: String = _lines[idx].get("text", "")
-	for pair in [[".pianoroll()", VIZ_PIANOROLL], [".punchcard()", VIZ_PIANOROLL],
-				  ["._pianoroll()", VIZ_PIANOROLL],
-				  [".scope()", VIZ_SCOPE], [".tscope()", VIZ_SCOPE], ["._scope()", VIZ_SCOPE],
-				  [".wordfall()", VIZ_WORDFALL],
-				  [".spiral()", VIZ_SPIRAL], ["._spiral()", VIZ_SPIRAL],
-				  [".pitchwheel()", VIZ_PITCHWHEEL], ["._pitchwheel()", VIZ_PITCHWHEEL],
-				  [".fscope()", VIZ_FSCOPE]]:
-		if pair[0] in text:
-			return pair[1]
+	for method_name in ["pianoroll", "punchcard", "_pianoroll",
+						"scope", "tscope", "_scope",
+						"wordfall", "spiral", "_spiral",
+						"pitchwheel", "_pitchwheel", "fscope"]:
+		if ("." + method_name + "(") in text:
+			match method_name:
+				"pianoroll", "punchcard", "_pianoroll": return VIZ_PIANOROLL
+				"scope", "tscope", "_scope": return VIZ_SCOPE
+				"wordfall": return VIZ_WORDFALL
+				"spiral", "_spiral": return VIZ_SPIRAL
+				"pitchwheel", "_pitchwheel": return VIZ_PITCHWHEEL
+				"fscope": return VIZ_FSCOPE
 	return VIZ_NONE
 
 
@@ -569,39 +605,58 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	#
 	# Method chain: strip .method() suffixes from right to left
 
-	var viz_methods := {
-		".pianoroll()": VIZ_PIANOROLL,
-		".punchcard()": VIZ_PIANOROLL,
-		"._pianoroll()": VIZ_PIANOROLL,
-		".scope()": VIZ_SCOPE,
-		".tscope()": VIZ_SCOPE,
-		"._scope()": VIZ_SCOPE,
-		".wordfall()": VIZ_WORDFALL,
-		".spiral()": VIZ_SPIRAL,
-		"._spiral()": VIZ_SPIRAL,
-		".pitchwheel()": VIZ_PITCHWHEEL,
-		"._pitchwheel()": VIZ_PITCHWHEEL,
-		".fscope()": VIZ_FSCOPE,
+	# Viz method names → viz type
+	var viz_names := {
+		"pianoroll": VIZ_PIANOROLL, "punchcard": VIZ_PIANOROLL, "_pianoroll": VIZ_PIANOROLL,
+		"scope": VIZ_SCOPE, "tscope": VIZ_SCOPE, "_scope": VIZ_SCOPE,
+		"wordfall": VIZ_WORDFALL,
+		"spiral": VIZ_SPIRAL, "_spiral": VIZ_SPIRAL,
+		"pitchwheel": VIZ_PITCHWHEEL, "_pitchwheel": VIZ_PITCHWHEEL,
+		"fscope": VIZ_FSCOPE,
 	}
 
-	# Strip viz methods from the end of the text
+	# Parse viz method + options from the end of the text.
+	# Matches: .pianoroll() or .pianoroll({labels:1, fold:0}) or .pianoroll({ labels: 1 })
 	var stripped_text: String = text.strip_edges()
-	for method in viz_methods:
-		if stripped_text.ends_with(method):
-			result["viz"] = viz_methods[method]
-			line["viz"] = viz_methods[method]
-			stripped_text = stripped_text.substr(0, stripped_text.length() - method.length()).strip_edges()
-			break
+	var viz_options: Dictionary = {}
+
+	for method_name in viz_names:
+		var method_prefix: String = "." + method_name + "("
+		var m_idx: int = stripped_text.rfind(method_prefix)
+		if m_idx < 0:
+			continue
+		# Find the matching closing paren
+		var paren_start: int = m_idx + method_prefix.length()
+		var paren_end: int = stripped_text.find(")", paren_start)
+		if paren_end < 0:
+			continue
+		# Check this is at the end of the text
+		if paren_end != stripped_text.length() - 1:
+			continue
+
+		result["viz"] = viz_names[method_name]
+		line["viz"] = viz_names[method_name]
+
+		# Parse options inside the parens (simple key:value pairs)
+		var opts_str: String = stripped_text.substr(paren_start, paren_end - paren_start).strip_edges()
+		if not opts_str.is_empty():
+			viz_options = _parse_viz_options(opts_str)
+		result["viz_options"] = viz_options
+		line["viz_options"] = viz_options
+
+		stripped_text = stripped_text.substr(0, m_idx).strip_edges()
+		break
 
 	# If no viz found, clear stored text-based viz (keep manual Ctrl+. toggle)
 	if result["viz"] == VIZ_NONE:
 		var had_viz_text: bool = false
-		for method in viz_methods:
-			if method in raw:
+		for method_name in viz_names:
+			if ("." + method_name + "(") in raw:
 				had_viz_text = true
 				break
 		if had_viz_text:
 			line["viz"] = VIZ_NONE
+			line["viz_options"] = {}
 
 	# Strip Strudel wrappers: note("..."), s("...")
 	# These are JS function calls that wrap mini-notation in Strudel
@@ -1048,52 +1103,129 @@ func _draw_line_viz(x: float, y: float, w: float, h: float, font: Font, line_idx
 
 
 func _draw_line_pianoroll(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
-	## Draw a mini pianoroll strip for one line's haps.
+	## Draw a mini pianoroll strip — supports Strudel pianoroll options.
+	## Options: labels, fold, vertical, autorange, cycles, playhead, active, inactive,
+	##          fill, fillActive, strokeActive, hideInactive, minMidi, maxMidi
+	var opts: Dictionary = _lines[line_idx].get("viz_options", {}) if line_idx < _lines.size() else {}
+	var show_labels: bool = opts.get("labels", false)
+	var fold: bool = opts.get("fold", true)
+	var vertical: bool = opts.get("vertical", false)
+	var autorange: bool = opts.get("autorange", false)
+	var viz_cycles: float = float(opts.get("cycles", PIANOROLL_CYCLES))
+	var viz_playhead: float = float(opts.get("playhead", PIANOROLL_PLAYHEAD))
+	var fill_notes: bool = opts.get("fill", true)
+	var fill_active: bool = opts.get("fillActive", false)
+	var stroke_active: bool = opts.get("strokeActive", true)
+	var hide_inactive: bool = opts.get("hideInactive", false)
+	var active_color := Color(1.0, 0.8, 0.2, 0.9)
+	var inactive_color := Color(0.3, 0.5, 0.8, 0.5)
+	var min_midi: int = int(opts.get("minMidi", 10))
+	var max_midi: int = int(opts.get("maxMidi", 90))
+
 	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
 
 	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
 	if haps.is_empty():
 		return
 
-	# Value range for this line
+	# Collect values for fold mode / autorange
 	var values: Array = []
 	for hap in haps:
 		var v: float = _hap_to_pitch(hap)
-		if v != -1 and v not in values:
+		if v >= 0 and v not in values:
 			values.append(v)
 	if values.is_empty():
 		return
 	values.sort()
 
-	var val_count: int = maxi(values.size(), 1)
-	var bar_h: float = h / val_count
-	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
-	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	if autorange:
+		min_midi = int(values[0])
+		max_midi = int(values[-1])
+
+	var val_count: int
+	var val_extent: float
+	if fold:
+		val_count = maxi(values.size(), 1)
+		val_extent = val_count
+	else:
+		val_extent = maxf(float(max_midi - min_midi + 1), 1.0)
+		val_count = int(val_extent)
+
+	# Axis dimensions — swap for vertical mode
+	var time_axis: float = w if not vertical else h
+	var value_axis: float = h if not vertical else w
+	var bar_size: float = value_axis / maxf(val_count, 1)
+	bar_size = clampf(bar_size, 1.0, value_axis)  # Safety: at least 1px, at most full axis
+
+	var from_time: float = _current_time - viz_cycles * viz_playhead
+	var to_time: float = _current_time + viz_cycles * (1.0 - viz_playhead)
 	var time_range: float = to_time - from_time
 
 	for hap in haps:
 		if hap.whole == null:
 			continue
 		var pitch: float = _hap_to_pitch(hap)
-		if pitch == -1:
+		if pitch < 0:
 			continue
 		var is_active: bool = hap.is_active(_current_time)
+		if hide_inactive and not is_active:
+			continue
+
 		var hap_begin: float = hap.w().begin.to_float()
 		var hap_end: float = hap.get_end_clipped().to_float()
-		var px_x: float = x + ((hap_begin - from_time) / time_range) * w
-		var px_w: float = ((hap_end - hap_begin) / time_range) * w
-		var val_idx: int = values.find(pitch)
-		var px_y: float = y + h - (val_idx + 1) * bar_h
-		if px_x + px_w < x or px_x > x + w:
+		var time_progress: float = (hap_begin - from_time) / time_range
+		var time_px: float = time_progress * time_axis
+		var duration_px: float = ((hap_end - hap_begin) / time_range) * time_axis
+
+		var val_progress: float
+		if fold:
+			val_progress = float(values.find(pitch)) / val_count
+		else:
+			val_progress = (pitch - min_midi) / val_extent
+
+		var val_px: float = value_axis - (val_progress + 1.0 / val_count) * value_axis
+
+		# Build rect coords based on orientation
+		var rect: Rect2
+		if vertical:
+			rect = Rect2(x + val_px + 1, y + h - time_px - duration_px + 1, bar_size - 2, maxf(duration_px - 2, 1))
+		else:
+			rect = Rect2(x + time_px + 1, y + val_px + 1, maxf(duration_px - 2, 1), bar_size - 2)
+
+		# Safety: skip degenerate rects
+		if rect.size.x <= 0 or rect.size.y <= 0 or is_nan(rect.position.x) or is_nan(rect.position.y):
 			continue
-		px_x = maxf(px_x, x)
-		px_w = minf(px_w, x + w - px_x)
-		var color: Color = Color(1.0, 0.8, 0.2, 0.9) if is_active else Color(0.3, 0.5, 0.8, 0.5)
-		_panel.draw_rect(Rect2(px_x + 1, px_y + 1, maxf(px_w - 2, 1), bar_h - 2), color)
+		# Clip to bounds
+		if rect.position.x + rect.size.x < x or rect.position.x > x + w:
+			continue
+		if rect.position.y + rect.size.y < y or rect.position.y > y + h:
+			continue
+		# Clamp rect within panel
+		rect = rect.intersection(Rect2(x, y, w, h))
+		if rect.size.x <= 0 or rect.size.y <= 0:
+			continue
+
+		var color: Color = active_color if is_active else inactive_color
+		var should_fill: bool = (is_active and fill_active) or (not is_active and fill_notes)
+		var should_stroke: bool = is_active and stroke_active
+
+		if should_fill:
+			_panel.draw_rect(rect, color)
+		if should_stroke:
+			_panel.draw_rect(rect, color, false, 1.0)
+
+		# Labels
+		if show_labels and is_active and bar_size > 8 and duration_px > 15:
+			var lbl: String = str(hap.value) if not (hap.value is Dictionary) else str(hap.value.get("note", hap.value.get("value", "")))
+			_panel.draw_string(font, Vector2(rect.position.x + 2, rect.position.y + bar_size - 3),
+				lbl, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 4, 7, Color(0, 0, 0, 0.8))
 
 	# Playhead
-	var ph_x: float = x + PIANOROLL_PLAYHEAD * w
-	_panel.draw_line(Vector2(ph_x, y), Vector2(ph_x, y + h), Color(1.0, 1.0, 1.0, 0.4), 1.0)
+	var ph_pos: float = viz_playhead * time_axis
+	if vertical:
+		_panel.draw_line(Vector2(x, y + h - ph_pos), Vector2(x + w, y + h - ph_pos), Color(1.0, 1.0, 1.0, 0.4), 1.0)
+	else:
+		_panel.draw_line(Vector2(x + ph_pos, y), Vector2(x + ph_pos, y + h), Color(1.0, 1.0, 1.0, 0.4), 1.0)
 
 
 
@@ -1159,57 +1291,17 @@ func _draw_line_scope(x: float, y: float, w: float, h: float, _font: Font, line_
 
 
 func _draw_line_wordfall(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
-	## Vertical pianoroll with labels — Strudel's .wordfall().
-	## Notes fall downward. Active notes filled white with label text.
-	_panel.draw_rect(Rect2(x, y, w, h), Color(0.02, 0.02, 0.04))
-
-	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
-	if haps.is_empty():
-		return
-
-	# Collect unique values for X-axis (fold mode)
-	var values: Array = []
-	for hap in haps:
-		var v: float = _hap_to_pitch(hap)
-		if v >= 0 and v not in values:
-			values.append(v)
-	if values.is_empty():
-		return
-	values.sort()
-
-	var val_count: int = maxi(values.size(), 1)
-	var col_w: float = w / val_count
-	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
-	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
-	var time_range: float = to_time - from_time
-
-	for hap in haps:
-		if hap.whole == null:
-			continue
-		var pitch: float = _hap_to_pitch(hap)
-		if pitch < 0:
-			continue
-		var is_active: bool = hap.is_active(_current_time)
-		var hap_begin: float = hap.w().begin.to_float()
-		var hap_end: float = hap.get_end_clipped().to_float()
-		# Vertical: time on Y axis (top = future, bottom = past)
-		var py: float = y + h - ((hap_begin - from_time) / time_range) * h
-		var ph: float = ((hap_end - hap_begin) / time_range) * h
-		var val_idx: int = values.find(pitch)
-		var px: float = x + val_idx * col_w
-		if py + ph < y or py > y + h:
-			continue
-		var color: Color = Color(1.0, 1.0, 1.0, 0.9) if is_active else Color(0.3, 0.5, 0.8, 0.4)
-		_panel.draw_rect(Rect2(px + 1, py + 1, col_w - 2, maxf(ph - 2, 1)), color)
-		# Label on active haps
-		if is_active and col_w > 12:
-			var label: String = str(hap.value) if not (hap.value is Dictionary) else str(hap.value.get("note", hap.value.get("value", "")))
-			_panel.draw_string(font, Vector2(px + 2, py + 9), label,
-				HORIZONTAL_ALIGNMENT_LEFT, col_w - 4, 7, Color(0, 0, 0, 0.8))
-
-	# Playhead (horizontal line)
-	var ph_y: float = y + h - PIANOROLL_PLAYHEAD * h
-	_panel.draw_line(Vector2(x, ph_y), Vector2(x + w, ph_y), Color(1.0, 1.0, 1.0, 0.4), 1.0)
+	## Wordfall = pianoroll with preset options matching Strudel:
+	## punchcard({vertical:1, labels:1, stroke:0, fillActive:1, active:'white', ...options})
+	## We inject these defaults then delegate to pianoroll.
+	var saved_opts: Dictionary = _lines[line_idx].get("viz_options", {}).duplicate() if line_idx < _lines.size() else {}
+	# Wordfall defaults (user options override)
+	var wordfall_defaults := {"vertical": true, "labels": true, "fillActive": true, "fill": false}
+	wordfall_defaults.merge(saved_opts)  # User opts override defaults
+	_lines[line_idx]["viz_options"] = wordfall_defaults
+	_draw_line_pianoroll(x, y, w, h, font, line_idx)
+	# Restore original options
+	_lines[line_idx]["viz_options"] = saved_opts
 
 
 func _draw_line_spiral(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
