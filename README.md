@@ -163,6 +163,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.46
+**ChargeComponent, Character base virtuals, dead forwarder cleanup — player_side.gd under 4,000 lines**
+
+- **ChargeComponent extracted**: hold-to-charge system as reusable component with class hooks (on_charge_press, on_charge_tick, on_charge_release, get_charge_threshold)
+- **Character base expanded**: DEFAULT_GRAVITY, DEFAULT_JUMP_VELOCITY constants; apply_gravity(), apply_knockback(), get_aim_direction() virtual methods; _is_dead, _is_wall_sliding shared state
+- **36 dead forwarders removed**: executioner functions with zero references (class calls local)
+- **Dispatch table cleanup**: removed all extracted class entries from _init_class_dispatch — each class's init handles its own dispatch
+- **Fix**: executioner tick crash from deleted forwarder (p._exec_test_tick → local exec_test_tick)
+- **player_side.gd: 9,654 → 3,985 lines (−58.7%)**
+
 ### v0.10.45
 **All 13 player classes extracted — player_side.gd reduced 55.8%**
 
