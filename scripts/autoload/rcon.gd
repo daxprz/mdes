@@ -1289,6 +1289,36 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"drawer":
 			MusicDrawer.toggle()
 			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
+		"edit":
+			# Set drawer lines directly and play. Lines separated by |
+			# strudel edit drums: c4(3,8).pianoroll() | bass: c2 ~ e2 ~.bar() | melody: c4 e4 g4 c5
+			if parts.size() < 3:
+				return "ERR: usage: strudel edit <line1> | <line2> | ..."
+			var edit_text: String = command.substr(command.find("edit") + 5).strip_edges()
+			var edit_cps: float = -1.0
+			var cps_match: int = edit_text.find("cps=")
+			if cps_match >= 0:
+				var cps_val: String = edit_text.substr(cps_match + 4).strip_edges()
+				var sp: int = cps_val.find(" ")
+				if sp >= 0:
+					cps_val = cps_val.substr(0, sp)
+				if cps_val.find("|") >= 0:
+					cps_val = cps_val.substr(0, cps_val.find("|"))
+				edit_cps = float(cps_val.strip_edges())
+				edit_text = (edit_text.substr(0, cps_match) + edit_text.substr(cps_match + 4 + cps_val.length())).strip_edges()
+			# Split into lines and set on the drawer
+			var edit_lines: Array = edit_text.split("|")
+			MusicDrawer._lines.clear()
+			for el in edit_lines:
+				MusicDrawer._lines.append(MusicDrawer._make_line(el.strip_edges()))
+			MusicDrawer._current_line = 0
+			MusicDrawer._editor_cursor = 0
+			MusicDrawer.open()
+			# Eval (plays all lines stacked)
+			if edit_cps > 0:
+				MusicDrawer._cps = edit_cps
+			MusicDrawer._play_current()
+			return "OK: drawer set with %d lines, playing" % edit_lines.size()
 		_:
 			# Everything else is mini-notation
 			var mini_text: String = command.substr(command.find(" ") + 1).strip_edges()
