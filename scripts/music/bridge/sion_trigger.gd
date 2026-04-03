@@ -94,6 +94,9 @@ func _setup_voices() -> void:
 		"square":      "midi.lead1",
 		"sawtooth":    "midi.lead2",
 		"saw":         "midi.lead2",
+		"sine":        "midi.lead1",    # Square is closest to pure sine in FM
+		"triangle":    "midi.lead1",    # Triangle ≈ square with softer harmonics
+		"supersaw":    "midi.lead2",    # Supersaw ≈ detuned saw
 		"lead":        "midi.lead2",
 		"calliope":    "midi.lead3",
 		"chiff":       "midi.lead4",
@@ -120,6 +123,23 @@ func _setup_voices() -> void:
 		"tb":          "midi.brass2",
 		"ob":          "midi.reed5",
 		"cl":          "midi.reed8",
+		# -- Strudel oscillator types --
+		# These match Web Audio OscillatorNode type names
+		# used in Strudel's s("sawtooth") etc.
+		# Already mapped above: sawtooth, square, sine, triangle, supersaw
+		# -- Strudel drum sample names --
+		# Standard dirt-samples names used in Strudel: s("bd"), s("sd"), etc.
+		# Mapped to the closest SiON percussion/drum preset
+		"bd":          "midi.strings8",  # Timpani as bass drum proxy
+		"sd":          "midi.strings6",  # Pizzicato as snare proxy
+		"hh":          "midi.chrom2",    # Glockenspiel as hi-hat proxy
+		"cp":          "midi.guitar8",   # Guitar harmonics as clap proxy
+		"rim":         "midi.chrom6",    # Xylophone as rim proxy
+		"rd":          "midi.chrom7",    # Tubular bells as ride proxy
+		"cr":          "midi.ensemble8", # Orchestra hit as crash proxy
+		"lt":          "midi.strings8",  # Timpani as low tom proxy
+		"mt":          "midi.strings8",  # Timpani as mid tom proxy
+		"ht":          "midi.chrom5",    # Marimba as high tom proxy
 	}
 
 	for name in map:

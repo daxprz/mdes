@@ -1292,6 +1292,64 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"drawer":
 			MusicDrawer.toggle()
 			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
+		"save":
+			# Save current drawer lines to a .txt file
+			# strudel save <filename>
+			if parts.size() < 3:
+				return "ERR: usage: strudel save <filename>"
+			var save_name: String = parts[2].strip_edges()
+			if not save_name.ends_with(".txt"):
+				save_name += ".txt"
+			var save_path: String = "user://patterns/" + save_name
+			DirAccess.make_dir_recursive_absolute("user://patterns/")
+			var save_file := FileAccess.open(save_path, FileAccess.WRITE)
+			if not save_file:
+				return "ERR: cannot write to %s" % save_path
+			for line_dict in MusicDrawer._lines:
+				save_file.store_line(line_dict.get("text", ""))
+			save_file.close()
+			return "OK: saved %d lines to %s" % [MusicDrawer._lines.size(), save_path]
+		"load":
+			# Load a pattern file into the drawer
+			# strudel load <filename>
+			if parts.size() < 3:
+				# List available files
+				var dir := DirAccess.open("user://patterns/")
+				if not dir:
+					return "No saved patterns. Save with: strudel save <name>"
+				var files: Array[String] = []
+				dir.list_dir_begin()
+				var fname: String = dir.get_next()
+				while fname != "":
+					if fname.ends_with(".txt"):
+						files.append(fname.replace(".txt", ""))
+					fname = dir.get_next()
+				if files.is_empty():
+					return "No saved patterns. Save with: strudel save <name>"
+				return "Saved patterns: %s" % ", ".join(PackedStringArray(files))
+			var load_name: String = parts[2].strip_edges()
+			if not load_name.ends_with(".txt"):
+				load_name += ".txt"
+			var load_path: String = "user://patterns/" + load_name
+			if not FileAccess.file_exists(load_path):
+				return "ERR: file not found: %s" % load_path
+			var load_file := FileAccess.open(load_path, FileAccess.READ)
+			if not load_file:
+				return "ERR: cannot read %s" % load_path
+			MusicDrawer._lines.clear()
+			while not load_file.eof_reached():
+				var line_text: String = load_file.get_line()
+				MusicDrawer._lines.append(MusicDrawer._make_line(line_text))
+			load_file.close()
+			# Remove trailing empty line from EOF
+			while not MusicDrawer._lines.is_empty() and MusicDrawer._lines[-1].get("text", "").strip_edges().is_empty():
+				MusicDrawer._lines.pop_back()
+			if MusicDrawer._lines.is_empty():
+				MusicDrawer._lines.append(MusicDrawer._make_line(""))
+			MusicDrawer._current_line = 0
+			MusicDrawer._editor_cursor = 0
+			MusicDrawer.open()
+			return "OK: loaded %d lines from %s" % [MusicDrawer._lines.size(), load_path]
 		"edit":
 			# Set drawer lines directly and play. Lines separated by |
 			# strudel edit drums: c4(3,8).pianoroll() | bass: c2 ~ e2 ~.bar() | melody: c4 e4 g4 c5
