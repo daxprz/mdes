@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.52
+**Pianoroll options, import/export, compatibility audit, oscillator + drum voices**
+
+- **Pianoroll options**: `"mini".pianoroll({labels:1, fold:0, vertical:1, autorange:1, cycles:8})` — Strudel-compatible option syntax parsed from `{key:value}` inside parentheses
+- **Wordfall** now delegates to pianoroll with exact Strudel presets (`vertical:1, labels:1, fillActive:1`)
+- **Import/export**: `strudel save <name>` / `strudel load <name>` — save/load drawer lines to `user://patterns/*.txt`
+- **Compatibility audit**: `docs/design/strudel_compatibility.md` — honest coverage report (mini-notation ~95%, controls ~2%, JS eval 0%)
+- **Oscillator types**: `sine`, `triangle`, `supersaw` mapped to SiON FM presets
+- **Drum sample names**: `bd`, `sd`, `hh`, `cp`, `rim`, `rd`, `cr` mapped to closest SiON percussion
+- **Safety bounds** in pianoroll renderer prevent crashes from degenerate rects
+
 ### v0.10.51
 **Multi-line editor, per-line visualizers, Strudel v1.2.0 viz compatibility**
 
