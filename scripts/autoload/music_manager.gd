@@ -619,8 +619,15 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: Strin
 	print("MUSIC: Strudel pattern playing (cps=%.2f)" % _cyclist.cps)
 
 
+var _strudel_last_pattern: StrudelPattern = null  ## Preserved for resume after stop
+var _strudel_last_source: String = ""
+
 func strudel_stop() -> void:
 	## Stop the Strudel pattern engine and the SiON stream.
+	## Preserves the last pattern so strudel_start() can resume it.
+	if _strudel_pattern:
+		_strudel_last_pattern = _strudel_pattern
+		_strudel_last_source = _strudel_source_text
 	if _cyclist and _strudel_playing:
 		_cyclist.stop()
 	_strudel_playing = false
@@ -628,6 +635,14 @@ func strudel_stop() -> void:
 	if _sion_streaming and driver:
 		driver.call("stop")
 		_sion_streaming = false
+
+
+func strudel_start() -> void:
+	## Resume the last stopped pattern, or do nothing if there's nothing to resume.
+	if _strudel_last_pattern:
+		strudel_play(_strudel_last_pattern, -1.0, _strudel_last_source)
+	else:
+		print("MUSIC: nothing to resume")
 
 
 func _strudel_play_title() -> void:

@@ -1237,6 +1237,9 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"stop", "hush":
 			MusicManager.strudel_stop()
 			return "OK: strudel stopped"
+		"start":
+			MusicManager.strudel_start()
+			return "OK: strudel %s" % ("resumed" if MusicManager._strudel_playing else "nothing to resume")
 		"test":
 			# Run strudel test suite: strudel test [suite_name]
 			var test_node: Node = get_node_or_null("/root/StrudelTestRunner")
