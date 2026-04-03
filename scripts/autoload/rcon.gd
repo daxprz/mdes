@@ -1230,6 +1230,22 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"stop", "hush":
 			MusicManager.strudel_stop()
 			return "OK: strudel stopped"
+		"voices":
+			if MusicManager._sion_trigger:
+				var names: Array = MusicManager._sion_trigger._voices.keys()
+				names.sort()
+				var lines: Array[String] = ["Available voices (%d):" % names.size()]
+				var row: String = " "
+				for n in names:
+					if row.length() + n.length() > 70:
+						lines.append(row)
+						row = " "
+					row += " " + n
+				if not row.strip_edges().is_empty():
+					lines.append(row)
+				lines.append("Usage: strudel c4 e4 g4 c5 sound=flute")
+				return "\n".join(lines)
+			return "ERR: trigger not initialized"
 		"cps":
 			if parts.size() < 3:
 				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
@@ -1256,16 +1272,32 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		_:
 			# Everything else is mini-notation
 			var mini_text: String = command.substr(command.find(" ") + 1).strip_edges()
-			# Parse optional cps= at the end
+			# Parse optional key=value parameters at the end
 			var mini_cps: float = -1.0
-			var cps_idx: int = mini_text.find("cps=")
-			if cps_idx >= 0:
-				mini_cps = float(mini_text.substr(cps_idx + 4).strip_edges())
-				mini_text = mini_text.substr(0, cps_idx).strip_edges()
+			var mini_sound: String = ""
+			# Extract cps= and sound= from the tail
+			for param in ["cps=", "sound=", "s="]:
+				var p_idx: int = mini_text.find(param)
+				if p_idx >= 0:
+					var p_val: String = mini_text.substr(p_idx + param.length()).strip_edges()
+					# Value ends at next space or end of string
+					var space_idx: int = p_val.find(" ")
+					if space_idx >= 0:
+						p_val = p_val.substr(0, space_idx)
+					if param == "cps=":
+						mini_cps = float(p_val)
+					else:
+						mini_sound = p_val
+					mini_text = (mini_text.substr(0, p_idx) + mini_text.substr(p_idx + param.length() + p_val.length())).strip_edges()
 			var pat: StrudelPattern = StrudelMini.mini(mini_text)
+			# Apply sound/voice if specified
+			if not mini_sound.is_empty():
+				pat = pat.set_in(Strudel.pure({"s": mini_sound}))
 			MusicManager.strudel_play(pat, mini_cps)
 			var hap_count: int = pat.first_cycle().size()
-			return "OK: strudel '%s' (%d haps/cycle)" % [mini_text, hap_count]
+			return "OK: strudel '%s' (%d haps/cycle%s)" % [
+				mini_text, hap_count,
+				" sound=%s" % mini_sound if not mini_sound.is_empty() else ""]
 
 
 func _cmd_music(parts: PackedStringArray, command: String = "") -> String:

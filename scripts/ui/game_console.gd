@@ -149,7 +149,7 @@ const COMMANDS := [
 	"announce", "comment",
 	# -- Strudel --
 	"strudel", "strudel stop", "strudel hush",
-	"strudel cps", "strudel status", "strudel drawer",
+	"strudel cps", "strudel status", "strudel drawer", "strudel voices",
 	"musicdrawer", "md",
 ]
 

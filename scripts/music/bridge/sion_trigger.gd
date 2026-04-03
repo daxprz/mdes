@@ -19,16 +19,114 @@ func _init(p_driver: Variant, p_presets: Variant) -> void:
 func _setup_voices() -> void:
 	if not presets:
 		return
-	# Default melodic voice
-	_voices["default"] = presets.call("get_voice_preset", "midi.piano1")
-	_voices["piano"] = presets.call("get_voice_preset", "midi.piano1")
-	_voices["bass"] = presets.call("get_voice_preset", "midi.bass7")
-	_voices["lead"] = presets.call("get_voice_preset", "midi.lead2")
-	_voices["pad"] = presets.call("get_voice_preset", "midi.pad2")
-	_voices["organ"] = presets.call("get_voice_preset", "midi.organ3")
-	_voices["strings"] = presets.call("get_voice_preset", "midi.strings1")
-	_voices["sawtooth"] = presets.call("get_voice_preset", "midi.lead2")
-	_voices["square"] = presets.call("get_voice_preset", "midi.lead1")
+
+	# Build the full voice map: friendly name -> SiON preset
+	# Names are chosen to be short and intuitive for mini-notation s() usage.
+	var map := {
+		# -- Piano / Keys --
+		"piano":       "midi.piano1",
+		"epiano":      "midi.piano5",
+		"honkytonk":   "midi.piano4",
+		"harpsichord": "midi.piano7",
+		"clavi":       "midi.piano8",
+		"celesta":     "midi.chrom1",
+		"glockenspiel":"midi.chrom2",
+		"musicbox":    "midi.chrom3",
+		"vibes":       "midi.chrom4",
+		"marimba":     "midi.chrom5",
+		"xylophone":   "midi.chrom6",
+		"bells":       "midi.chrom7",
+		"dulcimer":    "midi.chrom8",
+		# -- Organ --
+		"organ":       "midi.organ3",
+		"church":      "midi.organ4",
+		"accordion":   "midi.organ6",
+		"harmonica":   "midi.organ7",
+		# -- Guitar --
+		"guitar":      "midi.guitar1",
+		"acoustic":    "midi.guitar1",
+		"steel":       "midi.guitar2",
+		"jazz":        "midi.guitar3",
+		"electric":    "midi.guitar4",
+		"muted":       "midi.guitar5",
+		"overdrive":   "midi.guitar6",
+		"distortion":  "midi.guitar7",
+		# -- Bass --
+		"bass":        "midi.bass1",
+		"fingerbass":  "midi.bass2",
+		"pickbass":    "midi.bass3",
+		"fretless":    "midi.bass4",
+		"slap":        "midi.bass5",
+		"synthbass":   "midi.bass7",
+		# -- Strings --
+		"violin":      "midi.strings1",
+		"viola":       "midi.strings2",
+		"cello":       "midi.strings3",
+		"contrabass":  "midi.strings4",
+		"strings":     "midi.ensemble1",
+		"pizzicato":   "midi.strings6",
+		"harp":        "midi.strings7",
+		"timpani":     "midi.strings8",
+		# -- Ensemble --
+		"choir":       "midi.ensemble5",
+		"voice":       "midi.ensemble6",
+		"orchestra":   "midi.ensemble8",
+		# -- Brass --
+		"trumpet":     "midi.brass1",
+		"trombone":    "midi.brass2",
+		"tuba":        "midi.brass3",
+		"horn":        "midi.brass5",
+		"brass":       "midi.brass6",
+		# -- Reed / Wind --
+		"sax":         "midi.reed2",
+		"sopranosax":  "midi.reed1",
+		"tenorsax":    "midi.reed3",
+		"oboe":        "midi.reed5",
+		"bassoon":     "midi.reed7",
+		"clarinet":    "midi.reed8",
+		"flute":       "midi.pipe2",
+		"piccolo":     "midi.pipe1",
+		"recorder":    "midi.pipe3",
+		"panflute":    "midi.pipe4",
+		"whistle":     "midi.pipe7",
+		"ocarina":     "midi.pipe8",
+		# -- Synth Lead --
+		"square":      "midi.lead1",
+		"sawtooth":    "midi.lead2",
+		"saw":         "midi.lead2",
+		"lead":        "midi.lead2",
+		"calliope":    "midi.lead3",
+		"chiff":       "midi.lead4",
+		"charang":     "midi.lead5",
+		"fifths":      "midi.lead7",
+		# -- Synth Pad --
+		"pad":         "midi.pad2",
+		"newage":      "midi.pad1",
+		"warmpad":     "midi.pad2",
+		"polysynth":   "midi.pad3",
+		"choirpad":    "midi.pad4",
+		"bowed":       "midi.pad5",
+		"metallic":    "midi.pad6",
+		# -- Short aliases --
+		"pno":         "midi.piano1",
+		"str":         "midi.ensemble1",
+		"syn":         "midi.lead2",
+		"brs":         "midi.brass6",
+		"fl":          "midi.pipe2",
+		"vln":         "midi.strings1",
+		"vc":          "midi.strings3",
+		"cb":          "midi.strings4",
+		"tp":          "midi.brass1",
+		"tb":          "midi.brass2",
+		"ob":          "midi.reed5",
+		"cl":          "midi.reed8",
+	}
+
+	for name in map:
+		_voices[name] = presets.call("get_voice_preset", map[name])
+
+	_voices["default"] = _voices["piano"]
+	print("STRUDEL: %d voices mapped" % _voices.size())
 
 
 func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, target_time: float) -> void:
@@ -80,10 +178,17 @@ func _resolve_note(value: Variant) -> int:
 
 func _resolve_voice(value: Variant) -> Variant:
 	## Get the SiON voice for this hap value.
+	## Checks: dict.s, dict.sound, dict.voice, or the value itself as a voice name.
 	if value is Dictionary:
-		var s: String = str(value.get("s", value.get("sound", "")))
-		if _voices.has(s):
-			return _voices[s]
+		for key in ["s", "sound", "voice"]:
+			if value.has(key):
+				var s: String = str(value[key]).to_lower()
+				if _voices.has(s):
+					return _voices[s]
+	if value is String:
+		var lower: String = value.to_lower()
+		if _voices.has(lower):
+			return _voices[lower]
 	return _voices.get("default")
 
 

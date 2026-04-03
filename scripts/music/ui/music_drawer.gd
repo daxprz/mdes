@@ -330,16 +330,26 @@ func _play_current() -> void:
 	var text: String = _editor_text.strip_edges()
 	if text.is_empty():
 		return
-	# Extract cps= parameter if present (not part of mini-notation)
-	var cps_idx: int = text.find("cps=")
-	if cps_idx >= 0:
-		var cps_str: String = text.substr(cps_idx + 4).strip_edges()
-		if cps_str.is_valid_float():
-			_cps = float(cps_str)
-		text = text.substr(0, cps_idx).strip_edges()
+	# Extract key=value parameters (not part of mini-notation)
+	var sound_name: String = ""
+	for param in ["cps=", "sound=", "s="]:
+		var p_idx: int = text.find(param)
+		if p_idx >= 0:
+			var p_val: String = text.substr(p_idx + param.length()).strip_edges()
+			var space_idx: int = p_val.find(" ")
+			if space_idx >= 0:
+				p_val = p_val.substr(0, space_idx)
+			if param == "cps=":
+				if p_val.is_valid_float():
+					_cps = float(p_val)
+			else:
+				sound_name = p_val
+			text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
 	if text.is_empty():
 		return
 	var pat: StrudelPattern = StrudelMini.mini(text)
+	if not sound_name.is_empty():
+		pat = pat.set_in(Strudel.pure({"s": sound_name}))
 	MusicManager.strudel_play(pat, _cps)
 	_is_playing = true
 	# Reset rolling buffer on pattern change
