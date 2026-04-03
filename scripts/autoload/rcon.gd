@@ -1050,7 +1050,14 @@ func _execute(command: String) -> String:
 			return _cmd_strudel(parts, command)
 
 		"musicdrawer", "md":
-			MusicDrawer.toggle()
+			# md / md open / md close
+			if parts.size() > 1:
+				match parts[1].to_lower():
+					"open": MusicDrawer.open()
+					"close": MusicDrawer.close()
+					_: MusicDrawer.toggle()
+			else:
+				MusicDrawer.toggle()
 			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
 
 		"ai_spawn":

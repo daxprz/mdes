@@ -189,6 +189,14 @@ func toggle() -> void:
 			MusicManager._cyclist.now() if MusicManager._cyclist else 0.0))
 
 
+func open() -> void:
+	if not _active:
+		toggle()
+
+func close() -> void:
+	if _active:
+		toggle()
+
 func is_open() -> bool:
 	return _active
 
@@ -731,6 +739,22 @@ func _update_pianoroll() -> void:
 
 	for i in range(_lines.size()):
 		var pat: Variant = _line_patterns[i] if i < _line_patterns.size() else null
+
+		# If a line has a viz but no pattern, try parsing on the fly
+		# (user typed .pianoroll() but hasn't pressed Ctrl+Enter yet)
+		if pat == null and _line_viz(i) != VIZ_NONE and MusicManager._strudel_playing:
+			var parsed: Dictionary = _parse_line_text(_lines[i])
+			if parsed["is_valid"]:
+				pat = StrudelMini.mini(parsed["pattern_text"])
+				var snd: String = parsed["sound"]
+				if not snd.is_empty():
+					pat = pat.set_in(Strudel.pure({"s": snd}))
+				# Store it so we don't re-parse every frame
+				while _line_patterns.size() <= i:
+					_line_patterns.append(null)
+				_line_patterns[i] = pat
+				_lines[i]["pattern_offset"] = parsed["pattern_offset"]
+
 		if pat == null or _line_muted(i):
 			if i < _line_haps.size():
 				_line_haps[i] = []
