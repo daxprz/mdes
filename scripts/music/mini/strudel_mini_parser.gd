@@ -271,7 +271,10 @@ func _parse_step() -> Dictionary:
 			break
 
 	if chars.is_empty():
-		_error("expected a step (note name, number, or ~)")
+		_error("expected a step (note name, number, or ~) but got '%s'" % (_code[_pos] if _pos < _code.length() else "EOF"))
+		# CRITICAL: advance past the bad character to prevent infinite loops
+		if _pos < _code.length():
+			_pos += 1
 		return atom_node("~", start, _pos)
 
 	# Don't allow "." or "_" as standalone atoms (they're separators)

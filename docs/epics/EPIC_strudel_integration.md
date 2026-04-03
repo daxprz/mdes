@@ -417,27 +417,30 @@ The single end-to-end path that must work first:
 [Source highlighter illuminates "bd" "sd" "hh" "cp" as they play]
 ```
 
-### Phase 1: Silent Algebra (EPICs 1.1–1.6)
+### Phase 1: Silent Algebra (EPICs 1.1–1.6) — COMPLETE
 Get the pattern engine producing correct haps without audio.
 Validate by comparing `firstCycleValues` against Strudel.
 
-### Phase 2: Make Sound (EPIC 3)
+### Phase 2: Make Sound (EPIC 3) — COMPLETE
 Connect scheduler → GDSiON bridge. One pattern plays notes.
 
-### Phase 3: Mini-Notation (EPIC 2)
+### Phase 3: Mini-Notation (EPIC 2) — COMPLETE
 Parse `"bd sd [hh hh] cp"` into patterns. Now users can type music.
 
-### Phase 4: See It (EPIC 4.3–4.4)
+### Phase 4: See It (EPIC 4.3–4.4) — COMPLETE
 Pianoroll + source highlighting. The visual feedback loop closes.
 
-### Phase 5: Edit It (EPIC 4.1–4.2, 4.5)
-The Music Drawer UI. Live editing with hot-swap.
+### Phase 5: Edit It (EPIC 4.1–4.2, 4.5) — COMPLETE
+The Music Drawer UI. Live editing with hot-swap. Full keybindings
+(selection, copy/cut/paste, emacs kill ring, word navigation).
 
-### Phase 6: Wire It (EPIC 5)
-RCON commands, debug aspects, console integration.
+### Phase 6: Wire It (EPIC 5) — COMPLETE
+RCON commands (`strudel`, `musicdrawer`), debug aspects, console autocomplete.
 
-### Phase 7: Complete (EPICs 1.7–1.9, remaining combinators)
-Composers, signals, advanced combinators. Full Strudel compatibility.
+### Phase 7: Complete (EPICs 1.7–1.9, remaining combinators) — COMPLETE
+Composers (add/sub/mul/div/set/keep/keepif), signals (saw/sine/tri/square/rand),
+advanced combinators (every, ply, palindrome, jux, off, inside, outside, chunk).
+Degrade (`?`) and random choose (`|`) implemented.
 
 ---
 

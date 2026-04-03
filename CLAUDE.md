@@ -79,9 +79,17 @@ Do NOT use tumu when:
 | `scripts/autoload/object_pool.gd` | Node recycling pool for VFX, projectiles, chains |
 | `docs/design/player_refactor.md` | Composition architecture design — unified Character system |
 | `data/tests/suites/class_basics.json` | Gate suite: movement + combat tests for all 13 classes |
-| `scripts/autoload/music_manager.gd` | Procedural adaptive music (GDSiON) — layers, intensity, game event hooks |
+| `scripts/autoload/music_manager.gd` | Procedural adaptive music (GDSiON) — layers, intensity, game event hooks, Strudel engine |
+| `scripts/music/ui/music_drawer.gd` | Music Drawer (Ctrl+M) — live-coding panel with mini-notation editor, pianoroll, source highlighting |
+| `scripts/music/core/strudel_pattern.gd` | Strudel pattern algebra — Pattern class, 45+ combinators, composers, euclidean rhythms |
+| `scripts/music/core/strudel.gd` | Strudel static factories — pure, silence, stack, sequence, cat, slowcat, reify |
+| `scripts/music/mini/strudel_mini.gd` | Mini-notation → Pattern converter (AST to pattern tree) |
+| `scripts/music/mini/strudel_mini_parser.gd` | Recursive-descent parser for Strudel mini-notation |
+| `scripts/music/scheduler/strudel_cyclist.gd` | Cycle-based pattern scheduler (Cyclist) |
+| `scripts/music/bridge/sion_trigger.gd` | Hap → SiON note_on bridge |
 | `data/music/scores.json` | 18 community MML arrangements (Chrono Trigger, FFV, Castlevania, etc.) |
 | `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
+| `docs/epics/EPIC_strudel_integration.md` | Strudel integration design — 5 EPICs, architecture, compatibility notes |
 
 ## Conventions
 

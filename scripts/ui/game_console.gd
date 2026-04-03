@@ -133,6 +133,7 @@ const COMMANDS := [
 	"notify", "notify_dismiss",
 	# -- Music --
 	"music", "m",
+	"music help",
 	"music play", "music stop", "music off", "music test",
 	"music score", "music scores",
 	"music mml",

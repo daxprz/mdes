@@ -1,9 +1,39 @@
 extends CanvasLayer
 
-## Music Drawer — slide-out panel from the right edge.
-## Contains a mini-notation editor line at top, transport controls,
-## and a pianoroll visualization below.
-## Ctrl+M toggles open/close.
+## Music Drawer — slide-out panel from the right edge for live-coding music.
+## Contains a Strudel mini-notation editor, transport controls, scrolling
+## pianoroll, and source highlighting (active notes glow in the text).
+##
+## Toggle: Ctrl+M or RCON `musicdrawer` / `md`
+##
+## Keybindings:
+##   Navigation:
+##     Left / Right        — move cursor one character
+##     Ctrl+Left / Right   — move cursor one word
+##     Home / End          — beginning / end of line
+##     Ctrl+A              — beginning of line (at start: select all)
+##     Ctrl+E              — end of line
+##   Selection:
+##     Shift + any movement — extend selection
+##   Editing:
+##     Type                — insert at cursor (replaces selection)
+##     Backspace           — delete char before cursor
+##     Shift+Backspace     — delete word backward
+##     Ctrl+Backspace      — delete word backward
+##     Delete              — delete char after cursor
+##     Ctrl+Delete         — delete word forward
+##   Clipboard (OS):
+##     Ctrl+C              — copy selection (or whole line)
+##     Ctrl+X              — cut selection (or whole line)
+##     Ctrl+V              — paste from clipboard
+##   Kill ring (emacs):
+##     Ctrl+K              — kill from cursor to end of line
+##     Ctrl+U              — kill from cursor to beginning of line
+##     Ctrl+W              — kill word backward
+##     Ctrl+Y              — yank (paste from kill buffer)
+##   Music:
+##     Enter               — evaluate pattern (play/hot-swap)
+##     Escape              — close drawer
 
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0
@@ -22,6 +52,8 @@ var _editor_text: String = "c4 e4 g4 c5"
 var _editor_cursor: int = 0
 var _editor_focused: bool = true
 var _cursor_blink: float = 0.0
+var _select_start: int = -1    # Selection anchor (-1 = no selection)
+var _kill_buffer: String = ""  # Ctrl+K / Ctrl+Y kill ring
 
 # Playback state
 var _is_playing: bool = false
@@ -94,66 +126,220 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if event is InputEventKey and event.pressed:
-		var handled: bool = true
+		var shift: bool = event.shift_pressed
+		var ctrl: bool = event.ctrl_pressed or event.meta_pressed
+
 		match event.keycode:
-			KEY_ENTER:
-				_play_current()
 			KEY_ESCAPE:
 				toggle()
-			KEY_BACKSPACE:
-				if _editor_cursor > 0:
-					_editor_text = _editor_text.substr(0, _editor_cursor - 1) + _editor_text.substr(_editor_cursor)
-					_editor_cursor -= 1
-			KEY_DELETE:
-				if _editor_cursor < _editor_text.length():
-					_editor_text = _editor_text.substr(0, _editor_cursor) + _editor_text.substr(_editor_cursor + 1)
-			KEY_LEFT:
-				_editor_cursor = maxi(0, _editor_cursor - 1)
-			KEY_RIGHT:
-				_editor_cursor = mini(_editor_text.length(), _editor_cursor + 1)
-			KEY_HOME:
-				_editor_cursor = 0
-			KEY_END:
-				_editor_cursor = _editor_text.length()
-			KEY_A:
-				if event.ctrl_pressed:
-					_editor_cursor = 0
-				else:
-					handled = false
-			KEY_E:
-				if event.ctrl_pressed:
-					_editor_cursor = _editor_text.length()
-				else:
-					handled = false
-			KEY_SPACE:
-				# Space is a valid mini-notation character
-				_insert_char(" ")
-			_:
-				handled = false
-
-		if handled:
-			get_viewport().set_input_as_handled()
-			return
-
-		# Regular character input
-		if event is InputEventKey and event.pressed and event.unicode > 0:
-			var ch: String = char(event.unicode)
-			if ch.length() == 1 and event.unicode >= 32:
-				_insert_char(ch)
 				get_viewport().set_input_as_handled()
 
+			KEY_ENTER:
+				_play_current()
+				get_viewport().set_input_as_handled()
 
-func _insert_char(ch: String) -> void:
-	_editor_text = _editor_text.substr(0, _editor_cursor) + ch + _editor_text.substr(_editor_cursor)
-	_editor_cursor += ch.length()
+			KEY_BACKSPACE:
+				if _has_selection():
+					_delete_selection()
+				elif ctrl or shift:
+					# Ctrl+Backspace / Shift+Backspace: delete word backward
+					var p: int = _word_boundary_left()
+					_editor_text = _editor_text.substr(0, p) + _editor_text.substr(_editor_cursor)
+					_editor_cursor = p
+				elif _editor_cursor > 0:
+					_editor_text = _editor_text.substr(0, _editor_cursor - 1) + _editor_text.substr(_editor_cursor)
+					_editor_cursor -= 1
+				get_viewport().set_input_as_handled()
+
+			KEY_DELETE:
+				if _has_selection():
+					_delete_selection()
+				elif ctrl:
+					# Ctrl+Delete: delete word forward
+					var p: int = _word_boundary_right()
+					_editor_text = _editor_text.substr(0, _editor_cursor) + _editor_text.substr(p)
+				elif _editor_cursor < _editor_text.length():
+					_editor_text = _editor_text.substr(0, _editor_cursor) + _editor_text.substr(_editor_cursor + 1)
+				get_viewport().set_input_as_handled()
+
+			KEY_LEFT:
+				if ctrl:
+					_move_cursor(_word_boundary_left(), shift)
+				else:
+					_move_cursor(maxi(0, _editor_cursor - 1), shift)
+				get_viewport().set_input_as_handled()
+
+			KEY_RIGHT:
+				if ctrl:
+					_move_cursor(_word_boundary_right(), shift)
+				else:
+					_move_cursor(mini(_editor_text.length(), _editor_cursor + 1), shift)
+				get_viewport().set_input_as_handled()
+
+			KEY_HOME:
+				_move_cursor(0, shift)
+				get_viewport().set_input_as_handled()
+
+			KEY_END:
+				_move_cursor(_editor_text.length(), shift)
+				get_viewport().set_input_as_handled()
+
+			_:
+				if ctrl:
+					match event.keycode:
+						KEY_A:
+							# Ctrl+A: beginning of line — or select all if already at start
+							if _editor_cursor == 0:
+								_select_start = 0
+								_editor_cursor = _editor_text.length()
+							else:
+								_move_cursor(0, shift)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_E:
+							# Ctrl+E: end of line
+							_move_cursor(_editor_text.length(), shift)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_K:
+							# Ctrl+K: kill from cursor to end of line
+							_kill_buffer = _editor_text.substr(_editor_cursor)
+							_editor_text = _editor_text.substr(0, _editor_cursor)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_U:
+							# Ctrl+U: kill from cursor to beginning of line
+							_kill_buffer = _editor_text.substr(0, _editor_cursor)
+							_editor_text = _editor_text.substr(_editor_cursor)
+							_editor_cursor = 0
+							get_viewport().set_input_as_handled()
+							return
+						KEY_Y:
+							# Ctrl+Y: yank (paste kill buffer)
+							if not _kill_buffer.is_empty():
+								if _has_selection():
+									_delete_selection()
+								_editor_text = _editor_text.substr(0, _editor_cursor) + _kill_buffer + _editor_text.substr(_editor_cursor)
+								_editor_cursor += _kill_buffer.length()
+							get_viewport().set_input_as_handled()
+							return
+						KEY_W:
+							# Ctrl+W: kill word backward
+							if _has_selection():
+								_kill_buffer = _get_selected_text()
+								_delete_selection()
+							else:
+								var p: int = _word_boundary_left()
+								_kill_buffer = _editor_text.substr(p, _editor_cursor - p)
+								_editor_text = _editor_text.substr(0, p) + _editor_text.substr(_editor_cursor)
+								_editor_cursor = p
+							get_viewport().set_input_as_handled()
+							return
+						KEY_C:
+							# Ctrl+C: copy selection (or whole line)
+							var text: String = _get_selected_text() if _has_selection() else _editor_text
+							if not text.is_empty():
+								DisplayServer.clipboard_set(text)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_X:
+							# Ctrl+X: cut selection (or whole line)
+							if _has_selection():
+								DisplayServer.clipboard_set(_get_selected_text())
+								_delete_selection()
+							else:
+								DisplayServer.clipboard_set(_editor_text)
+								_editor_text = ""
+								_editor_cursor = 0
+							get_viewport().set_input_as_handled()
+							return
+						KEY_V:
+							# Ctrl+V: paste from clipboard
+							var clip: String = DisplayServer.clipboard_get()
+							if not clip.is_empty():
+								clip = clip.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").strip_edges()
+								if _has_selection():
+									_delete_selection()
+								_editor_text = _editor_text.substr(0, _editor_cursor) + clip + _editor_text.substr(_editor_cursor)
+								_editor_cursor += clip.length()
+							get_viewport().set_input_as_handled()
+							return
+
+				# Type character at cursor (skip if ctrl held, except for Ctrl+M which was handled above)
+				if event.unicode > 0 and not ctrl:
+					if _has_selection():
+						_delete_selection()
+					var ch: String = char(event.unicode)
+					_editor_text = _editor_text.substr(0, _editor_cursor) + ch + _editor_text.substr(_editor_cursor)
+					_editor_cursor += 1
+					_cursor_blink = 0.0
+					get_viewport().set_input_as_handled()
+
+
+# -- Selection helpers ---------------------------------------------------------
+
+func _has_selection() -> bool:
+	return _select_start >= 0 and _select_start != _editor_cursor
+
+func _get_selected_text() -> String:
+	if not _has_selection():
+		return ""
+	var from: int = mini(_select_start, _editor_cursor)
+	var to: int = maxi(_select_start, _editor_cursor)
+	return _editor_text.substr(from, to - from)
+
+func _delete_selection() -> void:
+	if not _has_selection():
+		return
+	var from: int = mini(_select_start, _editor_cursor)
+	var to: int = maxi(_select_start, _editor_cursor)
+	_editor_text = _editor_text.substr(0, from) + _editor_text.substr(to)
+	_editor_cursor = from
+	_select_start = -1
+
+func _move_cursor(new_pos: int, extend_selection: bool) -> void:
+	if extend_selection:
+		if _select_start < 0:
+			_select_start = _editor_cursor
+	else:
+		_select_start = -1
+	_editor_cursor = new_pos
+	_cursor_blink = 0.0
+
+func _word_boundary_left() -> int:
+	var p: int = _editor_cursor - 1
+	while p > 0 and _editor_text[p - 1] == " ":
+		p -= 1
+	while p > 0 and _editor_text[p - 1] != " ":
+		p -= 1
+	return maxi(0, p)
+
+func _word_boundary_right() -> int:
+	var p: int = _editor_cursor
+	var slen: int = _editor_text.length()
+	while p < slen and _editor_text[p] != " ":
+		p += 1
+	while p < slen and _editor_text[p] == " ":
+		p += 1
+	return p
 
 
 # -- Playback ------------------------------------------------------------------
 
 func _play_current() -> void:
-	if _editor_text.strip_edges().is_empty():
+	var text: String = _editor_text.strip_edges()
+	if text.is_empty():
 		return
-	var pat: StrudelPattern = StrudelMini.mini(_editor_text.strip_edges())
+	# Extract cps= parameter if present (not part of mini-notation)
+	var cps_idx: int = text.find("cps=")
+	if cps_idx >= 0:
+		var cps_str: String = text.substr(cps_idx + 4).strip_edges()
+		if cps_str.is_valid_float():
+			_cps = float(cps_str)
+		text = text.substr(0, cps_idx).strip_edges()
+	if text.is_empty():
+		return
+	var pat: StrudelPattern = StrudelMini.mini(text)
 	MusicManager.strudel_play(pat, _cps)
 	_is_playing = true
 	# Reset rolling buffer on pattern change
@@ -286,20 +472,18 @@ func _draw_editor_line(x: float, y: float, w: float, h: float, font: Font) -> vo
 	var text_y: float = y + h * 0.7
 	var font_size: int = 14
 
-	# Draw source highlights behind text
+	# Draw source highlights behind text (active notes glow)
 	for key in _active_locations:
-		var parts: PackedStringArray = key.split(":")
-		if parts.size() != 2:
+		var loc_parts: PackedStringArray = key.split(":")
+		if loc_parts.size() != 2:
 			continue
-		var loc_start: int = int(parts[0])
-		var loc_end: int = int(parts[1])
-		# Calculate pixel positions for the highlighted range
+		var loc_start: int = int(loc_parts[0])
+		var loc_end: int = int(loc_parts[1])
 		var pre_text: String = _editor_text.substr(0, loc_start)
 		var highlight_text: String = _editor_text.substr(loc_start, loc_end - loc_start)
 		var pre_w: float = font.get_string_size(pre_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		var hl_w: float = font.get_string_size(highlight_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		var hap: StrudelHap = _active_locations[key]
-		# Fade based on progress through the event
 		var progress: float = 0.0
 		if hap.whole != null:
 			var dur: float = hap.get_duration().to_float()
@@ -309,11 +493,22 @@ func _draw_editor_line(x: float, y: float, w: float, h: float, font: Font) -> vo
 		_panel.draw_rect(Rect2(text_x + pre_w, y + 2, hl_w, h - 4),
 			Color(0.3, 0.6, 1.0, alpha))
 
+	# Draw selection highlight (behind text, in front of source highlights)
+	if _has_selection():
+		var sel_from: int = mini(_select_start, _editor_cursor)
+		var sel_to: int = maxi(_select_start, _editor_cursor)
+		var sel_x_from: float = text_x + font.get_string_size(
+			_editor_text.substr(0, sel_from), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		var sel_x_to: float = text_x + font.get_string_size(
+			_editor_text.substr(0, sel_to), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		_panel.draw_rect(Rect2(sel_x_from, y + 2, sel_x_to - sel_x_from, h - 4),
+			Color(0.3, 0.5, 0.8, 0.4))
+
 	# Draw the text
 	_panel.draw_string(font, Vector2(text_x, text_y), _editor_text,
 		HORIZONTAL_ALIGNMENT_LEFT, w - 8, font_size, Color(0.9, 0.9, 0.95))
 
-	# Draw cursor
+	# Draw cursor (blinking)
 	if _editor_focused and int(_cursor_blink * 2.0) % 2 == 0:
 		var cursor_text: String = _editor_text.substr(0, _editor_cursor)
 		var cursor_x: float = text_x + font.get_string_size(cursor_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x

@@ -85,6 +85,31 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 | **Arrows** (Splay Edit) | Nudge cast endpoint |
 | **Drag** (Splay Edit) | IK-drag connection point / cast endpoint / origin |
 
+### Music Drawer (Ctrl+M)
+
+| Input | Action |
+|-------|--------|
+| **Type** | Insert at cursor (replaces selection) |
+| **Enter** | Evaluate / play pattern |
+| **Escape** | Close drawer |
+| **Left / Right** | Move cursor one character |
+| **Ctrl+Left / Right** | Move cursor one word |
+| **Home / End** | Beginning / end of line |
+| **Shift + movement** | Extend selection |
+| **Ctrl+A** | Beginning of line (at start: select all) |
+| **Ctrl+E** | End of line |
+| **Backspace** | Delete char before cursor |
+| **Shift+Backspace / Ctrl+Backspace** | Delete word backward |
+| **Delete** | Delete char after cursor |
+| **Ctrl+Delete** | Delete word forward |
+| **Ctrl+C** | Copy selection (or whole line) |
+| **Ctrl+X** | Cut selection (or whole line) |
+| **Ctrl+V** | Paste from clipboard |
+| **Ctrl+K** | Kill to end of line |
+| **Ctrl+U** | Kill to beginning of line |
+| **Ctrl+W** | Kill word backward |
+| **Ctrl+Y** | Yank (paste from kill buffer) |
+
 ### RCON Commands (TCP port 9999)
 
 ```

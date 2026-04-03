@@ -1276,6 +1276,59 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 
 	var sub: String = parts[1].to_lower()
 	match sub:
+		"help":
+			return """Music System Commands:
+  music                    — show status
+  music help               — this help text
+
+  --- MML Playback ---
+  music play               — start adaptive layer system
+  music stop               — stop adaptive layers
+  music off                — stop ALL music (layers + strudel + MML)
+  music test               — play GDSiON test tone
+  music score <name>       — play a named MML score
+  music scores             — list all available scores
+  music mml <string>       — play arbitrary MML notation
+
+  --- Strudel Pattern Engine ---
+  strudel <mini-notation>  — parse and play a pattern
+  strudel stop             — stop strudel playback
+  strudel cps <value>      — set cycles per second
+  strudel status           — show scheduler state
+  strudel drawer           — toggle music drawer
+
+  --- Mini-Notation Syntax ---
+  c4 e4 g4         sequence (space-separated)
+  [c4 e4]          sub-cycle (fits in one slot)
+  [c4,e4,g4]       stack / chord (simultaneous)
+  <c4 e4 g4>       slowcat (one per cycle)
+  c4*2             fast (play twice as fast)
+  c4/2             slow (stretch over 2 cycles)
+  c4(3,8)          euclidean rhythm (3 pulses in 8 steps)
+  c4?              degrade (randomly drop ~50%)
+  c4?0.3           degrade with probability 0.3
+  c4!3             replicate 3 times
+  ~                silence / rest
+  c4:2             tail (sets sample index)
+  [c4|e4|g4]       random choose (one per cycle)
+
+  --- Adaptive Layers ---
+  music intensity <0-1>    — set music intensity
+  music push <amount>      — add to intensity
+  music tempo <bpm>        — set tempo (70-160)
+  music layer [name] [on|off] — toggle layer (pad/bass/drums/melody)
+  music mute / unmute      — mute/unmute all layers
+  music combat             — simulate combat start
+  music calm               — simulate combat end
+
+  --- Music Drawer (Ctrl+M) ---
+  musicdrawer              — toggle drawer (alias: md)
+  Type mini-notation, press Enter to play.
+  Ctrl+A/E/K/U/W/Y: emacs editing
+  Ctrl+C/X/V: clipboard
+  Shift+arrows: selection
+  Pianoroll shows scrolling note bars.
+  Active notes glow in the editor text."""
 		"play":
 			MusicManager.play()
 			return "OK: music playing"
