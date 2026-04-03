@@ -1,0 +1,103 @@
+{
+  "name": "music_listen_features",
+  "description": "Listening test: plays each Strudel pattern feature so you can hear it working",
+  "script": [
+    "var inspect default=5",
+
+    "announce STRUDEL LISTENING TESTS",
+    "wait 1",
+
+    "# === 1. Single note ===",
+    "announce 1/18: Single Note — one note repeating",
+    "strudel c4 cps=0.5",
+    "wait 3",
+
+    "# === 2. Sequence ===",
+    "announce 2/18: Sequence — c4 e4 g4 c5 evenly spaced",
+    "strudel c4 e4 g4 c5 cps=0.5",
+    "wait 4",
+
+    "# === 3. Rests ===",
+    "announce 3/18: Rests — notes with ~ gaps",
+    "strudel c4 ~ e4 ~ g4 ~ c5 ~ cps=0.7",
+    "wait 4",
+
+    "# === 4. Sub-cycle ===",
+    "announce 4/18: Sub-cycle — [e4 g4] fits in one slot",
+    "strudel c4 [e4 g4] c5 cps=0.5",
+    "wait 4",
+
+    "# === 5. Nested brackets ===",
+    "announce 5/18: Nested — c4 [e4 [g4 b4]] c5",
+    "strudel c4 [e4 [g4 b4]] c5 cps=0.4",
+    "wait 5",
+
+    "# === 6. Fast operator ===",
+    "announce 6/18: Fast *2 — arpeggio doubled",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5",
+    "wait 4",
+
+    "# === 7. Fast x4 ===",
+    "announce 7/18: Fast *4 — 16 notes/cycle",
+    "strudel [c4 e4 g4 c5]*4 cps=0.5",
+    "wait 4",
+
+    "# === 8. Chord ===",
+    "announce 8/18: Chord — [c3,e3,g3] simultaneous",
+    "strudel [c3,e3,g3] cps=0.5",
+    "wait 4",
+
+    "# === 9. Chord progression ===",
+    "announce 9/18: Chord Progression — C F G C",
+    "strudel [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] cps=0.3",
+    "wait 7",
+
+    "# === 10. Euclidean 3,8 ===",
+    "announce 10/18: Euclidean (3,8) — tresillo",
+    "strudel c4(3,8) cps=1",
+    "wait 4",
+
+    "# === 11. Layered euclidean ===",
+    "announce 11/18: Layered Euclidean — two rhythms stacked",
+    "strudel [c3(3,8), e4(5,8)] cps=0.8",
+    "wait 5",
+
+    "# === 12. Degrade ===",
+    "announce 12/18: Degrade ? — random drops",
+    "strudel [c4 e4 g4 c5]*4? cps=0.8",
+    "wait 5",
+
+    "# === 13. Random choose ===",
+    "announce 13/18: Random [a|b|c] — one per cycle",
+    "strudel [c4|e4|g4|c5]*4 cps=1",
+    "wait 5",
+
+    "# === 14. Voice: Flute ===",
+    "announce 14/18: Voice — Flute",
+    "strudel c4 e4 g4 c5 s=flute cps=0.5",
+    "wait 4",
+
+    "# === 15. Voice: Strings ===",
+    "announce 15/18: Voice — Strings chords",
+    "strudel [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] s=strings cps=0.25",
+    "wait 8",
+
+    "# === 16. Voice: Marimba ===",
+    "announce 16/18: Voice — Marimba",
+    "strudel [c4 e4 g4 c5]*3 s=marimba cps=0.6",
+    "wait 4",
+
+    "# === 17. Dense polyrhythm ===",
+    "announce 17/18: Polyrhythm — three rates",
+    "strudel [c3 c4]*4 [e3 e4]*3 [g3 g4]*2 cps=0.3",
+    "wait 7",
+
+    "# === 18. Atmospheric pad ===",
+    "announce 18/18: Atmospheric — slow pad drones",
+    "strudel [c2,c3] ~ ~ ~ ~ ~ [g2,g3] ~ s=pad cps=0.15",
+    "wait 10",
+
+    "strudel stop",
+    "notify {SCRIPT} \"Listening tests complete. How did they sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

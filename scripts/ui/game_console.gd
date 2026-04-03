@@ -150,6 +150,7 @@ const COMMANDS := [
 	# -- Strudel --
 	"strudel", "strudel stop", "strudel hush",
 	"strudel cps", "strudel status", "strudel drawer", "strudel voices",
+	"strudel listen",
 	"strudel test", "strudel test all", "strudel test algebra",
 	"strudel test composers", "strudel test combinators", "strudel test signals",
 	"strudel test mini", "strudel test integration", "strudel test voices",

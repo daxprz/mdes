@@ -1,0 +1,7 @@
+{
+  "name": "music",
+  "description": "Music listening tests — audible proof of each Strudel feature",
+  "tests": [
+    "music_listen_features"
+  ]
+}

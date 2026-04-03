@@ -1232,15 +1232,17 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			return "OK: strudel stopped"
 		"test":
 			# Run strudel test suite: strudel test [suite_name]
-			var test_node: Node = get_node_or_null("/root/StrudelTest")
+			var test_node: Node = get_node_or_null("/root/StrudelTestRunner")
 			if not test_node:
-				# Create it on the fly
 				var script: GDScript = load("res://scripts/music/core/strudel_test.gd")
 				test_node = script.new()
 				test_node.name = "StrudelTestRunner"
 				get_tree().root.add_child(test_node)
 			var suite_name: String = parts[2] if parts.size() > 2 else "all"
 			return test_node.run(suite_name)
+		"listen":
+			# Shortcut: run the music listening test suite
+			return _execute("run music_listen_features")
 		"voices":
 			if MusicManager._sion_trigger:
 				var names: Array = MusicManager._sion_trigger._voices.keys()
@@ -1311,6 +1313,7 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 				" sound=%s" % mini_sound if not mini_sound.is_empty() else ""]
 
 
+
 func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 	## Music system control.
 	## Usage: music [subcmd] [args...]
@@ -1339,7 +1342,10 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
   strudel cps <value>      — set cycles per second
   strudel status           — show scheduler state
   strudel drawer           — toggle music drawer
-  strudel test [suite]     — run test suite (all/algebra/mini/integration/voices/...)
+  strudel test [suite]     — run unit tests (all/algebra/mini/integration/voices)
+  strudel listen           — run listening test (uses test runner: Ctrl+D)
+  run music_listen_features — same thing via test runner directly
+  suite music              — run music test suite
 
   --- Mini-Notation Syntax ---
   c4 e4 g4         sequence (space-separated)
