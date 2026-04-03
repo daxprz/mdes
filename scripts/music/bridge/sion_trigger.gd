@@ -142,12 +142,13 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 	var length: float = maxf(duration, 0.05)
 
 	# SiONDriver.note_on(note, voice, length, delay, quantize, track_id, disposable)
-	# Use only the required params and let SiON use defaults for the rest
-	# voice can be null to use default
-	if voice != null:
-		driver.call("note_on", note_num, voice)
-	else:
-		driver.call("note_on", note_num)
+	# length is in 16th-note ticks at current BPM, NOT seconds.
+	# Convert duration (seconds) to ticks: at default BPM 120, one beat = 0.5s,
+	# one 16th note = 0.125s. But we don't know the BPM, so use a fixed short length.
+	# A length of 0 means "hold until note_off" — we want auto-release.
+	# Use length=4 (one beat / quarter note) as a reasonable default.
+	var length_ticks: float = maxf(1.0, length * 8.0)  # Rough: 8 ticks per second
+	driver.call("note_on", note_num, voice, length_ticks)
 
 	DebugOverlay.log("strudel/trigger", null, "STRUDEL_TRIGGER: note=%d dur=%.3f val=%s" % [
 		note_num, length, str(hap.value)])

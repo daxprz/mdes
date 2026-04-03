@@ -591,15 +591,11 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
 	if is_playing:
 		stop()
 
-	# Ensure SiON is streaming. Reset to clear lingering notes from old pattern.
+	# Ensure SiON is streaming (note_on requires stream mode).
 	if not _sion_streaming:
 		driver.call("stop")
 		driver.call("stream", false)
 		_sion_streaming = true
-	else:
-		# Already streaming — reset to silence lingering notes, then restart stream
-		driver.call("reset")
-		driver.call("stream", false)
 
 	if cps > 0.0:
 		_cyclist.set_cps(cps)
