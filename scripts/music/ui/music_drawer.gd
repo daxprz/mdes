@@ -680,11 +680,8 @@ func _play_current() -> void:
 		_lines[i]["pattern_offset"] = parsed["pattern_offset"]
 		active_patterns.append(pat)
 
-		var pname: String = parsed["name"]
-		var label: String = (pname + ": " if not pname.is_empty() else "") + text
-		if not sound_name.is_empty():
-			label += " s=%s" % sound_name
-		display_parts.append(label)
+		# Use the original line text for display (preserves quotes, viz methods)
+		display_parts.append(_lines[i].get("text", "").strip_edges())
 
 	if active_patterns.is_empty():
 		return

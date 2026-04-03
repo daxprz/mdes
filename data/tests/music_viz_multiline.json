@@ -1,0 +1,44 @@
+{
+  "name": "music_viz_multiline",
+  "description": "Multi-line patterns with different visualizers per line — open Ctrl+M",
+  "script": [
+    "var inspect default=5",
+
+    "announce MULTI-LINE VISUALIZER TESTS — watch Ctrl+M",
+    "md open",
+    "wait 1",
+
+    "# === 1. Pianoroll + scope ===",
+    "announce 1/6: Pianoroll melody + scope bass",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() | \"c2 ~ c2 ~ e2 ~\".scope() cps=0.5",
+    "wait 6",
+
+    "# === 2. Three different viz types ===",
+    "announce 2/6: pianoroll + scope + wordfall",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() | \"c2 ~ c2 ~\".scope() | \"[c3,e3,g3]\".wordfall() cps=0.4",
+    "wait 7",
+
+    "# === 3. Spiral + pitchwheel ===",
+    "announce 3/6: spiral rhythm + pitchwheel chords",
+    "strudel edit \"c4(3,8)\".spiral() | \"[c4,e4,g4]\".pitchwheel() cps=0.7",
+    "wait 6",
+
+    "# === 4. Named lines with voices + viz ===",
+    "announce 4/6: Named + voiced + visualized",
+    "strudel edit melody: note(\"c4 e4 g4 c5\").pianoroll() | bass: \"c2 ~ e2 ~\".scope() | rhythm: \"c5(5,8)\".spiral() cps=0.4",
+    "wait 7",
+
+    "# === 5. All six viz types at once ===",
+    "announce 5/6: All 6 visualizers — one per line",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() | \"c3 e3 g3\".scope() | \"[c4,e4]\".wordfall() | \"c4(3,8)\".spiral() | \"[c4,e4,g4]\".pitchwheel() | \"c3 g3 c4\".fscope() cps=0.5",
+    "wait 8",
+
+    "# === 6. Full composition, each layer visualized ===",
+    "announce 6/6: Full composition — chords + melody + bass",
+    "strudel edit chords: \"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]\".pianoroll() | melody: \"[c4 e4 g4 c5]*2\".scope() | bass: \"c2 ~ c2 ~ e2 ~ g2 ~\".wordfall() cps=0.3",
+    "wait 10",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the multi-line viz look?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

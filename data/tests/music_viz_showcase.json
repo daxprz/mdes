@@ -1,0 +1,76 @@
+{
+  "name": "music_viz_showcase",
+  "description": "Showcase of all Strudel visualizer types — open Ctrl+M to watch each one",
+  "script": [
+    "var inspect default=5",
+
+    "announce STRUDEL VISUALIZER SHOWCASE — watch Ctrl+M",
+    "md open",
+    "wait 1",
+
+    "# ========== PIANOROLL ==========",
+    "announce 1/14: pianoroll — simple melody",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() cps=0.5",
+    "wait 5",
+
+    "announce 2/14: pianoroll — fast arpeggio",
+    "strudel edit \"[c4 e4 g4 c5]*4\".pianoroll() cps=0.5",
+    "wait 5",
+
+    "announce 3/14: pianoroll — chord progression",
+    "strudel edit \"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]\".pianoroll() cps=0.3",
+    "wait 6",
+
+    "# ========== SCOPE ==========",
+    "announce 4/14: scope — single note oscilloscope",
+    "strudel edit \"c4\".scope() cps=0.5",
+    "wait 4",
+
+    "announce 5/14: scope — melody shows pitch changes",
+    "strudel edit \"c4 e4 g4 c5\".scope() cps=0.5",
+    "wait 5",
+
+    "announce 6/14: scope — chord waveform interference",
+    "strudel edit \"[c3,e3,g3]\".scope() cps=0.5",
+    "wait 5",
+
+    "# ========== WORDFALL ==========",
+    "announce 7/14: wordfall — melody labels falling",
+    "strudel edit \"c4 e4 g4 c5\".wordfall() cps=0.5",
+    "wait 5",
+
+    "announce 8/14: wordfall — chord voicings visible",
+    "strudel edit \"[c3,e3,g3] [f3,a3,c4]\".wordfall() cps=0.3",
+    "wait 6",
+
+    "# ========== SPIRAL ==========",
+    "announce 9/14: spiral — euclidean rhythm rotating",
+    "strudel edit \"c4(3,8)\".spiral() cps=0.8",
+    "wait 5",
+
+    "announce 10/14: spiral — melody tracing the spiral",
+    "strudel edit \"c4 e4 g4 c5 g4 e4\".spiral() cps=0.4",
+    "wait 6",
+
+    "# ========== PITCHWHEEL ==========",
+    "announce 11/14: pitchwheel — chromatic notes on circle",
+    "strudel edit \"c4 d4 e4 f4 g4 a4 b4\".pitchwheel() cps=0.5",
+    "wait 5",
+
+    "announce 12/14: pitchwheel — chord flake pattern",
+    "strudel edit \"[c4,e4,g4,c5]\".pitchwheel() cps=0.5",
+    "wait 5",
+
+    "# ========== FSCOPE ==========",
+    "announce 13/14: fscope — frequency spectrum of melody",
+    "strudel edit \"c3 e3 g3 c4\".fscope() cps=0.5",
+    "wait 5",
+
+    "announce 14/14: fscope — wide range frequency bars",
+    "strudel edit \"c2 c3 c4 c5\".fscope() cps=0.4",
+    "wait 5",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did all the visualizers look?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}
