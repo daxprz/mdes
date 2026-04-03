@@ -601,6 +601,10 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: Strin
 	if cps > 0.0:
 		_cyclist.set_cps(cps)
 
+	# Sync SiON driver BPM with cyclist CPS for correct note durations
+	var sion_bpm: float = _cyclist.cps * 120.0
+	driver.call("set_bpm", int(maxf(sion_bpm, 30.0)))
+
 	# Hot-swap: just update the pattern and restart the cyclist clock
 	if _strudel_playing:
 		_cyclist.stop()

@@ -139,19 +139,20 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 		return
 
 	var voice: Variant = _resolve_voice(hap.value)
-	var length: float = maxf(duration, 0.05)
+	var length_sec: float = maxf(duration, 0.02)
 
-	# SiONDriver.note_on(note, voice, length, delay, quantize, track_id, disposable)
-	# length is in 16th-note ticks at current BPM, NOT seconds.
-	# Convert duration (seconds) to ticks: at default BPM 120, one beat = 0.5s,
-	# one 16th note = 0.125s. But we don't know the BPM, so use a fixed short length.
-	# A length of 0 means "hold until note_off" — we want auto-release.
-	# Use length=4 (one beat / quarter note) as a reasonable default.
-	var length_ticks: float = maxf(1.0, length * 8.0)  # Rough: 8 ticks per second
+	# SiON note_on length is in 16th-note ticks at the driver's current BPM.
+	# The driver BPM is set to match the cyclist's CPS (see MusicManager).
+	# Conversion: ticks = duration_seconds * BPM * 4 / 60
+	#   where 4 = 16th notes per beat, 60 = seconds per minute
+	# If CPS = 0.5, one cycle = 2 seconds. SiON BPM = cps * 120 = 60.
+	# A quarter-cycle note (0.5s) = 0.5 * 60 * 4 / 60 = 2 ticks.
+	var bpm: float = maxf(cps * 120.0, 30.0)  # CPS->BPM (cps=0.5 -> 60 BPM)
+	var length_ticks: float = maxf(1.0, length_sec * bpm * 4.0 / 60.0)
 	driver.call("note_on", note_num, voice, length_ticks)
 
-	DebugOverlay.log("strudel/trigger", null, "STRUDEL_TRIGGER: note=%d dur=%.3f val=%s" % [
-		note_num, length, str(hap.value)])
+	DebugOverlay.log("strudel/trigger", null, "STRUDEL_TRIGGER: note=%d dur=%.3f ticks=%.1f val=%s" % [
+		note_num, length_sec, length_ticks, str(hap.value)])
 
 
 func _resolve_note(value: Variant) -> int:

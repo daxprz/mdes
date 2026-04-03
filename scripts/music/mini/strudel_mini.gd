@@ -108,18 +108,28 @@ static func _patternify_pattern(ast: Dictionary, code: String, offset: int) -> S
 					slowed.append(child)
 			return Strudel.stack(slowed)
 		"polymeter":
-			# {a b, c d e} = polymeter
+			# {a b c, d e} = polymeter. Each sub-pattern loops at its own
+			# length, aligned to a shared step count (default = first child's length).
+			if children.is_empty():
+				return Strudel.silence()
 			if children.size() == 1:
 				return children[0]
-			var steps_per_cycle: Variant = null
-			if args.has("stepsPerCycle"):
-				steps_per_cycle = _patternify_ast(args["stepsPerCycle"], code, offset)
-			# For now: simple polymeter — each child plays at its own rate
-			# Full polymeter aligns to the first child's length
-			if steps_per_cycle == null and not children.is_empty():
-				# Default: steps from first child
-				return Strudel.stack(children)
-			return Strudel.stack(children)
+			# Determine steps per cycle
+			var spc: int = -1
+			if args.has("stepsPerCycle") and args["stepsPerCycle"] != null:
+				spc = _resolve_int(args["stepsPerCycle"], code, offset)
+			if spc < 0:
+				# Default: step count from the first child's source
+				spc = sources[0].get("source_", []).size() if sources[0].get("type_") == "pattern" else 1
+			# Each child is fast-adjusted so its natural length fits into spc steps
+			var aligned: Array = []
+			for i in range(children.size()):
+				var child_steps: int = sources[i].get("source_", []).size() if sources[i].get("type_") == "pattern" else 1
+				if child_steps > 0 and child_steps != spc:
+					aligned.append(children[i]._fast(StrudelFraction.new(spc, child_steps)))
+				else:
+					aligned.append(children[i])
+			return Strudel.stack(aligned)
 		"rand":
 			# a | b | c = random pick each cycle (seeded)
 			var rand_seed: int = args.get("seed", 0)
