@@ -96,7 +96,10 @@ var _editor_text: String:
 const VIZ_NONE := "none"          ## No visualizer (default)
 const VIZ_PIANOROLL := "pianoroll" ## Horizontal scrolling pianoroll strip
 const VIZ_BAR := "bar"            ## Simple bar graph of active haps
-const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_BAR]
+const VIZ_WAVEFORM := "waveform"  ## Continuous line showing hap values over time
+const VIZ_DOTS := "dots"          ## Onset dots on a timeline (minimal, good for drums)
+const VIZ_METER := "meter"        ## Vertical VU-meter showing density/activity
+const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_BAR, VIZ_WAVEFORM, VIZ_DOTS, VIZ_METER]
 const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
 
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
@@ -116,6 +119,12 @@ func _line_viz(idx: int) -> String:
 		return VIZ_PIANOROLL
 	if ".bar()" in text:
 		return VIZ_BAR
+	if ".waveform()" in text:
+		return VIZ_WAVEFORM
+	if ".dots()" in text:
+		return VIZ_DOTS
+	if ".meter()" in text:
+		return VIZ_METER
 	return VIZ_NONE
 
 
@@ -547,8 +556,11 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	var viz_methods := {
 		".pianoroll()": VIZ_PIANOROLL,
 		".punchcard()": VIZ_PIANOROLL,
-		".bar()": VIZ_BAR,
 		"._pianoroll()": VIZ_PIANOROLL,
+		".bar()": VIZ_BAR,
+		".waveform()": VIZ_WAVEFORM,
+		".dots()": VIZ_DOTS,
+		".meter()": VIZ_METER,
 	}
 	for method in viz_methods:
 		if text.strip_edges().ends_with(method):
@@ -905,6 +917,9 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	match viz:
 		VIZ_PIANOROLL: viz_char = "P"
 		VIZ_BAR: viz_char = "B"
+		VIZ_WAVEFORM: viz_char = "W"
+		VIZ_DOTS: viz_char = "D"
+		VIZ_METER: viz_char = "M"
 	if not viz_char.is_empty():
 		label += viz_char
 	_panel.draw_string(font, Vector2(x + 3, y + h * 0.72), label,
@@ -983,6 +998,12 @@ func _draw_line_viz(x: float, y: float, w: float, h: float, font: Font, line_idx
 			_draw_line_pianoroll(x, y, w, h, font, line_idx)
 		VIZ_BAR:
 			_draw_line_bar(x, y, w, h, font, line_idx)
+		VIZ_WAVEFORM:
+			_draw_line_waveform(x, y, w, h, font, line_idx)
+		VIZ_DOTS:
+			_draw_line_dots(x, y, w, h, font, line_idx)
+		VIZ_METER:
+			_draw_line_meter(x, y, w, h, font, line_idx)
 
 
 func _draw_line_pianoroll(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
@@ -1056,6 +1077,164 @@ func _draw_line_bar(x: float, y: float, w: float, h: float, font: Font, line_idx
 	# Label
 	_panel.draw_string(font, Vector2(x + 4, y + h - 4), "%d active" % active_count,
 		HORIZONTAL_ALIGNMENT_LEFT, w - 8, 8, Color(0.5, 0.5, 0.6))
+
+
+func _draw_line_waveform(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
+	## Draw hap values as a continuous line over time — good for melodic contours.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
+	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	var time_range: float = to_time - from_time
+	if time_range <= 0:
+		return
+
+	# Collect pitch values for range
+	var min_p: float = INF
+	var max_p: float = -INF
+	for hap in haps:
+		var p: float = _hap_to_pitch(hap)
+		if p >= 0:
+			min_p = minf(min_p, p)
+			max_p = maxf(max_p, p)
+	if min_p == INF:
+		return
+	var p_range: float = maxf(max_p - min_p, 1.0)
+
+	# Draw connected line segments through hap onsets
+	var points: PackedVector2Array = PackedVector2Array()
+	var colors: PackedColorArray = PackedColorArray()
+	for hap in haps:
+		if hap.whole == null:
+			continue
+		var pitch: float = _hap_to_pitch(hap)
+		if pitch < 0:
+			continue
+		var hap_begin: float = hap.w().begin.to_float()
+		var px_x: float = x + ((hap_begin - from_time) / time_range) * w
+		if px_x < x - 10 or px_x > x + w + 10:
+			continue
+		var py: float = y + h - ((pitch - min_p) / p_range) * (h - 4) - 2
+		points.append(Vector2(px_x, py))
+		var is_active: bool = hap.is_active(_current_time)
+		colors.append(Color(1.0, 0.8, 0.2, 0.9) if is_active else Color(0.3, 0.6, 1.0, 0.6))
+
+	# Draw line segments
+	if points.size() >= 2:
+		for i in range(points.size() - 1):
+			_panel.draw_line(points[i], points[i + 1], colors[i], 1.5)
+
+	# Draw dots at each onset
+	for i in range(points.size()):
+		_panel.draw_circle(points[i], 2.5, colors[i])
+
+	# Playhead
+	var ph_x: float = x + PIANOROLL_PLAYHEAD * w
+	_panel.draw_line(Vector2(ph_x, y), Vector2(ph_x, y + h), Color(1.0, 1.0, 1.0, 0.3), 1.0)
+
+
+func _draw_line_dots(x: float, y: float, w: float, h: float, _font: Font, line_idx: int) -> void:
+	## Draw onset dots on a timeline — minimal, good for percussion/rhythm.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
+	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	var time_range: float = to_time - from_time
+	if time_range <= 0:
+		return
+
+	# Center line
+	var cy: float = y + h * 0.5
+	_panel.draw_line(Vector2(x, cy), Vector2(x + w, cy), Color(0.15, 0.15, 0.2), 1.0)
+
+	# Draw a dot for each onset
+	for hap in haps:
+		if hap.whole == null:
+			continue
+		var hap_begin: float = hap.w().begin.to_float()
+		var px_x: float = x + ((hap_begin - from_time) / time_range) * w
+		if px_x < x or px_x > x + w:
+			continue
+
+		var is_active: bool = hap.is_active(_current_time)
+		var radius: float = 4.0 if is_active else 2.5
+		var color: Color = Color(1.0, 0.8, 0.2, 0.9) if is_active else Color(0.4, 0.6, 0.9, 0.5)
+
+		# Active dots pulse slightly larger
+		if is_active:
+			var progress: float = 0.0
+			var dur: float = hap.get_duration().to_float()
+			if dur > 0:
+				progress = clampf((_current_time - hap_begin) / dur, 0.0, 1.0)
+			radius = lerpf(5.0, 3.0, progress)
+
+		_panel.draw_circle(Vector2(px_x, cy), radius, color)
+
+	# Playhead
+	var ph_x: float = x + PIANOROLL_PLAYHEAD * w
+	_panel.draw_line(Vector2(ph_x, y + 2), Vector2(ph_x, y + h - 2), Color(1.0, 1.0, 1.0, 0.5), 1.0)
+
+	# Cycle grid
+	var cycle_start: int = int(ceilf(from_time))
+	while cycle_start < to_time:
+		var cx: float = x + ((cycle_start - from_time) / time_range) * w
+		_panel.draw_line(Vector2(cx, y + h - 4), Vector2(cx, y + h), Color(1.0, 1.0, 1.0, 0.1), 1.0)
+		cycle_start += 1
+
+
+func _draw_line_meter(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
+	## Vertical VU-meter showing note density and current activity.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	# Count active haps and get their pitches
+	var active_haps: Array = []
+	for hap in haps:
+		if hap.whole != null and hap.is_active(_current_time):
+			active_haps.append(hap)
+
+	# Draw individual meter bars — one per active note, spread across width
+	var max_simultaneous: int = 8  # Max bars to show
+	var bar_spacing: float = 2.0
+	var bar_count: int = mini(active_haps.size(), max_simultaneous)
+
+	if bar_count > 0:
+		var bar_w: float = (w - bar_spacing * (bar_count + 1)) / bar_count
+
+		for i in range(bar_count):
+			var hap: StrudelHap = active_haps[i]
+			var pitch: float = _hap_to_pitch(hap)
+			# Map pitch to bar height (higher pitch = taller bar)
+			var bar_frac: float = clampf((pitch - 36.0) / 60.0, 0.1, 1.0) if pitch >= 0 else 0.5
+			var bar_h: float = bar_frac * (h - 4)
+			var bx: float = x + bar_spacing + i * (bar_w + bar_spacing)
+			var by: float = y + h - 2 - bar_h
+
+			# Color: green → yellow → red based on height
+			var color: Color
+			if bar_frac < 0.4:
+				color = Color(0.2, 0.7, 0.3, 0.8)
+			elif bar_frac < 0.7:
+				color = Color(0.8, 0.7, 0.2, 0.8)
+			else:
+				color = Color(0.9, 0.3, 0.2, 0.8)
+
+			_panel.draw_rect(Rect2(bx, by, bar_w, bar_h), color)
+
+	# Activity text
+	_panel.draw_string(font, Vector2(x + w - 30, y + h - 3), "%d" % active_haps.size(),
+		HORIZONTAL_ALIGNMENT_LEFT, 28, 8, Color(0.5, 0.5, 0.6))
 
 
 func _draw_pianoroll(x: float, y: float, w: float, h: float, font: Font) -> void:
