@@ -163,6 +163,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.49
+**Fix Strudel audio dropout + pianoroll flashing**
+
+- **Fix**: SiON driver mode conflict — `play(mml)` and `stream()` modes now properly sequenced; `strudel_play` always forces clean streaming mode
+- **Fix**: `play_test_tone` and `play_mml` now stop the Strudel cyclist first to prevent mode conflicts
+- **Fix**: Pianoroll rolling buffer — haps accumulate incrementally instead of re-querying entire window each frame, eliminating visual flashing
+- **Fix**: Rolling buffer resets on pattern change and stop
+
 ### v0.10.48
 **Strudel pattern engine — live-coding music in Godot**
 

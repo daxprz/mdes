@@ -27,9 +27,10 @@ var _cursor_blink: float = 0.0
 var _is_playing: bool = false
 var _cps: float = 0.5
 
-# Pianoroll state
+# Pianoroll state — rolling buffer (haps accumulate, old ones pruned)
 var _visible_haps: Array = []   # Haps currently visible in the pianoroll
 var _current_time: float = 0.0  # Current cycle position for rendering
+var _last_query_end: float = 0.0  # Right edge of last query (only query new haps beyond this)
 
 # Highlight state — which source locations are active right now
 var _active_locations: Dictionary = {}  # "start:end" -> StrudelHap
@@ -155,14 +156,17 @@ func _play_current() -> void:
 	var pat: StrudelPattern = StrudelMini.mini(_editor_text.strip_edges())
 	MusicManager.strudel_play(pat, _cps)
 	_is_playing = true
-	# Collect leaf locations for highlighting
-	_update_leaf_locations()
+	# Reset rolling buffer on pattern change
+	_visible_haps.clear()
+	_last_query_end = 0.0
+	_active_locations.clear()
 
 
 func _stop() -> void:
 	MusicManager.strudel_stop()
 	_is_playing = false
 	_visible_haps.clear()
+	_last_query_end = 0.0
 	_active_locations.clear()
 
 
@@ -178,21 +182,33 @@ func _update_pianoroll() -> void:
 	if not MusicManager._cyclist or not MusicManager._strudel_playing:
 		_visible_haps.clear()
 		_current_time = 0.0
+		_last_query_end = 0.0
 		return
 
 	_current_time = MusicManager._cyclist.now()
 	var lookbehind: float = PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
 	var lookahead: float = PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	var visible_start: float = _current_time - lookbehind
+	var visible_end: float = _current_time + lookahead
 
-	# Query pattern for visible haps
-	var begin: float = maxf(_current_time - lookbehind, 0.0)
-	var end: float = _current_time + lookahead
+	# Rolling buffer: prune haps that scrolled off the left edge
+	_visible_haps = _visible_haps.filter(func(hap: StrudelHap) -> bool:
+		if hap.whole == null:
+			return false
+		return hap.get_end_clipped().to_float() >= visible_start)
+
+	# Query only NEW haps beyond where we last queried
 	if MusicManager._strudel_pattern:
-		_visible_haps = MusicManager._strudel_pattern.query_arc(begin, end)
-	else:
-		_visible_haps.clear()
+		var query_start: float = maxf(_last_query_end, visible_start)
+		if visible_end > query_start:
+			var new_haps: Array = MusicManager._strudel_pattern.query_arc(query_start, visible_end)
+			# Only add haps with onsets (avoid duplicates from overlapping queries)
+			for hap in new_haps:
+				if hap.has_onset():
+					_visible_haps.append(hap)
+			_last_query_end = visible_end
 
-	# Update source highlighting
+	# Update source highlighting — only from currently active haps
 	_active_locations.clear()
 	for hap in _visible_haps:
 		if hap.whole == null:

@@ -482,16 +482,19 @@ func play_test_tone() -> void:
 	if not driver:
 		print("MUSIC: Cannot test — driver not initialized")
 		return
+	# Stop strudel first — play(mml) conflicts with stream mode
+	strudel_stop()
 	driver.call("play", "t120 l8 [ccggaag4 ffeeddc4]")
 	print("MUSIC: test tone playing")
 
 
 ## Play an arbitrary MML string directly on the driver.
-## Stops any current playback (layered or title) first.
+## Stops any current playback (layered, strudel, title) first.
 func play_mml(mml: String) -> void:
 	if not driver:
 		print("MUSIC: Cannot play MML — driver not initialized")
 		return
+	strudel_stop()
 	if is_playing:
 		stop()
 	stop_title_music()
@@ -587,9 +590,10 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
 	if is_playing:
 		stop()
 
-	# Start the SiON streaming if not already (needed for note_on to produce sound)
-	if not driver.call("is_streaming"):
-		driver.call("stream", false)
+	# Force SiON into streaming mode. stop() first to clear any MML playback,
+	# then stream(false) to enable note_on.
+	driver.call("stop")
+	driver.call("stream", false)
 
 	if cps > 0.0:
 		_cyclist.set_cps(cps)
