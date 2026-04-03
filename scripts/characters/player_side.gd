@@ -1602,121 +1602,13 @@ func _init_class_component(cls_name: String) -> void:
 		if comp.has_method("perform_charged"): _class_charged_fn[e] = comp.perform_charged
 		_class_tick_fn[e] = func(delta: float): comp.tick(delta)
 
-func _attack_mage() -> void:
-	if _mage_class:
-		_mage_class._attack_mage()
-
-func _special_frosting_freeze() -> void:
-	if _mage_class:
-		_mage_class._special_frosting_freeze()
-
-func _handle_mage_airwalk_toggle() -> void:
-	if _mage_class:
-		_mage_class._handle_mage_airwalk_toggle()
-
-func _handle_mage_airwalk(delta: float) -> void:
-	if _mage_class:
-		_mage_class._handle_mage_airwalk(delta)
-
-func _charged_mage_bolt(charge_ratio: float) -> void:
-	if _mage_class:
-		_mage_class._charged_mage_bolt(charge_ratio)
-
-func _attack_tank() -> void:
-	if _tank_class:
-		_tank_class._attack_tank()
-
-func _special_tank_slam() -> void:
-	if _tank_class:
-		_tank_class._special_tank_slam()
-
-func _handle_tank_fortify(delta: float) -> void:
-	if _tank_class:
-		_tank_class._handle_tank_fortify(delta)
-
-func _charged_tank_shockwave(charge_ratio: float) -> void:
-	if _tank_class:
-		_tank_class._charged_tank_shockwave(charge_ratio)
-
-func _handle_balloonist_float(delta: float) -> void:
-	if _balloonist_class:
-		_balloonist_class._handle_balloonist_float(delta)
-
-func _attack_balloonist() -> void:
-	if _balloonist_class:
-		_balloonist_class._attack_balloonist()
-
-func _special_balloonist_burst() -> void:
-	if _balloonist_class:
-		_balloonist_class._special_balloonist_burst()
-
-func _charged_balloonist_barrage(charge_ratio: float) -> void:
-	if _balloonist_class:
-		_balloonist_class._charged_balloonist_barrage(charge_ratio)
-
-func _attack_jumper() -> void:
-	if _ninja_class:
-		_ninja_class._attack_jumper()
-
-func _special_jumper_dive() -> void:
-	if _ninja_class:
-		_ninja_class._special_jumper_dive()
-
-func _handle_jumper_dash() -> void:
-	if _ninja_class:
-		_ninja_class._handle_jumper_dash()
-
-func _pickup_item(item: Node2D) -> void:
-	if _ninja_class:
-		_ninja_class._pickup_item(item)
-
-func _throw_held_item() -> void:
-	if _ninja_class:
-		_ninja_class._throw_held_item()
-
-func _handle_jumper_momentum(delta: float) -> void:
-	if _ninja_class:
-		_ninja_class._handle_jumper_momentum(delta)
-
-func _charged_jumper_meteor(charge_ratio: float) -> void:
-	if _ninja_class:
-		_ninja_class._charged_jumper_meteor(charge_ratio)
-
-func _attack_melee() -> void:
-	if _melee_class:
-		_melee_class._attack_melee()
-
-func _spawn_melee_arc(reach: float, combo_idx: int) -> void:
-	if _melee_class:
-		_melee_class._spawn_melee_arc(reach, combo_idx)
-
 func _update_combo_timer(delta: float) -> void:
 	if _melee_class:
 		_melee_class._update_combo_timer(delta)
 
-func _start_ground_slam() -> void:
-	if _melee_class:
-		_melee_class._start_ground_slam()
-
 func _check_ground_slam_landing() -> void:
 	if _melee_class:
 		_melee_class._check_ground_slam_landing()
-
-func _ground_slam_pop_balloons() -> void:
-	if _melee_class:
-		_melee_class._ground_slam_pop_balloons()
-
-func _special_shield_charge() -> void:
-	if _melee_class:
-		_melee_class._special_shield_charge()
-
-func _handle_melee_enrage(delta: float) -> void:
-	if _melee_class:
-		_melee_class._handle_melee_enrage(delta)
-
-func _charged_melee_slam(charge_ratio: float) -> void:
-	if _melee_class:
-		_melee_class._charged_melee_slam(charge_ratio)
 
 func _spawn_blood_particles(hit_pos: Vector2) -> void:
 	# 3 blood squirts in random upward directions
@@ -1803,89 +1695,9 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 
 # -- Ranger functions delegated to RangerClass --------------------------------
 
-func _attack_ranged() -> void:
-	if _ranger_class:
-		_ranger_class._attack_ranged()
-
-func _ranger_fire_crossbow() -> void:
-	if _ranger_class:
-		_ranger_class._ranger_fire_crossbow()
-
 func _handle_ranger_grapple() -> void:
 	if _ranger_class:
 		_ranger_class._handle_ranger_grapple()
-
-func _grapple_tick_windup(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tick_windup(delta)
-
-func _grapple_throw() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_throw()
-
-func _grapple_tick_thrown(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tick_thrown(delta)
-
-func _grapple_update_rope_thrown() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_update_rope_thrown()
-
-func _update_grapple_anchor() -> void:
-	if _ranger_class:
-		_ranger_class._update_grapple_anchor()
-
-func _grapple_tick_connected(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tick_connected(delta)
-
-func _enter_swing_from_velocity() -> void:
-	if _ranger_class:
-		_ranger_class._enter_swing_from_velocity()
-
-func _grapple_tick_swinging(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tick_swinging(delta)
-
-func _grapple_tug() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tug()
-
-func _grapple_pull_to_anchor() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_pull_to_anchor()
-
-func _grapple_jump_release() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_jump_release()
-
-func _grapple_release() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_release()
-
-func _grapple_start_retract() -> void:
-	if _ranger_class:
-		_ranger_class._grapple_start_retract()
-
-func _grapple_tick_retracting(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._grapple_tick_retracting(delta)
-
-func _tether_begin_second_hook() -> void:
-	if _ranger_class:
-		_ranger_class._tether_begin_second_hook()
-
-func _tether_tick_windup(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._tether_tick_windup(delta)
-
-func _tether_throw_second_hook() -> void:
-	if _ranger_class:
-		_ranger_class._tether_throw_second_hook()
-
-func _tether_tick_thrown(delta: float) -> void:
-	if _ranger_class:
-		_ranger_class._tether_tick_thrown(delta)
 
 func _draw_grapple() -> void:
 	if _ranger_class:
@@ -1899,43 +1711,10 @@ func _handle_archer_aim(delta: float) -> void:
 	if _ranger_class:
 		_ranger_class._handle_archer_aim(delta)
 
-func _archer_find_nearest_enemy() -> void:
-	if _ranger_class:
-		_ranger_class._archer_find_nearest_enemy()
-
-func _archer_solve_arc() -> void:
-	if _ranger_class:
-		_ranger_class._archer_solve_arc()
-
-func _arc_closest_distance_to_target() -> float:
-	return _ranger_class._arc_closest_distance_to_target() if _ranger_class else 0.0
-
-func _verify_arc_hits_target(radius: float) -> bool:
-	return _ranger_class._verify_arc_hits_target(radius) if _ranger_class else false
-
-func _build_arc_points_vertical(dy: float) -> void:
-	if _ranger_class:
-		_ranger_class._build_arc_points_vertical(dy)
-
-func _build_arc_points_from_vel(vx: float, vy: float) -> void:
-	if _ranger_class:
-		_ranger_class._build_arc_points_from_vel(vx, vy)
-
-func _archer_fire_aimed() -> void:
-	if _ranger_class:
-		_ranger_class._archer_fire_aimed()
-
-func _track_arrow_trail(proj: Node2D) -> void:
-	if _ranger_class:
-		_ranger_class._track_arrow_trail(proj)
-
 func _draw_archer_aim() -> void:
 	if _ranger_class:
 		_ranger_class._draw_archer_aim()
 
-func _draw_sense_effect(center: Vector2, radius: float, alpha_mult: float, anim_phase: float) -> void:
-	if _ranger_class:
-		_ranger_class._draw_sense_effect(center, radius, alpha_mult, anim_phase)
 func _spawn_fireball(aim: Vector2, damage: int) -> void:
 	var fireball := Node2D.new()
 	fireball.name = "Fireball"
@@ -2128,89 +1907,9 @@ var _summoner_class: Variant = null
 var _guitarist_class: Variant = null
 var _werewolf_class: Variant = null
 
-func _attack_rogue() -> void:
-	if _rogue_class:
-		_rogue_class._attack_rogue()
-
-func _handle_rogue_stealth_toggle() -> void:
-	if _rogue_class:
-		_rogue_class._handle_rogue_stealth_toggle()
-
-func _handle_rogue_stealth(delta: float) -> void:
-	if _rogue_class:
-		_rogue_class._handle_rogue_stealth(delta)
-
-func _exit_stealth() -> void:
-	if _rogue_class:
-		_rogue_class._exit_stealth()
-
-func _stealth_backstab_vfx(hit_pos: Vector2) -> void:
-	if _rogue_class:
-		_rogue_class._stealth_backstab_vfx(hit_pos)
-
-func _special_shadow_dash() -> void:
-	if _rogue_class:
-		_rogue_class._special_shadow_dash()
-
-func _charged_rogue_backstab(charge_ratio: float) -> void:
-	if _rogue_class:
-		_rogue_class._charged_rogue_backstab(charge_ratio)
-
-func _attack_demolitionist() -> void:
-	if _demolitionist_class:
-		_demolitionist_class._attack_demolitionist()
-
-func _handle_demo_refuel() -> void:
-	if _demolitionist_class:
-		_demolitionist_class._handle_demo_refuel()
-
-func _special_big_bomb() -> void:
-	if _demolitionist_class:
-		_demolitionist_class._special_big_bomb()
-
-func _charged_demo_mega_bomb(charge_ratio: float) -> void:
-	if _demolitionist_class:
-		_demolitionist_class._charged_demo_mega_bomb(charge_ratio)
-
-func _attack_healer() -> void:
-	if _healer_class:
-		_healer_class._attack_healer()
-
-func _handle_healer_wind_gust() -> void:
-	if _healer_class:
-		_healer_class._handle_healer_wind_gust()
-
-func _special_healing_burst() -> void:
-	if _healer_class:
-		_healer_class._special_healing_burst()
-
-func _charged_healer_wave(charge_ratio: float) -> void:
-	if _healer_class:
-		_healer_class._charged_healer_wave(charge_ratio)
-
-func _attack_summoner() -> void:
-	if _summoner_class:
-		_summoner_class._attack_summoner()
-
-func _expire_mark_after(enemy: Node2D, duration: float) -> void:
-	if _summoner_class:
-		_summoner_class._expire_mark_after(enemy, duration)
-
-func _special_summon_donut() -> void:
-	if _summoner_class:
-		_summoner_class._special_summon_donut()
-
-func _charged_summoner_donut(charge_ratio: float) -> void:
-	if _summoner_class:
-		_summoner_class._charged_summoner_donut(charge_ratio)
-
 func _handle_delegate_toggle() -> void:
 	if _summoner_class:
 		_summoner_class._handle_delegate_toggle()
-
-func _enter_delegate_mode() -> void:
-	if _summoner_class:
-		_summoner_class._enter_delegate_mode()
 
 func _exit_delegate_mode() -> void:
 	if _summoner_class:
@@ -2220,49 +1919,9 @@ func _spawn_aether_rift(pos: Vector2) -> void:
 	if _summoner_class:
 		_summoner_class._spawn_aether_rift(pos)
 
-func _spawn_aether_particle_delayed(rift: Node2D, pos: Vector2, delay: float) -> void:
-	if _summoner_class:
-		_summoner_class._spawn_aether_particle_delayed(rift, pos, delay)
-
-func _apply_aether_growth_to(enemy: Node2D) -> void:
-	if _summoner_class:
-		_summoner_class._apply_aether_growth_to(enemy)
-
-func _spawn_aether_aura(enemy: Node2D) -> void:
-	if _summoner_class:
-		_summoner_class._spawn_aether_aura(enemy)
-
 func _update_delegate(delta: float) -> void:
 	if _summoner_class:
 		_summoner_class._update_delegate(delta)
-
-func _update_buddy_target() -> void:
-	if _summoner_class:
-		_summoner_class._update_buddy_target()
-
-func _handle_guitarist_amp_up(delta: float) -> void:
-	if _guitarist_class:
-		_guitarist_class._handle_guitarist_amp_up(delta)
-
-func _charged_guitarist_power_chord(charge_ratio: float) -> void:
-	if _guitarist_class:
-		_guitarist_class._charged_guitarist_power_chord(charge_ratio)
-
-func _attack_werewolf() -> void:
-	if _werewolf_class:
-		_werewolf_class._attack_werewolf()
-
-func _handle_werewolf_frenzy(delta: float) -> void:
-	if _werewolf_class:
-		_werewolf_class._handle_werewolf_frenzy(delta)
-
-func _special_werewolf_roar_push() -> void:
-	if _werewolf_class:
-		_werewolf_class._special_werewolf_roar_push()
-
-func _charged_werewolf_pounce(charge_ratio: float) -> void:
-	if _werewolf_class:
-		_werewolf_class._charged_werewolf_pounce(charge_ratio)
 
 func _check_werewolf_pounce_landing() -> void:
 	if _werewolf_class:
