@@ -693,7 +693,25 @@ func _update_pianoroll() -> void:
 			_editor_cursor = _editor_text.length()
 			_select_start = -1
 		_is_playing = MusicManager._strudel_playing
-		DebugOverlay.log("strudel/pattern", null, "DRAWER: synced to '%s'" % _editor_text)
+		# Populate per-line patterns from the synced text so pianoroll + highlights work
+		_line_patterns.clear()
+		_line_haps.clear()
+		_line_query_ends.clear()
+		for i in range(_lines.size()):
+			var parsed: Dictionary = _parse_line_text(_lines[i])
+			if parsed["is_valid"]:
+				var pat: StrudelPattern = StrudelMini.mini(parsed["pattern_text"])
+				var snd: String = parsed["sound"]
+				if not snd.is_empty():
+					pat = pat.set_in(Strudel.pure({"s": snd}))
+				_line_patterns.append(pat)
+				_lines[i]["pattern_offset"] = parsed["pattern_offset"]
+			else:
+				_line_patterns.append(null)
+			_line_haps.append([])
+			_line_query_ends.append(0.0)
+		DebugOverlay.log("strudel/pattern", null, "DRAWER: synced to '%s' (%d line patterns)" % [
+			_editor_text, _line_patterns.filter(func(p): return p != null).size()])
 
 	_current_time = MusicManager._cyclist.now()
 	var lookbehind: float = PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
