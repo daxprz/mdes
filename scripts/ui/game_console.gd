@@ -66,38 +66,86 @@ var _kill_buffer: String = ""  # Ctrl+K kill ring / Ctrl+Y yank
 var _tab_completions: Array[String] = []
 var _tab_index: int = 0
 
-# All known commands for autocomplete
+# All known commands for autocomplete — static keywords.
+# Dynamic completions (score names, debug aspects, test names, levels,
+# modifier blueprints) are resolved at tab-time in _autocomplete().
 const COMMANDS := [
-	"help", "debug", "spawn monster", "spawn dummy", "spawn attacker",
-	"clear", "clearplayers", "enablejoins", "portal off", "portal on",
-	"tp", "tab", "key", "enemies", "players", "status", "quit",
+	# -- Core --
+	"help", "status", "enemies", "players", "quit", "cls",
+	"eval", "emit",
+	# -- Spawning --
+	"spawn monster", "spawn dummy", "spawn attacker",
+	"ai_spawn", "ai_cmd", "ai_off",
+	# -- Entity control --
+	"tp", "tab", "key", "kick",
+	"clear", "clearplayers", "enablejoins",
+	"kill", "revive", "resethp",
+	"reset", "player_reset",
+	# -- Monster --
 	"standdown on", "standdown off", "standdown",
 	"territorial on", "territorial off", "territorial",
-	"revive", "resethp", "fps", "hp", "ik", "ikreset", "thrash", "ball",
+	"precog", "ball", "thrash",
+	# -- Info / display --
+	"fps", "hp", "ik", "ikreset",
 	"debugdraw", "title", "score", "grid",
 	"partstatus", "partdmg", "weight",
+	"dump", "dump ik", "dump skeleton",
+	# -- Attachments / chain / tether --
 	"attach balloon", "detach",
+	"shackle_attach",
 	"tether status", "tether cut", "tether length",
 	"chain status", "chain cut", "chaindump",
+	# -- Splay poses --
 	"splay list", "splay spawn", "splay clear", "splay status",
-	"dump",
+	# -- Attacker dummy --
 	"attacker target", "attacker part", "attacker weapon",
 	"attacker rate", "attacker stop", "attacker start", "attacker stats",
 	"attacker tether_length", "attacker tether_b",
-	"run", "suite", "tests", "cls",
+	# -- Tests --
+	"run", "suite", "tests",
+	"testload", "testshow", "testedit", "testinsert", "testdelete",
+	"testrun", "testsave", "testnew",
+	# -- Zones / leaps --
+	"etz", "daz", "zones", "clearzones",
 	"leaps", "clearleaps",
 	"bleap reset", "bleap a", "bleap b", "bleap plan req", "bleap plan opt",
 	"bleap start", "bleap end", "bleap disallow", "bleap min", "bleap show",
-	"testload", "testshow", "testedit", "testinsert", "testdelete",
-	"testrun", "testsave", "testnew",
-	"etz", "daz", "zones", "clearzones",
-	"debug", "debug list", "debug on", "debug off",
-	"debug log", "debug console", "debug both", "debug nolog",
-	"debug save", "debug load", "debug filter type", "debug filter id",
+	# -- Debug overlay --
+	"debug", "debug list",
+	"debug on", "debug off", "debug log", "debug nolog",
+	"debug console", "debug both",
+	"debug save", "debug load",
+	"debug filter type", "debug filter id",
 	"debug reset", "debug profile", "debug clear_transient",
-	"level", "level flat_floor", "level title_screen",
+	# -- Config / modifiers --
 	"buff",
-	"notify_dismiss",
+	"mod", "mods", "unmod",
+	"smod", "smods", "unsmod",
+	"gameconfig", "gc",
+	# -- Portal --
+	"portal on", "portal off",
+	# -- Level --
+	"level",
+	# -- Executioner --
+	"exec_tuning", "et", "exec_set", "exec_test",
+	"exec_mode", "exec_get",
+	# -- Notifications --
+	"notify", "notify_dismiss",
+	# -- Music --
+	"music", "m",
+	"music play", "music stop", "music off", "music test",
+	"music score", "music scores",
+	"music mml",
+	"music intensity", "music i",
+	"music tempo", "music bpm",
+	"music layer", "music layer pad", "music layer bass",
+	"music layer drums", "music layer melody",
+	"music mute", "music unmute",
+	"music push", "music combat", "music calm",
+	# -- Mocap / skeleton --
+	"mocap", "skeleton",
+	# -- Announce / comment --
+	"announce", "comment",
 ]
 
 var _panel: Control = null
@@ -596,38 +644,108 @@ func _log_result(result: String) -> void:
 
 
 func _autocomplete() -> void:
-	## Tab autocomplete — cycles through matching commands and known test/suite names.
+	## Tab autocomplete — cycles through matching commands and known names.
+	## Dynamic completions are resolved for specific command prefixes:
+	##   run/testload/testsave → test names
+	##   suite → suite names
+	##   music score → score names
+	##   debug on/off/log/nolog/console/both → debug aspect paths
+	##   mod/smod → modifier blueprint names
+	##   level → level names
+	##   unmod/unsmod → active modifier names
 	if _current_input.is_empty():
 		return
 
 	# Build completions list on first tab press (or after input cleared them)
 	if _tab_completions.is_empty():
 		var prefix: String = _current_input.to_lower()
+		_tab_index = 0
 
-		# Commands that take a test name as first argument
+		# -- Dynamic completions for commands with known argument sets --
+
+		# Test names: run/testload/testsave <test_name>
 		for test_cmd in ["run ", "testload ", "testsave "]:
 			if prefix.begins_with(test_cmd):
 				var name_prefix: String = prefix.substr(test_cmd.length())
 				for test_name in _get_test_names():
 					if test_name.to_lower().begins_with(name_prefix):
 						_tab_completions.append(test_cmd.strip_edges() + " " + test_name)
-				_tab_index = 0
 				break
 
-		# suite / testnew take a suite name
+		# Suite names: suite <suite_name>
 		if _tab_completions.is_empty() and prefix.begins_with("suite "):
 			var name_prefix: String = prefix.substr(6)
 			for suite_name in _get_suite_names():
 				if suite_name.to_lower().begins_with(name_prefix):
 					_tab_completions.append("suite " + suite_name)
-			_tab_index = 0
 
-		# Fall back to command keyword completion
+		# Music score names: music score <name> / m score <name>
+		if _tab_completions.is_empty():
+			for score_cmd in ["music score ", "m score "]:
+				if prefix.begins_with(score_cmd):
+					var name_prefix: String = prefix.substr(score_cmd.length())
+					for score_name in _get_score_names():
+						if score_name.to_lower().begins_with(name_prefix):
+							_tab_completions.append(score_cmd.strip_edges() + " " + score_name)
+					break
+
+		# Debug aspect paths: debug on/off/log/nolog/console/both <aspect>
+		if _tab_completions.is_empty():
+			for dbg_cmd in ["debug on ", "debug off ", "debug log ", "debug nolog ",
+							"debug console ", "debug both "]:
+				if prefix.begins_with(dbg_cmd):
+					var aspect_prefix: String = prefix.substr(dbg_cmd.length())
+					for aspect_path in _get_debug_aspect_paths():
+						if aspect_path.to_lower().begins_with(aspect_prefix):
+							_tab_completions.append(dbg_cmd.strip_edges() + " " + aspect_path)
+					break
+
+		# Modifier blueprints: mod <name> / smod <name>
+		if _tab_completions.is_empty():
+			for mod_cmd in ["mod ", "smod "]:
+				if prefix.begins_with(mod_cmd) and not prefix.begins_with("mods"):
+					var name_prefix: String = prefix.substr(mod_cmd.length())
+					for bp_name in _get_modifier_blueprints():
+						if bp_name.to_lower().begins_with(name_prefix):
+							_tab_completions.append(mod_cmd.strip_edges() + " " + bp_name)
+					break
+
+		# Level names: level <name>
+		if _tab_completions.is_empty() and prefix.begins_with("level "):
+			var name_prefix: String = prefix.substr(6)
+			for level_name in _get_level_names():
+				if level_name.to_lower().begins_with(name_prefix):
+					_tab_completions.append("level " + level_name)
+
+		# Music layer names with on/off: music layer <name> [on|off]
+		if _tab_completions.is_empty():
+			for layer_cmd in ["music layer ", "m layer "]:
+				if prefix.begins_with(layer_cmd):
+					var rest: String = prefix.substr(layer_cmd.length())
+					# If they've typed a layer name already, offer on/off
+					var layer_names := ["pad", "bass", "drums", "melody"]
+					var matched_layer: String = ""
+					for ln in layer_names:
+						if rest.begins_with(ln + " "):
+							matched_layer = ln
+							break
+					if matched_layer != "":
+						var suffix_prefix: String = rest.substr(matched_layer.length() + 1)
+						for toggle in ["on", "off"]:
+							if toggle.begins_with(suffix_prefix):
+								_tab_completions.append(layer_cmd.strip_edges() + " " + matched_layer + " " + toggle)
+					else:
+						# Complete layer name
+						for ln in layer_names:
+							if ln.begins_with(rest):
+								_tab_completions.append(layer_cmd.strip_edges() + " " + ln)
+					break
+
+		# -- Fall back to static command keyword completion --
 		if _tab_completions.is_empty():
 			for cmd in COMMANDS:
 				if cmd.to_lower().begins_with(prefix):
 					_tab_completions.append(cmd)
-			_tab_index = 0
 
 	if _tab_completions.is_empty():
 		return
@@ -666,6 +784,61 @@ func _get_suite_names() -> Array[String]:
 			if fname.ends_with(".json") and not dir.current_is_dir():
 				names.append(fname.replace(".json", ""))
 			fname = dir.get_next()
+	return names
+
+
+func _get_score_names() -> Array[String]:
+	## Return all available music score names from MusicManager.
+	var names: Array[String] = []
+	if MusicManager and MusicManager._all_scores:
+		for key in MusicManager._all_scores:
+			names.append(key)
+	names.sort()
+	return names
+
+
+func _get_debug_aspect_paths() -> Array[String]:
+	## Return all registered debug aspect paths.
+	return DebugOverlay.get_aspect_paths()
+
+
+func _get_modifier_blueprints() -> Array[String]:
+	## Return modifier blueprint names from data/modifier_blueprints/.
+	var names: Array[String] = []
+	var dir := DirAccess.open("res://data/modifier_blueprints/")
+	if dir:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json") and not dir.current_is_dir():
+				names.append(fname.replace(".json", ""))
+			fname = dir.get_next()
+	return names
+
+
+func _get_level_names() -> Array[String]:
+	## Return level names from LevelConfig's known levels.
+	var names: Array[String] = []
+	# Check bundled levels
+	var dir := DirAccess.open("res://data/levels/")
+	if dir:
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".json") and not dir.current_is_dir():
+				names.append(fname.replace(".json", ""))
+			fname = dir.get_next()
+	# Check user override levels
+	dir = DirAccess.open("user://data/levels/")
+	if dir:
+		dir.list_dir_begin()
+		var fname2: String = dir.get_next()
+		while fname2 != "":
+			if fname2.ends_with(".json") and not dir.current_is_dir():
+				var n: String = fname2.replace(".json", "")
+				if n not in names:
+					names.append(n)
+			fname2 = dir.get_next()
 	return names
 
 

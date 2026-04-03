@@ -125,3 +125,9 @@ func _register_all() -> void:
 	r.call("effects/applied", "Effect applied to entity (name, duration, value)")
 	r.call("effects/expired", "Effect expired on entity")
 	r.call("effects/active", "Currently active effects overlay per entity")
+
+	# -- Music --
+	r.call("music/status", "Music system state changes (play, stop, driver init)")
+	r.call("music/layers", "Layer activation/deactivation and variant switches")
+	r.call("music/beats", "Beat and timer tick events (verbose)")
+	r.call("music/events", "Game event hooks triggering intensity changes")

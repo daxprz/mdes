@@ -15,7 +15,7 @@ compatibility/default_parent_skeleton_in_mesh_instance_3d=true
 [application]
 
 config/name="The Ultimate Muffin"
-config/version="0.9.4"
+config/version="0.10.47"
 run/main_scene="res://scenes/ui/title_screen.tscn"
 config/features=PackedStringArray("4.6")
 
@@ -34,6 +34,7 @@ DebugOverlay="*res://scripts/autoload/debug_overlay.gd"
 DebugAspects="*res://scripts/autoload/debug_aspects.gd"
 DebugDrawer="*res://scripts/ui/debug_drawer.gd"
 Factions="*res://scripts/autoload/factions.gd"
+MusicManager="*res://scripts/autoload/music_manager.gd"
 
 [display]
 

@@ -164,6 +164,7 @@ func _execute(command: String) -> String:
   gameconfig <key> [value]      — get/set game config (gc shorthand)
   exec_tuning (et)              — toggle ball/chain tuning popup
   exec_set <key> <value>        — set executioner tuning value
+  music [play|stop|off|score|scores|mml|intensity|tempo|layer|...] — music
   quit                          — quit game"""
 
 		"debug":
@@ -1040,6 +1041,9 @@ func _execute(command: String) -> String:
 					return "OK: %s = %.2f" % [key, val]
 			return "ERR: no executioner player found"
 
+		"music", "m":
+			return _cmd_music(parts, command)
+
 		"ai_spawn":
 			# Spawn an AI-controlled player at a position.
 			# ai_spawn [x y | @e[...] ~dx ~dy] [class=executioner] [name=id]
@@ -1194,6 +1198,100 @@ func _cmd_gameconfig(parts: PackedStringArray) -> String:
 	GAME_CONFIG_KEYS[key]["set"].call(value_str)
 	var new_val: Variant = GAME_CONFIG_KEYS[key]["get"].call()
 	return "OK: game/%s = %s" % [key, str(new_val)]
+
+
+func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
+	## Music system control.
+	## Usage: music [subcmd] [args...]
+	if parts.size() < 2:
+		return MusicManager.get_status_text()
+
+	var sub: String = parts[1].to_lower()
+	match sub:
+		"play":
+			MusicManager.play()
+			return "OK: music playing"
+		"stop":
+			MusicManager.stop()
+			return "OK: music stopped"
+		"test":
+			MusicManager.play_test_tone()
+			return "OK: test tone"
+		"intensity", "i":
+			if parts.size() < 3:
+				return "intensity: %.2f (target: %.2f)" % [MusicManager.intensity, MusicManager._target_intensity]
+			var val: float = float(parts[2])
+			MusicManager.set_intensity(val)
+			return "OK: intensity → %.2f" % val
+		"tempo", "bpm":
+			if parts.size() < 3:
+				return "tempo: %d BPM" % MusicManager._bpm
+			var bpm: int = int(parts[2])
+			MusicManager.set_tempo(bpm)
+			return "OK: tempo → %d BPM" % bpm
+		"layer":
+			if parts.size() < 3:
+				# List layers
+				var lines: PackedStringArray = PackedStringArray(["Layers:"])
+				for ln in MusicManager._layers:
+					var l: MusicManager.LayerState = MusicManager._layers[ln]
+					lines.append("  %s: %s (enabled=%s, active=%s, variant=%d)" % [
+						l.name, "ON" if l.active else "off",
+						"yes" if l.enabled else "no", "yes" if l.active else "no",
+						l.current_variant])
+				return "\n".join(lines)
+			var layer_name: String = parts[2].to_lower()
+			if parts.size() >= 4:
+				var on_off: String = parts[3].to_lower()
+				MusicManager.set_layer_enabled(layer_name, on_off in ["on", "true", "1", "yes"])
+				return "OK: layer '%s' %s" % [layer_name, "enabled" if on_off in ["on", "true", "1", "yes"] else "disabled"]
+			# Toggle
+			if MusicManager._layers.has(layer_name):
+				var layer: MusicManager.LayerState = MusicManager._layers[layer_name]
+				MusicManager.set_layer_enabled(layer_name, not layer.enabled)
+				return "OK: layer '%s' %s" % [layer_name, "enabled" if layer.enabled else "disabled"]
+			return "ERR: unknown layer '%s'" % layer_name
+		"mute":
+			MusicManager.mute()
+			return "OK: muted"
+		"unmute":
+			MusicManager.unmute()
+			return "OK: unmuted"
+		"push":
+			if parts.size() < 3:
+				return "ERR: usage: music push <amount>"
+			var amount: float = float(parts[2])
+			MusicManager.push_intensity(amount)
+			return "OK: pushed +%.2f → %.2f" % [amount, MusicManager._target_intensity]
+		"combat":
+			MusicManager.on_combat_start()
+			return "OK: combat start event fired"
+		"calm":
+			MusicManager.on_combat_end()
+			return "OK: combat end event fired"
+		"score":
+			if parts.size() < 3:
+				return MusicManager.get_score_list()
+			return MusicManager.play_score(parts[2].to_lower())
+		"scores":
+			return MusicManager.get_score_list()
+		"mml":
+			# Play arbitrary MML: music mml <mml_string>
+			# Everything after "mml" is the MML data (preserves spaces in MML)
+			if parts.size() < 3:
+				return "ERR: usage: music mml <mml_string>"
+			var mml_idx: int = command.find("mml")
+			var mml_text: String = command.substr(mml_idx + 3).strip_edges() if mml_idx >= 0 else " ".join(parts.slice(2))
+			MusicManager.play_mml(mml_text)
+			return "OK: playing MML (%d chars)" % mml_text.length()
+		"off":
+			# Stop everything (layered, title, direct)
+			MusicManager.stop()
+			MusicManager.stop_title_music()
+			MusicManager.stop_direct()
+			return "OK: all music stopped"
+		_:
+			return "ERR: unknown music command '%s'. Try: play, stop, off, test, score, scores, mml, intensity, tempo, layer, mute, unmute, push, combat, calm" % sub
 
 
 func _cmd_teleport(parts: PackedStringArray) -> String:

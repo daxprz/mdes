@@ -163,6 +163,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.47
+**Procedural adaptive music system powered by GDSiON**
+
+- **GDSiON integration**: Software synthesizer GDExtension (v0.7-beta8) — 650+ FM/MIDI/chiptune voices, MML sequencer, real-time effects
+- **MusicManager autoload**: 4-layer adaptive music (pad, bass, drums, melody) driven by game intensity 0.0–1.0
+- **Intensity system**: Game events push intensity up (combat +0.4, attacks +0.15, leaps +0.25), natural decay brings it down; layers activate/deactivate at thresholds
+- **Monster hooks**: `_notify_music()` on every state transition — CHASE starts combat music, attacks/leaps escalate, death/patrol resets
+- **Player hooks**: damage pushes intensity, all-players-dead drops to zero
+- **Title ambient**: Soft C minor pad auto-plays on title screen, transitions cleanly to layered system
+- **18 community MML scores**: Chrono Trigger, FFV Big Bridge, Castlevania Beginning, Street Fighter Chun-Li, Super Mario Bros, Ikaruga, Ys II, Secret of Mana, Dragon Quest III, Megami Tensei II, and more — loaded from `data/music/scores.json`
+- **RCON commands**: `music play/stop/off/test`, `music score <name>`, `music mml <string>`, `music intensity/tempo/layer/push/combat/calm`, `music scores`
+- **Console autocomplete**: All music commands, score names, debug aspects, modifier blueprints, and level names now tab-complete in the in-game console
+- **Debug aspects**: `music/status`, `music/layers`, `music/beats`, `music/events`
+- **Graceful fallback**: Dynamic GDScript bridge avoids parse-time type dependency — if GDSiON is missing, music system disables cleanly
+
 ### v0.10.46
 **ChargeComponent, Character base virtuals, dead forwarder cleanup — player_side.gd under 4,000 lines**
 

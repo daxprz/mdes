@@ -79,6 +79,9 @@ Do NOT use tumu when:
 | `scripts/autoload/object_pool.gd` | Node recycling pool for VFX, projectiles, chains |
 | `docs/design/player_refactor.md` | Composition architecture design — unified Character system |
 | `data/tests/suites/class_basics.json` | Gate suite: movement + combat tests for all 13 classes |
+| `scripts/autoload/music_manager.gd` | Procedural adaptive music (GDSiON) — layers, intensity, game event hooks |
+| `data/music/scores.json` | 18 community MML arrangements (Chrono Trigger, FFV, Castlevania, etc.) |
+| `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
 
 ## Conventions
 

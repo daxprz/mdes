@@ -210,6 +210,31 @@ func _change_state(new_state: State) -> void:
 	_last_state = old_state
 	DebugOverlay.log("monster/state", self, "STATE: %s -> %s" % [
 		State.keys()[old_state], State.keys()[new_state]])
+	# Notify music system of state transitions
+	_notify_music(old_state, new_state)
+
+
+## Notify MusicManager of musically-relevant state transitions.
+func _notify_music(old_state: State, new_state: State) -> void:
+	match new_state:
+		State.CHASE:
+			# Only fire on first transition into chase (not re-entering from attacks)
+			if old_state == State.PATROL or old_state == State.STANDDOWN:
+				MusicManager.on_combat_start()
+			else:
+				MusicManager.on_monster_chase_start()
+		State.ATTACK_BITE, State.ATTACK_SWIPE, State.ATTACK_TAIL, \
+		State.ATTACK_LUNGE, State.ATTACK_SPRINT_SLASH, State.ATTACK_HOP_UP, \
+		State.ATTACK_GRAB:
+			MusicManager.on_monster_attack_start()
+		State.ATTACK_LEAP_WINDUP:
+			MusicManager.on_monster_leap_start()
+		State.DEAD:
+			MusicManager.on_monster_died()
+		State.PATROL:
+			# Returning to patrol means combat is over
+			if old_state != State.STANDDOWN:
+				MusicManager.on_combat_end()
 
 
 ## Cleanup when leaving a state. Resets transient flags that the old state owned.
@@ -649,6 +674,9 @@ func _ready() -> void:
 		set_controller(AIController.new())
 	else:
 		_controller.on_attach(self)
+
+	# Register with music system for adaptive soundtrack
+	MusicManager.connect_monster(self)
 
 
 func _init_skeleton() -> void:
