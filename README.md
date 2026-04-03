@@ -87,10 +87,25 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 
 ### Music Drawer (Ctrl+M)
 
+Live-coding music panel. Each line is an independent pattern — all non-muted lines play stacked together.
+
+**Line format:**
+```
+drums: c4(3,8)                — named "drums"
+bass: c2 ~ c2 ~ e2 ~ s=bass  — named "bass", bass voice
+melody: c4 e4 g4 c5 s=flute   — named "melody", flute voice
+c4 e4 g4 c5                   — auto-named "d1", "d2", etc.
+# this is a comment            — skipped
+```
+
 | Input | Action |
 |-------|--------|
-| **Type** | Insert at cursor (replaces selection) |
-| **Enter** | Evaluate / play pattern |
+| **Enter** | New line below current |
+| **Ctrl+Enter** | Evaluate all lines (play/hot-swap) |
+| **Up / Down** | Move between lines |
+| **Ctrl+/** | Toggle mute on current line |
+| **Ctrl+Shift+K** | Delete current line |
+| **Backspace at col 0** | Join with previous line |
 | **Escape** | Close drawer |
 | **Left / Right** | Move cursor one character |
 | **Ctrl+Left / Right** | Move cursor one word |

@@ -1,0 +1,54 @@
+{
+  "name": "music_named_lines",
+  "description": "Listening test: named lines, independent layers, mute — open Ctrl+M to watch",
+  "script": [
+    "var inspect default=5",
+
+    "announce NAMED LINE TESTS — open Ctrl+M to watch the drawer",
+    "musicdrawer",
+    "wait 1",
+
+    "# === 1. Single named line ===",
+    "announce 1/8: Single named line — drums: c4(3,8)",
+    "strudel c4(3,8) cps=1",
+    "wait 4",
+
+    "# === 2. Two named lines stacked ===",
+    "announce 2/8: Two lines — drums + bass stacked",
+    "strudel c4(3,8) | c2 ~ c2 ~ e2 ~ cps=0.8",
+    "wait 5",
+
+    "# === 3. Three named lines ===",
+    "announce 3/8: Three lines — drums + bass + melody",
+    "strudel c4(3,8) | c2 ~ e2 ~ | c4 e4 g4 c5 cps=0.5",
+    "wait 6",
+
+    "# === 4. Voices per line ===",
+    "announce 4/8: Different voices — flute melody + string chords + bass",
+    "strudel [c4 e4 g4 c5]*2 | [c3,e3,g3] [f3,a3,c4] | c2 ~ c2 ~ s=bass cps=0.4",
+    "wait 7",
+
+    "# === 5. Swap one line (melody changes, bass stays) ===",
+    "announce 5/8: Swap melody — bass unchanged",
+    "strudel [c5 b4 g4 e4]*2 | [c3,e3,g3] [f3,a3,c4] | c2 ~ c2 ~ s=bass cps=0.4",
+    "wait 6",
+
+    "# === 6. Remove a layer (just melody + bass) ===",
+    "announce 6/8: Drop middle layer — melody + bass only",
+    "strudel [c5 b4 g4 e4]*2 | c2 ~ c2 ~ e2 ~ s=bass cps=0.5",
+    "wait 5",
+
+    "# === 7. Euclidean polyrhythm layers ===",
+    "announce 7/8: Three euclidean layers at different rates",
+    "strudel c3(3,8) | e4(5,8) | g4(7,16) cps=0.7",
+    "wait 6",
+
+    "# === 8. Full composition ===",
+    "announce 8/8: Full composition — 4 named layers",
+    "strudel [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] | [c4 e4 g4 c5]*2 | c2 ~ c2 ~ e2 ~ g2 ~ | c5(3,8) cps=0.35",
+    "wait 8",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the named lines work?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

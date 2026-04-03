@@ -33,12 +33,22 @@ extends CanvasLayer
 ##     Ctrl+Y              — yank (paste from kill buffer)
 ##   Multi-line:
 ##     Enter               — new line below current
-##     Ctrl+Enter          — evaluate all lines (play/hot-swap)
+##     Ctrl+Enter          — evaluate all non-muted lines (play/hot-swap)
 ##     Up / Down           — move cursor between lines
 ##     Backspace at col 0  — join with previous line
 ##     Ctrl+Shift+K        — delete current line
+##     Ctrl+/              — toggle mute on current line
 ##   Music:
 ##     Escape              — close drawer
+##
+## Line format:
+##   Each line is an independent pattern. Non-muted lines are stacked on eval.
+##   Lines support the Strudel label syntax:
+##     drums: c4(3,8)                — named "drums"
+##     bass: c2 ~ c2 ~ e2 ~ s=bass  — named "bass", voice override
+##     c4 e4 g4 c5                   — auto-named "d1", "d2", etc.
+##     # this is a comment           — skipped on eval
+##   Muted lines (Ctrl+/) are dimmed and excluded from playback.
 
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0

@@ -1374,12 +1374,22 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 
   --- Music Drawer (Ctrl+M) ---
   musicdrawer              — toggle drawer (alias: md)
-  Type mini-notation, press Enter to play.
-  Ctrl+A/E/K/U/W/Y: emacs editing
-  Ctrl+C/X/V: clipboard
+
+  Multi-line live-coding editor. Each line = independent pattern.
+  All non-muted lines play stacked (simultaneous).
+
+  Line format:
+    drums: c4(3,8)              — named line (Strudel label syntax)
+    bass: c2 ~ e2 ~ s=bass     — named + voice override
+    c4 e4 g4 c5                 — auto-named d1, d2, ...
+    # comment                   — skipped
+
+  Enter: new line    Ctrl+Enter: evaluate all lines
+  Up/Down: move between lines   Ctrl+/: toggle mute
+  Ctrl+Shift+K: delete line     Backspace@col0: join lines
+  Ctrl+A/E/K/U/W/Y: emacs      Ctrl+C/X/V: clipboard
   Shift+arrows: selection
-  Pianoroll shows scrolling note bars.
-  Active notes glow in the editor text."""
+  Pianoroll + source highlighting update live."""
 		"play":
 			MusicManager.play()
 			return "OK: music playing"
