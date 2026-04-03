@@ -53,8 +53,9 @@ var _panel_x: float = 0.0      # Current X position of panel left edge
 var _target_x: float = 0.0     # Target X for slide animation
 var _panel: Control = null
 
-# Multi-line editor state
-var _lines: Array[String] = ["c4 e4 g4 c5"]  # Each line is an independent pattern
+# Multi-line editor state — each line is a named, independently mutable pattern
+# Line format: "name: pattern_text" or just "pattern_text" (auto-named d1, d2, ...)
+var _lines: Array[Dictionary] = []  # [{text, name, muted}]
 var _current_line: int = 0     # Which line the cursor is on
 var _editor_cursor: int = 0    # Cursor position within the current line
 var _editor_focused: bool = true
@@ -65,10 +66,31 @@ var _editor_scroll: int = 0    # First visible line index (for scrolling)
 
 ## Current line text (convenience accessor)
 var _editor_text: String:
-	get: return _lines[_current_line] if _current_line < _lines.size() else ""
+	get:
+		if _current_line < _lines.size():
+			return _lines[_current_line].get("text", "")
+		return ""
 	set(value):
 		if _current_line < _lines.size():
-			_lines[_current_line] = value
+			_lines[_current_line]["text"] = value
+
+
+func _make_line(text: String = "", name: String = "", muted: bool = false) -> Dictionary:
+	return {"text": text, "name": name, "muted": muted}
+
+
+func _line_name(idx: int) -> String:
+	## Get display name for a line. User-set name or default "d1", "d2", etc.
+	if idx >= _lines.size():
+		return "d%d" % (idx + 1)
+	var n: String = _lines[idx].get("name", "")
+	return n if not n.is_empty() else "d%d" % (idx + 1)
+
+
+func _line_muted(idx: int) -> bool:
+	if idx >= _lines.size():
+		return false
+	return _lines[idx].get("muted", false)
 
 # Playback state
 var _is_playing: bool = false
@@ -85,6 +107,7 @@ var _debug_frame: int = 0               # Frame counter for throttled logging
 
 
 func _ready() -> void:
+	_lines = [_make_line("c4 e4 g4 c5")]
 	layer = 105  # Below console (110), above game
 	_panel = Control.new()
 	_panel.name = "MusicDrawerPanel"
@@ -167,7 +190,7 @@ func _input(event: InputEvent) -> void:
 					var tail: String = _editor_text.substr(_editor_cursor)
 					_editor_text = _editor_text.substr(0, _editor_cursor)
 					_current_line += 1
-					_lines.insert(_current_line, tail)
+					_lines.insert(_current_line, _make_line(tail))
 					_editor_cursor = 0
 					_select_start = -1
 					_ensure_cursor_visible()
@@ -185,13 +208,13 @@ func _input(event: InputEvent) -> void:
 					_editor_cursor -= 1
 				elif _current_line > 0:
 					# At column 0: join with previous line
-					var prev_len: int = _lines[_current_line - 1].length()
-					_lines[_current_line - 1] += _lines[_current_line]
+					var prev_text: String = _lines[_current_line - 1].get("text", "")
+					var prev_len: int = prev_text.length()
+					_lines[_current_line - 1]["text"] = prev_text + _editor_text
 					_lines.remove_at(_current_line)
 					_current_line -= 1
 					_editor_cursor = prev_len
 					_ensure_cursor_visible()
-					_editor_cursor -= 1
 				get_viewport().set_input_as_handled()
 
 			KEY_DELETE:
@@ -260,11 +283,17 @@ func _input(event: InputEvent) -> void:
 							_move_cursor(_editor_text.length(), shift)
 							get_viewport().set_input_as_handled()
 							return
+						KEY_SLASH:
+							# Ctrl+/: toggle mute on current line
+							if _current_line < _lines.size():
+								_lines[_current_line]["muted"] = not _line_muted(_current_line)
+							get_viewport().set_input_as_handled()
+							return
 						KEY_K:
 							if shift:
 								# Ctrl+Shift+K: delete entire current line
 								if _lines.size() > 1:
-									_kill_buffer = _lines[_current_line]
+									_kill_buffer = _editor_text
 									_lines.remove_at(_current_line)
 									if _current_line >= _lines.size():
 										_current_line = _lines.size() - 1
@@ -406,39 +435,75 @@ func _word_boundary_right() -> int:
 
 # -- Playback ------------------------------------------------------------------
 
+func _parse_line_text(line: Dictionary) -> Dictionary:
+	## Parse a line dict into {pattern_text, name, sound, is_valid}.
+	## Supports "name: pattern s=voice" syntax.
+	var raw: String = line.get("text", "").strip_edges()
+	var result := {"pattern_text": "", "name": line.get("name", ""), "sound": "", "is_valid": false}
+
+	if raw.is_empty() or raw.begins_with("#"):
+		return result
+
+	var text: String = raw
+
+	# Check for "name: pattern" syntax (Strudel label style)
+	var colon_idx: int = text.find(": ")
+	if colon_idx > 0 and colon_idx < 20:
+		# Everything before ": " is the name, rest is pattern
+		var candidate: String = text.substr(0, colon_idx).strip_edges()
+		# Only treat as name if it's a simple identifier (no spaces, brackets, etc.)
+		if candidate.is_valid_identifier():
+			result["name"] = candidate
+			line["name"] = candidate  # Persist the name
+			text = text.substr(colon_idx + 2).strip_edges()
+
+	# Extract key=value parameters
+	for param in ["cps=", "sound=", "s="]:
+		var p_idx: int = text.find(param)
+		if p_idx >= 0:
+			var p_val: String = text.substr(p_idx + param.length()).strip_edges()
+			var space_idx: int = p_val.find(" ")
+			if space_idx >= 0:
+				p_val = p_val.substr(0, space_idx)
+			if param == "cps=":
+				if p_val.is_valid_float():
+					_cps = float(p_val)
+			else:
+				result["sound"] = p_val
+			text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
+
+	if not text.is_empty():
+		result["pattern_text"] = text
+		result["is_valid"] = true
+	return result
+
+
 func _play_current() -> void:
-	## Parse all non-empty lines into patterns and stack them.
+	## Parse all non-muted, non-empty lines into patterns and stack them.
 	var patterns: Array = []
 	var display_parts: Array[String] = []
 
 	for i in range(_lines.size()):
-		var text: String = _lines[i].strip_edges()
-		if text.is_empty() or text.begins_with("#"):
-			continue  # Skip empty lines and comments
-
-		# Extract key=value parameters from this line
-		var sound_name: String = ""
-		for param in ["cps=", "sound=", "s="]:
-			var p_idx: int = text.find(param)
-			if p_idx >= 0:
-				var p_val: String = text.substr(p_idx + param.length()).strip_edges()
-				var space_idx: int = p_val.find(" ")
-				if space_idx >= 0:
-					p_val = p_val.substr(0, space_idx)
-				if param == "cps=":
-					if p_val.is_valid_float():
-						_cps = float(p_val)
-				else:
-					sound_name = p_val
-				text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
-		if text.is_empty():
+		if _line_muted(i):
 			continue
+
+		var parsed: Dictionary = _parse_line_text(_lines[i])
+		if not parsed["is_valid"]:
+			continue
+
+		var text: String = parsed["pattern_text"]
+		var sound_name: String = parsed["sound"]
 
 		var pat: StrudelPattern = StrudelMini.mini(text)
 		if not sound_name.is_empty():
 			pat = pat.set_in(Strudel.pure({"s": sound_name}))
 		patterns.append(pat)
-		display_parts.append(text + (" s=%s" % sound_name if not sound_name.is_empty() else ""))
+
+		var name: String = parsed["name"]
+		var label: String = (name + ": " if not name.is_empty() else "") + text
+		if not sound_name.is_empty():
+			label += " s=%s" % sound_name
+		display_parts.append(label)
 
 	if patterns.is_empty():
 		return
@@ -497,13 +562,13 @@ func _update_pianoroll() -> void:
 			if " | " in src:
 				_lines.clear()
 				for part in src.split(" | "):
-					_lines.append(part.strip_edges())
+					_lines.append(_make_line(part.strip_edges()))
 			else:
 				# Single pattern — put in first line, keep others
 				if _lines.is_empty():
-					_lines.append(src)
+					_lines.append(_make_line(src))
 				else:
-					_lines[0] = src
+					_lines[0]["text"] = src
 			_current_line = 0
 			_editor_cursor = _editor_text.length()
 			_select_start = -1
@@ -620,27 +685,45 @@ func _draw_panel() -> void:
 
 
 func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> void:
-	## Draw one editor line with source highlighting.
-	var line_text: String = _lines[line_idx] if line_idx < _lines.size() else ""
+	## Draw one editor line with source highlighting, name, and mute state.
+	var line_text: String = _lines[line_idx].get("text", "") if line_idx < _lines.size() else ""
+	var is_muted: bool = _line_muted(line_idx)
+	var line_name: String = _line_name(line_idx)
 	var font_size: int = 12
 
-	# Background — slightly brighter for current line
-	var bg_color: Color = Color(0.07, 0.07, 0.11) if is_current else Color(0.04, 0.04, 0.07)
+	# Background — brighter for current, dimmed for muted
+	var bg_color: Color
+	if is_muted:
+		bg_color = Color(0.06, 0.03, 0.03)
+	elif is_current:
+		bg_color = Color(0.07, 0.07, 0.11)
+	else:
+		bg_color = Color(0.04, 0.04, 0.07)
 	_panel.draw_rect(Rect2(x, y, w, h), bg_color)
 
-	# Left border accent for current line
+	# Left border accent — blue for current, red for muted
 	if is_current:
 		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.4, 0.7, 1.0, 0.6))
+	elif is_muted:
+		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.6, 0.2, 0.2, 0.4))
 
-	# Line number
-	var num_w: float = 16.0
-	_panel.draw_string(font, Vector2(x + 2, y + h * 0.72), str(line_idx + 1),
-		HORIZONTAL_ALIGNMENT_LEFT, num_w, 9,
-		Color(0.5, 0.5, 0.6) if is_current else Color(0.3, 0.3, 0.4))
+	# Line label: name or number + mute indicator
+	var label: String = line_name
+	var label_w: float = 28.0
+	var label_color: Color
+	if is_muted:
+		label_color = Color(0.5, 0.2, 0.2)
+		label = "x" + label  # 'x' prefix = muted
+	elif is_current:
+		label_color = Color(0.5, 0.6, 0.8)
+	else:
+		label_color = Color(0.3, 0.3, 0.4)
+	_panel.draw_string(font, Vector2(x + 3, y + h * 0.72), label,
+		HORIZONTAL_ALIGNMENT_LEFT, label_w, 8, label_color)
 
-	var text_x: float = x + num_w + 2
+	var text_x: float = x + label_w + 2
 	var text_y: float = y + h * 0.72
-	var text_w: float = w - num_w - 4
+	var text_w: float = w - label_w - 4
 
 	# Draw source highlights behind text (active notes glow)
 	# Source locations are offsets within this line's text
@@ -681,7 +764,13 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 			Color(0.3, 0.5, 0.8, 0.4))
 
 	# Draw the text
-	var text_color: Color = Color(0.9, 0.9, 0.95) if not line_text.begins_with("#") else Color(0.4, 0.5, 0.4)
+	var text_color: Color
+	if is_muted:
+		text_color = Color(0.4, 0.3, 0.3)
+	elif line_text.begins_with("#"):
+		text_color = Color(0.4, 0.5, 0.4)
+	else:
+		text_color = Color(0.9, 0.9, 0.95)
 	_panel.draw_string(font, Vector2(text_x, text_y), line_text,
 		HORIZONTAL_ALIGNMENT_LEFT, text_w, font_size, text_color)
 
