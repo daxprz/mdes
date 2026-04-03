@@ -66,6 +66,7 @@ var _last_query_end: float = 0.0  # Right edge of last query (only query new hap
 
 # Highlight state — which source locations are active right now
 var _active_locations: Dictionary = {}  # "start:end" -> StrudelHap
+var _debug_frame: int = 0               # Frame counter for throttled logging
 
 
 func _ready() -> void:
@@ -85,8 +86,15 @@ func _ready() -> void:
 func toggle() -> void:
 	_active = not _active
 	_update_target_x()
-	if _active and not _is_playing:
-		_play_current()
+	# Sync drawer state with MusicManager — if strudel is already playing
+	# (e.g. from RCON or title pattern), just observe, don't restart.
+	if _active and MusicManager._strudel_playing:
+		_is_playing = true
+		# Reset rolling buffer so pianoroll fills from current position
+		_visible_haps.clear()
+		_last_query_end = 0.0
+		DebugOverlay.log("strudel/pattern", null, "DRAWER: opened, syncing to cyclist at cycle %.2f" % (
+			MusicManager._cyclist.now() if MusicManager._cyclist else 0.0))
 
 
 func is_open() -> bool:
@@ -109,6 +117,7 @@ func _process(delta: float) -> void:
 
 	if _active:
 		_cursor_blink += delta
+		_debug_frame += 1
 		# Update pianoroll from cyclist
 		_update_pianoroll()
 		_panel.queue_redraw()
@@ -374,12 +383,23 @@ func _update_leaf_locations() -> void:
 
 # -- Pianoroll Update ----------------------------------------------------------
 
+var _last_known_pattern: StrudelPattern = null  ## Track pattern changes from outside
+
 func _update_pianoroll() -> void:
 	if not MusicManager._cyclist or not MusicManager._strudel_playing:
 		_visible_haps.clear()
 		_current_time = 0.0
 		_last_query_end = 0.0
+		_last_known_pattern = null
 		return
+
+	# Detect external pattern change (e.g. RCON strudel command)
+	if MusicManager._strudel_pattern != _last_known_pattern:
+		_last_known_pattern = MusicManager._strudel_pattern
+		_visible_haps.clear()
+		_last_query_end = 0.0
+		_active_locations.clear()
+		DebugOverlay.log("strudel/pattern", null, "DRAWER: pattern changed externally, resetting buffer")
 
 	_current_time = MusicManager._cyclist.now()
 	var lookbehind: float = PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
@@ -398,11 +418,18 @@ func _update_pianoroll() -> void:
 		var query_start: float = maxf(_last_query_end, visible_start)
 		if visible_end > query_start:
 			var new_haps: Array = MusicManager._strudel_pattern.query_arc(query_start, visible_end)
-			# Only add haps with onsets (avoid duplicates from overlapping queries)
+			var added: int = 0
 			for hap in new_haps:
 				if hap.has_onset():
 					_visible_haps.append(hap)
+					added += 1
 			_last_query_end = visible_end
+			# Throttled debug logging (every 60 frames)
+			if _debug_frame % 60 == 0:
+				DebugOverlay.log("strudel/pattern", null,
+					"DRAWER: t=%.2f haps=%d added=%d active_locs=%d query=[%.2f,%.2f]" % [
+					_current_time, _visible_haps.size(), added, _active_locations.size(),
+					query_start, visible_end])
 
 	# Update source highlighting — only from currently active haps
 	_active_locations.clear()
@@ -608,6 +635,7 @@ static var _note_helper: StrudelSionTrigger = null
 
 func _hap_to_pitch(hap: StrudelHap) -> float:
 	## Convert a hap's value to a numeric pitch for Y-axis placement.
+	## Handles: plain int/float, plain string ("c4"), dict with "note"/"value"/"n" keys.
 	if _note_helper == null:
 		_note_helper = StrudelSionTrigger.new(null, null)
 	var val: Variant = hap.value
@@ -618,12 +646,14 @@ func _hap_to_pitch(hap: StrudelHap) -> float:
 		if midi >= 0:
 			return float(midi)
 	if val is Dictionary:
-		if val.has("note"):
-			var n_val: Variant = val["note"]
-			if n_val is int or n_val is float:
-				return float(n_val)
-			if n_val is String:
-				var midi: int = _note_helper._note_name_to_midi(n_val)
-				if midi >= 0:
-					return float(midi)
+		# Check all possible keys where a note value might be
+		for key in ["note", "value", "n"]:
+			if val.has(key):
+				var n_val: Variant = val[key]
+				if n_val is int or n_val is float:
+					return float(n_val)
+				if n_val is String:
+					var midi: int = _note_helper._note_name_to_midi(n_val)
+					if midi >= 0:
+						return float(midi)
 	return -1.0

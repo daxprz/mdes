@@ -155,6 +155,7 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 
 func _resolve_note(value: Variant) -> int:
 	## Convert a hap value to a MIDI note number.
+	## Handles: int, float, string ("c4"), dict with "note"/"value"/"n"/"freq" keys.
 	if value is int:
 		return value
 	if value is float:
@@ -162,15 +163,16 @@ func _resolve_note(value: Variant) -> int:
 	if value is String:
 		return _note_name_to_midi(value)
 	if value is Dictionary:
-		# Check for 'note', 'n', 'freq' keys (Strudel control format)
-		if value.has("note"):
-			var n: Variant = value["note"]
-			if n is String:
-				return _note_name_to_midi(n)
-			if n is int or n is float:
-				return int(n)
-		if value.has("n"):
-			return int(value["n"])
+		# Check all possible keys where a note value might be
+		for key in ["note", "value", "n"]:
+			if value.has(key):
+				var n: Variant = value[key]
+				if n is String:
+					var midi: int = _note_name_to_midi(n)
+					if midi >= 0:
+						return midi
+				if n is int or n is float:
+					return int(n)
 		if value.has("freq"):
 			return _freq_to_midi(float(value["freq"]))
 	return -1  # Can't resolve — skip

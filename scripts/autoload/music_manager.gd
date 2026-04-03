@@ -484,6 +484,7 @@ func play_test_tone() -> void:
 		return
 	# Stop strudel first — play(mml) conflicts with stream mode
 	strudel_stop()
+	_sion_streaming = false
 	driver.call("play", "t120 l8 [ccggaag4 ffeeddc4]")
 	print("MUSIC: test tone playing")
 
@@ -495,6 +496,7 @@ func play_mml(mml: String) -> void:
 		print("MUSIC: Cannot play MML — driver not initialized")
 		return
 	strudel_stop()
+	_sion_streaming = false
 	if is_playing:
 		stop()
 	stop_title_music()
@@ -576,28 +578,35 @@ func _init_strudel() -> void:
 	DebugOverlay.log("music/status", null, "MUSIC: Strudel engine initialized")
 
 
+var _sion_streaming: bool = false  ## Track whether SiON is in streaming mode
+
 func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
-	## Play a Strudel pattern. Stops any old Strudel or MML playback.
+	## Play a Strudel pattern. Hot-swaps if already playing.
 	if not _cyclist or not driver:
 		print("MUSIC: Cannot play pattern — Strudel engine not initialized")
 		return
 
-	# Stop old playback (cyclist only — keep SiON streaming)
-	if _strudel_playing:
-		_cyclist.stop()
-		_strudel_playing = false
+	# Stop non-strudel playback if active
 	stop_title_music()
 	if is_playing:
 		stop()
 
-	# Force SiON into streaming mode. stop() first to clear any MML playback,
-	# then stream(false) to enable note_on.
-	driver.call("stop")
-	driver.call("stream", false)
+	# Ensure SiON is streaming. Reset to clear lingering notes from old pattern.
+	if not _sion_streaming:
+		driver.call("stop")
+		driver.call("stream", false)
+		_sion_streaming = true
+	else:
+		# Already streaming — reset to silence lingering notes, then restart stream
+		driver.call("reset")
+		driver.call("stream", false)
 
 	if cps > 0.0:
 		_cyclist.set_cps(cps)
 
+	# Hot-swap: just update the pattern and restart the cyclist clock
+	if _strudel_playing:
+		_cyclist.stop()
 	_strudel_time = 0.0
 	_cyclist.set_pattern(pattern)
 	_cyclist.start()
@@ -609,12 +618,14 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0) -> void:
 
 
 func strudel_stop() -> void:
-	## Stop the Strudel pattern engine. Does NOT stop the SiON driver
-	## (stream must keep running for note_on to work).
+	## Stop the Strudel pattern engine and the SiON stream.
 	if _cyclist and _strudel_playing:
 		_cyclist.stop()
 	_strudel_playing = false
 	_strudel_pattern = null
+	if _sion_streaming and driver:
+		driver.call("stop")
+		_sion_streaming = false
 
 
 func _strudel_play_title() -> void:
