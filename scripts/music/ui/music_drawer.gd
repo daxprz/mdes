@@ -38,6 +38,7 @@ extends CanvasLayer
 ##     Backspace at col 0  — join with previous line
 ##     Ctrl+Shift+K        — delete current line
 ##     Ctrl+/              — toggle mute on current line
+##     Ctrl+.              — cycle visualizer (none → pianoroll → bar → none)
 ##   Music:
 ##     Escape              — close drawer
 ##
@@ -85,8 +86,30 @@ var _editor_text: String:
 			_lines[_current_line]["text"] = value
 
 
-func _make_line(text: String = "", name: String = "", muted: bool = false) -> Dictionary:
-	return {"text": text, "name": name, "muted": muted}
+## Visualizer types for per-line display
+const VIZ_NONE := "none"          ## No visualizer (default)
+const VIZ_PIANOROLL := "pianoroll" ## Horizontal scrolling pianoroll strip
+const VIZ_BAR := "bar"            ## Simple bar graph of active haps
+const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_BAR]
+const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
+
+func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
+	return {"text": text, "name": name, "muted": muted, "viz": viz}
+
+
+func _line_viz(idx: int) -> String:
+	if idx >= _lines.size():
+		return VIZ_NONE
+	return _lines[idx].get("viz", VIZ_NONE)
+
+
+func _cycle_line_viz(idx: int) -> void:
+	## Cycle the visualizer type for a line.
+	if idx >= _lines.size():
+		return
+	var current: String = _line_viz(idx)
+	var next_idx: int = (VIZ_TYPES.find(current) + 1) % VIZ_TYPES.size()
+	_lines[idx]["viz"] = VIZ_TYPES[next_idx]
 
 
 func _line_name(idx: int) -> String:
@@ -106,13 +129,18 @@ func _line_muted(idx: int) -> bool:
 var _is_playing: bool = false
 var _cps: float = 0.5
 
-# Pianoroll state — rolling buffer (haps accumulate, old ones pruned)
-var _visible_haps: Array = []   # Haps currently visible in the pianoroll
-var _current_time: float = 0.0  # Current cycle position for rendering
-var _last_query_end: float = 0.0  # Right edge of last query (only query new haps beyond this)
+# Per-line pattern state (set on eval, used for per-line pianoroll)
+var _line_patterns: Array = []   # Array[StrudelPattern or null] — one per line
+var _line_haps: Array = []       # Array[Array[StrudelHap]] — per-line rolling hap buffers
+var _line_query_ends: Array = [] # Array[float] — per-line last query end
 
-# Highlight state — which source locations are active right now
-var _active_locations: Dictionary = {}  # "start:end" -> StrudelHap
+# Global pianoroll state
+var _visible_haps: Array = []   # Combined haps (all lines) for the shared pianoroll
+var _current_time: float = 0.0  # Current cycle position for rendering
+var _last_query_end: float = 0.0
+
+# Highlight state — per-line source locations
+var _active_locations: Dictionary = {}  # "line:start:end" -> StrudelHap
 var _debug_frame: int = 0               # Frame counter for throttled logging
 
 
@@ -297,6 +325,11 @@ func _input(event: InputEvent) -> void:
 							# Ctrl+/: toggle mute on current line
 							if _current_line < _lines.size():
 								_lines[_current_line]["muted"] = not _line_muted(_current_line)
+							get_viewport().set_input_as_handled()
+							return
+						KEY_PERIOD:
+							# Ctrl+.: cycle visualizer for current line (none → pianoroll → bar → none)
+							_cycle_line_viz(_current_line)
 							get_viewport().set_input_as_handled()
 							return
 						KEY_K:
@@ -490,10 +523,20 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 
 func _play_current() -> void:
 	## Parse all non-muted, non-empty lines into patterns and stack them.
-	var patterns: Array = []
+	## Also stores per-line patterns for individual pianoroll rendering.
+	var active_patterns: Array = []
 	var display_parts: Array[String] = []
 
+	# Resize per-line arrays to match line count
+	_line_patterns.resize(_lines.size())
+	_line_haps.resize(_lines.size())
+	_line_query_ends.resize(_lines.size())
+
 	for i in range(_lines.size()):
+		_line_patterns[i] = null
+		_line_haps[i] = []
+		_line_query_ends[i] = 0.0
+
 		if _line_muted(i):
 			continue
 
@@ -507,22 +550,24 @@ func _play_current() -> void:
 		var pat: StrudelPattern = StrudelMini.mini(text)
 		if not sound_name.is_empty():
 			pat = pat.set_in(Strudel.pure({"s": sound_name}))
-		patterns.append(pat)
 
-		var name: String = parsed["name"]
-		var label: String = (name + ": " if not name.is_empty() else "") + text
+		_line_patterns[i] = pat
+		active_patterns.append(pat)
+
+		var pname: String = parsed["name"]
+		var label: String = (pname + ": " if not pname.is_empty() else "") + text
 		if not sound_name.is_empty():
 			label += " s=%s" % sound_name
 		display_parts.append(label)
 
-	if patterns.is_empty():
+	if active_patterns.is_empty():
 		return
 
 	var combined: StrudelPattern
-	if patterns.size() == 1:
-		combined = patterns[0]
+	if active_patterns.size() == 1:
+		combined = active_patterns[0]
 	else:
-		combined = Strudel.stack(patterns)
+		combined = Strudel.stack(active_patterns)
 
 	var display: String = " | ".join(PackedStringArray(display_parts))
 	MusicManager.strudel_play(combined, _cps, display)
@@ -591,42 +636,49 @@ func _update_pianoroll() -> void:
 	var visible_start: float = _current_time - lookbehind
 	var visible_end: float = _current_time + lookahead
 
-	# Rolling buffer: prune haps that scrolled off the left edge
-	_visible_haps = _visible_haps.filter(func(hap: StrudelHap) -> bool:
-		if hap.whole == null:
-			return false
-		return hap.get_end_clipped().to_float() >= visible_start)
+	# Per-line rolling buffer: query each line's pattern independently
+	_visible_haps.clear()
+	_active_locations.clear()
 
-	# Query only NEW haps beyond where we last queried
-	if MusicManager._strudel_pattern:
-		var query_start: float = maxf(_last_query_end, visible_start)
+	# Ensure arrays are sized
+	while _line_haps.size() < _lines.size():
+		_line_haps.append([])
+		_line_query_ends.append(0.0)
+		_line_patterns.append(null)
+
+	for i in range(_lines.size()):
+		var pat: Variant = _line_patterns[i] if i < _line_patterns.size() else null
+		if pat == null or _line_muted(i):
+			if i < _line_haps.size():
+				_line_haps[i] = []
+			continue
+
+		# Prune old haps for this line
+		_line_haps[i] = _line_haps[i].filter(func(hap: StrudelHap) -> bool:
+			if hap.whole == null: return false
+			return hap.get_end_clipped().to_float() >= visible_start)
+
+		# Query new haps for this line
+		var line_qe: float = _line_query_ends[i] if i < _line_query_ends.size() else 0.0
+		var query_start: float = maxf(line_qe, visible_start)
 		if visible_end > query_start:
-			var new_haps: Array = MusicManager._strudel_pattern.query_arc(query_start, visible_end)
-			var added: int = 0
+			var new_haps: Array = pat.query_arc(query_start, visible_end)
 			for hap in new_haps:
 				if hap.has_onset():
-					_visible_haps.append(hap)
-					added += 1
-			_last_query_end = visible_end
-			# Throttled debug logging (every 60 frames)
-			if _debug_frame % 60 == 0:
-				DebugOverlay.log("strudel/pattern", null,
-					"DRAWER: t=%.2f haps=%d added=%d active_locs=%d query=[%.2f,%.2f]" % [
-					_current_time, _visible_haps.size(), added, _active_locations.size(),
-					query_start, visible_end])
+					_line_haps[i].append(hap)
+			_line_query_ends[i] = visible_end
 
-	# Update source highlighting — only from currently active haps
-	_active_locations.clear()
-	for hap in _visible_haps:
-		if hap.whole == null:
-			continue
-		if not hap.is_active(_current_time):
-			continue
-		var locations: Array = hap.context.get("locations", [])
-		for loc in locations:
-			var key: String = "%d:%d" % [loc.get("start", 0), loc.get("end", 0)]
-			if not _active_locations.has(key) or hap.w().begin.to_float() > _active_locations[key].w().begin.to_float():
-				_active_locations[key] = hap
+		# Accumulate into global list + per-line highlighting
+		for hap in _line_haps[i]:
+			_visible_haps.append(hap)
+			if hap.whole == null or not hap.is_active(_current_time):
+				continue
+			var locations: Array = hap.context.get("locations", [])
+			for loc in locations:
+				# Key includes line index so highlights are per-line
+				var key: String = "%d:%d:%d" % [i, loc.get("start", 0), loc.get("end", 0)]
+				if not _active_locations.has(key) or hap.w().begin.to_float() > _active_locations[key].w().begin.to_float():
+					_active_locations[key] = hap
 
 
 # -- Drawing -------------------------------------------------------------------
@@ -671,27 +723,32 @@ func _draw_panel() -> void:
 	_panel.draw_string(font, Vector2(px + pw - 80, btn_y + 12), "Strudel",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.7, 1.0))
 
-	# -- Editor Lines (multi-line) --
+	# -- Editor Lines (multi-line with per-line visualizers) --
 	var ey: float = TOOLBAR_HEIGHT + 4.0
-	var visible_lines: int = mini(_lines.size(), MAX_VISIBLE_LINES)
-	var editor_total_h: float = visible_lines * LINE_HEIGHT
+	var draw_y: float = ey
 
 	for i in range(_editor_scroll, mini(_editor_scroll + MAX_VISIBLE_LINES, _lines.size())):
-		var line_y: float = ey + (i - _editor_scroll) * LINE_HEIGHT
 		var is_current: bool = (i == _current_line)
-		_draw_editor_line_at(px + 8, line_y, pw - 16, LINE_HEIGHT, font, i, is_current)
+		var viz: String = _line_viz(i)
+
+		# Draw the code line
+		_draw_editor_line_at(px + 8, draw_y, pw - 16, LINE_HEIGHT, font, i, is_current)
+		draw_y += LINE_HEIGHT
+
+		# Draw the per-line visualizer strip (if enabled)
+		if viz != VIZ_NONE and i < _line_haps.size():
+			_draw_line_viz(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT, font, i, viz)
+			draw_y += VIZ_STRIP_HEIGHT
+
+		# Stop if we run out of panel space
+		if draw_y > ph - 20:
+			break
 
 	# Line count indicator
 	if _lines.size() > 1:
-		_panel.draw_string(font, Vector2(px + pw - 40, ey + editor_total_h + 10),
+		_panel.draw_string(font, Vector2(px + pw - 40, draw_y + 4),
 			"%d/%d" % [_current_line + 1, _lines.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.5))
-
-	# -- Pianoroll --
-	var pr_y: float = ey + editor_total_h + 8.0
-	var pr_h: float = ph - pr_y - 8.0
-	if pr_h > 20:
-		_draw_pianoroll(px + 4, pr_y, pw - 8, pr_h, font)
 
 
 func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> void:
@@ -717,17 +774,25 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	elif is_muted:
 		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.6, 0.2, 0.2, 0.4))
 
-	# Line label: name or number + mute indicator
+	# Line label: name + mute + viz indicator
+	var viz: String = _line_viz(line_idx)
 	var label: String = line_name
-	var label_w: float = 28.0
+	var label_w: float = 32.0
 	var label_color: Color
 	if is_muted:
 		label_color = Color(0.5, 0.2, 0.2)
-		label = "x" + label  # 'x' prefix = muted
+		label = "x" + label
 	elif is_current:
 		label_color = Color(0.5, 0.6, 0.8)
 	else:
 		label_color = Color(0.3, 0.3, 0.4)
+	# Viz indicator: tiny character showing visualizer type
+	var viz_char: String = ""
+	match viz:
+		VIZ_PIANOROLL: viz_char = "P"
+		VIZ_BAR: viz_char = "B"
+	if not viz_char.is_empty():
+		label += viz_char
 	_panel.draw_string(font, Vector2(x + 3, y + h * 0.72), label,
 		HORIZONTAL_ALIGNMENT_LEFT, label_w, 8, label_color)
 
@@ -736,13 +801,16 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	var text_w: float = w - label_w - 4
 
 	# Draw source highlights behind text (active notes glow)
-	# Source locations are offsets within this line's text
+	# Keys are "line_idx:start:end" — only draw highlights for this line
 	for key in _active_locations:
 		var loc_parts: PackedStringArray = key.split(":")
-		if loc_parts.size() != 2:
+		if loc_parts.size() != 3:
 			continue
-		var loc_start: int = int(loc_parts[0])
-		var loc_end: int = int(loc_parts[1])
+		var loc_line: int = int(loc_parts[0])
+		if loc_line != line_idx:
+			continue
+		var loc_start: int = int(loc_parts[1])
+		var loc_end: int = int(loc_parts[2])
 		# Only highlight if this location falls within this line's text
 		if loc_start >= line_text.length() or loc_end <= 0:
 			continue
@@ -789,6 +857,88 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 		var cursor_text: String = line_text.substr(0, _editor_cursor)
 		var cursor_x: float = text_x + font.get_string_size(cursor_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		_panel.draw_line(Vector2(cursor_x, y + 3), Vector2(cursor_x, y + h - 3), Color(1.0, 0.8, 0.2), 1.5)
+
+
+func _draw_line_viz(x: float, y: float, w: float, h: float, font: Font, line_idx: int, viz_type: String) -> void:
+	## Draw the per-line visualizer strip below a code line.
+	match viz_type:
+		VIZ_PIANOROLL:
+			_draw_line_pianoroll(x, y, w, h, font, line_idx)
+		VIZ_BAR:
+			_draw_line_bar(x, y, w, h, font, line_idx)
+
+
+func _draw_line_pianoroll(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
+	## Draw a mini pianoroll strip for one line's haps.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	# Value range for this line
+	var values: Array = []
+	for hap in haps:
+		var v: float = _hap_to_pitch(hap)
+		if v != -1 and v not in values:
+			values.append(v)
+	if values.is_empty():
+		return
+	values.sort()
+
+	var val_count: int = maxi(values.size(), 1)
+	var bar_h: float = h / val_count
+	var from_time: float = _current_time - PIANOROLL_CYCLES * PIANOROLL_PLAYHEAD
+	var to_time: float = _current_time + PIANOROLL_CYCLES * (1.0 - PIANOROLL_PLAYHEAD)
+	var time_range: float = to_time - from_time
+
+	for hap in haps:
+		if hap.whole == null:
+			continue
+		var pitch: float = _hap_to_pitch(hap)
+		if pitch == -1:
+			continue
+		var is_active: bool = hap.is_active(_current_time)
+		var hap_begin: float = hap.w().begin.to_float()
+		var hap_end: float = hap.get_end_clipped().to_float()
+		var px_x: float = x + ((hap_begin - from_time) / time_range) * w
+		var px_w: float = ((hap_end - hap_begin) / time_range) * w
+		var val_idx: int = values.find(pitch)
+		var px_y: float = y + h - (val_idx + 1) * bar_h
+		if px_x + px_w < x or px_x > x + w:
+			continue
+		px_x = maxf(px_x, x)
+		px_w = minf(px_w, x + w - px_x)
+		var color: Color = Color(1.0, 0.8, 0.2, 0.9) if is_active else Color(0.3, 0.5, 0.8, 0.5)
+		_panel.draw_rect(Rect2(px_x + 1, px_y + 1, maxf(px_w - 2, 1), bar_h - 2), color)
+
+	# Playhead
+	var ph_x: float = x + PIANOROLL_PLAYHEAD * w
+	_panel.draw_line(Vector2(ph_x, y), Vector2(ph_x, y + h), Color(1.0, 1.0, 1.0, 0.4), 1.0)
+
+
+func _draw_line_bar(x: float, y: float, w: float, h: float, font: Font, line_idx: int) -> void:
+	## Draw a simple bar indicator for one line — shows active haps as colored bars.
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.03, 0.03, 0.05))
+
+	var haps: Array = _line_haps[line_idx] if line_idx < _line_haps.size() else []
+	if haps.is_empty():
+		return
+
+	# Count active vs total haps
+	var active_count: int = 0
+	for hap in haps:
+		if hap.whole != null and hap.is_active(_current_time):
+			active_count += 1
+
+	# Draw activity bar
+	if active_count > 0:
+		var bar_w: float = minf(float(active_count) * 20.0, w - 4)
+		_panel.draw_rect(Rect2(x + 2, y + 4, bar_w, h - 8), Color(0.3, 0.7, 1.0, 0.6))
+
+	# Label
+	_panel.draw_string(font, Vector2(x + 4, y + h - 4), "%d active" % active_count,
+		HORIZONTAL_ALIGNMENT_LEFT, w - 8, 8, Color(0.5, 0.5, 0.6))
 
 
 func _draw_pianoroll(x: float, y: float, w: float, h: float, font: Font) -> void:
