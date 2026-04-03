@@ -31,14 +31,20 @@ extends CanvasLayer
 ##     Ctrl+U              — kill from cursor to beginning of line
 ##     Ctrl+W              — kill word backward
 ##     Ctrl+Y              — yank (paste from kill buffer)
+##   Multi-line:
+##     Enter               — new line below current
+##     Ctrl+Enter          — evaluate all lines (play/hot-swap)
+##     Up / Down           — move cursor between lines
+##     Backspace at col 0  — join with previous line
+##     Ctrl+Shift+K        — delete current line
 ##   Music:
-##     Enter               — evaluate pattern (play/hot-swap)
 ##     Escape              — close drawer
 
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0
 const TOOLBAR_HEIGHT := 36.0
-const EDITOR_HEIGHT := 32.0
+const LINE_HEIGHT := 24.0     # Height of each editor line
+const MAX_VISIBLE_LINES := 8  # Max lines before scrolling
 const PIANOROLL_CYCLES := 4.0
 const PIANOROLL_PLAYHEAD := 0.5  # Fraction of width where "now" is
 
@@ -47,13 +53,22 @@ var _panel_x: float = 0.0      # Current X position of panel left edge
 var _target_x: float = 0.0     # Target X for slide animation
 var _panel: Control = null
 
-# Editor state
-var _editor_text: String = "c4 e4 g4 c5"
-var _editor_cursor: int = 0
+# Multi-line editor state
+var _lines: Array[String] = ["c4 e4 g4 c5"]  # Each line is an independent pattern
+var _current_line: int = 0     # Which line the cursor is on
+var _editor_cursor: int = 0    # Cursor position within the current line
 var _editor_focused: bool = true
 var _cursor_blink: float = 0.0
-var _select_start: int = -1    # Selection anchor (-1 = no selection)
+var _select_start: int = -1    # Selection anchor (-1 = no selection, within current line)
 var _kill_buffer: String = ""  # Ctrl+K / Ctrl+Y kill ring
+var _editor_scroll: int = 0    # First visible line index (for scrolling)
+
+## Current line text (convenience accessor)
+var _editor_text: String:
+	get: return _lines[_current_line] if _current_line < _lines.size() else ""
+	set(value):
+		if _current_line < _lines.size():
+			_lines[_current_line] = value
 
 # Playback state
 var _is_playing: bool = false
@@ -144,19 +159,38 @@ func _input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 
 			KEY_ENTER:
-				_play_current()
+				if ctrl:
+					# Ctrl+Enter: evaluate all lines
+					_play_current()
+				else:
+					# Enter: new line below current
+					var tail: String = _editor_text.substr(_editor_cursor)
+					_editor_text = _editor_text.substr(0, _editor_cursor)
+					_current_line += 1
+					_lines.insert(_current_line, tail)
+					_editor_cursor = 0
+					_select_start = -1
+					_ensure_cursor_visible()
 				get_viewport().set_input_as_handled()
 
 			KEY_BACKSPACE:
 				if _has_selection():
 					_delete_selection()
 				elif ctrl or shift:
-					# Ctrl+Backspace / Shift+Backspace: delete word backward
 					var p: int = _word_boundary_left()
 					_editor_text = _editor_text.substr(0, p) + _editor_text.substr(_editor_cursor)
 					_editor_cursor = p
 				elif _editor_cursor > 0:
 					_editor_text = _editor_text.substr(0, _editor_cursor - 1) + _editor_text.substr(_editor_cursor)
+					_editor_cursor -= 1
+				elif _current_line > 0:
+					# At column 0: join with previous line
+					var prev_len: int = _lines[_current_line - 1].length()
+					_lines[_current_line - 1] += _lines[_current_line]
+					_lines.remove_at(_current_line)
+					_current_line -= 1
+					_editor_cursor = prev_len
+					_ensure_cursor_visible()
 					_editor_cursor -= 1
 				get_viewport().set_input_as_handled()
 
@@ -193,6 +227,22 @@ func _input(event: InputEvent) -> void:
 				_move_cursor(_editor_text.length(), shift)
 				get_viewport().set_input_as_handled()
 
+			KEY_UP:
+				if _current_line > 0:
+					_current_line -= 1
+					_editor_cursor = mini(_editor_cursor, _editor_text.length())
+					_select_start = -1
+					_ensure_cursor_visible()
+				get_viewport().set_input_as_handled()
+
+			KEY_DOWN:
+				if _current_line < _lines.size() - 1:
+					_current_line += 1
+					_editor_cursor = mini(_editor_cursor, _editor_text.length())
+					_select_start = -1
+					_ensure_cursor_visible()
+				get_viewport().set_input_as_handled()
+
 			_:
 				if ctrl:
 					match event.keycode:
@@ -211,9 +261,23 @@ func _input(event: InputEvent) -> void:
 							get_viewport().set_input_as_handled()
 							return
 						KEY_K:
-							# Ctrl+K: kill from cursor to end of line
-							_kill_buffer = _editor_text.substr(_editor_cursor)
-							_editor_text = _editor_text.substr(0, _editor_cursor)
+							if shift:
+								# Ctrl+Shift+K: delete entire current line
+								if _lines.size() > 1:
+									_kill_buffer = _lines[_current_line]
+									_lines.remove_at(_current_line)
+									if _current_line >= _lines.size():
+										_current_line = _lines.size() - 1
+									_editor_cursor = mini(_editor_cursor, _editor_text.length())
+									_ensure_cursor_visible()
+								else:
+									_kill_buffer = _editor_text
+									_editor_text = ""
+									_editor_cursor = 0
+							else:
+								# Ctrl+K: kill from cursor to end of line
+								_kill_buffer = _editor_text.substr(_editor_cursor)
+								_editor_text = _editor_text.substr(0, _editor_cursor)
 							get_viewport().set_input_as_handled()
 							return
 						KEY_U:
@@ -315,6 +379,13 @@ func _move_cursor(new_pos: int, extend_selection: bool) -> void:
 	_editor_cursor = new_pos
 	_cursor_blink = 0.0
 
+func _ensure_cursor_visible() -> void:
+	## Scroll the editor so the current line is visible.
+	if _current_line < _editor_scroll:
+		_editor_scroll = _current_line
+	elif _current_line >= _editor_scroll + MAX_VISIBLE_LINES:
+		_editor_scroll = _current_line - MAX_VISIBLE_LINES + 1
+
 func _word_boundary_left() -> int:
 	var p: int = _editor_cursor - 1
 	while p > 0 and _editor_text[p - 1] == " ":
@@ -336,31 +407,50 @@ func _word_boundary_right() -> int:
 # -- Playback ------------------------------------------------------------------
 
 func _play_current() -> void:
-	var text: String = _editor_text.strip_edges()
-	if text.is_empty():
+	## Parse all non-empty lines into patterns and stack them.
+	var patterns: Array = []
+	var display_parts: Array[String] = []
+
+	for i in range(_lines.size()):
+		var text: String = _lines[i].strip_edges()
+		if text.is_empty() or text.begins_with("#"):
+			continue  # Skip empty lines and comments
+
+		# Extract key=value parameters from this line
+		var sound_name: String = ""
+		for param in ["cps=", "sound=", "s="]:
+			var p_idx: int = text.find(param)
+			if p_idx >= 0:
+				var p_val: String = text.substr(p_idx + param.length()).strip_edges()
+				var space_idx: int = p_val.find(" ")
+				if space_idx >= 0:
+					p_val = p_val.substr(0, space_idx)
+				if param == "cps=":
+					if p_val.is_valid_float():
+						_cps = float(p_val)
+				else:
+					sound_name = p_val
+				text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
+		if text.is_empty():
+			continue
+
+		var pat: StrudelPattern = StrudelMini.mini(text)
+		if not sound_name.is_empty():
+			pat = pat.set_in(Strudel.pure({"s": sound_name}))
+		patterns.append(pat)
+		display_parts.append(text + (" s=%s" % sound_name if not sound_name.is_empty() else ""))
+
+	if patterns.is_empty():
 		return
-	# Extract key=value parameters (not part of mini-notation)
-	var sound_name: String = ""
-	for param in ["cps=", "sound=", "s="]:
-		var p_idx: int = text.find(param)
-		if p_idx >= 0:
-			var p_val: String = text.substr(p_idx + param.length()).strip_edges()
-			var space_idx: int = p_val.find(" ")
-			if space_idx >= 0:
-				p_val = p_val.substr(0, space_idx)
-			if param == "cps=":
-				if p_val.is_valid_float():
-					_cps = float(p_val)
-			else:
-				sound_name = p_val
-			text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
-	if text.is_empty():
-		return
-	var pat: StrudelPattern = StrudelMini.mini(text)
-	if not sound_name.is_empty():
-		pat = pat.set_in(Strudel.pure({"s": sound_name}))
-	var display: String = text + (" s=%s" % sound_name if not sound_name.is_empty() else "")
-	MusicManager.strudel_play(pat, _cps, display)
+
+	var combined: StrudelPattern
+	if patterns.size() == 1:
+		combined = patterns[0]
+	else:
+		combined = Strudel.stack(patterns)
+
+	var display: String = " | ".join(PackedStringArray(display_parts))
+	MusicManager.strudel_play(combined, _cps, display)
 	_is_playing = true
 	# Reset rolling buffer on pattern change
 	_visible_haps.clear()
@@ -402,7 +492,19 @@ func _update_pianoroll() -> void:
 		_active_locations.clear()
 		# Sync editor text from the source that created this pattern
 		if not MusicManager._strudel_source_text.is_empty():
-			_editor_text = MusicManager._strudel_source_text
+			var src: String = MusicManager._strudel_source_text
+			# If source contains " | ", it was multiple patterns stacked — split into lines
+			if " | " in src:
+				_lines.clear()
+				for part in src.split(" | "):
+					_lines.append(part.strip_edges())
+			else:
+				# Single pattern — put in first line, keep others
+				if _lines.is_empty():
+					_lines.append(src)
+				else:
+					_lines[0] = src
+			_current_line = 0
 			_editor_cursor = _editor_text.length()
 			_select_start = -1
 		_is_playing = MusicManager._strudel_playing
@@ -494,37 +596,67 @@ func _draw_panel() -> void:
 	_panel.draw_string(font, Vector2(px + pw - 80, btn_y + 12), "Strudel",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.7, 1.0))
 
-	# -- Editor Line --
+	# -- Editor Lines (multi-line) --
 	var ey: float = TOOLBAR_HEIGHT + 4.0
-	_draw_editor_line(px + 8, ey, pw - 16, EDITOR_HEIGHT, font)
+	var visible_lines: int = mini(_lines.size(), MAX_VISIBLE_LINES)
+	var editor_total_h: float = visible_lines * LINE_HEIGHT
+
+	for i in range(_editor_scroll, mini(_editor_scroll + MAX_VISIBLE_LINES, _lines.size())):
+		var line_y: float = ey + (i - _editor_scroll) * LINE_HEIGHT
+		var is_current: bool = (i == _current_line)
+		_draw_editor_line_at(px + 8, line_y, pw - 16, LINE_HEIGHT, font, i, is_current)
+
+	# Line count indicator
+	if _lines.size() > 1:
+		_panel.draw_string(font, Vector2(px + pw - 40, ey + editor_total_h + 10),
+			"%d/%d" % [_current_line + 1, _lines.size()],
+			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.5))
 
 	# -- Pianoroll --
-	var pr_y: float = ey + EDITOR_HEIGHT + 8.0
+	var pr_y: float = ey + editor_total_h + 8.0
 	var pr_h: float = ph - pr_y - 8.0
 	if pr_h > 20:
 		_draw_pianoroll(px + 4, pr_y, pw - 8, pr_h, font)
 
 
-func _draw_editor_line(x: float, y: float, w: float, h: float, font: Font) -> void:
-	## Draw the mini-notation text input with source highlighting.
-	# Background
-	_panel.draw_rect(Rect2(x, y, w, h), Color(0.05, 0.05, 0.08))
-	# Border
-	_panel.draw_rect(Rect2(x, y, w, h), Color(0.3, 0.3, 0.5), false, 1.0)
+func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> void:
+	## Draw one editor line with source highlighting.
+	var line_text: String = _lines[line_idx] if line_idx < _lines.size() else ""
+	var font_size: int = 12
 
-	var text_x: float = x + 4.0
-	var text_y: float = y + h * 0.7
-	var font_size: int = 14
+	# Background — slightly brighter for current line
+	var bg_color: Color = Color(0.07, 0.07, 0.11) if is_current else Color(0.04, 0.04, 0.07)
+	_panel.draw_rect(Rect2(x, y, w, h), bg_color)
+
+	# Left border accent for current line
+	if is_current:
+		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.4, 0.7, 1.0, 0.6))
+
+	# Line number
+	var num_w: float = 16.0
+	_panel.draw_string(font, Vector2(x + 2, y + h * 0.72), str(line_idx + 1),
+		HORIZONTAL_ALIGNMENT_LEFT, num_w, 9,
+		Color(0.5, 0.5, 0.6) if is_current else Color(0.3, 0.3, 0.4))
+
+	var text_x: float = x + num_w + 2
+	var text_y: float = y + h * 0.72
+	var text_w: float = w - num_w - 4
 
 	# Draw source highlights behind text (active notes glow)
+	# Source locations are offsets within this line's text
 	for key in _active_locations:
 		var loc_parts: PackedStringArray = key.split(":")
 		if loc_parts.size() != 2:
 			continue
 		var loc_start: int = int(loc_parts[0])
 		var loc_end: int = int(loc_parts[1])
-		var pre_text: String = _editor_text.substr(0, loc_start)
-		var highlight_text: String = _editor_text.substr(loc_start, loc_end - loc_start)
+		# Only highlight if this location falls within this line's text
+		if loc_start >= line_text.length() or loc_end <= 0:
+			continue
+		loc_start = clampi(loc_start, 0, line_text.length())
+		loc_end = clampi(loc_end, 0, line_text.length())
+		var pre_text: String = line_text.substr(0, loc_start)
+		var highlight_text: String = line_text.substr(loc_start, loc_end - loc_start)
 		var pre_w: float = font.get_string_size(pre_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		var hl_w: float = font.get_string_size(highlight_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		var hap: StrudelHap = _active_locations[key]
@@ -537,24 +669,25 @@ func _draw_editor_line(x: float, y: float, w: float, h: float, font: Font) -> vo
 		_panel.draw_rect(Rect2(text_x + pre_w, y + 2, hl_w, h - 4),
 			Color(0.3, 0.6, 1.0, alpha))
 
-	# Draw selection highlight (behind text, in front of source highlights)
-	if _has_selection():
+	# Draw selection highlight (only on current line)
+	if is_current and _has_selection():
 		var sel_from: int = mini(_select_start, _editor_cursor)
 		var sel_to: int = maxi(_select_start, _editor_cursor)
 		var sel_x_from: float = text_x + font.get_string_size(
-			_editor_text.substr(0, sel_from), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			line_text.substr(0, sel_from), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		var sel_x_to: float = text_x + font.get_string_size(
-			_editor_text.substr(0, sel_to), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			line_text.substr(0, sel_to), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		_panel.draw_rect(Rect2(sel_x_from, y + 2, sel_x_to - sel_x_from, h - 4),
 			Color(0.3, 0.5, 0.8, 0.4))
 
 	# Draw the text
-	_panel.draw_string(font, Vector2(text_x, text_y), _editor_text,
-		HORIZONTAL_ALIGNMENT_LEFT, w - 8, font_size, Color(0.9, 0.9, 0.95))
+	var text_color: Color = Color(0.9, 0.9, 0.95) if not line_text.begins_with("#") else Color(0.4, 0.5, 0.4)
+	_panel.draw_string(font, Vector2(text_x, text_y), line_text,
+		HORIZONTAL_ALIGNMENT_LEFT, text_w, font_size, text_color)
 
-	# Draw cursor (blinking)
-	if _editor_focused and int(_cursor_blink * 2.0) % 2 == 0:
-		var cursor_text: String = _editor_text.substr(0, _editor_cursor)
+	# Draw cursor (only on current line, blinking)
+	if is_current and _editor_focused and int(_cursor_blink * 2.0) % 2 == 0:
+		var cursor_text: String = line_text.substr(0, _editor_cursor)
 		var cursor_x: float = text_x + font.get_string_size(cursor_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 		_panel.draw_line(Vector2(cursor_x, y + 3), Vector2(cursor_x, y + h - 3), Color(1.0, 0.8, 0.2), 1.5)
 
