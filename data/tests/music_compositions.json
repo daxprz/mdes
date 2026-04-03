@@ -1,0 +1,37 @@
+{
+  "name": "music_compositions",
+  "description": "Listening test: complete musical compositions using multiple features together",
+  "script": [
+    "var inspect default=5",
+
+    "announce COMPOSITION TESTS — features working together",
+    "wait 1",
+
+    "announce 1/6: Ambient — slow pad chords + harp arpeggio",
+    "strudel [[c2,c3] ~ ~ ~ [g2,g3] ~, c4 e4 g4 c5 g4 e4] s=harp cps=0.2",
+    "wait 10",
+
+    "announce 2/6: Driving — bass line + euclidean melody",
+    "strudel [c2 ~ c2 ~ e2 ~ g2 ~, c4(5,8)] cps=0.8",
+    "wait 6",
+
+    "announce 3/6: Jazz — chord changes + walking bass",
+    "strudel [[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3], c2 e2 g2 c3 g2 e2] cps=0.3",
+    "wait 8",
+
+    "announce 4/6: Polyrhythm — three independent euclidean layers",
+    "strudel [c3(3,8), e4(5,8), g4(7,16)] cps=0.6",
+    "wait 7",
+
+    "announce 5/6: Evolving — slowcat changes bass each cycle",
+    "strudel [[c4 e4 g4 c5]*2, <c2 f2 g2 c2>] cps=0.4",
+    "wait 8",
+
+    "announce 6/6: Dense — fast arpeggio + chords + rests",
+    "strudel [[[c3,g3] ~ [e3,b3] ~]*2, [c4 e4 g4 c5]*4] cps=0.4",
+    "wait 6",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the compositions sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "music_duration",
+  "description": "Listening test: note duration and tempo accuracy at different CPS values",
+  "script": [
+    "var inspect default=5",
+
+    "announce NOTE DURATION + TEMPO TESTS",
+    "wait 1",
+
+    "# === CPS comparison ===",
+    "announce 1/8: cps=0.25 — very slow (1 cycle = 4 seconds)",
+    "strudel c4 e4 g4 c5 cps=0.25",
+    "wait 6",
+
+    "announce 2/8: cps=0.5 — moderate (1 cycle = 2 seconds)",
+    "strudel c4 e4 g4 c5 cps=0.5",
+    "wait 4",
+
+    "announce 3/8: cps=1.0 — fast (1 cycle = 1 second)",
+    "strudel c4 e4 g4 c5 cps=1",
+    "wait 4",
+
+    "announce 4/8: cps=2.0 — very fast (1 cycle = 0.5 seconds)",
+    "strudel c4 e4 g4 c5 cps=2",
+    "wait 4",
+
+    "# === Note length should match slot size (no stacking) ===",
+    "announce 5/8: Sustained notes — should NOT stack/overlap",
+    "strudel c3 e3 g3 c4 s=pad cps=0.3",
+    "wait 6",
+
+    "announce 6/8: Fast notes — should be crisp, no blur",
+    "strudel [c4 e4 g4 c5]*4 s=marimba cps=1",
+    "wait 4",
+
+    "# === Sub-cycle duration accuracy ===",
+    "announce 7/8: Sub-cycle — bracketed notes should be half length",
+    "strudel c4 [e4 g4] c5 cps=0.5",
+    "wait 5",
+
+    "announce 8/8: Nested — deepest notes shortest",
+    "strudel c4 [e4 [g4 b4]] c5 cps=0.4",
+    "wait 5",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the durations/tempo sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

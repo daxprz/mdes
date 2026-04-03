@@ -1,0 +1,59 @@
+{
+  "name": "music_rhythm",
+  "description": "Listening test: rhythmic features — euclidean, degrade, weight, polymeter",
+  "script": [
+    "var inspect default=5",
+
+    "announce RHYTHM FEATURE TESTS",
+    "wait 1",
+
+    "# === Euclidean rhythms ===",
+    "announce 1/10: Euclidean (3,8) — tresillo",
+    "strudel c4(3,8) cps=1",
+    "wait 4",
+
+    "announce 2/10: Euclidean (5,8) — cinquillo",
+    "strudel c4(5,8) cps=1",
+    "wait 4",
+
+    "announce 3/10: Euclidean (7,12) — West African bell",
+    "strudel c4(7,12) cps=0.8",
+    "wait 5",
+
+    "# === Degrade ===",
+    "announce 4/10: Degrade ? — random drops (listen for gaps)",
+    "strudel [c4 e4 g4 c5]*4? cps=0.8",
+    "wait 5",
+
+    "announce 5/10: Degrade ?0.7 — heavy drops (many gaps)",
+    "strudel [c4 e4 g4 c5]*4?0.7 cps=0.8",
+    "wait 5",
+
+    "# === Weight ===",
+    "announce 6/10: Weight @3 — first note 3x longer",
+    "strudel c4@3 e4 g4 cps=0.4",
+    "wait 5",
+
+    "announce 7/10: Weight @2 — uneven timing",
+    "strudel c4@2 e4 g4@2 c5 cps=0.4",
+    "wait 5",
+
+    "# === Replicate ===",
+    "announce 8/10: Replicate !3 — note repeats",
+    "strudel c4!3 e4 g4 cps=0.5",
+    "wait 4",
+
+    "# === Polymeter ===",
+    "announce 9/10: Polymeter {3 vs 2} — phasing",
+    "strudel {c4 e4 g4, c3 e3} cps=0.5",
+    "wait 6",
+
+    "# === Random choose ===",
+    "announce 10/10: Random [a|b|c|d] — different each cycle",
+    "strudel [c4|e4|g4|c5]*4 cps=1",
+    "wait 5",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the rhythm features sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

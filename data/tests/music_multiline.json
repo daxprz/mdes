@@ -1,0 +1,43 @@
+{
+  "name": "music_multiline",
+  "description": "Listening test: layered patterns (simulates multi-line stacking)",
+  "script": [
+    "var inspect default=5",
+
+    "announce MULTI-LINE STACKING TESTS",
+    "wait 1",
+
+    "# === Single layer baseline ===",
+    "announce 1/6: Single melody",
+    "strudel c4 e4 g4 c5 cps=0.5",
+    "wait 4",
+
+    "# === Two layers: melody + bass ===",
+    "announce 2/6: Melody + Bass (two patterns stacked)",
+    "strudel [c4 e4 g4 c5, c2 ~ c2 ~] cps=0.5",
+    "wait 5",
+
+    "# === Three layers: melody + bass + rhythm ===",
+    "announce 3/6: Melody + Bass + Rhythm",
+    "strudel [c4 e4 g4 c5, c2 ~ e2 ~ g2 ~, c5(3,8)] cps=0.5",
+    "wait 6",
+
+    "# === Chord pads + arpeggio ===",
+    "announce 4/6: Chords + Arpeggio layered",
+    "strudel [[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3], [c4 e4 g4 c5]*2] cps=0.35",
+    "wait 7",
+
+    "# === Different speeds stacked ===",
+    "announce 5/6: Fast + Slow layered",
+    "strudel [[c4 e4 g4 c5]*4, c2 ~ ~ ~ e2 ~ ~ ~] cps=0.5",
+    "wait 5",
+
+    "# === Euclidean layers ===",
+    "announce 6/6: Euclidean polyrhythm layers",
+    "strudel [c3(3,8), e4(5,8), g4(7,16)] cps=0.7",
+    "wait 6",
+
+    "strudel stop",
+    "notify {SCRIPT} \"How did the layered patterns sound?\" [\"Good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}
