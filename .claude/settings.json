@@ -59,7 +59,14 @@
       "// BASH - Python & Tools",
       "// ============================================================",
       "Bash(python3 *)",
-      "Bash(tools/mocap/run.sh)"
+      "Bash(tools/mocap/run.sh)",
+      "// ============================================================",
+      "// MCP OLAI - Knowledge Exchange",
+      "// ============================================================",
+      "mcp__olai__knowledge_manifest",
+      "mcp__olai__knowledge_read",
+      "mcp__olai__knowledge_propose",
+      "mcp__olai__knowledge_status"
     ],
     "deny": [
       "**/.git/**",

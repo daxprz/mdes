@@ -1,0 +1,24 @@
+{
+  "name": "ab_stack",
+  "description": "A/B: two stacked patterns (bass + melody)",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_stack",
+    "strudel ref stack(note(\"c3 g3 c3 e3\"),note(\"c5 e5 g5 c6\")).pianoroll() cps=0.5",
+    "announce REF: bass + melody stack",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: bass + melody stack",
+    "strudel edit stack(note(\"c3 g3 c3 e3\"),note(\"c5 e5 g5 c6\")).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+  ]
+}

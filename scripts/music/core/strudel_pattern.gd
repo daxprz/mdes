@@ -733,18 +733,17 @@ func _hurry(r: Variant) -> StrudelPattern:
 	## Speed up both pattern and playback speed.
 	return _fast(r)
 
-func _degrade_by(amount: float = 0.5, seed: int = 0) -> StrudelPattern:
-	## Randomly drop events with the given probability.
-	## Uses a deterministic hash based on event position + seed.
+func _degrade_by(amount: float = 0.5, _seed: int = 0) -> StrudelPattern:
+	## Randomly drop events. Uses Strudel's rand signal for deterministic
+	## randomness matching Strudel v1.2.0's degradeBy implementation:
+	## pat._degradeByWith(rand, amount)
+	## = pat.fmap(a => _ => a).appLeft(rand.filterValues(v => v > amount))
 	var pat: StrudelPattern = self
-	return StrudelPattern.new(func(state: StrudelState) -> Array:
-		return pat.query.call(state).filter(func(hap: StrudelHap) -> bool:
-			if not hap.has_onset():
-				return true  # Keep continuous haps
-			# Deterministic random based on onset position
-			var t: float = hap.w().begin.to_float() if hap.whole != null else 0.0
-			var hash_val: float = fmod(absf(sin((t + float(seed) * 0.618) * 12345.6789) * 43758.5453), 1.0)
-			return hash_val >= amount))
+	var rand_pat: StrudelPattern = StrudelSignal.rand()
+	return pat.fmap(func(a: Variant) -> Callable:
+		return func(_b: Variant) -> Variant: return a
+	).app_left(rand_pat.filter_values(func(v: Variant) -> bool:
+		return float(v) > amount))
 
 func _sometimes(func_transform: Callable) -> StrudelPattern:
 	## Apply func ~50% of the time (per event).

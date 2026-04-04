@@ -1,0 +1,24 @@
+{
+  "name": "ab_lpf_saw_sweep",
+  "description": "A/B: sawtooth with saw LPF sweep 100-4000Hz",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_lpf_saw_sweep",
+    "strudel ref note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(saw.range(100,4000)).pianoroll() cps=0.5",
+    "announce REF: sawtooth + saw LPF sweep",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: sawtooth + saw LPF sweep",
+    "strudel edit note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(saw.range(100,4000)).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.08 0.8 500"
+  ]
+}

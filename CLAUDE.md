@@ -95,6 +95,17 @@ Do NOT use tumu when:
 | `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
 | `docs/epics/EPIC_strudel_integration.md` | Strudel integration design — 5 EPICs, architecture, compatibility notes |
 
+## Knowledge Contribution
+
+When you learn something valuable about Godot, game development, procedural animation, or audio programming during this session, contribute it to the shared research corpus:
+
+```
+/contribute-knowledge gamedev/godot <what you learned>
+/contribute-knowledge gamedev/strudel <what you learned>
+```
+
+This preserves knowledge across projects and sessions. Always cite sources (URLs, docs, experiments).
+
 ## Conventions
 
 - All debug rendering must route through `DebugOverlay.should_draw()` / `DebugOverlay.log()`

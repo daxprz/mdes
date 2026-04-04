@@ -64,13 +64,16 @@ static func render_note(midi: int, duration_sec: float, waveform: String, gain: 
 	return wav
 
 
-static func render_cycle(haps: Array, cps: float, waveform: String = "sine", default_gain: float = 0.7, signal_controls: Array = []) -> AudioStreamWAV:
-	## Render a full cycle of haps as a single looping AudioStreamWAV.
+static func render_cycle(haps: Array, cps: float, waveform: String = "sine", default_gain: float = 0.7, signal_controls: Array = [], num_cycles: int = 1) -> AudioStreamWAV:
+	## Render haps as a looping AudioStreamWAV spanning num_cycles.
 	## Each hap produces a note at the correct pitch, duration, and timing.
 	## signal_controls: Array of StrudelPattern producing {lpf: value} dicts,
 	## evaluated per-note to bake filtering directly into the waveform.
+	## When num_cycles > 1, haps can span multiple cycles (for time-dependent
+	## patterns like degrade that produce different notes each cycle).
 	var cycle_dur: float = 1.0 / cps
-	var n_samples: int = int(RATE * cycle_dur)
+	var total_dur: float = cycle_dur * num_cycles
+	var n_samples: int = int(RATE * total_dur)
 	var buffer := PackedFloat32Array()
 	buffer.resize(n_samples)
 	buffer.fill(0.0)
@@ -83,9 +86,11 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 		if midi < 0:
 			continue
 		var onset: float = hap.w().begin.to_float() if hap.whole != null else 0.0
-		onset = fmod(onset, 1.0)
-		if onset < 0:
-			onset += 1.0
+		# For multi-cycle rendering, use absolute onset (don't wrap to cycle 0)
+		if num_cycles == 1:
+			onset = fmod(onset, 1.0)
+			if onset < 0:
+				onset += 1.0
 		var dur_frac: float = hap.get_duration().to_float()
 
 		var note_start: int = int(onset * cycle_dur * RATE)
@@ -97,20 +102,38 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 		if hap.value is Dictionary:
 			gain = float(hap.value.get("gain", hap.value.get("velocity", default_gain)))
 
-		# Evaluate signal controls at this note's cycle position to get LPF cutoff etc.
-		var lpf_cutoff: float = 20000.0  # Wide open by default
+		# Evaluate signal controls at this note's cycle position to get filter cutoffs.
+		var lpf_cutoff: float = 20000.0
+		var hpf_cutoff: float = 0.0
+		# Check hap value for static controls
+		if hap.value is Dictionary:
+			if hap.value.has("lpf"):
+				lpf_cutoff = float(hap.value["lpf"])
+			if hap.value.has("hpf"):
+				hpf_cutoff = float(hap.value["hpf"])
+		# Check signal controls for dynamic modulation
 		for sig_pat in signal_controls:
 			var sig_haps: Array = sig_pat.query_arc(onset, onset + 0.001)
 			if not sig_haps.is_empty():
 				var sv: Variant = sig_haps[0].value
-				if sv is Dictionary and sv.has("lpf"):
-					lpf_cutoff = float(sv["lpf"])
+				if sv is Dictionary:
+					if sv.has("lpf"):
+						lpf_cutoff = float(sv["lpf"])
+					if sv.has("hpf"):
+						hpf_cutoff = float(sv["hpf"])
+					if sv.has("gain"):
+						gain = float(sv["gain"])
 
-		# 1-pole IIR lowpass filter coefficient (same as Strudel reference renderer)
+		# 1-pole IIR lowpass filter (same as Strudel reference renderer)
 		var rc: float = 1.0 / (TAU * lpf_cutoff)
 		var dt: float = 1.0 / RATE
 		var alpha: float = dt / (rc + dt)
 		var prev_filtered: float = 0.0
+		# 1-pole IIR highpass filter
+		var hpf_rc: float = 1.0 / (TAU * maxf(hpf_cutoff, 1.0))
+		var hpf_alpha: float = hpf_rc / (hpf_rc + dt)
+		var prev_hpf: float = 0.0
+		var prev_hpf_input: float = 0.0
 
 		var attack: int = mini(int(RATE * 0.005), note_samples / 4)
 		var release: int = mini(int(RATE * 0.010), note_samples / 4)
@@ -132,6 +155,12 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 			# Apply LPF
 			var filtered: float = prev_filtered + alpha * (val - prev_filtered)
 			prev_filtered = filtered
+
+			# Apply HPF
+			if hpf_cutoff > 0:
+				prev_hpf = hpf_alpha * (prev_hpf + filtered - prev_hpf_input)
+				prev_hpf_input = filtered
+				filtered = prev_hpf
 
 			var env: float = 1.0
 			if i < attack:

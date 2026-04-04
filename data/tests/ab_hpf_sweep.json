@@ -1,0 +1,24 @@
+{
+  "name": "ab_hpf_sweep",
+  "description": "A/B: sawtooth with sine HPF sweep 200-2000Hz",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_hpf_sweep",
+    "strudel ref note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").hpf(sine.range(200,2000)).pianoroll() cps=0.5",
+    "announce REF: sawtooth + sine HPF sweep",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: sawtooth + sine HPF sweep",
+    "strudel edit note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").hpf(sine.range(200,2000)).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.08 0.8 500"
+  ]
+}

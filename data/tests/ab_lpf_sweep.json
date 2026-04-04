@@ -7,18 +7,18 @@
     "music off",
     "wait 1",
     "ab_dir ab_lpf_sweep",
-    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\").lpf(sine.range(100,4000))",
+    "strudel ref note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(sine.range(100,4000)).pianoroll() cps=0.5",
     "announce REF: sawtooth + sine LPF sweep",
     "ab_play ref.wav",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "announce OURS: sawtooth + sine LPF sweep",
-    "strudel edit \"c4 c4 c4 c4 c4 c4 c4 c4\".s(\"sawtooth\").lpf(sine.range(100,4000)).pianoroll() cps=0.5",
+    "strudel edit note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(sine.range(100,4000)).pianoroll() cps=0.5",
     "strudel record start",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "strudel stop",
     "music off",
     "strudel record stop ours",
     "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.08 0.8 10"
+    "check ab_compare ref.wav ours.wav 0.08 0.8 500"
   ]
 }

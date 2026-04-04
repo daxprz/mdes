@@ -206,8 +206,9 @@ static func _apply_options(pat: StrudelPattern, options: Dictionary, code: Strin
 				else:
 					pat = pat._euclid(pulses, steps)
 
-			"degradeBy":
+			"degrade", "degradeBy":
 				# Randomly drop events with probability `amount` (default 0.5)
+				# .degrade() is shorthand for .degradeBy(0.5)
 				var degrade_amount: float = 0.5
 				if op_args.get("amount") != null:
 					degrade_amount = float(op_args["amount"])

@@ -1,11 +1,18 @@
 {
   "name": "ab",
-  "description": "A/B comparison suite — Strudel reference vs DAX engine",
+  "description": "A/B comparison suite — Strudel reference vs TUMU engine",
   "tests": [
     "ab_sine",
     "ab_sawtooth",
     "ab_square",
     "ab_triangle",
-    "ab_lpf_sweep"
+    "ab_lpf_sweep",
+    "ab_lpf_saw_sweep",
+    "ab_hpf",
+    "ab_scale",
+    "ab_gain",
+    "ab_euclid",
+    "ab_stack",
+    "ab_fast"
   ]
 }

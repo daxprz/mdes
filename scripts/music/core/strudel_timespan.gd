@@ -106,6 +106,12 @@ func intersection_e(other: StrudelTimeSpan) -> StrudelTimeSpan:
 	return result
 
 
+func shift_by(offset: float) -> StrudelTimeSpan:
+	## Return a new timespan shifted by offset cycles.
+	var off := StrudelFraction.from_float(offset)
+	return StrudelTimeSpan.new(begin.add(off), end.add(off))
+
+
 # -- Equality / Display --------------------------------------------------------
 
 func equals(other: StrudelTimeSpan) -> bool:

@@ -203,6 +203,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.56
+**Degrade PRNG fix, stack() parsing, per-cycle rendering, A/B test hardening**
+
+- **Degrade PRNG**: xorwise algorithm with 32-bit signed integer semantics now matches Strudel v1.2.0 exactly (verified per-value against JavaScript output)
+- **`.degrade()` method chain**: recognized as a pattern combinator, applied after mini-notation eval
+- **`stack()` expression parsing**: `stack(note("c3").s("sawtooth"), note("c5").s("square"))` correctly splits, evaluates sub-expressions, and routes per-note voices
+- **Per-note voice routing**: batch mode groups haps by `value.s` waveform (not just track voice), enabling mixed oscillator types in a single stack
+- **Multi-cycle pre-rendering**: oscillator renders 16 cycles to handle time-dependent patterns (degrade produces different dropout patterns each cycle)
+- **Pianoroll cycle wrapping**: display wraps queries modulo batch cycle count so UI matches looping audio
+- **Reference server fix**: now queries each cycle independently via `queryArc(n, n+1)` instead of repeating `firstCycle()` — critical for degrade/random pattern accuracy
+- **Identical test strings**: `strudel ref` strips `.pianoroll()` and `cps=` so both commands receive the exact same input
+- **Silence grace period**: `wait 10 unless silent 2.5` prevents reference/ours overlap in sparse patterns
+- **20/20 A/B tests passing** with 12 new test files (chords, degrade, multi_voice, rests, slowcat, etc.)
+- **TimeSpan.shift_by()**: new helper for shifting hap times during pianoroll cycle wrapping
+
 ### v0.10.52
 **Pianoroll options, import/export, compatibility audit, oscillator + drum voices**
 

@@ -196,6 +196,16 @@ On startup, read your `inbox/` for new work. Move items to `active/` when you be
 9. **NEVER** change tests to fix code bugs — fix the code
 10. Tests succeed or fail fast — do NOT add long waits
 
+## Knowledge Contribution
+
+When you discover reusable Godot patterns, debug techniques, or testing strategies during your work, contribute them to the shared knowledge base:
+
+```
+/contribute-knowledge gamedev/godot <pattern or technique>
+```
+
+This preserves insights across sessions. Always include what you learned and why it matters.
+
 ## Test Output & Observations
 
 Tests write output to `user://test-output/<version>/<testname>/<timestamp>/`:

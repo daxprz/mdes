@@ -72,16 +72,37 @@ static func square2() -> StrudelPattern:
 	return sig(func(t: StrudelFraction) -> float:
 		return -1.0 if fmod(t.to_float(), 1.0) < 0.5 else 1.0)
 
-## Random value per cycle (deterministic based on cycle number).
+## Random value — deterministic PRNG matching Strudel v1.2.0's xorwise algorithm.
+## Ported from signal.mjs: xorwise → timeToIntSeed → intSeedToRand → timeToRand.
 static func rand() -> StrudelPattern:
-	## Pseudo-random signal using cycle position as seed.
-	## Each query to the same time span returns the same value.
 	return sig(func(t: StrudelFraction) -> float:
-		# Use a hash-like function for deterministic randomness
-		var cycle: int = t.sam().n
-		var pos: float = t.cycle_pos().to_float()
-		var seed_val: float = float(cycle) * 1.61803398875 + pos * 2.71828182845
-		return fmod(absf(sin(seed_val * 12345.6789) * 43758.5453), 1.0))
+		return _time_to_rand(t.to_float()))
+
+
+static func _to_int32(x: int) -> int:
+	## Simulate JavaScript's ToInt32 (32-bit signed integer semantics).
+	x = x & 0xFFFFFFFF
+	if x >= 0x80000000:
+		x -= 0x100000000
+	return x
+
+
+static func _xorwise(x: int) -> int:
+	## Strudel's xorwise PRNG (from Tidal Cycles / Haskell Music Theory).
+	## Must use 32-bit signed integer semantics to match JavaScript.
+	x = _to_int32(x)
+	var a: int = _to_int32(_to_int32(x << 13) ^ x)
+	var b: int = _to_int32((a >> 17) ^ a)
+	return _to_int32(_to_int32(b << 5) ^ b)
+
+
+static func _time_to_rand(x: float) -> float:
+	## Strudel's timeToRand: maps a time value to a deterministic [0,1) random.
+	## Stretches 300 cycles over [0, 2^29), applies xorwise.
+	var frac: float = x / 300.0
+	frac = frac - floorf(frac)  # fractional part
+	var int_seed: int = _xorwise(int(frac * 536870912.0))
+	return absf(float(int_seed % 536870912) / 536870912.0)
 
 ## Linear time signal: value equals the cycle position (0, 1, 2, ...).
 static func time_signal() -> StrudelPattern:

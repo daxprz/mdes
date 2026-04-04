@@ -7,18 +7,18 @@
     "music off",
     "wait 1",
     "ab_dir ab_triangle",
-    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"triangle\")",
+    "strudel ref note(\"c4 c4 c4 c4\").s(\"triangle\").pianoroll() cps=0.5",
     "announce REF: triangle C4",
     "ab_play ref.wav",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "announce OURS: triangle C4",
-    "strudel edit \"c4 c4 c4 c4\".s(\"triangle\").pianoroll() cps=0.5",
+    "strudel edit note(\"c4 c4 c4 c4\").s(\"triangle\").pianoroll() cps=0.5",
     "strudel record start",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "strudel stop",
     "music off",
     "strudel record stop ours",
     "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5 10"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
   ]
 }

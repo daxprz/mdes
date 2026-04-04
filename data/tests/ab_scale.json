@@ -7,18 +7,18 @@
     "music off",
     "wait 1",
     "ab_dir ab_scale",
-    "strudel ref note(\"c4\",\"d4\",\"e4\",\"f4\",\"g4\",\"a4\",\"b4\",\"c5\")",
+    "strudel ref note(\"c4 d4 e4 f4 g4 a4 b4 c5\").pianoroll() cps=0.5",
     "announce REF: C major scale",
     "ab_play ref.wav",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "announce OURS: C major scale",
-    "strudel edit \"c4 d4 e4 f4 g4 a4 b4 c5\".pianoroll() cps=0.5",
+    "strudel edit note(\"c4 d4 e4 f4 g4 a4 b4 c5\").pianoroll() cps=0.5",
     "strudel record start",
-    "wait 10 unless silent",
+    "wait 10 unless silent 2.5",
     "strudel stop",
     "music off",
     "strudel record stop ours",
     "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5 10"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
   ]
 }

@@ -1,0 +1,24 @@
+{
+  "name": "ab_chords",
+  "description": "A/B: simultaneous chord [c3,e3,g3]",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_chords",
+    "strudel ref note(\"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "announce REF: chord progression",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: chord progression",
+    "strudel edit note(\"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.08 0.8 500"
+  ]
+}

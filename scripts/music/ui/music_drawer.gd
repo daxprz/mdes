@@ -722,12 +722,34 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	var signal_controls: Array = []  ## Signal patterns like sine.range(200,2000) wrapped as {key: val}
 	var found_viz: bool = false
 
-	# Build combined lookup of all known method names (viz + audio controls).
-	var all_methods: Dictionary = {}  # method_name -> "viz" or "audio"
+	# Pattern combinator methods — applied to the pattern after mini-notation eval.
+	# These are Strudel Pattern methods, not audio controls or visualizers.
+	var pattern_methods := [
+		"degrade", "degradeBy", "undegrade", "undegradeBy",
+		"fast", "slow", "hurry",
+		"early", "late",
+		"rev", "palindrome",
+		"euclid",
+		"every",
+		"chunk",
+		"segment",
+		"sometimes", "often", "rarely",
+		"jux",
+		"iter",
+		"ply",
+		"striate",
+		"chop",
+	]
+
+	# Build combined lookup of all known method names (viz + audio + pattern).
+	var all_methods: Dictionary = {}  # method_name -> "viz" or "audio" or "pattern"
 	for k in viz_names:
 		all_methods[k] = "viz"
 	for k in AUDIO_CONTROL_METHODS:
 		all_methods[k] = "audio"
+	for k in pattern_methods:
+		all_methods[k] = "pattern"
+	var deferred_ops: Array = []  # [{method: String, args: String}] applied after pattern build
 
 	# Parse method chain from right to left: find the rightmost known
 	# .method(args) whose closing paren is at the end of the string,
@@ -788,6 +810,9 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 				result["viz_options"] = viz_options
 				line["viz_options"] = viz_options
 				found_viz = true
+		elif kind == "pattern":
+			# Deferred pattern combinator — applied after pattern build
+			deferred_ops.append({"method": best_method, "args": args_str})
 		else:
 			var control_key: String = AUDIO_CONTROL_METHODS[best_method]
 			if control_key == "s":
@@ -812,6 +837,7 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 
 	result["audio_controls"] = audio_controls
 	result["signal_controls"] = signal_controls
+	result["deferred_ops"] = deferred_ops
 
 	# If no viz found from method chain, clear stored text-based viz
 	if not found_viz:
@@ -823,6 +849,18 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		if had_viz_text:
 			line["viz"] = VIZ_NONE
 			line["viz_options"] = {}
+
+	# Handle stack(): split into sub-expressions evaluated independently.
+	# stack(expr1, expr2, ...) → evaluate each expr, return Strudel.stack()
+	if stripped_text.begins_with("stack(") and stripped_text.ends_with(")"):
+		var inner: String = stripped_text.substr(6, stripped_text.length() - 7)
+		var sub_exprs: Array = _split_top_level_commas(inner)
+		if sub_exprs.size() > 1:
+			result["is_stack"] = true
+			result["stack_exprs"] = sub_exprs
+			result["is_valid"] = true
+			result["pattern_text"] = ""  # Built from stack_exprs, not raw text
+			return result
 
 	# Strip Strudel wrappers: note("..."), s("...")
 	# These are JS function calls that wrap mini-notation in Strudel
@@ -882,6 +920,153 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	return result
 
 
+static func _split_top_level_commas(text: String) -> Array:
+	## Split a string by commas, but only at the top level (depth 0).
+	## Respects nested parens, brackets, and quotes.
+	var parts: Array = []
+	var depth: int = 0
+	var in_quote: String = ""
+	var start: int = 0
+	for i in range(text.length()):
+		var c: String = text[i]
+		if not in_quote.is_empty():
+			if c == in_quote:
+				in_quote = ""
+			continue
+		if c == '"' or c == "'":
+			in_quote = c
+		elif c == "(" or c == "[" or c == "{":
+			depth += 1
+		elif c == ")" or c == "]" or c == "}":
+			depth -= 1
+		elif c == "," and depth == 0:
+			parts.append(text.substr(start, i - start).strip_edges())
+			start = i + 1
+	if start < text.length():
+		parts.append(text.substr(start).strip_edges())
+	return parts
+
+
+static func _eval_sub_expr(expr: String) -> StrudelPattern:
+	## Evaluate a single Strudel sub-expression (e.g., note("c3 g3").s("sawtooth")).
+	## Handles note() wrapper, .s() voice, and method chains.
+	var text: String = expr.strip_edges()
+	var voice: String = ""
+
+	# Strip method chains from right to left for .s() voice selection
+	# Look for .s("...") at the end or within the chain
+	var s_methods := [".s(", ".sound("]
+	for sm in s_methods:
+		var pos: int = text.rfind(sm)
+		if pos < 0:
+			continue
+		var po: int = pos + sm.length()
+		var depth: int = 1
+		var pc: int = po
+		while pc < text.length() and depth > 0:
+			if text[pc] == "(":
+				depth += 1
+			elif text[pc] == ")":
+				depth -= 1
+			if depth > 0:
+				pc += 1
+		if depth == 0:
+			var args: String = text.substr(po, pc - po).strip_edges()
+			voice = args.replace("\"", "").replace("'", "").strip_edges()
+			text = (text.substr(0, pos) + text.substr(pc + 1)).strip_edges()
+
+	# Strip note() wrapper
+	if text.begins_with("note(") and text.ends_with(")"):
+		text = text.substr(5, text.length() - 6).strip_edges()
+	elif text.begins_with("s(") and text.ends_with(")"):
+		text = text.substr(2, text.length() - 3).strip_edges()
+
+	# Strip quotes
+	if text.length() >= 2:
+		if (text[0] == '"' and text[-1] == '"') or \
+		   (text[0] == "'" and text[-1] == "'"):
+			text = text.substr(1, text.length() - 2)
+
+	var pat: StrudelPattern = StrudelMini.mini(text)
+	if not voice.is_empty():
+		pat = pat.set_in(Strudel.pure({"s": voice}))
+	return pat
+
+
+static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPattern:
+	## Apply deferred pattern combinator methods parsed from the method chain.
+	## ops is [{method: String, args: String}], applied in reverse order
+	## (since they were parsed right-to-left but should apply left-to-right).
+	for i in range(ops.size() - 1, -1, -1):
+		var op: Dictionary = ops[i]
+		var method: String = op["method"]
+		var args: String = op["args"]
+		match method:
+			"degrade":
+				pat = pat._degrade_by(0.5)
+			"degradeBy":
+				var amount: float = float(args) if args.is_valid_float() else 0.5
+				pat = pat._degrade_by(amount)
+			"undegradeBy":
+				# undegradeBy keeps events that degrade would drop
+				var amount: float = float(args) if args.is_valid_float() else 0.5
+				pat = pat._degrade_by(amount)  # TODO: proper undegradeBy
+			"undegrade":
+				pat = pat._degrade_by(0.5)  # TODO: proper undegrade
+			"fast":
+				if args.is_valid_float():
+					pat = pat._fast(float(args))
+			"slow":
+				if args.is_valid_float():
+					pat = pat._slow(float(args))
+			"hurry":
+				if args.is_valid_float():
+					pat = pat._fast(float(args))  # hurry also speeds up sample
+			"early":
+				if args.is_valid_float():
+					pat = pat._early(StrudelFraction.from_float(float(args)))
+			"late":
+				if args.is_valid_float():
+					pat = pat._late(StrudelFraction.from_float(float(args)))
+			"rev":
+				pat = pat._rev()
+			"palindrome":
+				pat = pat._palindrome()
+			"euclid":
+				# Parse euclid(pulses, steps) or euclid(pulses, steps, rotation)
+				var euclid_args: PackedStringArray = args.split(",")
+				if euclid_args.size() >= 2:
+					var pulses: int = int(euclid_args[0].strip_edges())
+					var steps: int = int(euclid_args[1].strip_edges())
+					if euclid_args.size() >= 3:
+						var rotation: int = int(euclid_args[2].strip_edges())
+						pat = pat._euclid_rot(pulses, steps, rotation)
+					else:
+						pat = pat._euclid(pulses, steps)
+			"segment":
+				if args.is_valid_float():
+					pat = pat._segment(int(float(args)))
+			"sometimes":
+				pass  # Requires a function argument — not parseable from string
+			"often":
+				pass
+			"rarely":
+				pass
+			"jux":
+				pass  # Requires a function argument
+			"iter":
+				if args.is_valid_float():
+					pat = pat._iter(int(float(args)))
+			"every":
+				pass  # Requires (n, function) — not parseable
+			"chunk":
+				pass  # Requires (n, function) — not parseable
+			"ply":
+				if args.is_valid_float():
+					pat = pat._ply(int(float(args)))
+	return pat
+
+
 func _play_current() -> void:
 	## Parse all non-muted, non-empty lines into patterns and stack them.
 	## Also stores per-line patterns for individual pianoroll rendering.
@@ -913,32 +1098,48 @@ func _play_current() -> void:
 		for key in line_controls:
 			merged_controls[key] = line_controls[key]
 
-		var text: String = parsed["pattern_text"]
+		var clean_pat: StrudelPattern
+		var display_pat: StrudelPattern
 		var sound_name: String = parsed["sound"]
-
-		var clean_pat: StrudelPattern = StrudelMini.mini(text)
-		var display_pat: StrudelPattern = clean_pat
-
-		# Signal control patterns (e.g., .lpf(sine.range(200, 2000)))
-		# Instead of merging into the note pattern (which fragments timing via set_in),
-		# store them separately. They're evaluated per-note at trigger time.
+		var ops: Array = parsed.get("deferred_ops", [])
 		var line_signals: Array = parsed.get("signal_controls", [])
 
-		# In note mode, inject voice via set_in (needed for per-note voice resolution).
-		# In batch mode, DON'T — set_in fragments hap timing which breaks pianoroll.
-		# Batch mode passes voice separately via _line_tracks.
-		var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
-		if not sound_name.is_empty() and not is_batch:
-			display_pat = clean_pat.set_in(Strudel.pure({"s": sound_name}))
+		if parsed.get("is_stack", false):
+			# stack(expr1, expr2, ...) — evaluate each sub-expression independently
+			var sub_pats: Array = []
+			for expr in parsed["stack_exprs"]:
+				sub_pats.append(_eval_sub_expr(expr))
+			clean_pat = Strudel.stack(sub_pats)
+			clean_pat = _apply_deferred_ops(clean_pat, ops)
+			display_pat = clean_pat
+		else:
+			var text: String = parsed["pattern_text"]
+			clean_pat = StrudelMini.mini(text)
+			# Apply deferred pattern combinators (.degrade(), .fast(), etc.)
+			clean_pat = _apply_deferred_ops(clean_pat, ops)
+			display_pat = clean_pat
+
+			# Signal control patterns (e.g., .lpf(sine.range(200, 2000)))
+			# Instead of merging into the note pattern (which fragments timing via set_in),
+			# store them separately. They're evaluated per-note at trigger time.
+
+			# In note mode, inject voice via set_in (needed for per-note voice resolution).
+			# In batch mode, DON'T — set_in fragments hap timing which breaks pianoroll.
+			# Batch mode passes voice separately via _line_tracks.
+			var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
+			if not sound_name.is_empty() and not is_batch:
+				display_pat = clean_pat.set_in(Strudel.pure({"s": sound_name}))
 
 		_line_patterns[i] = display_pat
 		_lines[i]["pattern_offset"] = parsed["pattern_offset"]
 		active_patterns.append(display_pat)
 
 		# Store per-line metadata for batch mode compilation
+		# Use the SAME pattern object for both display and batch to ensure
+		# deterministic operations (like degrade) produce identical results.
 		var line_name: String = parsed["name"] if not parsed["name"].is_empty() else "line%d" % i
 		_line_tracks.append({
-			"pattern": StrudelMini.mini(text),  # Clean pattern (no set_in)
+			"pattern": clean_pat,  # Same pattern object as display (ensures degrade consistency)
 			"voice": sound_name,
 			"gain": float(line_controls.get("gain", line_controls.get("velocity", 1.0))),
 			"name": line_name,
@@ -1110,14 +1311,57 @@ func _update_pianoroll() -> void:
 			if hap.whole == null: return false
 			return hap.get_end_clipped().to_float() >= visible_start)
 
-		# Query new haps for this line
+		# Query new haps for this line.
+		# In batch mode, the oscillator WAV contains N pre-rendered cycles and loops.
+		# To match, we wrap queries modulo N so the pianoroll shows the same
+		# degrade/random variation that the audio plays.
 		var line_qe: float = _line_query_ends[i] if i < _line_query_ends.size() else 0.0
 		var query_start: float = maxf(line_qe, visible_start)
 		if visible_end > query_start:
-			var new_haps: Array = pat.query_arc(query_start, visible_end)
-			for hap in new_haps:
-				if hap.has_onset():
-					_line_haps[i].append(hap)
+			var is_batch_mode: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
+			var bc: int = MusicManager._sion_trigger.batch_cycle_count if is_batch_mode else 0
+			if is_batch_mode and bc > 1:
+				# Wrap query range to match the looping WAV's cycle range [0, bc)
+				var wrap_start: float = fmod(query_start, float(bc))
+				var wrap_end: float = fmod(visible_end, float(bc))
+				if wrap_start < 0: wrap_start += float(bc)
+				if wrap_end < 0: wrap_end += float(bc)
+				# Query in wrapped space, then shift haps back to real time
+				var cycle_offset: float = query_start - wrap_start
+				if wrap_end > wrap_start:
+					var new_haps: Array = pat.query_arc(wrap_start, wrap_end)
+					for hap in new_haps:
+						if hap.has_onset():
+							# Shift hap times to real display position
+							var shifted := StrudelHap.new(
+								hap.whole.shift_by(cycle_offset) if hap.whole != null else null,
+								hap.part.shift_by(cycle_offset),
+								hap.value)
+							_line_haps[i].append(shifted)
+				else:
+					# Wraps around: query [wrap_start, bc) then [0, wrap_end)
+					var new_haps1: Array = pat.query_arc(wrap_start, float(bc))
+					for hap in new_haps1:
+						if hap.has_onset():
+							var shifted := StrudelHap.new(
+								hap.whole.shift_by(cycle_offset) if hap.whole != null else null,
+								hap.part.shift_by(cycle_offset),
+								hap.value)
+							_line_haps[i].append(shifted)
+					var new_haps2: Array = pat.query_arc(0.0, wrap_end)
+					var offset2: float = cycle_offset + float(bc)
+					for hap in new_haps2:
+						if hap.has_onset():
+							var shifted := StrudelHap.new(
+								hap.whole.shift_by(offset2) if hap.whole != null else null,
+								hap.part.shift_by(offset2),
+								hap.value)
+							_line_haps[i].append(shifted)
+			else:
+				var new_haps: Array = pat.query_arc(query_start, visible_end)
+				for hap in new_haps:
+					if hap.has_onset():
+						_line_haps[i].append(hap)
 			_line_query_ends[i] = visible_end
 
 		# Accumulate into global list + per-line highlighting

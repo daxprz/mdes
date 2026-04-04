@@ -1,0 +1,24 @@
+{
+  "name": "ab_multi_voice",
+  "description": "A/B: bass=sawtooth + melody=square simultaneously",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_multi_voice",
+    "strudel ref stack(note(\"c3 g3 c3 e3\").s(\"sawtooth\"),note(\"c5 e5 g5 c6\").s(\"square\")).pianoroll() cps=0.5",
+    "announce REF: sawtooth bass + square melody",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: sawtooth bass + square melody",
+    "strudel edit stack(note(\"c3 g3 c3 e3\").s(\"sawtooth\"),note(\"c5 e5 g5 c6\").s(\"square\")).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.20 0.8 500"
+  ]
+}

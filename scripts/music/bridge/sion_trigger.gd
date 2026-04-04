@@ -4,9 +4,12 @@ class_name StrudelSionTrigger extends RefCounted
 ## Converts pattern values (note names, MIDI numbers, frequencies)
 ## to SiON driver calls.
 
+const BATCH_RENDER_CYCLES := 16  ## Number of cycles pre-rendered for oscillator batch mode
+
 var driver: Variant = null     ## SiONDriver (dynamic to avoid parse-time dep)
 var presets: Variant = null     ## SiONVoicePresetUtil
 var _voices: Dictionary = {}   ## name -> SiONVoice
+var batch_cycle_count: int = 1 ## Actual cycles in current batch WAV (set by start_batch_from_tracks)
 var _active_notes: Dictionary = {} ## track_id -> scheduled_off_time
 
 
@@ -276,11 +279,15 @@ func clear_pending() -> void:
 # ==============================================================================
 
 var _batch_dispatched: bool = false  ## True once the looping MML has been compiled and dispatched
+var _last_batch_cycle: int = -1     ## Last cycle rendered in trigger_batch (for per-cycle re-render)
+var _pending_batch_haps: Array = [] ## Accumulated haps for current cycle (rendered at boundary)
 
 func trigger_batch(haps: Array, cps: float, cycle_begin: float, cycle_end: float) -> void:
 	## In batch mode, the cyclist still calls this per-tick but we ignore it.
-	## The actual compilation happens eagerly in start_batch_playback().
+	## The actual rendering happens in start_batch_from_tracks which pre-renders
+	## multiple cycles to handle time-dependent patterns like degrade.
 	pass
+
 
 
 func start_batch_from_tracks(tracks: Array, cps: float) -> void:
@@ -299,39 +306,55 @@ func start_batch_from_tracks(tracks: Array, cps: float) -> void:
 	var mml_parts: Array[String] = []
 	var total_notes: int = 0
 
-	var osc_haps: Array = []    # Haps for oscillator rendering (bypass SiON)
-	var osc_waveform: String = "sine"
-	var osc_gain: float = 0.7
+	# Pre-render N cycles for oscillator tracks to handle time-dependent patterns
+	# (like degrade) that produce different notes each cycle.
+	batch_cycle_count = BATCH_RENDER_CYCLES
+	var osc_groups: Dictionary = {}  # waveform_name -> {haps: [], gain: float}
 
 	for track in tracks:
 		var pat: StrudelPattern = track["pattern"]
 		var voice_name: String = track.get("voice", "")
 		var gain: float = track.get("gain", 1.0)
 
-		# Query one full cycle — clean pattern, no set_in
-		var haps: Array = pat.query_arc(0.0, 1.0)
-		var onset_haps: Array = []
-		for hap in haps:
-			if hap.has_onset():
-				onset_haps.append(hap)
-		if onset_haps.is_empty():
+		# Query N cycles to capture time-dependent variation
+		var all_onset_haps: Array = []
+		for cycle_i in range(BATCH_RENDER_CYCLES):
+			var haps: Array = pat.query_arc(float(cycle_i), float(cycle_i + 1))
+			for hap in haps:
+				if hap.has_onset():
+					all_onset_haps.append(hap)
+		if all_onset_haps.is_empty():
 			continue
 
-		onset_haps.sort_custom(MmlBatchCompiler._sort_by_onset)
+		all_onset_haps.sort_custom(MmlBatchCompiler._sort_by_onset)
 
 		# Route: oscillator types (or default/no voice) bypass SiON entirely
 		var use_osc: bool = voice_name.is_empty() or StrudelOscillator.is_oscillator(voice_name)
 		if use_osc:
-			osc_haps.append_array(onset_haps)
-			osc_waveform = voice_name.to_lower() if not voice_name.is_empty() else "sine"
-			osc_gain = gain
-			total_notes += onset_haps.size()
-			DebugOverlay.log("music/batch", null, "BATCH: track '%s' → oscillator (%s, %d notes)" % [
-				track.get("name", "?"), osc_waveform, onset_haps.size()])
+			# Group haps by per-note voice (from hap.value.s) or track voice
+			for hap in all_onset_haps:
+				var hap_voice: String = voice_name
+				if hap_voice.is_empty() and hap.value is Dictionary:
+					hap_voice = str(hap.value.get("s", ""))
+				if hap_voice.is_empty():
+					hap_voice = "sine"
+				hap_voice = hap_voice.to_lower()
+				if not osc_groups.has(hap_voice):
+					osc_groups[hap_voice] = {"haps": [], "gain": gain}
+				osc_groups[hap_voice]["haps"].append(hap)
+			total_notes += all_onset_haps.size()
+			DebugOverlay.log("music/batch", null, "BATCH: track '%s' → oscillator (%d notes across %d cycles, %d voice groups)" % [
+				track.get("name", "?"), all_onset_haps.size(), BATCH_RENDER_CYCLES, osc_groups.size()])
 			continue
 
-		# SiON path: build MML
-		var mml: String = _batch_compiler._haps_to_mml(onset_haps, bpm)
+		# SiON path: build MML (uses cycle-0 haps only — MML loops)
+		var c0_haps: Array = pat.query_arc(0.0, 1.0)
+		var c0_onset: Array = []
+		for hap in c0_haps:
+			if hap.has_onset():
+				c0_onset.append(hap)
+		c0_onset.sort_custom(MmlBatchCompiler._sort_by_onset)
+		var mml: String = _batch_compiler._haps_to_mml(c0_onset, bpm)
 		if mml.is_empty():
 			continue
 		if not voice_name.is_empty() and MmlBatchCompiler.VOICE_TO_MML.has(voice_name.to_lower()):
@@ -340,22 +363,42 @@ func start_batch_from_tracks(tracks: Array, cps: float) -> void:
 			var vol: int = clampi(int(gain * 15.0), 0, 15)
 			mml = mml.replace("t%d " % bpm, "t%d v%d " % [bpm, vol])
 		mml_parts.append(mml)
-		total_notes += onset_haps.size()
+		total_notes += c0_onset.size()
 		DebugOverlay.log("music/batch", null, "BATCH: track '%s' → SiON MML (%d notes)" % [
-			track.get("name", "?"), onset_haps.size()])
+			track.get("name", "?"), c0_onset.size()])
 
 	# Play oscillator tracks via AudioStreamPlayer (pure waveforms)
-	if not osc_haps.is_empty():
-		var wav: AudioStreamWAV = StrudelOscillator.render_cycle(osc_haps, cps, osc_waveform, osc_gain, _signal_controls)
-		_play_oscillator(wav)
-		DebugOverlay.log("music/batch", null, "BATCH: oscillator playing (%s, %d notes)" % [osc_waveform, osc_haps.size()])
+	# Each voice group gets its own render, then they're mixed together.
+	if not osc_groups.is_empty():
+		var mixed_wav: AudioStreamWAV = null
+		for waveform in osc_groups:
+			var group: Dictionary = osc_groups[waveform]
+			var wav: AudioStreamWAV = StrudelOscillator.render_cycle(
+				group["haps"], cps, waveform, group["gain"], _signal_controls, BATCH_RENDER_CYCLES)
+			if mixed_wav == null:
+				mixed_wav = wav
+			else:
+				# Mix: add samples from wav into mixed_wav
+				var mix_data := mixed_wav.data
+				var add_data := wav.data
+				var len_samples: int = mini(mix_data.size() / 2, add_data.size() / 2)
+				for s_i in range(len_samples):
+					var existing: int = mix_data.decode_s16(s_i * 2)
+					var adding: int = add_data.decode_s16(s_i * 2)
+					var combined: int = clampi(existing + adding, -32768, 32767)
+					mix_data.encode_s16(s_i * 2, combined)
+				mixed_wav.data = mix_data
+			DebugOverlay.log("music/batch", null, "BATCH: oscillator group '%s' (%d notes)" % [waveform, group["haps"].size()])
+		if mixed_wav != null:
+			_play_oscillator(mixed_wav)
+			DebugOverlay.log("music/batch", null, "BATCH: oscillator playing (%d voice groups)" % osc_groups.size())
 
 	# Play SiON tracks via driver.play()
 	if not mml_parts.is_empty():
 		var full_mml: String = ";".join(PackedStringArray(mml_parts))
 		DebugOverlay.log("music/batch", null, "BATCH: SiON playing (%d tracks, mml=%s)" % [mml_parts.size(), full_mml.substr(0, 80)])
 		driver.call("play", full_mml)
-	elif osc_haps.is_empty():
+	elif osc_groups.is_empty():
 		DebugOverlay.log("music/batch", null, "BATCH: nothing to play")
 	_batch_dispatched = true
 
@@ -479,6 +522,8 @@ func stop_all_sequences() -> void:
 	_cycle_buffer.clear()
 	_cycle_buffer_int = -1
 	_batch_dispatched = false
+	_last_batch_cycle = -1
+	_pending_batch_haps.clear()
 
 
 func _apply_batch_effects(haps: Array) -> void:

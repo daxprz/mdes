@@ -1,0 +1,24 @@
+{
+  "name": "ab_degrade",
+  "description": "A/B: degrade c4? \u2014 random note drops",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_degrade",
+    "strudel ref note(\"c4 d4 e4 f4 g4 a4 b4 c5\").degrade().pianoroll() cps=0.5",
+    "announce REF: scale with degrade",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: scale with degrade",
+    "strudel edit note(\"c4 d4 e4 f4 g4 a4 b4 c5\").degrade().pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.10 0.8 500"
+  ]
+}
