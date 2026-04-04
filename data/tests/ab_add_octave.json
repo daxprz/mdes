@@ -1,0 +1,24 @@
+{
+  "name": "ab_add_octave",
+  "description": "A/B: add(note(12)) — c4 should become c5",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_add_octave",
+    "strudel ref note(\"c4 c4 c4 c4\").add(note(12)).pianoroll() cps=0.5",
+    "announce REF: c4 + 12 = c5",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: c4 + 12 = c5",
+    "strudel edit note(\"c4 c4 c4 c4\").add(note(12)).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "ab_show ref.wav ours.wav"
+  ]
+}

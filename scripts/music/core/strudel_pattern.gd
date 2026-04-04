@@ -570,9 +570,22 @@ static func _numeral(v: Variant) -> Variant:
 static func _compose_op(a: Variant, b: Variant, op: Callable) -> Variant:
 	if a is Dictionary or b is Dictionary:
 		if not (a is Dictionary):
-			a = {"value": a}
+			# Bare note name or number → wrap as {note: value} to match Strudel's
+			# control dict structure. This allows add(note(7)) to find the "note"
+			# key and perform arithmetic on it.
+			if a is String and StrudelOscillator._note_to_midi(a) >= 0:
+				a = {"note": a}
+			elif a is int or a is float:
+				a = {"note": a}
+			else:
+				a = {"value": a}
 		if not (b is Dictionary):
-			b = {"value": b}
+			if b is String and StrudelOscillator._note_to_midi(b) >= 0:
+				b = {"note": b}
+			elif b is int or b is float:
+				b = {"note": b}
+			else:
+				b = {"value": b}
 		var result: Dictionary = a.duplicate()
 		result.merge(b)
 		for key in b:

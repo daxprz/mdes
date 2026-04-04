@@ -1,0 +1,24 @@
+{
+  "name": "ab_superimpose_add",
+  "description": "A/B: superimpose(add(note(7))) — original + fifth stacked",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_superimpose_add",
+    "strudel ref note(\"c4 e4 g4 c5\").superimpose(x=>x.add(note(7))).pianoroll() cps=0.5",
+    "announce REF: superimpose + add(7)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: superimpose + add(7)",
+    "strudel edit note(\"c4 e4 g4 c5\").superimpose(x=>x.add(note(7))).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0.7",
+    "ab_show ref.wav ours.wav"
+  ]
+}
