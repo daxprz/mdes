@@ -713,8 +713,9 @@ func _jux(func_transform: Callable) -> StrudelPattern:
 
 func _off(time_offset: Variant, func_transform: Callable) -> StrudelPattern:
 	## Superimpose a transformed, time-shifted copy.
+	## Strudel applies late BEFORE the transform: stack(pat, func(pat.late(t)))
 	return superimpose([func(p: StrudelPattern) -> StrudelPattern:
-		return func_transform.call(p)._late(time_offset)])
+		return func_transform.call(p._late(time_offset))])
 
 func _inside(factor: Variant, func_transform: Callable) -> StrudelPattern:
 	## Apply func inside a cycle: slow, transform, fast.
