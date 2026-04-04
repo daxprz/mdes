@@ -2,7 +2,10 @@
   "name": "ab",
   "description": "A/B comparison suite — Strudel reference vs DAX engine",
   "tests": [
-    "music_ab_waveforms",
-    "music_ab_lpf"
+    "ab_sine",
+    "ab_sawtooth",
+    "ab_square",
+    "ab_triangle",
+    "ab_lpf_sweep"
   ]
 }

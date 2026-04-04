@@ -1049,6 +1049,13 @@ func _execute(command: String) -> String:
 		"strudel":
 			return _cmd_strudel(parts, command)
 
+		"ab_dismiss":
+			if _ab_overlay:
+				_ab_overlay.queue_free()
+				_ab_overlay = null
+				return "OK: dismissed"
+			return "OK: no overlay"
+
 		"ab_dir":
 			# Set the output directory for A/B test files.
 			# Usage: ab_dir <test_name>
@@ -1269,21 +1276,39 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 	if ref_bands.is_empty() or our_bands.is_empty():
 		return "FAIL: no signal in one or both files"
 
-	# Compare: average hi-freq energy difference and spectral shape
+	# Compare: per-window spectral match + centroid correlation.
+	# Catches time-varying filter differences (sweep direction, depth).
 	var n: int = mini(ref_bands.size(), our_bands.size())
 	var hi_diff_sum: float = 0.0
 	var shape_diff_sum: float = 0.0
+	var worst_window_diff: float = 0.0
+	var ref_centroids: Array[float] = []
+	var our_centroids: Array[float] = []
+
 	for i in range(n):
-		var r: Vector3 = ref_bands[i]  # x=lo, y=mid, z=hi
-		var o: Vector3 = our_bands[i]
-		hi_diff_sum += absf(r.z - o.z)
-		# Shape: ratio of mid/lo and hi/lo
-		var r_ratio: float = r.y / maxf(r.x, 0.0001)
-		var o_ratio: float = o.y / maxf(o.x, 0.0001)
-		shape_diff_sum += absf(r_ratio - o_ratio)
+		var r: Dictionary = ref_bands[i]
+		var o: Dictionary = our_bands[i]
+
+		hi_diff_sum += absf(float(r["hi"]) - float(o["hi"]))
+
+		# Normalized spectral shape comparison
+		var r_total: float = maxf(float(r["lo"]) + float(r["mid"]) + float(r["hi"]), 0.0001)
+		var o_total: float = maxf(float(o["lo"]) + float(o["mid"]) + float(o["hi"]), 0.0001)
+		var r_norm := Vector3(float(r["lo"]) / r_total, float(r["mid"]) / r_total, float(r["hi"]) / r_total)
+		var o_norm := Vector3(float(o["lo"]) / o_total, float(o["mid"]) / o_total, float(o["hi"]) / o_total)
+		var window_shape_diff: float = (r_norm - o_norm).length()
+		shape_diff_sum += window_shape_diff
+		worst_window_diff = maxf(worst_window_diff, window_shape_diff)
+
+		ref_centroids.append(float(r["centroid"]))
+		our_centroids.append(float(o["centroid"]))
 
 	var avg_hi_diff: float = hi_diff_sum / n
 	var avg_shape_diff: float = shape_diff_sum / n
+
+	# Centroid correlation: do both sweeps move in the same direction?
+	# Pearson correlation of centroid sequences. 1.0 = perfect match, 0 = no correlation.
+	var centroid_corr: float = _pearson_correlation(ref_centroids, our_centroids)
 
 	# Timing check: find first onset in each file, compare offset
 	var ref_onset_ms: float = _find_first_onset_ms(ref_data, 44100)
@@ -1291,18 +1316,38 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 	var onset_diff_ms: float = absf(our_onset_ms - ref_onset_ms)
 
 	var spectral_ok: bool = avg_hi_diff <= max_hi_diff and avg_shape_diff <= max_shape_diff
+	# Centroid correlation only matters if the reference has significant variation
+	# (i.e., a filter sweep). For static sounds, centroid is ~constant and
+	# correlation is meaningless. Check if ref centroid variance is > threshold.
+	var ref_centroid_var: float = 0.0
+	if not ref_centroids.is_empty():
+		var c_mean: float = 0.0
+		for c in ref_centroids:
+			c_mean += c
+		c_mean /= ref_centroids.size()
+		for c in ref_centroids:
+			ref_centroid_var += (c - c_mean) * (c - c_mean)
+		ref_centroid_var = sqrt(ref_centroid_var / ref_centroids.size())
+
+	var centroid_matters: bool = ref_centroid_var > 100.0  # Hz stddev — sweep present
+	var centroid_ok: bool = true
+	if centroid_matters:
+		centroid_ok = centroid_corr >= 0.8
 	var timing_ok: bool = onset_diff_ms <= max_onset_ms
-	var passed: bool = spectral_ok and timing_ok
+	var passed: bool = spectral_ok and centroid_ok and timing_ok
 	var verdict: String = "OK" if passed else "FAIL"
 
 	var reasons: Array[String] = []
 	if not spectral_ok:
-		reasons.append("spectral")
+		reasons.append("spectral(hi=%.3f/%.3f shape=%.3f/%.3f)" % [
+			avg_hi_diff, max_hi_diff, avg_shape_diff, max_shape_diff])
+	if not centroid_ok:
+		reasons.append("centroid(r=%.3f<0.8)" % centroid_corr)
 	if not timing_ok:
 		reasons.append("timing(%.0fms>%.0fms)" % [onset_diff_ms, max_onset_ms])
 
-	return "%s: hi=%.4f shape=%.4f onset=%.0fms %s" % [
-		verdict, avg_hi_diff, avg_shape_diff, onset_diff_ms,
+	return "%s: hi=%.4f shape=%.4f centroid_r=%.3f onset=%.0fms %s" % [
+		verdict, avg_hi_diff, avg_shape_diff, centroid_corr, onset_diff_ms,
 		("— " + ",".join(PackedStringArray(reasons))) if not passed else ""]
 
 
@@ -1360,23 +1405,25 @@ func _load_wav_mono(path: String) -> PackedFloat32Array:
 
 
 func _spectral_bands(samples: PackedFloat32Array, rate: int) -> Array:
-	## Compute lo/mid/hi energy per 100ms window. Returns Array[Vector3].
+	## Compute spectral fingerprint per 100ms window.
+	## Returns Array[Vector3] where x=lo, y=mid, z=hi energy.
+	## Also computes spectral centroid for time-varying filter detection.
 	var win: int = rate / 10  # 100ms
 	var result: Array = []
 	var i: int = 0
 	while i + win <= samples.size():
-		# Check for silence
 		var peak: float = 0.0
 		for j in range(i, i + win):
 			peak = maxf(peak, absf(samples[j]))
 		if peak < 0.003:
 			i += win
 			continue
-		# Goertzel-based energy in 3 bands
 		var lo: float = 0.0
 		var mid: float = 0.0
 		var hi: float = 0.0
-		for freq in range(50, 5000, 100):
+		var centroid_num: float = 0.0  # Σ(freq * mag)
+		var centroid_den: float = 0.0  # Σ(mag)
+		for freq in range(50, 5000, 50):
 			var cos_w: float = cos(TAU * freq / rate)
 			var s1: float = 0.0
 			var s2: float = 0.0
@@ -1386,13 +1433,17 @@ func _spectral_bands(samples: PackedFloat32Array, rate: int) -> Array:
 				s2 = s1
 				s1 = s0
 			var mag: float = sqrt(s1 * s1 + s2 * s2 - 2.0 * cos_w * s1 * s2) / n_samp
+			centroid_num += freq * mag
+			centroid_den += mag
 			if freq < 500:
 				lo += mag * mag
 			elif freq < 2000:
 				mid += mag * mag
 			else:
 				hi += mag * mag
-		result.append(Vector3(sqrt(lo), sqrt(mid), sqrt(hi)))
+		# Store centroid in x component of a second vector (we'll use a Dictionary instead)
+		var centroid: float = centroid_num / maxf(centroid_den, 0.0001)
+		result.append({"lo": sqrt(lo), "mid": sqrt(mid), "hi": sqrt(hi), "centroid": centroid})
 		i += win
 	return result
 
@@ -1533,6 +1584,33 @@ func _show_ab_overlay(tex: ImageTexture) -> void:
 			_ab_overlay = null)
 
 	get_tree().root.add_child(_ab_overlay)
+
+
+func _pearson_correlation(a: Array[float], b: Array[float]) -> float:
+	## Pearson correlation coefficient between two float arrays. Returns -1 to 1.
+	var n: int = mini(a.size(), b.size())
+	if n < 3:
+		return 0.0
+	var sum_a: float = 0.0
+	var sum_b: float = 0.0
+	for i in range(n):
+		sum_a += a[i]
+		sum_b += b[i]
+	var mean_a: float = sum_a / n
+	var mean_b: float = sum_b / n
+	var cov: float = 0.0
+	var var_a: float = 0.0
+	var var_b: float = 0.0
+	for i in range(n):
+		var da: float = a[i] - mean_a
+		var db: float = b[i] - mean_b
+		cov += da * db
+		var_a += da * da
+		var_b += db * db
+	var denom: float = sqrt(var_a * var_b)
+	if denom < 0.0001:
+		return 0.0
+	return cov / denom
 
 
 func _find_first_onset_ms(samples: PackedFloat32Array, rate: int, threshold: float = 0.01) -> float:

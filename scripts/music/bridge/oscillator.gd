@@ -64,9 +64,11 @@ static func render_note(midi: int, duration_sec: float, waveform: String, gain: 
 	return wav
 
 
-static func render_cycle(haps: Array, cps: float, waveform: String = "sine", default_gain: float = 0.7) -> AudioStreamWAV:
+static func render_cycle(haps: Array, cps: float, waveform: String = "sine", default_gain: float = 0.7, signal_controls: Array = []) -> AudioStreamWAV:
 	## Render a full cycle of haps as a single looping AudioStreamWAV.
 	## Each hap produces a note at the correct pitch, duration, and timing.
+	## signal_controls: Array of StrudelPattern producing {lpf: value} dicts,
+	## evaluated per-note to bake filtering directly into the waveform.
 	var cycle_dur: float = 1.0 / cps
 	var n_samples: int = int(RATE * cycle_dur)
 	var buffer := PackedFloat32Array()
@@ -77,12 +79,10 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 		if not hap.has_onset():
 			continue
 
-		# Get note and timing
 		var midi: int = _resolve_midi(hap.value)
 		if midi < 0:
 			continue
 		var onset: float = hap.w().begin.to_float() if hap.whole != null else 0.0
-		# Normalize onset to [0, 1) within cycle
 		onset = fmod(onset, 1.0)
 		if onset < 0:
 			onset += 1.0
@@ -93,10 +93,24 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 		var note_samples: int = int(note_dur * RATE)
 		var freq: float = 440.0 * pow(2.0, (midi - 69.0) / 12.0)
 
-		# Get per-note gain
 		var gain: float = default_gain
 		if hap.value is Dictionary:
 			gain = float(hap.value.get("gain", hap.value.get("velocity", default_gain)))
+
+		# Evaluate signal controls at this note's cycle position to get LPF cutoff etc.
+		var lpf_cutoff: float = 20000.0  # Wide open by default
+		for sig_pat in signal_controls:
+			var sig_haps: Array = sig_pat.query_arc(onset, onset + 0.001)
+			if not sig_haps.is_empty():
+				var sv: Variant = sig_haps[0].value
+				if sv is Dictionary and sv.has("lpf"):
+					lpf_cutoff = float(sv["lpf"])
+
+		# 1-pole IIR lowpass filter coefficient (same as Strudel reference renderer)
+		var rc: float = 1.0 / (TAU * lpf_cutoff)
+		var dt: float = 1.0 / RATE
+		var alpha: float = dt / (rc + dt)
+		var prev_filtered: float = 0.0
 
 		var attack: int = mini(int(RATE * 0.005), note_samples / 4)
 		var release: int = mini(int(RATE * 0.010), note_samples / 4)
@@ -115,13 +129,17 @@ static func render_cycle(haps: Array, cps: float, waveform: String = "sine", def
 				"square": val = 1.0 if phase < 0.5 else -1.0
 				"triangle": val = 4.0 * absf(phase - 0.5) - 1.0
 
+			# Apply LPF
+			var filtered: float = prev_filtered + alpha * (val - prev_filtered)
+			prev_filtered = filtered
+
 			var env: float = 1.0
 			if i < attack:
 				env = float(i) / maxf(attack, 1)
 			elif i > note_samples - release:
 				env = float(note_samples - i) / maxf(release, 1)
 
-			buffer[idx] += val * gain * env
+			buffer[idx] += filtered * gain * env
 
 	# Convert float buffer to 16-bit PCM
 	var data := PackedByteArray()

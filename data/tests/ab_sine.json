@@ -2,16 +2,14 @@
   "name": "ab_sine",
   "description": "A/B: sine wave C4",
   "script": [
+    "ab_dismiss",
     "strudel stop",
     "music off",
-
     "ab_dir ab_sine",
-
     "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\")",
     "announce REF: sine C4",
     "ab_play ref.wav",
     "wait 10 unless silent",
-
     "announce OURS: sine C4",
     "strudel edit \"c4 c4 c4 c4\".pianoroll() cps=0.5",
     "strudel record start",
@@ -19,7 +17,6 @@
     "strudel stop",
     "music off",
     "strudel record stop ours",
-
     "ab_show ref.wav ours.wav",
     "check ab_compare ref.wav ours.wav 0.05 0.5 10"
   ]

@@ -2,24 +2,22 @@
   "name": "ab_square",
   "description": "A/B: square wave C4",
   "script": [
+    "ab_dismiss",
     "strudel stop",
     "music off",
     "ab_dir ab_square",
-
     "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"square\")",
     "announce REF: square C4",
     "ab_play ref.wav",
     "wait 10 unless silent",
-
     "announce OURS: square C4",
-    "strudel record start",
     "strudel edit \"c4 c4 c4 c4\".s(\"square\").pianoroll() cps=0.5",
+    "strudel record start",
     "wait 10 unless silent",
     "strudel stop",
     "music off",
     "strudel record stop ours",
-
     "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 10"
   ]
 }

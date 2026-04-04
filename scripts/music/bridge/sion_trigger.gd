@@ -346,7 +346,7 @@ func start_batch_from_tracks(tracks: Array, cps: float) -> void:
 
 	# Play oscillator tracks via AudioStreamPlayer (pure waveforms)
 	if not osc_haps.is_empty():
-		var wav: AudioStreamWAV = StrudelOscillator.render_cycle(osc_haps, cps, osc_waveform, osc_gain)
+		var wav: AudioStreamWAV = StrudelOscillator.render_cycle(osc_haps, cps, osc_waveform, osc_gain, _signal_controls)
 		_play_oscillator(wav)
 		DebugOverlay.log("music/batch", null, "BATCH: oscillator playing (%s, %d notes)" % [osc_waveform, osc_haps.size()])
 
