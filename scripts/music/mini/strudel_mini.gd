@@ -99,16 +99,8 @@ static func _patternify_pattern(ast: Dictionary, code: String, offset: int) -> S
 		"stack":
 			return Strudel.stack(children)
 		"polymeter_slowcat":
-			# <a b c> = slowcat of children, each slowed by its weight
-			var slowed: Array = []
-			for i in range(children.size()):
-				var child: StrudelPattern = children[i]
-				var weight: Variant = _get_weight(sources[i])
-				if weight != null and weight > 1:
-					slowed.append(child._slow(weight))
-				else:
-					slowed.append(child)
-			return Strudel.stack(slowed)
+			# <a b c> = slowcat: one element per cycle (a in cycle 0, b in cycle 1, ...)
+			return Strudel.slowcat(children)
 		"polymeter":
 			# {a b c, d e} = polymeter. Each sub-pattern loops at its own
 			# length, aligned to a shared step count (default = first child's length).

@@ -325,14 +325,17 @@ func _parse_polymeter_stack() -> Dictionary:
 
 
 func _parse_slow_sequence() -> Dictionary:
-	## slow_sequence = "<" polymeter_stack ">"
+	## slow_sequence = "<" elements ">"
+	## Each space-separated element is a separate slowcat entry.
+	## <a b c> = slowcat([a, b, c]) — one element per cycle.
 	_expect("<")
 	_skip_ws()
-	var inner: Dictionary = _parse_polymeter_stack()
-	_skip_ws()
+	var items: Array = []
+	while _pos < _code.length() and _peek() != ">":
+		items.append(_parse_slice_with_ops())
+		_skip_ws()
 	_expect(">")
-	inner["arguments_"]["alignment"] = "polymeter_slowcat"
-	return inner
+	return pattern_node(items, "polymeter_slowcat")
 
 
 # -- Helpers -------------------------------------------------------------------

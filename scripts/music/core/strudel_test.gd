@@ -355,6 +355,74 @@ func _test_signals() -> void:
 	print("    degrade via _apply_deferred_ops cycle 0: %d haps" % drawer_onsets)
 	_eq("degrade via deferred_ops = 1 hap", str(drawer_onsets), "1")
 
+	# -- add() transposition tests --
+	# Static add: note("c3").add_in({"note": 7}) should produce MIDI 55 (g3)
+	var add_static: StrudelPattern = StrudelMini.mini("c3").add_in({"note": 7})
+	var add_s_haps: Array = add_static.query_arc(0.0, 1.0)
+	var add_s_midi: int = -1
+	for ah in add_s_haps:
+		if ah.has_onset():
+			add_s_midi = StrudelOscillator._resolve_midi(ah.value)
+			break
+	_eq("add_in({note:7}) c3→g3", str(add_s_midi), "55")
+
+	# Static add via deferred ops (simulates method chain .add(note(7)))
+	var add_def: StrudelPattern = StrudelMini.mini("c3")
+	add_def = MusicDrawer._apply_deferred_ops(add_def, [{"method": "add", "args": "note(7)"}])
+	var add_d_haps: Array = add_def.query_arc(0.0, 1.0)
+	var add_d_midi: int = -1
+	for ah in add_d_haps:
+		if ah.has_onset():
+			add_d_midi = StrudelOscillator._resolve_midi(ah.value)
+			break
+	_eq("deferred add(note(7)) c3→g3", str(add_d_midi), "55")
+
+	# Dynamic add: note("c3").add_in(slowcat_pattern(<0 12>))
+	# Cycle 0 should produce MIDI 48 (c3+0), cycle 1 should produce MIDI 60 (c3+12=c4)
+	var add_pat_arg: StrudelPattern = StrudelMini.mini("<0 12>").fmap(
+		func(v: Variant) -> Dictionary: return {"note": float(v) if v is float or v is int else 0})
+	var add_dynamic: StrudelPattern = StrudelMini.mini("c3").add_in(add_pat_arg)
+	var add_c0: Array = add_dynamic.query_arc(0.0, 1.0)
+	var add_c0_midi: int = -1
+	for ah in add_c0:
+		if ah.has_onset():
+			add_c0_midi = StrudelOscillator._resolve_midi(ah.value)
+			break
+	print("    add(<0 12>) cycle 0: midi=%d (expect 48=c3)" % add_c0_midi)
+	_eq("add(<0 12>) cycle 0 = 48 (c3)", str(add_c0_midi), "48")
+
+	var add_c1: Array = add_dynamic.query_arc(1.0, 2.0)
+	var add_c1_midi: int = -1
+	for ah in add_c1:
+		if ah.has_onset():
+			add_c1_midi = StrudelOscillator._resolve_midi(ah.value)
+			break
+	print("    add(<0 12>) cycle 1: midi=%d (expect 60=c4)" % add_c1_midi)
+	_eq("add(<0 12>) cycle 1 = 60 (c4)", str(add_c1_midi), "60")
+
+	# 3-note pattern with dynamic add: all notes should shift by the same amount per cycle
+	var add_3note: StrudelPattern = StrudelMini.mini("c3 e3 g3").add_in(add_pat_arg)
+	var add_3_c0: Array = add_3note.query_arc(0.0, 1.0)
+	var add_3_c0_midis: Array = []
+	for ah in add_3_c0:
+		if ah.has_onset():
+			var midi: int = StrudelOscillator._resolve_midi(ah.value)
+			var whole_str: String = "%s-%s" % [ah.whole.begin.to_string(), ah.whole.end.to_string()] if ah.whole else "null"
+			print("      hap: value=%s midi=%d whole=%s" % [str(ah.value), midi, whole_str])
+			add_3_c0_midis.append(midi)
+	add_3_c0_midis.sort()
+	print("    add(<0 12>) 3-note cycle 0: %s (expect [48,52,55])" % str(add_3_c0_midis))
+	_eq("add(<0 12>) 3-note c0", str(add_3_c0_midis), "[48, 52, 55]")
+
+	var add_3_c1: Array = add_3note.query_arc(1.0, 2.0)
+	var add_3_c1_midis: Array = []
+	for ah in add_3_c1:
+		if ah.has_onset():
+			add_3_c1_midis.append(StrudelOscillator._resolve_midi(ah.value))
+	add_3_c1_midis.sort()
+	print("    add(<0 12>) 3-note cycle 1: %s (expect [60,64,67])" % str(add_3_c1_midis))
+	_eq("add(<0 12>) 3-note c1", str(add_3_c1_midis), "[60, 64, 67]")
+
 	print("  Signals: %d tests" % (_pass_count + _fail_count - start))
 
 
@@ -829,7 +897,8 @@ func _test_mml_compiler() -> void:
 	_ok("mml has g (G note)", " g" in mml)
 
 	# Each note should be a quarter (l4) since 4 equal notes per cycle
-	_ok("mml has quarter notes", " c4 " in mml or "c4 " in mml)
+	# MML format uses "o4 c" not "c4" — octave prefix + note letter
+	_ok("mml has quarter note length", "l4" in mml)
 
 	# --- Euclidean rhythm MML ---
 	var euc_pat: StrudelPattern = StrudelMini.mini("c4(3,8)")

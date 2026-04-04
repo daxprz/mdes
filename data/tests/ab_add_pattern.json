@@ -1,0 +1,24 @@
+{
+  "name": "ab_add_pattern",
+  "description": "A/B: add(note(\"<0 5 7 0>\")) — dynamic transposition per cycle",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_add_pattern",
+    "strudel ref note(\"c3 e3 g3\").add(note(\"<0 5 7 0>\")).pianoroll() cps=0.5",
+    "announce REF: add pattern <0 5 7 0>",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: add pattern <0 5 7 0>",
+    "strudel edit note(\"c3 e3 g3\").add(note(\"<0 5 7 0>\")).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0.7",
+    "ab_show ref.wav ours.wav"
+  ]
+}
