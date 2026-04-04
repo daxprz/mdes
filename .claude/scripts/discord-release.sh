@@ -121,8 +121,8 @@ PAYLOAD=$(cat <<ENDJSON
         },
         {
           "name": "Download",
-          "value": "[GitHub Release](${RELEASE_URL})",
-          "inline": true
+          "value": "[Windows](${REPO_URL}/releases/download/${VERSION}/TheUltimateMuffin-Windows.zip) · [macOS](${REPO_URL}/releases/download/${VERSION}/TheUltimateMuffin-macOS.zip) · [Linux](${REPO_URL}/releases/download/${VERSION}/TheUltimateMuffin-Linux.zip)",
+          "inline": false
         }
       ],
       "footer": {
