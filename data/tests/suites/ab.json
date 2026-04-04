@@ -33,6 +33,15 @@
     "ab_jux",
     "ab_off",
     "ab_s_function",
-    "ab_degrade"
+    "ab_degrade",
+    "ab_add",
+    "ab_add_simple",
+    "ab_add_octave",
+    "ab_superimpose_add",
+    "ab_add_pattern",
+    "ab_adsr",
+    "ab_setcps",
+    "ab_stack_func",
+    "ab_hush"
   ]
 }

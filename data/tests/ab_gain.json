@@ -12,6 +12,7 @@
     "ab_play ref.wav",
     "wait 10 unless silent 2.5",
     "announce OURS: gain 0.3",
+    "strudel highlights on",
     "strudel edit note(\"c4 c4 c4 c4\").gain(0.3).pianoroll() cps=0.5",
     "strudel record start",
     "wait 10 unless silent 2.5",
@@ -19,6 +20,7 @@
     "music off",
     "strudel record stop ours",
     "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "check strudel highlights check 0/1:[L1:c4]",
     "ab_show ref.wav ours.wav"
   ]
 }

@@ -203,6 +203,20 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.59
+**Highlight sequence testing, multi-line blocks, harmonic frequency matching, 41 A/B tests**
+
+- **Per-beat highlight tracking**: new `strudel highlights` system records which source substrings are highlighted at each beat fraction (e.g., `0/1:[L1:c4|L1:c5]`), enabling visual correctness testing
+- **All 41 A/B tests now verify highlights**: per-beat checks assert correct notes highlight at correct times with set semantics for simultaneous notes
+- **Multi-line block syntax**: `strudel begin`/`strudel end` preprocesses multi-line expressions (like `stack(...)` across lines) by merging continuation lines via paren-depth tracking
+- **Stack highlight offset fix**: `_split_top_level_commas` sub-expression positions now account for leading whitespace, fixing off-by-one source highlights in `stack()` expressions
+- **Transform arg location stripping**: `add(note("<0 5 7 0>"))` no longer pollutes base pattern highlights — `_strip_locations()` on Pattern removes operand locations before `combine_context` merge
+- **Harmonic frequency matching**: `ab_compare` now accepts 2x/0.5x frequency ratios as matches, correctly handling HPF-filtered signals where zero-crossing detects the 2nd harmonic
+- **CPS sync fix**: `strudel_set_cps()` now syncs `MusicDrawer._cps`, preventing stale CPS from leaking between tests
+- **Ref server space-join**: multi-line blocks sent to the Strudel reference server are joined with spaces (not semicolons), fixing `stack()` expressions
+- **Both-silent match**: `ab_compare` returns OK when both files are silent (hush test)
+- **5 new tests**: ab_setcps, ab_stack_func, ab_hush, plus ab suite updated to 41 tests
+
 ### v0.10.58
 **add/sub/mul transposition, per-window frequency match, annotated spectrograms, 36 A/B tests**
 

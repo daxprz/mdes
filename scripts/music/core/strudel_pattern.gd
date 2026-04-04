@@ -147,6 +147,18 @@ func with_loc(start: int, end: int) -> StrudelPattern:
 		return hap.set_context(new_ctx))
 
 
+func _strip_locations() -> StrudelPattern:
+	## Remove all source locations from haps. Used for transform operand patterns
+	## (add/sub/mul arguments) whose locations would pollute the base pattern's
+	## coordinate space when merged via combine_context.
+	return with_hap(func(hap: StrudelHap) -> StrudelHap:
+		if hap.context.has("locations"):
+			var new_ctx: Dictionary = hap.context.duplicate()
+			new_ctx.erase("locations")
+			return hap.set_context(new_ctx)
+		return hap)
+
+
 # ==============================================================================
 # Filters
 # ==============================================================================

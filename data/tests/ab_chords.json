@@ -12,6 +12,7 @@
     "ab_play ref.wav",
     "wait 10 unless silent 2.5",
     "announce OURS: chord progression",
+    "strudel highlights on",
     "strudel edit note(\"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]\").s(\"sawtooth\").pianoroll() cps=0.5",
     "strudel record start",
     "wait 10 unless silent 2.5",
@@ -19,6 +20,8 @@
     "music off",
     "strudel record stop ours",
     "check ab_compare ref.wav ours.wav 0.08 0.8 500 0.7",
+    "check strudel highlights check 0/1:[L1:c3|L1:e3|L1:g3]",
+    "check strudel highlights check 1/4:[L1:f3|L1:a3|L1:c4]",
     "ab_show ref.wav ours.wav"
   ]
 }

@@ -101,6 +101,74 @@ func _execute(command: String) -> String:
 	if parts.is_empty():
 		return "ERR: empty command"
 
+	# Strudel multi-line block: accumulate lines between "strudel begin" and "strudel end"
+	if _strudel_block_active:
+		var trimmed: String = command.strip_edges()
+		if trimmed == "strudel end":
+			_strudel_block_active = false
+			var raw_lines: Array[String] = _strudel_block.duplicate()
+			_strudel_block.clear()
+			# Preprocess: merge multi-line expressions by tracking paren depth.
+			# A real Strudel file has stack(\n  ...,\n  ...\n) as ONE expression.
+			# Lines with unclosed parens are continuation lines, not separate patterns.
+			var drawer_lines: Array[String] = []
+			var current: String = ""
+			var depth: int = 0
+			for rl in raw_lines:
+				var cl: String = rl.strip_edges()
+				if cl.is_empty() or cl.begins_with("//") or cl.begins_with("#"):
+					if depth == 0 and not current.is_empty():
+						drawer_lines.append(current)
+						current = ""
+					if cl.begins_with("//") or cl.begins_with("#"):
+						drawer_lines.append(cl)
+					continue
+				if current.is_empty():
+					current = cl
+				else:
+					current += " " + cl
+				# Count parens (outside of quoted strings)
+				var in_str: bool = false
+				var str_char: String = ""
+				for ci in range(cl.length()):
+					var ch: String = cl[ci]
+					if in_str:
+						if ch == str_char:
+							in_str = false
+					elif ch == '"' or ch == "'":
+						in_str = true
+						str_char = ch
+					elif ch == '(':
+						depth += 1
+					elif ch == ')':
+						depth = maxi(0, depth - 1)
+				if depth == 0:
+					drawer_lines.append(current)
+					current = ""
+			if not current.is_empty():
+				drawer_lines.append(current)
+			# Set drawer lines and play
+			MusicDrawer._lines.clear()
+			for bl in drawer_lines:
+				MusicDrawer._lines.append(MusicDrawer._make_line(bl))
+			MusicDrawer._current_line = 0
+			MusicDrawer._editor_cursor = 0
+			MusicDrawer.open()
+			MusicDrawer._play_current()
+			return "OK: strudel block (%d raw → %d merged lines), playing" % [raw_lines.size(), drawer_lines.size()]
+		elif trimmed == "strudel ref end":
+			_strudel_block_active = false
+			var block_lines: Array[String] = _strudel_block.duplicate()
+			_strudel_block.clear()
+			# Send to ref server as a single multi-line expression
+			var code: String = "\n".join(PackedStringArray(block_lines))
+			return _cmd_strudel_ref_code(code)
+		else:
+			# Accumulate the line (skip empty and comments for cleanliness)
+			if not trimmed.is_empty():
+				_strudel_block.append(trimmed)
+			return "OK: +line (%d)" % _strudel_block.size()
+
 	var cmd: String = parts[0].to_lower()
 
 	match cmd:
@@ -1275,8 +1343,13 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 	var ref_bands: Array = _spectral_bands(ref_data, 44100)
 	var our_bands: Array = _spectral_bands(our_data, 44100)
 
-	if ref_bands.is_empty() or our_bands.is_empty():
-		return "FAIL: no signal in one or both files"
+	if ref_bands.is_empty() and our_bands.is_empty():
+		# Both files are silent — this is a valid match (e.g., hush test)
+		return "OK: both silent — match"
+	if ref_bands.is_empty():
+		return "FAIL: no signal in ref (but ours has signal)"
+	if our_bands.is_empty():
+		return "FAIL: no signal in ours (but ref has signal)"
 
 	# Compare: per-window spectral match + centroid correlation.
 	# Catches time-varying filter differences (sweep direction, depth).
@@ -1383,7 +1456,14 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 			var ref_freq: float = float(ref_zc) * 44100.0 / (2.0 * float(win_samples))
 			var our_freq: float = float(our_zc) * 44100.0 / (2.0 * float(win_samples))
 			freq_total_count += 1
-			var matched: bool = ref_freq > 10.0 and absf(our_freq - ref_freq) / maxf(ref_freq, 1.0) < 0.15
+			# Match if frequencies are within 15%, OR if one is a harmonic
+			# of the other (2x/0.5x ratio within 15%). Filters shift dominant
+			# zero-crossing frequency to harmonics without changing the note.
+			var ratio: float = our_freq / maxf(ref_freq, 1.0)
+			var matched: bool = ref_freq > 10.0 and (
+				absf(ratio - 1.0) < 0.15 or   # fundamental match
+				absf(ratio - 2.0) < 0.15 or   # 2nd harmonic
+				absf(ratio - 0.5) < 0.15)      # sub-harmonic
 			if matched:
 				freq_match_count += 1
 			freq_windows.append({"time": t, "ref_hz": ref_freq, "our_hz": our_freq, "match": matched})
@@ -1532,6 +1612,10 @@ func _spectral_bands(samples: PackedFloat32Array, rate: int) -> Array:
 
 var _ab_player: AudioStreamPlayer = null
 var _ab_test_dir: String = ""  ## Current A/B test output folder name
+
+# Strudel multi-line block accumulator (strudel begin / strudel end)
+var _strudel_block: Array[String] = []
+var _strudel_block_active: bool = false
 var _last_freq_windows: Array = []  ## Per-window freq data from last ab_compare
 
 func _ab_path(filename: String) -> String:
@@ -1744,6 +1828,52 @@ func _count_onsets(samples: PackedFloat32Array, rate: int, threshold: float = 0.
 	return onsets
 
 
+func _cmd_strudel_ref_code(code: String) -> String:
+	## Send multi-line Strudel code to the ref server for rendering.
+	## Strips display-only suffixes, joins lines with semicolons for JS eval.
+	# Strip viz methods and our custom params from each line
+	var clean_lines: Array[String] = []
+	for line in code.split("\n"):
+		var cl: String = line.strip_edges()
+		if cl.is_empty() or cl.begins_with("//") or cl.begins_with("#"):
+			continue
+		# Strip viz methods
+		for viz in [".pianoroll()", ".punchcard()", "._pianoroll()",
+					".scope()", ".wordfall()", ".spiral()", ".pitchwheel()", ".fscope()"]:
+			cl = cl.replace(viz, "")
+		# Strip viz with options: .pianoroll({...})
+		var viz_paren: int = cl.find(".pianoroll(")
+		if viz_paren < 0:
+			viz_paren = cl.find(".scope(")
+		if viz_paren >= 0:
+			var close: int = cl.find(")", viz_paren)
+			if close >= 0:
+				cl = cl.substr(0, viz_paren) + cl.substr(close + 1)
+		# Strip cps= trailing param
+		var cps_idx: int = cl.find("cps=")
+		if cps_idx >= 0:
+			var cps_end: int = cps_idx + 4
+			while cps_end < cl.length() and cl[cps_end] != " " and cl[cps_end] != ";":
+				cps_end += 1
+			cl = (cl.substr(0, cps_idx) + cl.substr(cps_end)).strip_edges()
+		cl = cl.strip_edges()
+		if not cl.is_empty():
+			clean_lines.append(cl)
+	if clean_lines.is_empty():
+		return "ERR: no code to send"
+	# Join with spaces — preserves multi-line expressions (stack(...), etc.)
+	# The ref server extracts setcps/setcpm before wrapping in `return`,
+	# so the remaining code is a single expression that can be space-joined.
+	var js_code: String = " ".join(PackedStringArray(clean_lines))
+	var ref_result: String = _send_to_ref_server("render " + js_code)
+	if ref_result.begins_with("OK:") and not _ab_test_dir.is_empty():
+		var src: String = OS.get_user_data_dir().path_join("strudel_ref.wav")
+		var dst: String = _ab_path("ref.wav")
+		DirAccess.copy_absolute(src, dst)
+		ref_result += " → %s" % dst
+	return ref_result
+
+
 func _send_to_ref_server(message: String) -> String:
 	## Send a command to the Strudel reference server (Node.js on port 9998).
 	## Returns the response string, or an error message.
@@ -1798,6 +1928,14 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"stop", "hush":
 			MusicManager.strudel_stop()
 			return "OK: strudel stopped"
+		"begin":
+			# Start accumulating multi-line Strudel block.
+			# Lines are collected until "strudel end" which plays them,
+			# or "strudel ref end" which sends them to the ref server.
+			_strudel_block.clear()
+			_strudel_block_active = true
+			return "OK: strudel block started (send lines, then 'strudel end' or 'strudel ref end')"
+		# "ref" is handled below in the second ref: case
 		"start":
 			MusicManager.strudel_start()
 			return "OK: strudel %s" % ("resumed" if MusicManager._strudel_playing else "nothing to resume")
@@ -1835,6 +1973,70 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
 			MusicManager.strudel_set_cps(float(parts[2]))
 			return "OK: cps → %.2f" % float(parts[2])
+		"highlights":
+			# Highlight beat tracking for visual tests.
+			# strudel highlights on        — start tracking (clears previous)
+			# strudel highlights off       — stop tracking
+			# strudel highlights clear     — reset
+			# strudel highlights           — show all beats
+			# strudel highlights check <beat>:[<items>]
+			#   e.g.: check 0/4:[L1:c4|L1:c5]  — at beat 0/4, both c4 and c5 highlighted
+			var hl_sub: String = parts[2] if parts.size() > 2 else ""
+			match hl_sub:
+				"on":
+					MusicDrawer._highlight_tracking = true
+					MusicDrawer._highlight_beats.clear()
+					MusicDrawer._highlight_seen.clear()
+					return "OK: highlight tracking on"
+				"off":
+					MusicDrawer._highlight_tracking = false
+					return "OK: highlight tracking off"
+				"clear":
+					MusicDrawer._highlight_beats.clear()
+					MusicDrawer._highlight_seen.clear()
+					return "OK: highlights cleared"
+				"check":
+					# strudel highlights check 0/4:[L1:c4|L1:c5]
+					if parts.size() < 4:
+						return "Usage: strudel highlights check <beat>:[<items>]"
+					var check_arg: String = parts[3]
+					var colon_pos: int = check_arg.find(":[")
+					if colon_pos < 0:
+						return "Usage: strudel highlights check <beat>:[L1:c4|L1:c5]"
+					var beat_key: String = check_arg.substr(0, colon_pos)
+					var items_str: String = check_arg.substr(colon_pos + 2)
+					if items_str.ends_with("]"):
+						items_str = items_str.substr(0, items_str.length() - 1)
+					var expected_items: PackedStringArray = items_str.split("|")
+					var actual_items: Array = MusicDrawer._highlight_beats.get(beat_key, [])
+					var missing: Array[String] = []
+					for want in expected_items:
+						var w: String = want.strip_edges()
+						if w not in actual_items:
+							missing.append(w)
+					if missing.is_empty():
+						return "OK: beat %s has [%s] (%d items)" % [beat_key,
+							"|".join(PackedStringArray(actual_items)), actual_items.size()]
+					else:
+						return "FAIL: beat %s missing [%s]. actual=[%s]" % [beat_key,
+							"|".join(PackedStringArray(missing)),
+							"|".join(PackedStringArray(actual_items)) if not actual_items.is_empty() else "empty"]
+				_:
+					# Show all beats sorted by fraction value
+					var beats: Dictionary = MusicDrawer._highlight_beats
+					var keys: Array = beats.keys()
+					# Sort by numeric value of fraction
+					keys.sort_custom(func(a: String, b: String) -> bool:
+						var ap: PackedStringArray = a.split("/")
+						var bp: PackedStringArray = b.split("/")
+						var av: float = float(ap[0]) / maxf(float(ap[1]), 1.0) if ap.size() == 2 else float(a)
+						var bv: float = float(bp[0]) / maxf(float(bp[1]), 1.0) if bp.size() == 2 else float(b)
+						return av < bv)
+					var lines: Array[String] = ["highlights (%d beats, tracking=%s):" % [
+						keys.size(), "on" if MusicDrawer._highlight_tracking else "off"]]
+					for k in keys:
+						lines.append("  %s:[%s]" % [k, "|".join(PackedStringArray(beats[k]))])
+					return "\n".join(lines)
 		"status":
 			var lines: Array[String] = ["Strudel Engine:"]
 			lines.append("  playing: %s" % str(MusicManager._strudel_playing))
@@ -1879,9 +2081,13 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			# Reference render: send pattern to Strudel Node.js server (port 9998)
 			# Renders real Strudel output to WAV for A/B comparison.
 			# Saves to current ab_dir as ref.wav.
-			# Usage: strudel ref <strudel_code>
+			# Usage: strudel ref <strudel_code> OR strudel ref begin (multi-line)
 			# Strips display-only suffixes (.pianoroll(), cps=) so tests can
 			# pass the IDENTICAL string to both "strudel ref" and "strudel edit".
+			if parts.size() > 2 and parts[2] == "begin":
+				_strudel_block.clear()
+				_strudel_block_active = true
+				return "OK: strudel ref block started (send lines, then 'strudel ref end')"
 			if parts.size() < 3:
 				return "Usage: strudel ref <strudel_pattern_code>"
 			var ref_code: String = command.substr(command.find("ref ") + 4).strip_edges()
@@ -1904,6 +2110,10 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 				DirAccess.copy_absolute(src, dst)
 				ref_result += " → %s" % dst
 			return ref_result
+		"ref_block":
+			# Internal: called when strudel ref end finishes a block
+			return "OK: ref_block (handled in _execute block accumulator)"
+
 		"record":
 			# Audio recording: strudel record start|stop [filename]
 			if parts.size() < 3:

@@ -1,0 +1,40 @@
+{
+  "name": "ab_setcps",
+  "description": "A/B: setcps(1.0) — identical code to ref and ours. Verifies tempo control.",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "strudel cps 0.5",
+    "wait 1",
+    "ab_dir ab_setcps",
+
+    "# Reference: setcps(1.0) + note pattern sent to real Strudel",
+    "strudel ref begin",
+    "setcps(1.0)",
+    "note(\"c4 e4 g4 c5\")",
+    "strudel ref end",
+    "announce REF: setcps(1.0) + note(...)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+
+    "# Ours: identical code to our engine",
+    "announce OURS: setcps(1.0) + note(...)",
+    "strudel highlights on",
+    "strudel begin",
+    "setcps(1.0)",
+    "note(\"c4 e4 g4 c5\")",
+    "strudel end",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "check strudel highlights check 0/1:[L2:c4]",
+    "check strudel highlights check 1/4:[L2:e4]",
+    "check strudel highlights check 1/2:[L2:g4]",
+    "check strudel highlights check 3/4:[L2:c5]",
+    "ab_show ref.wav ours.wav"
+  ]
+}

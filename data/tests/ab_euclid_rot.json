@@ -12,6 +12,7 @@
     "ab_play ref.wav",
     "wait 10 unless silent 2.5",
     "announce OURS: euclid(3,8,1)",
+    "strudel highlights on",
     "strudel edit note(\"c4\").euclidRot(3,8,1).pianoroll() cps=0.5",
     "strudel record start",
     "wait 10 unless silent 2.5",
@@ -19,6 +20,9 @@
     "music off",
     "strudel record stop ours",
     "check ab_compare ref.wav ours.wav 0.10 0.5 500 0",
+    "check strudel highlights check 1/8:[L1:c4]",
+    "check strudel highlights check 1/2:[L1:c4]",
+    "check strudel highlights check 7/8:[L1:c4]",
     "ab_show ref.wav ours.wav"
   ]
 }

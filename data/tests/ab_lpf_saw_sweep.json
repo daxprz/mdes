@@ -12,6 +12,7 @@
     "ab_play ref.wav",
     "wait 10 unless silent 2.5",
     "announce OURS: sawtooth + saw LPF sweep",
+    "strudel highlights on",
     "strudel edit note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(saw.range(100,4000)).pianoroll() cps=0.5",
     "strudel record start",
     "wait 10 unless silent 2.5",
@@ -19,6 +20,7 @@
     "music off",
     "strudel record stop ours",
     "check ab_compare ref.wav ours.wav 0.08 0.8 500 0.7",
+    "check strudel highlights check 0/1:[L1:c4]",
     "ab_show ref.wav ours.wav"
   ]
 }

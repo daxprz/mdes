@@ -314,6 +314,14 @@ var _last_query_end: float = 0.0
 var _active_locations: Dictionary = {}  # "line:start:end" -> StrudelHap
 var _debug_frame: int = 0               # Frame counter for throttled logging
 
+# Highlight tracking for testing — time-bucketed sets.
+# Each beat maps to the set of substrings highlighted at that time.
+# Format: {"0/4": ["L1:c4", "L1:c5"], "1/4": ["L1:e4"], ...}
+# Reset via strudel highlights clear, read via strudel highlights.
+var _highlight_beats: Dictionary = {}      # fraction_str -> Array[String]
+var _highlight_seen: Dictionary = {}       # "line:start:end" -> true (dedup)
+var _highlight_tracking: bool = false      # Only track when enabled (test mode)
+
 
 func _ready() -> void:
 	_lines = [_make_line("c4 e4 g4 c5")]
@@ -840,8 +848,11 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 				line["viz_options"] = viz_options
 				found_viz = true
 		elif kind == "pattern":
-			# Deferred pattern combinator — applied after pattern build
-			deferred_ops.append({"method": best_method, "args": args_str})
+			# Deferred pattern combinator — applied after pattern build.
+			# Store args_offset: position of the args within the full line text,
+			# so that sub-patterns (e.g. add(note("<0 5 7>"))) get correct source locations.
+			var args_offset_in_line: int = offset + best_paren_open
+			deferred_ops.append({"method": best_method, "args": args_str, "args_offset": args_offset_in_line})
 		else:
 			var control_key: String = AUDIO_CONTROL_METHODS[best_method]
 			if control_key == "s":
@@ -888,6 +899,17 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 			# Compute where "stack(" starts in the original line text
 			var stack_pos: int = raw.find("stack(")
 			var stack_inner_offset: int = (stack_pos + 6) if stack_pos >= 0 else offset
+			# sub_exprs have stripped text but pos pointing to pre-strip start.
+			# Compute leading whitespace for each sub-expr so _eval_sub_expr
+			# gets the correct absolute offset.
+			for se in sub_exprs:
+				var raw_sub: String = inner.substr(se["pos"])
+				var comma_or_end: int = raw_sub.find(",")
+				if comma_or_end < 0:
+					comma_or_end = raw_sub.length()
+				raw_sub = raw_sub.substr(0, comma_or_end)
+				var leading: int = raw_sub.length() - raw_sub.lstrip(" \t").length()
+				se["pos"] = se["pos"] + leading  # shift past leading whitespace
 			result["is_stack"] = true
 			result["stack_exprs"] = sub_exprs
 			result["stack_offset"] = stack_inner_offset
@@ -1144,9 +1166,10 @@ static func _parse_method_chain_transform(chain: String) -> Variant:
 		return result
 
 
-static func _parse_transform_arg(args_str: String) -> Variant:
+static func _parse_transform_arg(args_str: String, base_offset: int = 0) -> Variant:
 	## Parse a transform argument — a number, note() wrapper, or quoted mini.
 	## Returns a value suitable for add_in/sub_in/mul_in.
+	## base_offset: character position of args_str within the line (for source highlighting).
 	##
 	## In Strudel, add() uses _opIn which merges dict values per-key.
 	## So note("c4").add(7) does NOT transpose — the 7 has no "note" key.
@@ -1158,28 +1181,35 @@ static func _parse_transform_arg(args_str: String) -> Variant:
 	##   add(note("7"))  → same
 	##   add("<0 5 7>")  → add_in(mini pattern)
 	var s: String = args_str.strip_edges()
+	var inner_offset: int = base_offset + (args_str.length() - args_str.strip_edges().length())
 	if s.is_empty():
 		return null
 	# note(N) wrapper → wrap as {note: N} dict for per-key merging
 	if s.begins_with("note(") and s.ends_with(")"):
 		var inner: String = s.substr(5, s.length() - 6).strip_edges()
+		inner_offset += 5  # skip "note("
 		# Strip quotes inside note()
 		if inner.length() >= 2 and ((inner[0] == '"' and inner[-1] == '"') or (inner[0] == "'" and inner[-1] == "'")):
+			inner_offset += 1  # skip opening quote
 			inner = inner.substr(1, inner.length() - 2)
 		if inner.is_valid_float():
 			return {"note": float(inner)}
-		# Mini-notation inside note() → pattern
-		return StrudelMini.mini(inner).fmap(func(v: Variant) -> Dictionary:
+		# Mini-notation inside note() → pattern.
+		# Strip locations so they don't pollute the base pattern's coordinate space
+		# when combined via add_in/sub_in/mul_in → app_left → combine_context.
+		return StrudelMini.mini(inner)._strip_locations().fmap(func(v: Variant) -> Dictionary:
 			return {"note": float(v) if v is float or v is int else 0})
 	# Strip quotes
 	if s.length() >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+		inner_offset += 1  # skip opening quote
 		s = s.substr(1, s.length() - 2)
 	# Try as number
 	if s.is_valid_float():
 		return float(s)
 	# Try as mini-notation pattern (e.g., "0,2" or "<0 5 7 0>")
+	# Strip locations — same reasoning as note() case above.
 	if not s.is_empty():
-		return s  # Will be reified by add_in → Strudel.reify()
+		return StrudelMini.mini(s)._strip_locations()
 	return null
 
 
@@ -1365,15 +1395,15 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 				if args.is_valid_float():
 					pat = pat._ply(int(float(args)))
 			"add":
-				var add_v: Variant = _parse_transform_arg(args)
+				var add_v: Variant = _parse_transform_arg(args, op.get("args_offset", 0))
 				if add_v != null:
 					pat = pat.add_in(add_v)
 			"sub":
-				var sub_v: Variant = _parse_transform_arg(args)
+				var sub_v: Variant = _parse_transform_arg(args, op.get("args_offset", 0))
 				if sub_v != null:
 					pat = pat.sub_in(sub_v)
 			"mul":
-				var mul_v: Variant = _parse_transform_arg(args)
+				var mul_v: Variant = _parse_transform_arg(args, op.get("args_offset", 0))
 				if mul_v != null:
 					pat = pat.mul_in(mul_v)
 	return pat
@@ -1698,6 +1728,8 @@ func _update_pianoroll() -> void:
 			_line_query_ends[i] = visible_end
 
 		# Accumulate into global list + per-line highlighting
+		var line_text: String = _lines[i].get("text", "") if i < _lines.size() else ""
+		var pat_off: int = _lines[i].get("pattern_offset", 0) if i < _lines.size() else 0
 		for hap in _line_haps[i]:
 			_visible_haps.append(hap)
 			if hap.whole == null or not hap.is_active(_current_time):
@@ -1708,6 +1740,22 @@ func _update_pianoroll() -> void:
 				var key: String = "%d:%d:%d" % [i, loc.get("start", 0), loc.get("end", 0)]
 				if not _active_locations.has(key) or hap.w().begin.to_float() > _active_locations[key].w().begin.to_float():
 					_active_locations[key] = hap
+				# Track first-seen highlights bucketed by beat fraction
+				if _highlight_tracking and hap.whole != null:
+					var beat_frac: String = hap.w().begin.modulo(StrudelFraction.new(1, 1)).show()
+					# Dedup key includes beat so same source at different beats is tracked
+					var beat_key: String = "%s@%s" % [key, beat_frac]
+					if not _highlight_seen.has(beat_key):
+						_highlight_seen[beat_key] = true
+						var hl_start: int = clampi(int(loc.get("start", 0)) + pat_off, 0, line_text.length())
+						var hl_end: int = clampi(int(loc.get("end", 0)) + pat_off, 0, line_text.length())
+						var hl_sub: String = line_text.substr(hl_start, hl_end - hl_start).strip_edges()
+						if not hl_sub.is_empty():
+							var entry: String = "L%d:%s" % [i + 1, hl_sub]
+							if not _highlight_beats.has(beat_frac):
+								_highlight_beats[beat_frac] = []
+							if entry not in _highlight_beats[beat_frac]:
+								_highlight_beats[beat_frac].append(entry)
 
 
 # -- Drawing -------------------------------------------------------------------

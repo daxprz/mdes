@@ -1093,6 +1093,9 @@ func strudel_set_cps(cps: float) -> void:
 		if _sion_trigger and _sion_trigger.batch_mode and driver:
 			var new_bpm: int = maxi(30, int(240.0 * cps))
 			driver.call("set_bpm", new_bpm)
+	# Keep drawer's CPS in sync so strudel begin/end blocks use the correct tempo
+	if MusicDrawer:
+		MusicDrawer._cps = cps
 
 
 func play_score(score_name: String) -> String:
