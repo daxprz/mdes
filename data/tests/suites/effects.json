@@ -1,0 +1,9 @@
+{
+  "name": "effects",
+  "description": "Audio effects test suite — bus-level post-processing (lpf, hpf, reverb, delay, distortion, crush, pan)",
+  "tests": [
+    "music_effects",
+    "music_effects_drawer",
+    "music_effects_rcon"
+  ]
+}

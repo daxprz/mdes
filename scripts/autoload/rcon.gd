@@ -165,7 +165,7 @@ func _execute(command: String) -> String:
   exec_tuning (et)              — toggle ball/chain tuning popup
   exec_set <key> <value>        — set executioner tuning value
   music [play|stop|off|score|scores|mml|intensity|tempo|layer|...] — music
-  strudel <mini-notation>       — play Strudel pattern (or stop/cps/status)
+  strudel <mini-notation>       — play Strudel pattern (or stop/cps/status/fx)
   musicdrawer (md)              — toggle music drawer (Ctrl+M)
   quit                          — quit game"""
 
@@ -1049,6 +1049,30 @@ func _execute(command: String) -> String:
 		"strudel":
 			return _cmd_strudel(parts, command)
 
+		"ab_dir":
+			# Set the output directory for A/B test files.
+			# Usage: ab_dir <test_name>
+			if parts.size() < 2:
+				return "ab_dir: %s" % _ab_test_dir
+			_ab_test_dir = parts[1]
+			var full_path: String = OS.get_user_data_dir().path_join("ab").path_join(_ab_test_dir)
+			DirAccess.make_dir_recursive_absolute(full_path)
+			return "OK: ab_dir=%s (%s)" % [_ab_test_dir, full_path]
+
+		"ab_compare":
+			return _cmd_ab_compare(parts)
+
+		"ab_show":
+			return _cmd_ab_show(parts)
+
+		"ab_play":
+			# Play a WAV file from user://
+			# Usage: ab_play <filename.wav>
+			if parts.size() < 2:
+				return "Usage: ab_play <filename.wav>"
+			return _cmd_ab_play(parts[1])
+
+
 		"musicdrawer", "md":
 			# md / md open / md close
 			if parts.size() > 1:
@@ -1216,6 +1240,342 @@ func _cmd_gameconfig(parts: PackedStringArray) -> String:
 	return "OK: game/%s = %s" % [key, str(new_val)]
 
 
+func _cmd_ab_compare(parts: PackedStringArray) -> String:
+	## A/B spectral + timing comparison of two WAV files.
+	## Usage: ab_compare <ref_file> <our_file> [max_hi_diff] [max_shape_diff] [max_onset_ms]
+	## Returns OK/FAIL with spectral and timing analysis details.
+	if parts.size() < 3:
+		return "Usage: ab_compare <ref.wav> <our.wav> [max_hi_diff=0.05] [max_shape_diff=0.5] [max_onset_ms=50]"
+
+	var ref_path: String = _ab_path(parts[1])
+	var our_path: String = _ab_path(parts[2])
+	var max_hi_diff: float = float(parts[3]) if parts.size() > 3 else 0.05
+	var max_shape_diff: float = float(parts[4]) if parts.size() > 4 else 0.5
+	var max_onset_ms: float = float(parts[5]) if parts.size() > 5 else 50.0
+
+	# Load WAV files
+	var ref_data: PackedFloat32Array = _load_wav_mono(ref_path)
+	var our_data: PackedFloat32Array = _load_wav_mono(our_path)
+
+	if ref_data.is_empty():
+		return "FAIL: can't load ref '%s'" % ref_path
+	if our_data.is_empty():
+		return "FAIL: can't load our '%s'" % our_path
+
+	# Compute spectral energy in 3 bands per 100ms window
+	var ref_bands: Array = _spectral_bands(ref_data, 44100)
+	var our_bands: Array = _spectral_bands(our_data, 44100)
+
+	if ref_bands.is_empty() or our_bands.is_empty():
+		return "FAIL: no signal in one or both files"
+
+	# Compare: average hi-freq energy difference and spectral shape
+	var n: int = mini(ref_bands.size(), our_bands.size())
+	var hi_diff_sum: float = 0.0
+	var shape_diff_sum: float = 0.0
+	for i in range(n):
+		var r: Vector3 = ref_bands[i]  # x=lo, y=mid, z=hi
+		var o: Vector3 = our_bands[i]
+		hi_diff_sum += absf(r.z - o.z)
+		# Shape: ratio of mid/lo and hi/lo
+		var r_ratio: float = r.y / maxf(r.x, 0.0001)
+		var o_ratio: float = o.y / maxf(o.x, 0.0001)
+		shape_diff_sum += absf(r_ratio - o_ratio)
+
+	var avg_hi_diff: float = hi_diff_sum / n
+	var avg_shape_diff: float = shape_diff_sum / n
+
+	# Timing check: find first onset in each file, compare offset
+	var ref_onset_ms: float = _find_first_onset_ms(ref_data, 44100)
+	var our_onset_ms: float = _find_first_onset_ms(our_data, 44100)
+	var onset_diff_ms: float = absf(our_onset_ms - ref_onset_ms)
+
+	var spectral_ok: bool = avg_hi_diff <= max_hi_diff and avg_shape_diff <= max_shape_diff
+	var timing_ok: bool = onset_diff_ms <= max_onset_ms
+	var passed: bool = spectral_ok and timing_ok
+	var verdict: String = "OK" if passed else "FAIL"
+
+	var reasons: Array[String] = []
+	if not spectral_ok:
+		reasons.append("spectral")
+	if not timing_ok:
+		reasons.append("timing(%.0fms>%.0fms)" % [onset_diff_ms, max_onset_ms])
+
+	return "%s: hi=%.4f shape=%.4f onset=%.0fms %s" % [
+		verdict, avg_hi_diff, avg_shape_diff, onset_diff_ms,
+		("— " + ",".join(PackedStringArray(reasons))) if not passed else ""]
+
+
+func _load_wav_mono(path: String) -> PackedFloat32Array:
+	## Load a WAV file and return mono float samples.
+	if not FileAccess.file_exists(path):
+		print("AB: file not found: %s" % path)
+		return PackedFloat32Array()
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return PackedFloat32Array()
+	# Read WAV header
+	var riff: String = file.get_buffer(4).get_string_from_ascii()
+	if riff != "RIFF":
+		return PackedFloat32Array()
+	file.get_32()  # file size
+	file.get_buffer(4)  # WAVE
+	file.get_buffer(4)  # fmt
+	var fmt_size: int = file.get_32()
+	var audio_fmt: int = file.get_16()
+	var channels: int = file.get_16()
+	var sample_rate: int = file.get_32()
+	file.get_32()  # byte rate
+	file.get_16()  # block align
+	var bits: int = file.get_16()
+	# Skip extra fmt bytes
+	if fmt_size > 16:
+		file.get_buffer(fmt_size - 16)
+	# Find data chunk
+	while file.get_position() < file.get_length():
+		var chunk_id: String = file.get_buffer(4).get_string_from_ascii()
+		var chunk_size: int = file.get_32()
+		if chunk_id == "data":
+			var n_samples: int = chunk_size / (bits / 8)
+			var n_frames: int = n_samples / channels
+			var result := PackedFloat32Array()
+			result.resize(n_frames)
+			for i in range(n_frames):
+				var sample: float = 0.0
+				if bits == 16:
+					sample = float(file.get_16()) / 32768.0
+				elif bits == 32:
+					sample = file.get_float()
+				# Skip extra channels
+				for _ch in range(channels - 1):
+					if bits == 16:
+						file.get_16()
+					elif bits == 32:
+						file.get_float()
+				result[i] = sample
+			return result
+		else:
+			file.get_buffer(chunk_size)
+	return PackedFloat32Array()
+
+
+func _spectral_bands(samples: PackedFloat32Array, rate: int) -> Array:
+	## Compute lo/mid/hi energy per 100ms window. Returns Array[Vector3].
+	var win: int = rate / 10  # 100ms
+	var result: Array = []
+	var i: int = 0
+	while i + win <= samples.size():
+		# Check for silence
+		var peak: float = 0.0
+		for j in range(i, i + win):
+			peak = maxf(peak, absf(samples[j]))
+		if peak < 0.003:
+			i += win
+			continue
+		# Goertzel-based energy in 3 bands
+		var lo: float = 0.0
+		var mid: float = 0.0
+		var hi: float = 0.0
+		for freq in range(50, 5000, 100):
+			var cos_w: float = cos(TAU * freq / rate)
+			var s1: float = 0.0
+			var s2: float = 0.0
+			var n_samp: int = mini(512, win)
+			for j in range(n_samp):
+				var s0: float = samples[i + j] + 2.0 * cos_w * s1 - s2
+				s2 = s1
+				s1 = s0
+			var mag: float = sqrt(s1 * s1 + s2 * s2 - 2.0 * cos_w * s1 * s2) / n_samp
+			if freq < 500:
+				lo += mag * mag
+			elif freq < 2000:
+				mid += mag * mag
+			else:
+				hi += mag * mag
+		result.append(Vector3(sqrt(lo), sqrt(mid), sqrt(hi)))
+		i += win
+	return result
+
+
+var _ab_player: AudioStreamPlayer = null
+var _ab_test_dir: String = ""  ## Current A/B test output folder name
+
+func _ab_path(filename: String) -> String:
+	## Resolve a filename to the current A/B test directory.
+	if _ab_test_dir.is_empty():
+		return OS.get_user_data_dir().path_join(filename)
+	return OS.get_user_data_dir().path_join("ab").path_join(_ab_test_dir).path_join(filename)
+
+func _cmd_ab_play(filename: String) -> String:
+	## Play a WAV file from the current A/B test directory.
+	var path: String = _ab_path(filename)
+	if not FileAccess.file_exists(path):
+		return "ERR: file not found: %s" % path
+	var wav := AudioStreamWAV.new()
+	# Load raw WAV data
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return "ERR: can't open %s" % path
+	# Parse WAV header
+	file.get_buffer(4)  # RIFF
+	file.get_32()       # file size
+	file.get_buffer(4)  # WAVE
+	file.get_buffer(4)  # fmt
+	var fmt_size: int = file.get_32()
+	var audio_fmt: int = file.get_16()
+	var channels: int = file.get_16()
+	var sample_rate: int = file.get_32()
+	file.get_32()  # byte rate
+	file.get_16()  # block align
+	var bits: int = file.get_16()
+	if fmt_size > 16:
+		file.get_buffer(fmt_size - 16)
+	# Find data chunk
+	while file.get_position() < file.get_length():
+		var chunk_id: String = file.get_buffer(4).get_string_from_ascii()
+		var chunk_size: int = file.get_32()
+		if chunk_id == "data":
+			wav.data = file.get_buffer(chunk_size)
+			break
+		else:
+			file.get_buffer(chunk_size)
+	wav.format = AudioStreamWAV.FORMAT_16_BITS if bits == 16 else AudioStreamWAV.FORMAT_8_BITS
+	wav.mix_rate = sample_rate
+	wav.stereo = channels > 1
+	# Play it
+	if _ab_player:
+		_ab_player.stop()
+		_ab_player.queue_free()
+	_ab_player = AudioStreamPlayer.new()
+	_ab_player.stream = wav
+	_ab_player.finished.connect(func(): _ab_player.queue_free(); _ab_player = null)
+	get_tree().root.add_child(_ab_player)
+	_ab_player.play()
+	return "OK: playing %s (%.1fs)" % [filename, float(wav.data.size()) / (sample_rate * channels * (bits / 8))]
+
+
+func _cmd_ab_show(parts: PackedStringArray) -> String:
+	## Generate spectral comparison PNG and display as overlay.
+	## Usage: ab_show <ref.wav> <our.wav>
+	if parts.size() < 3:
+		return "Usage: ab_show <ref.wav> <our.wav>"
+
+	var ref_path: String = _ab_path(parts[1])
+	var our_path: String = _ab_path(parts[2])
+	var png_path: String = _ab_path("comparison.png")
+
+	# Run Python spectral comparison script
+	var py: String = "/var/tumu/venv/bin/python3"
+	var script: String = "/var/tumu/strudel-ref/spectral_compare.py"
+	var args: PackedStringArray = [script, ref_path, our_path, png_path]
+	var output: Array = []
+	var exit_code: int = OS.execute(py, args, output, true)
+	if exit_code != 0:
+		return "ERR: spectral_compare.py failed (exit=%d) %s" % [exit_code, str(output)]
+
+	# Load the PNG and display as overlay
+	var img := Image.load_from_file(png_path)
+	if img == null:
+		return "ERR: can't load %s" % png_path
+
+	var tex := ImageTexture.create_from_image(img)
+	_show_ab_overlay(tex)
+	return "OK: showing comparison (%dx%d)" % [img.get_width(), img.get_height()]
+
+
+var _ab_overlay: CanvasLayer = null
+
+func _show_ab_overlay(tex: ImageTexture) -> void:
+	## Display a texture as a full-screen overlay. Click or Escape to dismiss.
+	if _ab_overlay:
+		_ab_overlay.queue_free()
+
+	_ab_overlay = CanvasLayer.new()
+	_ab_overlay.layer = 120  # Above everything
+
+	var panel := Panel.new()
+	panel.anchor_left = 0.25
+	panel.anchor_top = 0.25
+	panel.anchor_right = 0.75
+	panel.anchor_bottom = 0.75
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0.92)
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	panel.add_theme_stylebox_override("panel", style)
+	_ab_overlay.add_child(panel)
+
+	var rect := TextureRect.new()
+	rect.texture = tex
+	rect.expand_mode = TextureRect.EXPAND_FIT_WIDTH_PROPORTIONAL
+	rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.offset_left = 16
+	rect.offset_right = -16
+	rect.offset_top = 12
+	rect.offset_bottom = -28
+	panel.add_child(rect)
+
+	var label := Label.new()
+	label.text = "Click to dismiss"
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	label.offset_top = -24
+	label.add_theme_color_override("font_color", Color(0.6, 0.6, 0.6))
+	panel.add_child(label)
+
+	# Dismiss on input
+	panel.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton and event.pressed:
+			_ab_overlay.queue_free()
+			_ab_overlay = null)
+
+	get_tree().root.add_child(_ab_overlay)
+
+
+func _find_first_onset_ms(samples: PackedFloat32Array, rate: int, threshold: float = 0.01) -> float:
+	## Find the time of the first sample above threshold.
+	for i in range(samples.size()):
+		if absf(samples[i]) > threshold:
+			return float(i) / rate * 1000.0
+	return -1.0
+
+
+func _send_to_ref_server(message: String) -> String:
+	## Send a command to the Strudel reference server (Node.js on port 9998).
+	## Returns the response string, or an error message.
+	var peer := StreamPeerTCP.new()
+	var err: int = peer.connect_to_host("127.0.0.1", 9998)
+	if err != OK:
+		return "ERR: can't connect to ref server (port 9998) — is it running?"
+	# Wait for connection
+	var timeout: float = 0.0
+	while peer.get_status() == StreamPeerTCP.STATUS_CONNECTING and timeout < 2.0:
+		peer.poll()
+		OS.delay_msec(50)
+		timeout += 0.05
+	if peer.get_status() != StreamPeerTCP.STATUS_CONNECTED:
+		return "ERR: ref server connection timeout"
+	peer.put_data((message + "\n").to_utf8_buffer())
+	# Read response
+	var response: String = ""
+	timeout = 0.0
+	while timeout < 5.0:
+		peer.poll()
+		if peer.get_available_bytes() > 0:
+			var data: Array = peer.get_data(peer.get_available_bytes())
+			if data[0] == OK:
+				response += data[1].get_string_from_utf8()
+				if "\n" in response:
+					break
+		OS.delay_msec(50)
+		timeout += 0.05
+	peer.disconnect_from_host()
+	return response.strip_edges() if not response.is_empty() else "ERR: no response from ref server"
+
+
 func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 	## Strudel pattern engine — play mini-notation directly.
 	## Usage:
@@ -1288,7 +1648,106 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 					lines.append("    %s" % h.show(true))
 				if haps.size() > 8:
 					lines.append("    ... +%d more" % (haps.size() - 8))
+			# Effects status
+			lines.append(MusicManager.get_effects_status())
 			return "\n".join(lines)
+		"effects", "fx":
+			# Show or control audio effects
+			if parts.size() < 3:
+				return MusicManager.get_effects_status()
+			if parts[2] == "off" or parts[2] == "reset":
+				MusicManager.reset_music_effects()
+				return "OK: all effects disabled"
+			# Parse key=value pairs: strudel fx lpf=800 room=0.5
+			var fx_controls: Dictionary = {}
+			for i in range(2, parts.size()):
+				var eq_idx: int = parts[i].find("=")
+				if eq_idx > 0:
+					var key: String = parts[i].substr(0, eq_idx)
+					var val_str: String = parts[i].substr(eq_idx + 1)
+					if val_str.is_valid_float():
+						fx_controls[key] = float(val_str)
+			if fx_controls.is_empty():
+				return MusicManager.get_effects_status()
+			MusicManager.set_music_effects(fx_controls)
+			var fx_parts: Array[String] = []
+			for k in fx_controls:
+				fx_parts.append("%s=%.1f" % [k, fx_controls[k]])
+			return "OK: effects set [%s]" % ", ".join(PackedStringArray(fx_parts))
+		"ref":
+			# Reference render: send pattern to Strudel Node.js server (port 9998)
+			# Renders real Strudel output to WAV for A/B comparison.
+			# Saves to current ab_dir as ref.wav.
+			# Usage: strudel ref <strudel_code>
+			if parts.size() < 3:
+				return "Usage: strudel ref <strudel_pattern_code>"
+			var ref_code: String = command.substr(command.find("ref ") + 4).strip_edges()
+			var ref_result: String = _send_to_ref_server("render " + ref_code)
+			# Copy rendered file to ab test dir
+			if ref_result.begins_with("OK:") and not _ab_test_dir.is_empty():
+				var src: String = OS.get_user_data_dir().path_join("strudel_ref.wav")
+				var dst: String = _ab_path("ref.wav")
+				DirAccess.copy_absolute(src, dst)
+				ref_result += " → %s" % dst
+			return ref_result
+		"record":
+			# Audio recording: strudel record start|stop [filename]
+			if parts.size() < 3:
+				return "Usage: strudel record start|stop [filename]"
+			match parts[2]:
+				"start":
+					return MusicManager.record_start()
+				"stop":
+					var fname: String = parts[3] if parts.size() > 3 else "recording"
+					var result: String = MusicManager.record_stop(fname)
+					# Copy to ab test dir if set
+					if result.begins_with("OK:") and not _ab_test_dir.is_empty():
+						var src: String = OS.get_user_data_dir().path_join("%s.wav" % fname)
+						var dst: String = _ab_path("%s.wav" % fname)
+						DirAccess.copy_absolute(src, dst)
+						result += " → %s" % dst
+					return result
+				_:
+					return "Usage: strudel record start|stop [filename]"
+		"test_seq":
+			# Diagnostic: test sequence_on directly
+			return MusicManager.test_sequence_on()
+		"mode":
+			# Scheduling mode: batch (MML sequence_on) or note (per-note note_on)
+			if not MusicManager._sion_trigger or not MusicManager._cyclist:
+				return "ERR: strudel engine not initialized"
+			if parts.size() < 3:
+				var mode: String = "batch" if MusicManager._cyclist.batch_mode else "note"
+				return "Scheduling mode: %s" % mode
+			match parts[2]:
+				"batch":
+					MusicManager._cyclist.batch_mode = true
+					MusicManager._sion_trigger.batch_mode = true
+					return "OK: batch mode (MML → sequence_on, sample-accurate)"
+				"note":
+					MusicManager._cyclist.batch_mode = false
+					MusicManager._sion_trigger.batch_mode = false
+					MusicManager._sion_trigger.stop_all_sequences()
+					return "OK: note mode (per-note note_on, frame-accurate)"
+				_:
+					return "Usage: strudel mode batch|note"
+		"timing":
+			# Timing instrumentation: strudel timing on|off|report
+			if not MusicManager._sion_trigger:
+				return "ERR: trigger not initialized"
+			if parts.size() < 3:
+				return MusicManager._sion_trigger.timing_analyze()
+			match parts[2]:
+				"on", "start":
+					MusicManager._sion_trigger.timing_start()
+					return "OK: timing capture started"
+				"off", "stop":
+					return MusicManager._sion_trigger.timing_stop()
+				"clear":
+					MusicManager._sion_trigger._timing_records.clear()
+					return "OK: timing records cleared"
+				_:
+					return "Usage: strudel timing on|off|report|clear"
 		"drawer":
 			MusicDrawer.toggle()
 			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
@@ -1386,8 +1845,14 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			# Parse optional key=value parameters at the end
 			var mini_cps: float = -1.0
 			var mini_sound: String = ""
-			# Extract cps= and sound= from the tail
-			for param in ["cps=", "sound=", "s="]:
+			var mini_controls: Dictionary = {}
+			# Audio control key=value params (lpf=800, room=0.5, etc.)
+			var control_params := ["lpf=", "hpf=", "lpq=", "hpq=",
+				"room=", "roomsize=", "roomlp=",
+				"delay=", "delaytime=", "delayfeedback=",
+				"distort=", "crush=", "shape=", "pan="]
+			# Extract cps=, sound=, and audio controls from the tail
+			for param in ["cps=", "sound=", "s="] + control_params:
 				var p_idx: int = mini_text.find(param)
 				if p_idx >= 0:
 					var p_val: String = mini_text.substr(p_idx + param.length()).strip_edges()
@@ -1397,19 +1862,40 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 						p_val = p_val.substr(0, space_idx)
 					if param == "cps=":
 						mini_cps = float(p_val)
-					else:
+					elif param == "sound=" or param == "s=":
 						mini_sound = p_val
+					else:
+						# Audio control: strip trailing "="
+						var key: String = param.substr(0, param.length() - 1)
+						if p_val.is_valid_float():
+							mini_controls[key] = float(p_val)
 					mini_text = (mini_text.substr(0, p_idx) + mini_text.substr(p_idx + param.length() + p_val.length())).strip_edges()
 			var pat: StrudelPattern = StrudelMini.mini(mini_text)
 			var display_text: String = mini_text + (" s=%s" % mini_sound if not mini_sound.is_empty() else "")
 			# Apply sound/voice if specified
 			if not mini_sound.is_empty():
 				pat = pat.set_in(Strudel.pure({"s": mini_sound}))
+			# Inject audio controls into every hap so the trigger can
+			# read them per-note and update bus effects in realtime.
+			if not mini_controls.is_empty():
+				pat = pat.set_in(Strudel.pure(mini_controls))
 			MusicManager.strudel_play(pat, mini_cps, display_text)
+			# Also apply bus effects immediately (don't wait for first trigger)
+			if mini_controls.is_empty():
+				MusicManager.reset_music_effects()
+			else:
+				MusicManager.set_music_effects(mini_controls)
 			var hap_count: int = pat.first_cycle().size()
-			return "OK: strudel '%s' (%d haps/cycle%s)" % [
+			var fx_str: String = ""
+			if not mini_controls.is_empty():
+				var fx_parts: Array[String] = []
+				for k in mini_controls:
+					fx_parts.append("%s=%.1f" % [k, mini_controls[k]])
+				fx_str = " fx=[%s]" % ", ".join(PackedStringArray(fx_parts))
+			return "OK: strudel '%s' (%d haps/cycle%s%s)" % [
 				mini_text, hap_count,
-				" sound=%s" % mini_sound if not mini_sound.is_empty() else ""]
+				" sound=%s" % mini_sound if not mini_sound.is_empty() else "",
+				fx_str]
 
 
 
@@ -1441,10 +1927,22 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
   strudel cps <value>      — set cycles per second
   strudel status           — show scheduler state
   strudel drawer           — toggle music drawer
+  strudel fx [key=val ...]  — show/set audio effects (lpf, room, delay, etc.)
+  strudel fx off            — disable all audio effects
   strudel test [suite]     — run unit tests (all/algebra/mini/integration/voices)
   strudel listen           — run listening test (uses test runner: Ctrl+D)
   run music_listen_features — same thing via test runner directly
   suite music              — run music test suite
+
+  --- Audio Controls (append to strudel command or use .method() in drawer) ---
+  lpf=800           — low-pass filter cutoff Hz (bus-level)
+  hpf=200           — high-pass filter cutoff Hz (bus-level)
+  room=0.5          — reverb wet amount 0-1 (bus-level, same as Strudel)
+  delay=0.5         — delay wet amount 0-1 (bus-level, same as Strudel)
+  distort=0.3       — distortion drive 0-1 (bus-level)
+  crush=8           — bit crush 1-16 (bus-level, lofi mode)
+  pan=0.5           — stereo pan -1 to 1 (bus-level)
+  Drawer syntax: "c4 e4".lpf(800).room(0.5).pianoroll()
 
   --- Mini-Notation Syntax ---
   c4 e4 g4         sequence (space-separated)

@@ -54,20 +54,26 @@ priority: high
 
 ### Critical Gaps
 
-**1. JavaScript Expression Language (0% coverage)**
+**1. JavaScript Expression Language (partial — method chains parsed)**
 Strudel patterns are JS programs. Users write:
 ```javascript
 note("c4 e4 g4").s("sawtooth").lpf(800).room(0.5)
 stack(drums, bass, melody).cpm(120)
 ```
-We only parse the mini-notation inside quotes. Method chains, variables, `let`, `stack()`, `setcps()`, `samples()` — none of this works. This is the BIGGEST gap.
+We now parse method chains from drawer text (`.lpf(800)`, `.room(0.5)`, etc.) and
+apply them as bus-level audio effects. Variables, `let`, `stack()`, `setcps()`,
+`samples()` are still NOT supported. The gap is now about JS runtime, not audio controls.
 
-**2. Audio Synthesis Controls (2% coverage — 6 of 274)**
-We support: `note`, `s`, `n`, `gain`, `velocity`, `cps`
-Missing ALL of:
-- **Filter**: `lpf`, `hpf`, `bpf`, `lpq`, `lpenv`, `lpa`, `lpd`, `lps` and all HP/BP variants
-- **Envelope**: `attack`, `decay`, `sustain`, `release`, `hold`, `adsr`, `clip`
-- **Effects**: `room`, `roomsize`, `delay`, `delaytime`, `delayfeedback`, `phaser`, `distort`, `crush`, `shape`
+**2. Audio Synthesis Controls (7% coverage — 19 of 274)**
+Supported via bus-level post-processing (Godot AudioBus effects):
+- **Filter**: `lpf`, `hpf`, `lpq`, `hpq` → AudioEffectLowPassFilter/HighPassFilter
+- **Effects**: `room`, `roomsize`, `roomlp` → AudioEffectReverb (matches Strudel orbit-shared sends)
+- **Effects**: `delay`, `delaytime`, `delayfeedback` → AudioEffectDelay (matches Strudel orbit-shared sends)
+- **Effects**: `distort`, `crush`, `shape` → AudioEffectDistortion (clip/lofi/waveshape modes)
+- **Pan**: `pan` → AudioEffectPanner
+- **Note**: `note`, `s`, `n`, `gain`, `velocity`, `cps` → per-note via SiON
+Still missing:
+- **Envelope**: `attack`, `decay`, `sustain`, `release`, `hold` — per-note ADSR
 - **FM**: `fm`, `fmh`, `fmi`, `fmenv`
 - **Modulation**: `vib`, `vibmod`, `tremolo`, `penv`
 - **Pan**: `pan`, `panspan`
@@ -170,10 +176,12 @@ docs/
 
 ## Priority Path Forward
 
-1. **More controls via SiON mapping** — `attack`/`release` → SiON envelope, `lpf` → SiON filter effect, `room` → SiON reverb. Won't sound identical to Web Audio but functionally equivalent.
-2. **JS expression subset** — support `stack()`, `setcps()`, simple variable assignment. NOT a full JS runtime, just the common patterns.
-3. **Sample playback** — bundled drum kit (bd, sd, hh, cp as .wav), played via Godot AudioStreamPlayer instead of SiON.
-4. **Game event patterns** — replace MML adaptive layers with Strudel patterns driven by game intensity.
+1. ~~**Audio controls via bus effects**~~ ✓ DONE — lpf, hpf, room, delay, distort, crush, pan via Godot AudioBus
+2. **Per-note ADSR** — `attack`/`release`/`decay`/`sustain` → investigate SiON voice envelope API
+3. **JS expression subset** — support `stack()`, `setcps()`, simple variable assignment. NOT a full JS runtime, just the common patterns.
+4. **Sample playback** — bundled drum kit (bd, sd, hh, cp as .wav), played via Godot AudioStreamPlayer instead of SiON.
+5. **Game event patterns** — replace MML adaptive layers with Strudel patterns driven by game intensity.
+6. **Phaser** — map to AudioEffectPhaser (simple addition).
 
 ## Known Bugs
 

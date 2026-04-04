@@ -17,8 +17,14 @@ var cps: float = 0.5           ## Cycles per second (0.5 = 120 BPM)
 var pattern: StrudelPattern = null
 var latency: float = 0.1       ## Fixed trigger time offset (seconds)
 
+## Batch mode: collect all haps per tick window and deliver as a single array
+## instead of calling _on_trigger per-hap. Used for MML batch compilation.
+## Default ON — sample-accurate timing via SiON's internal sequencer.
+var batch_mode: bool = true
+
 var _clock: StrudelClock
 var _on_trigger: Callable      ## func(hap, deadline, duration, cps, target_time)
+var _on_batch_trigger: Callable ## func(haps: Array, cps: float, begin: float, end: float)
 var _on_toggle: Callable       ## func(started: bool) — optional
 var _get_time: Callable        ## func() -> float — absolute time source
 
@@ -66,24 +72,42 @@ func _on_clock_tick(phase: float, duration: float, tick: int, t: float) -> void:
 	# Query the pattern for haps in this time window
 	var haps: Array = pattern.query_arc(begin, end)
 
-	for hap in haps:
-		if not hap.has_onset():
-			continue
+	if batch_mode and _on_batch_trigger.is_valid():
+		# Batch mode: collect all onset haps and deliver as a single array.
+		# The batch trigger handles compilation and sequencing.
+		var onset_haps: Array = []
+		for hap in haps:
+			if not hap.has_onset():
+				continue
+			onset_haps.append(hap)
+			# Pattern-driven CPS changes
+			if hap.value is Dictionary and hap.value.has("cps"):
+				var new_cps: float = float(hap.value["cps"])
+				if cps != new_cps:
+					cps = new_cps
+					_num_ticks_since_cps_change = 0
+		if not onset_haps.is_empty():
+			_on_batch_trigger.call(onset_haps, cps, begin, end)
+	else:
+		# Per-hap mode: dispatch each hap individually with deadline timing.
+		for hap in haps:
+			if not hap.has_onset():
+				continue
 
-		var hap_begin: float = hap.w().begin.to_float() if hap.whole != null else 0.0
-		var target_time: float = (hap_begin - _num_cycles_at_cps_change) / cps + _seconds_at_cps_change + latency
-		var hap_duration: float = hap.get_duration().to_float() / cps
-		var deadline: float = target_time - phase
+			var hap_begin: float = hap.w().begin.to_float() if hap.whole != null else 0.0
+			var target_time: float = (hap_begin - _num_cycles_at_cps_change) / cps + _seconds_at_cps_change + latency
+			var hap_duration: float = hap.get_duration().to_float() / cps
+			var deadline: float = target_time - phase
 
-		if _on_trigger.is_valid():
-			_on_trigger.call(hap, deadline, hap_duration, cps, target_time)
+			if _on_trigger.is_valid():
+				_on_trigger.call(hap, deadline, hap_duration, cps, target_time)
 
-		# Pattern-driven CPS changes
-		if hap.value is Dictionary and hap.value.has("cps"):
-			var new_cps: float = float(hap.value["cps"])
-			if cps != new_cps:
-				cps = new_cps
-				_num_ticks_since_cps_change = 0
+			# Pattern-driven CPS changes
+			if hap.value is Dictionary and hap.value.has("cps"):
+				var new_cps: float = float(hap.value["cps"])
+				if cps != new_cps:
+					cps = new_cps
+					_num_ticks_since_cps_change = 0
 
 
 func now() -> float:

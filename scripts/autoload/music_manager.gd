@@ -32,6 +32,19 @@ signal layer_changed(layer_name: String, active: bool)
 
 ## How quickly intensity decays per second when no events push it up
 const INTENSITY_DECAY_RATE := 0.02
+
+# -- Audio Effects Bus ---------------------------------------------------------
+# Post-processing effects applied via Godot AudioBus, matching Strudel controls.
+# Reverb/delay are bus-level (same as Strudel's orbit-shared sends).
+# Filter/distortion are bus-level approximations of Strudel's per-note chains.
+const MUSIC_BUS_NAME := "Music"
+const FX_IDX_LPF := 0       ## AudioEffectLowPassFilter
+const FX_IDX_HPF := 1       ## AudioEffectHighPassFilter
+const FX_IDX_DISTORT := 2   ## AudioEffectDistortion (also handles crush)
+const FX_IDX_REVERB := 3    ## AudioEffectReverb
+const FX_IDX_DELAY := 4     ## AudioEffectDelay
+const FX_IDX_PAN := 5       ## AudioEffectPanner
+const FX_SLOT_COUNT := 6
 ## Minimum intensity to activate bass layer
 const BASS_THRESHOLD := 0.25
 ## Minimum intensity to activate drum layer
@@ -72,6 +85,24 @@ var _voices: Dictionary = {}
 
 ## Track ID allocation counter (GDSiON tracks)
 var _next_track_id: int = 10
+
+## Audio effects bus index (-1 = not set up yet)
+var _music_bus_idx: int = -1
+## Effect instances (stored for runtime parameter tweaking)
+var _fx_lpf: Variant = null           ## AudioEffectLowPassFilter
+var _fx_hpf: Variant = null           ## AudioEffectHighPassFilter
+var _fx_distort: Variant = null       ## AudioEffectDistortion
+var _fx_reverb: Variant = null        ## AudioEffectReverb
+var _fx_delay: Variant = null         ## AudioEffectDelay
+var _fx_pan: Variant = null           ## AudioEffectPanner
+## Currently active effect controls (for status display)
+var _active_controls: Dictionary = {}
+## Audio recorder effect for capture/analysis
+var _fx_recorder: Variant = null
+
+## Future: Strudel signal modulation (sine.range, saw.range, etc.)
+## Requires JS expression subset to parse .lpf(sine.range(200, 2000))
+## Signals exist in strudel_signal.gd but aren't parseable from drawer text yet.
 
 # -- Strudel Engine ------------------------------------------------------------
 
@@ -185,6 +216,9 @@ func gen_presets():
 	# Initialize the Strudel pattern engine
 	_init_strudel()
 
+	# Set up audio effects bus (post-processing for Strudel controls)
+	_setup_audio_bus()
+
 	# Auto-start Strudel pattern on the title screen
 	if GameManager.current_state == GameManager.GameState.TITLE:
 		_strudel_play_title()
@@ -275,11 +309,26 @@ func _setup_layers() -> void:
 	_layers["melody"] = melody
 
 
+var _fx_reconcile_timer: float = 0.0  ## Throttle reconciliation checks
+
 func _process(delta: float) -> void:
 	# Advance Strudel clock regardless of MML layer state
 	if _strudel_playing and _cyclist != null:
 		_strudel_time += delta
 		_cyclist.process()
+
+	# Process deferred note queue — fires notes at their correct wall-clock time
+	if _sion_trigger:
+		_sion_trigger.process()
+
+	# Periodic reconciliation: verify bus effects match desired state.
+	# Catches external changes, driver resets, or state that drifted.
+	# Runs every 0.5s to avoid per-frame AudioServer overhead.
+	if _music_bus_idx >= 0 and not _active_controls.is_empty():
+		_fx_reconcile_timer += delta
+		if _fx_reconcile_timer >= 0.5:
+			_fx_reconcile_timer = 0.0
+			_reconcile_effects()
 
 	if not driver or not is_playing:
 		return
@@ -490,6 +539,28 @@ func play_test_tone() -> void:
 	print("MUSIC: test tone playing")
 
 
+func test_sequence_on() -> String:
+	## Diagnostic: test sequence_on in streaming mode.
+	if not driver:
+		return "ERR: no driver"
+	# Ensure streaming
+	driver.call("stop")
+	driver.call("stream", false)
+	_sion_streaming = true
+	driver.call("set_bpm", 120)
+	# Compile
+	var mml := "t120 l4 [o4 c e g >c<]8"
+	var data: Variant = driver.call("compile", mml)
+	if not data:
+		return "ERR: compile returned null for '%s'" % mml
+	# Try with a real voice (the layer system always passes one)
+	var voice: Variant = _voices.get("pad")
+	print("MUSIC: test_sequence_on — voice=%s, data=%s" % [str(voice).substr(0, 30), str(data).substr(0, 30)])
+	driver.call("sequence_on", data, voice, 0, 0, 0, 50)
+	print("MUSIC: test_sequence_on — track 50 started, mml='%s'" % mml)
+	return "OK: sequence_on track=50 voice=pad, mml='%s' — listen for C-E-G-C5" % mml
+
+
 ## Play an arbitrary MML string directly on the driver.
 ## Stops any current playback (layered, strudel, title) first.
 func play_mml(mml: String) -> void:
@@ -558,6 +629,303 @@ func _load_scores() -> void:
 	print("MUSIC: loaded %d scores from %s" % [_loaded_scores.size(), SCORES_PATH])
 
 
+# -- Audio Effects Bus ---------------------------------------------------------
+
+func _setup_audio_bus() -> void:
+	## Create a dedicated Music AudioBus with post-processing effect slots.
+	## All effects start disabled. Controls like lpf(), room(), delay() enable them.
+
+	# Check if "Music" bus already exists (e.g. from project settings)
+	var existing_idx: int = AudioServer.get_bus_index(MUSIC_BUS_NAME)
+	if existing_idx >= 0:
+		_music_bus_idx = existing_idx
+	else:
+		_music_bus_idx = AudioServer.bus_count
+		AudioServer.add_bus(_music_bus_idx)
+		AudioServer.set_bus_name(_music_bus_idx, MUSIC_BUS_NAME)
+	# Route Music bus to Master
+	AudioServer.set_bus_send(_music_bus_idx, &"Master")
+
+	# Route the SiON driver to the Music bus.
+	# SiONDriver extends AudioStreamPlayer, so it should have a "bus" property.
+	if driver:
+		var has_bus: bool = "bus" in driver
+		if has_bus:
+			driver.set("bus", MUSIC_BUS_NAME)
+			DebugOverlay.log("music/effects", null, "MUSIC_FX: SiON routed to '%s' bus", [MUSIC_BUS_NAME])
+		else:
+			# Fallback: add effects to Master bus instead
+			_music_bus_idx = 0
+			DebugOverlay.log("music/effects", null, "MUSIC_FX: SiON has no bus property — effects on Master")
+			print("MUSIC_FX: Warning — SiON driver lacks bus property, using Master bus")
+
+	# Clear any existing effects on our bus (idempotent setup)
+	while AudioServer.get_bus_effect_count(_music_bus_idx) > 0:
+		AudioServer.remove_bus_effect(_music_bus_idx, 0)
+
+	# Slot 0: Low-pass filter
+	_fx_lpf = AudioEffectLowPassFilter.new()
+	_fx_lpf.cutoff_hz = 20500.0   # Wide open = no audible filtering
+	_fx_lpf.resonance = 0.5
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_lpf)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_LPF, false)
+
+	# Slot 1: High-pass filter
+	_fx_hpf = AudioEffectHighPassFilter.new()
+	_fx_hpf.cutoff_hz = 10.0      # Near DC = no audible filtering
+	_fx_hpf.resonance = 0.5
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_hpf)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_HPF, false)
+
+	# Slot 2: Distortion (also handles crush via lofi mode)
+	_fx_distort = AudioEffectDistortion.new()
+	_fx_distort.mode = AudioEffectDistortion.MODE_CLIP
+	_fx_distort.drive = 0.0
+	_fx_distort.pre_gain = 0.0
+	_fx_distort.post_gain = 0.0
+	_fx_distort.keep_hf_hz = 16000.0
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_distort)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DISTORT, false)
+
+	# Slot 3: Reverb
+	_fx_reverb = AudioEffectReverb.new()
+	_fx_reverb.room_size = 0.8
+	_fx_reverb.damping = 0.5
+	_fx_reverb.wet = 0.5
+	_fx_reverb.dry = 1.0
+	_fx_reverb.spread = 1.0
+	_fx_reverb.hipass = 0.0
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_reverb)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_REVERB, false)
+
+	# Slot 4: Delay
+	_fx_delay = AudioEffectDelay.new()
+	_fx_delay.dry = 1.0
+	_fx_delay.set("tap1/active", true)
+	_fx_delay.set("tap1/delay_ms", 250.0)
+	_fx_delay.set("tap1/level_db", -6.0)
+	_fx_delay.set("tap1/pan", 0.2)
+	_fx_delay.set("tap2/active", true)
+	_fx_delay.set("tap2/delay_ms", 500.0)
+	_fx_delay.set("tap2/level_db", -12.0)
+	_fx_delay.set("tap2/pan", -0.2)
+	_fx_delay.set("feedback/active", true)
+	_fx_delay.set("feedback/delay_ms", 375.0)
+	_fx_delay.set("feedback/level_db", -18.0)
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_delay)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DELAY, false)
+
+	# Slot 5: Pan
+	_fx_pan = AudioEffectPanner.new()
+	_fx_pan.pan = 0.0
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_pan)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_PAN, false)
+
+	# Slot 6: Recorder (for audio capture/analysis)
+	_fx_recorder = AudioEffectRecord.new()
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_recorder)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_SLOT_COUNT, true)
+
+	print("MUSIC_FX: Audio effects bus '%s' set up (%d slots + recorder)" % [
+		AudioServer.get_bus_name(_music_bus_idx), FX_SLOT_COUNT])
+	DebugOverlay.log("music/effects", null, "MUSIC_FX: bus '%s' ready (idx=%d)", [
+		AudioServer.get_bus_name(_music_bus_idx), _music_bus_idx])
+
+
+func set_music_effects(controls: Dictionary) -> void:
+	## Apply Strudel-compatible audio controls to the Music bus effects.
+	## Supported keys: lpf, hpf, lpq, hpq, room, roomsize, delay, delaytime,
+	## delayfeedback, distort, crush, pan, shape.
+	## Call with empty dict or reset_music_effects() to disable all.
+	if _music_bus_idx < 0:
+		return
+
+	_active_controls = controls.duplicate()
+
+	# -- Low-pass filter --
+	if controls.has("lpf"):
+		var cutoff: float = clampf(float(controls["lpf"]), 20.0, 20500.0)
+		_fx_lpf.cutoff_hz = cutoff
+		if controls.has("lpq"):
+			_fx_lpf.resonance = clampf(float(controls["lpq"]), 0.0, 4.0)
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_LPF, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: lpf=%.0f q=%.2f", [cutoff, _fx_lpf.resonance])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_LPF, false)
+
+	# -- High-pass filter --
+	if controls.has("hpf"):
+		var cutoff: float = clampf(float(controls["hpf"]), 10.0, 20500.0)
+		_fx_hpf.cutoff_hz = cutoff
+		if controls.has("hpq"):
+			_fx_hpf.resonance = clampf(float(controls["hpq"]), 0.0, 4.0)
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_HPF, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: hpf=%.0f q=%.2f", [cutoff, _fx_hpf.resonance])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_HPF, false)
+
+	# -- Distortion / Crush --
+	if controls.has("distort") or controls.has("crush") or controls.has("shape"):
+		if controls.has("crush"):
+			# Bit crush → lofi distortion mode
+			_fx_distort.mode = AudioEffectDistortion.MODE_LOFI
+			var crush: float = clampf(float(controls["crush"]), 1.0, 16.0)
+			# Map crush 1-16 to drive 0-1 (lower crush = more distortion)
+			_fx_distort.drive = clampf(1.0 - (crush - 1.0) / 15.0, 0.0, 1.0)
+		elif controls.has("shape"):
+			_fx_distort.mode = AudioEffectDistortion.MODE_WAVESHAPE
+			_fx_distort.drive = clampf(float(controls["shape"]), 0.0, 1.0)
+		else:
+			_fx_distort.mode = AudioEffectDistortion.MODE_CLIP
+			_fx_distort.drive = clampf(float(controls["distort"]), 0.0, 1.0)
+		_fx_distort.pre_gain = 6.0 if _fx_distort.drive > 0.3 else 0.0
+		_fx_distort.post_gain = -3.0 if _fx_distort.drive > 0.3 else 0.0
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DISTORT, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: distort mode=%d drive=%.2f", [
+			_fx_distort.mode, _fx_distort.drive])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DISTORT, false)
+
+	# -- Reverb --
+	if controls.has("room"):
+		var wet: float = clampf(float(controls["room"]), 0.0, 1.0)
+		_fx_reverb.wet = wet
+		_fx_reverb.dry = 1.0 - wet * 0.3  # Keep dry signal strong
+		if controls.has("roomsize"):
+			_fx_reverb.room_size = clampf(float(controls["roomsize"]), 0.0, 1.0)
+		else:
+			_fx_reverb.room_size = 0.8
+		if controls.has("roomlp"):
+			_fx_reverb.hipass = clampf(1.0 - float(controls["roomlp"]), 0.0, 1.0)
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_REVERB, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: room=%.2f size=%.2f", [wet, _fx_reverb.room_size])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_REVERB, false)
+
+	# -- Delay --
+	if controls.has("delay"):
+		var wet: float = clampf(float(controls["delay"]), 0.0, 1.0)
+		_fx_delay.dry = 1.0
+		# Scale tap levels by wet amount
+		_fx_delay.set("tap1/level_db", lerpf(-40.0, -3.0, wet))
+		_fx_delay.set("tap2/level_db", lerpf(-40.0, -9.0, wet))
+		if controls.has("delaytime"):
+			var dt_ms: float = clampf(float(controls["delaytime"]) * 1000.0, 10.0, 2000.0)
+			_fx_delay.set("tap1/delay_ms", dt_ms)
+			_fx_delay.set("tap2/delay_ms", dt_ms * 2.0)
+			_fx_delay.set("feedback/delay_ms", dt_ms * 1.5)
+		if controls.has("delayfeedback"):
+			var fb: float = clampf(float(controls["delayfeedback"]), 0.0, 0.95)
+			_fx_delay.set("feedback/level_db", lerpf(-40.0, -3.0, fb))
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DELAY, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: delay=%.2f", [wet])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_DELAY, false)
+
+	# -- Pan --
+	if controls.has("pan"):
+		var pan_val: float = clampf(float(controls["pan"]), -1.0, 1.0)
+		_fx_pan.pan = pan_val
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_PAN, true)
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: pan=%.2f", [pan_val])
+	else:
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_PAN, false)
+
+
+func reset_music_effects() -> void:
+	## Disable all audio effects on the Music bus.
+	if _music_bus_idx < 0:
+		return
+	for i in range(FX_SLOT_COUNT):
+		AudioServer.set_bus_effect_enabled(_music_bus_idx, i, false)
+	_active_controls.clear()
+	# Also clear the trigger's last-known state so it re-applies on next hap
+	if _sion_trigger:
+		_sion_trigger._last_fx.clear()
+	DebugOverlay.log("music/effects", null, "MUSIC_FX: all effects reset")
+
+
+func _reconcile_effects() -> void:
+	## Verify that the AudioBus effect state matches _active_controls.
+	## If something drifted (external change, driver reset), re-apply.
+	## Called periodically from _process(), NOT every frame.
+	if _active_controls.is_empty():
+		return
+
+	var needs_fix: bool = false
+
+	# Spot-check: is lpf enabled if we expect it?
+	if _active_controls.has("lpf"):
+		if not AudioServer.is_bus_effect_enabled(_music_bus_idx, FX_IDX_LPF):
+			needs_fix = true
+		elif absf(_fx_lpf.cutoff_hz - float(_active_controls["lpf"])) > 1.0:
+			needs_fix = true
+
+	if _active_controls.has("room"):
+		if not AudioServer.is_bus_effect_enabled(_music_bus_idx, FX_IDX_REVERB):
+			needs_fix = true
+
+	if _active_controls.has("delay"):
+		if not AudioServer.is_bus_effect_enabled(_music_bus_idx, FX_IDX_DELAY):
+			needs_fix = true
+
+	if needs_fix:
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: reconcile — drift detected, re-applying")
+		set_music_effects(_active_controls)
+
+
+func record_start() -> String:
+	## Start recording audio from the music bus.
+	if not _fx_recorder:
+		return "ERR: recorder not initialized"
+	if _fx_recorder.is_recording_active():
+		return "ERR: already recording"
+	_fx_recorder.set_recording_active(true)
+	return "OK: recording started"
+
+
+func record_stop(filename: String = "recording") -> String:
+	## Stop recording and save to user:// as WAV.
+	if not _fx_recorder:
+		return "ERR: recorder not initialized"
+	if not _fx_recorder.is_recording_active():
+		return "ERR: not recording"
+	_fx_recorder.set_recording_active(false)
+	var recording: AudioStreamWAV = _fx_recorder.get_recording()
+	if not recording:
+		return "ERR: no recording data"
+	var path: String = "user://%s.wav" % filename
+	var err: int = recording.save_to_wav(path)
+	if err != OK:
+		return "ERR: save failed (err=%d)" % err
+	var global_path: String = ProjectSettings.globalize_path(path)
+	print("MUSIC: recording saved to %s (%s)" % [path, global_path])
+	return "OK: saved to %s" % global_path
+
+
+func get_effects_status() -> String:
+	## Return a formatted string showing active effects.
+	if _music_bus_idx < 0:
+		return "Effects: not initialized"
+	var lines: Array[String] = ["Effects (bus='%s' idx=%d):" % [
+		AudioServer.get_bus_name(_music_bus_idx), _music_bus_idx]]
+	var names := ["lpf", "hpf", "distort", "reverb", "delay", "pan"]
+	for i in range(FX_SLOT_COUNT):
+		var enabled: bool = AudioServer.is_bus_effect_enabled(_music_bus_idx, i)
+		var state: String = "ON" if enabled else "off"
+		var detail: String = ""
+		if enabled:
+			match i:
+				FX_IDX_LPF: detail = " cutoff=%.0f q=%.2f" % [_fx_lpf.cutoff_hz, _fx_lpf.resonance]
+				FX_IDX_HPF: detail = " cutoff=%.0f q=%.2f" % [_fx_hpf.cutoff_hz, _fx_hpf.resonance]
+				FX_IDX_DISTORT: detail = " mode=%d drive=%.2f" % [_fx_distort.mode, _fx_distort.drive]
+				FX_IDX_REVERB: detail = " wet=%.2f size=%.2f" % [_fx_reverb.wet, _fx_reverb.room_size]
+				FX_IDX_DELAY: detail = " tap1=%.0fms" % [_fx_delay.get("tap1/delay_ms")]
+				FX_IDX_PAN: detail = " pan=%.2f" % [_fx_pan.pan]
+		lines.append("  %-8s: %s%s" % [names[i], state, detail])
+	return "\n".join(lines)
+
+
 # -- Strudel Engine ------------------------------------------------------------
 
 func _init_strudel() -> void:
@@ -567,12 +935,14 @@ func _init_strudel() -> void:
 
 	_sion_trigger = StrudelSionTrigger.new(driver, presets)
 	_cyclist = StrudelCyclist.new(
-		_sion_trigger.trigger,      # on_trigger callback
+		_sion_trigger.trigger,      # on_trigger callback (per-note mode)
 		func() -> float: return _strudel_time,  # get_time
 		Callable(),                 # on_toggle (unused)
 		0.1,                        # latency
 		0.05                        # interval
 	)
+	# Wire up batch mode callback
+	_cyclist._on_batch_trigger = _sion_trigger.trigger_batch
 	_cyclist.set_cps(0.5)  # Default: 120 BPM
 
 	print("MUSIC: Strudel engine initialized")
@@ -592,22 +962,31 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: Strin
 	if is_playing:
 		stop()
 
-	# Ensure SiON is streaming (note_on requires stream mode).
-	if not _sion_streaming:
-		driver.call("stop")
-		driver.call("stream", false)
-		_sion_streaming = true
-
 	if cps > 0.0:
 		_cyclist.set_cps(cps)
 
-	# Sync SiON driver BPM with cyclist CPS for correct note durations
-	var sion_bpm: float = _cyclist.cps * 120.0
-	driver.call("set_bpm", int(maxf(sion_bpm, 30.0)))
-
-	# Hot-swap: just update the pattern and restart the cyclist clock
+	# Hot-swap: stop cyclist and clean up old state FIRST, before starting new playback.
 	if _strudel_playing:
 		_cyclist.stop()
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger._cycle_buffer_int = -1
+	# Stop any current audio (batch play or streaming)
+	driver.call("stop")
+	_sion_streaming = false
+
+	var is_batch: bool = _sion_trigger != null and _sion_trigger.batch_mode
+
+	if is_batch:
+		# Batch mode: compile full cycle eagerly and play via driver.play().
+		# The MML embeds its own tempo (t<240*CPS>). Cyclist runs for UI sync only.
+		_sion_trigger.start_batch_playback(pattern, _cyclist.cps)
+	else:
+		# Note mode: start streaming for per-note note_on dispatch.
+		driver.call("stream", false)
+		_sion_streaming = true
+		var sion_bpm: float = _cyclist.cps * 120.0
+		driver.call("set_bpm", int(maxf(sion_bpm, 30.0)))
 	_strudel_time = 0.0
 	_cyclist.set_pattern(pattern)
 	_cyclist.start()
@@ -617,6 +996,49 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: Strin
 
 	DebugOverlay.log("music/status", null, "MUSIC: Strudel playing (cps=%.2f)" % _cyclist.cps)
 	print("MUSIC: Strudel pattern playing (cps=%.2f)" % _cyclist.cps)
+
+
+func strudel_play_batch(tracks: Array, cps: float) -> void:
+	## Play multiple tracks in batch mode — each track is compiled to its own MML.
+	## tracks: Array of {pattern: StrudelPattern, voice: String, gain: float, name: String}
+	if not _cyclist or not driver or not _sion_trigger:
+		return
+
+	stop_title_music()
+	if is_playing:
+		stop()
+	_cyclist.set_cps(cps)
+
+	# Stop old playback
+	if _strudel_playing:
+		_cyclist.stop()
+	driver.call("stop")
+	_sion_streaming = false
+
+	# Collect signal controls from all tracks for per-note evaluation
+	_sion_trigger._signal_controls.clear()
+	for t in tracks:
+		var sigs: Array = t.get("signals", [])
+		_sion_trigger._signal_controls.append_array(sigs)
+
+	# Compile each track's pattern to MML separately (clean, no set_in fragmentation)
+	_sion_trigger.start_batch_from_tracks(tracks, _cyclist.cps)
+
+	# Start cyclist for UI sync
+	_strudel_time = 0.0
+	# Use first track's pattern or stack all for UI
+	var all_pats: Array = []
+	for t in tracks:
+		all_pats.append(t["pattern"])
+	if all_pats.size() == 1:
+		_strudel_pattern = all_pats[0]
+	elif all_pats.size() > 1:
+		_strudel_pattern = Strudel.stack(all_pats)
+	_cyclist.set_pattern(_strudel_pattern)
+	_cyclist.start()
+	_strudel_playing = true
+
+	DebugOverlay.log("music/status", null, "MUSIC: Strudel batch playing (%d tracks, cps=%.2f)" % [tracks.size(), cps])
 
 
 var _strudel_last_pattern: StrudelPattern = null  ## Preserved for resume after stop
@@ -632,9 +1054,16 @@ func strudel_stop() -> void:
 		_cyclist.stop()
 	_strudel_playing = false
 	_strudel_pattern = null
-	if _sion_streaming and driver:
+	# Clear any deferred notes and stop batch sequences
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
+	# Stop the driver — handles both streaming mode (note_on) and play mode (batch MML)
+	if driver:
 		driver.call("stop")
 		_sion_streaming = false
+	# Reset audio effects when stopping (effects belong to the pattern)
+	reset_music_effects()
 
 
 func strudel_start() -> void:
@@ -659,6 +1088,11 @@ func _strudel_play_title() -> void:
 func strudel_set_cps(cps: float) -> void:
 	if _cyclist:
 		_cyclist.set_cps(cps)
+		# In batch mode, change the driver's BPM live — no recompile needed.
+		# The MML has t<BPM> baked in but set_bpm() overrides it at runtime.
+		if _sion_trigger and _sion_trigger.batch_mode and driver:
+			var new_bpm: int = maxi(30, int(240.0 * cps))
+			driver.call("set_bpm", new_bpm)
 
 
 func play_score(score_name: String) -> String:
@@ -895,4 +1329,7 @@ func get_status_text() -> String:
 		var enabled_str: String = "" if layer.enabled else " [DISABLED]"
 		lines.append("  %-8s: %-8s threshold=%.2f tracks=%s%s" % [
 			layer.name, state_str, layer.threshold, str(layer.track_ids), enabled_str])
+	# Show active audio effects
+	if not _active_controls.is_empty():
+		lines.append("  effects: %s" % str(_active_controls))
 	return "\n".join(lines)

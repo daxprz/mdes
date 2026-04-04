@@ -14,6 +14,7 @@ func _init(p_driver: Variant, p_presets: Variant) -> void:
 	driver = p_driver
 	presets = p_presets
 	_setup_voices()
+	_batch_compiler = MmlBatchCompiler.new(self)
 
 
 func _setup_voices() -> void:
@@ -149,8 +150,66 @@ func _setup_voices() -> void:
 	print("STRUDEL: %d voices mapped" % _voices.size())
 
 
+## Audio control keys that the trigger extracts from hap values
+## and forwards to MusicManager.set_music_effects() per-note.
+const EFFECT_KEYS := [
+	"lpf", "hpf", "lpq", "hpq",
+	"room", "roomsize", "roomlp",
+	"delay", "delaytime", "delayfeedback",
+	"distort", "crush", "shape",
+	"pan",
+]
+
+## Last-applied effect controls — used for change detection.
+## Only calls set_music_effects() when the values actually differ,
+## avoiding redundant AudioServer updates every trigger.
+var _last_fx: Dictionary = {}
+
+## Signal control patterns evaluated per-note at trigger time.
+## Array of StrudelPattern, each producing {control_key: value} dicts.
+var _signal_controls: Array = []
+
+## Scheduling mode: "note" = per-note frame-dispatch, "batch" = MML batch compilation.
+## Batch mode is the default — sample-accurate timing via SiON's internal sequencer.
+var batch_mode: bool = true
+
+## MML batch compiler — converts hap arrays to MML strings for sequence_on.
+var _batch_compiler: MmlBatchCompiler = null
+
+## AudioStreamPlayer for oscillator-based playback (bypasses SiON)
+var _osc_player: AudioStreamPlayer = null
+
+## Active sequence tracks from batch mode: { track_key: track_id }
+var _active_tracks: Dictionary = {}
+
+## Track ID counter for batch sequences (starts high to avoid collision with layer tracks)
+var _batch_track_base: int = 100
+
+## Cycle buffer: accumulate haps until a full cycle boundary is reached, then compile.
+## The cyclist delivers haps in small tick windows (~50ms); we need a full cycle to
+## produce compact per-voice MML with proper inter-note timing.
+var _cycle_buffer: Array = []
+var _cycle_buffer_int: int = -1   ## Which cycle integer the buffer is for
+var _last_batch_cps: float = 0.5  ## CPS at time of buffering
+
+## Deferred note queue: the cyclist dispatches haps into a lookahead window
+## (50ms tick + 100ms overlap = up to 150ms early). Instead of firing note_on
+## immediately, we enqueue notes and emit them at the correct wall-clock time.
+## process() is called each frame from MusicManager._process().
+var _pending_notes: Array[Dictionary] = []
+
+## Timing instrumentation — records actual note_on wall-clock times
+## for comparison against theoretical schedule. Enabled by setting
+## timing_log = true (via RCON: strudel timing on).
+var timing_log: bool = false
+var _timing_records: Array[Dictionary] = []  ## [{note, actual_ms, target_ms, deadline_ms, cycle_pos, delta_ms}]
+var _timing_start_ms: float = 0.0            ## Wall-clock reference (Time.get_ticks_msec at first note)
+
+
 func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, target_time: float) -> void:
 	## Called by the Cyclist for each hap with an onset.
+	## Does NOT fire note_on immediately — enqueues the note for deferred
+	## emission at the correct wall-clock time via process().
 	if not driver:
 		return
 
@@ -162,17 +221,474 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 	var length_sec: float = maxf(duration, 0.02)
 
 	# SiON note_on length is in 16th-note ticks at the driver's current BPM.
-	# The driver BPM is set to match the cyclist's CPS (see MusicManager).
-	# Conversion: ticks = duration_seconds * BPM * 4 / 60
-	#   where 4 = 16th notes per beat, 60 = seconds per minute
-	# If CPS = 0.5, one cycle = 2 seconds. SiON BPM = cps * 120 = 60.
-	# A quarter-cycle note (0.5s) = 0.5 * 60 * 4 / 60 = 2 ticks.
-	var bpm: float = maxf(cps * 120.0, 30.0)  # CPS->BPM (cps=0.5 -> 60 BPM)
+	var bpm: float = maxf(cps * 120.0, 30.0)
 	var length_ticks: float = maxf(1.0, length_sec * bpm * 4.0 / 60.0)
+
+	# Compute wall-clock emit time from the absolute target_time.
+	# deadline = target_time - phase (clock's virtual tick time, NOT wall-clock now).
+	# We must translate to wall-clock: how many strudel-seconds until target_time,
+	# then convert to wall-clock milliseconds.
+	var strudel_now: float = MusicManager._strudel_time
+	var wait_sec: float = target_time - strudel_now
+	var now_ms: float = Time.get_ticks_msec()
+	var emit_at_ms: float = now_ms + wait_sec * 1000.0
+
+	if wait_sec <= 0.003:
+		# 3ms or less — fire immediately (already late or on-time)
+		_emit_note(note_num, voice, length_ticks, hap.value, target_time, hap)
+	else:
+		# Defer: enqueue for later emission
+		_pending_notes.append({
+			"emit_at_ms": emit_at_ms,
+			"note_num": note_num,
+			"voice": voice,
+			"length_ticks": length_ticks,
+			"hap_value": hap.value,
+			"target_time": target_time,
+			"cycle_pos": hap.w().begin.to_float() if hap.whole != null else 0.0,
+		})
+
+
+func process() -> void:
+	## Called every frame from MusicManager._process().
+	## Fires any notes whose deadline has arrived.
+	if _pending_notes.is_empty():
+		return
+
+	var now_ms: float = Time.get_ticks_msec()
+	var i: int = 0
+	while i < _pending_notes.size():
+		if _pending_notes[i]["emit_at_ms"] <= now_ms:
+			var p: Dictionary = _pending_notes[i]
+			_emit_note_deferred(p)
+			_pending_notes.remove_at(i)
+		else:
+			i += 1
+
+
+func clear_pending() -> void:
+	## Clear the deferred note queue (called on stop/pattern change).
+	_pending_notes.clear()
+
+
+# ==============================================================================
+# Batch Mode: MML Compilation → sequence_on
+# ==============================================================================
+
+var _batch_dispatched: bool = false  ## True once the looping MML has been compiled and dispatched
+
+func trigger_batch(haps: Array, cps: float, cycle_begin: float, cycle_end: float) -> void:
+	## In batch mode, the cyclist still calls this per-tick but we ignore it.
+	## The actual compilation happens eagerly in start_batch_playback().
+	pass
+
+
+func start_batch_from_tracks(tracks: Array, cps: float) -> void:
+	## Compile multiple independent tracks into a multi-track MML string.
+	## Each track has: {pattern, voice, gain, name}
+	## This avoids set_in fragmentation by querying each pattern separately.
+	if not driver or not _batch_compiler:
+		return
+
+	# Stop any current playback before starting new
+	driver.call("stop")
+	MusicManager._sion_streaming = false
+
+	# BPM = 240 * CPS: 1 cycle = 1 whole note = 4 beats = 240/BPM seconds = 1/CPS seconds.
+	var bpm: int = maxi(30, int(240.0 * cps))
+	var mml_parts: Array[String] = []
+	var total_notes: int = 0
+
+	var osc_haps: Array = []    # Haps for oscillator rendering (bypass SiON)
+	var osc_waveform: String = "sine"
+	var osc_gain: float = 0.7
+
+	for track in tracks:
+		var pat: StrudelPattern = track["pattern"]
+		var voice_name: String = track.get("voice", "")
+		var gain: float = track.get("gain", 1.0)
+
+		# Query one full cycle — clean pattern, no set_in
+		var haps: Array = pat.query_arc(0.0, 1.0)
+		var onset_haps: Array = []
+		for hap in haps:
+			if hap.has_onset():
+				onset_haps.append(hap)
+		if onset_haps.is_empty():
+			continue
+
+		onset_haps.sort_custom(MmlBatchCompiler._sort_by_onset)
+
+		# Route: oscillator types (or default/no voice) bypass SiON entirely
+		var use_osc: bool = voice_name.is_empty() or StrudelOscillator.is_oscillator(voice_name)
+		if use_osc:
+			osc_haps.append_array(onset_haps)
+			osc_waveform = voice_name.to_lower() if not voice_name.is_empty() else "sine"
+			osc_gain = gain
+			total_notes += onset_haps.size()
+			DebugOverlay.log("music/batch", null, "BATCH: track '%s' → oscillator (%s, %d notes)" % [
+				track.get("name", "?"), osc_waveform, onset_haps.size()])
+			continue
+
+		# SiON path: build MML
+		var mml: String = _batch_compiler._haps_to_mml(onset_haps, bpm)
+		if mml.is_empty():
+			continue
+		if not voice_name.is_empty() and MmlBatchCompiler.VOICE_TO_MML.has(voice_name.to_lower()):
+			mml = mml.replace("t%d " % bpm, "t%d %s " % [bpm, MmlBatchCompiler.VOICE_TO_MML[voice_name.to_lower()]])
+		if gain < 0.99:
+			var vol: int = clampi(int(gain * 15.0), 0, 15)
+			mml = mml.replace("t%d " % bpm, "t%d v%d " % [bpm, vol])
+		mml_parts.append(mml)
+		total_notes += onset_haps.size()
+		DebugOverlay.log("music/batch", null, "BATCH: track '%s' → SiON MML (%d notes)" % [
+			track.get("name", "?"), onset_haps.size()])
+
+	# Play oscillator tracks via AudioStreamPlayer (pure waveforms)
+	if not osc_haps.is_empty():
+		var wav: AudioStreamWAV = StrudelOscillator.render_cycle(osc_haps, cps, osc_waveform, osc_gain)
+		_play_oscillator(wav)
+		DebugOverlay.log("music/batch", null, "BATCH: oscillator playing (%s, %d notes)" % [osc_waveform, osc_haps.size()])
+
+	# Play SiON tracks via driver.play()
+	if not mml_parts.is_empty():
+		var full_mml: String = ";".join(PackedStringArray(mml_parts))
+		DebugOverlay.log("music/batch", null, "BATCH: SiON playing (%d tracks, mml=%s)" % [mml_parts.size(), full_mml.substr(0, 80)])
+		driver.call("play", full_mml)
+	elif osc_haps.is_empty():
+		DebugOverlay.log("music/batch", null, "BATCH: nothing to play")
+	_batch_dispatched = true
+
+
+func start_batch_playback(pattern: StrudelPattern, cps: float) -> void:
+	## Eagerly query one full cycle from the pattern, compile to looping MML,
+	## and play() once. SiON handles all repetitions internally at sample precision.
+	## Called directly from strudel_play() — no buffering, no cyclist dependency.
+	if not driver or not _batch_compiler:
+		return
+
+	# Query all haps for cycle 0 (one full cycle)
+	var haps: Array = pattern.query_arc(0.0, 1.0)
+	var onset_haps: Array = []
+	for hap in haps:
+		if hap.has_onset():
+			onset_haps.append(hap)
+
+	if onset_haps.is_empty():
+		DebugOverlay.log("music/batch", null, "BATCH: no onset haps in cycle 0")
+		return
+
+	# Debug: show hap count and first few values+timing
+	DebugOverlay.log("music/batch", null, "BATCH: %d onset haps for cycle 0" % onset_haps.size())
+	for j in range(mini(onset_haps.size(), 6)):
+		var h: StrudelHap = onset_haps[j]
+		var w_str: String = "%s→%s" % [h.w().begin.show(), h.w().end.show()] if h.whole != null else "null"
+		DebugOverlay.log("music/batch", null, "BATCH: hap[%d] whole=%s value=%s" % [j, w_str, str(h.value).substr(0, 60)])
+
+	# Compile and play
+	_compile_and_play(onset_haps, cps)
+	_batch_dispatched = true
+
+	# Apply bus effects from hap controls
+	_apply_batch_effects(onset_haps)
+
+
+func _compile_and_play(haps: Array, cps: float) -> void:
+	## Compile haps into looping MML and play via driver.play().
+	## Multiple voice groups are joined with semicolons (MML multi-track).
+	if haps.is_empty():
+		return
+
+	var compiled: Dictionary = _batch_compiler.compile_cycle(haps, cps)
+	if compiled.is_empty():
+		DebugOverlay.log("music/batch", null, "BATCH: compile_cycle returned empty")
+		return
+
+	# Stop any current playback
+	driver.call("stop")
+	MusicManager._sion_streaming = false
+
+	# Join all voice group MML strings with semicolons (SiON multi-track).
+	var mml_parts: Array[String] = []
+	var total_notes: int = 0
+	for track_key in compiled:
+		var entry: Dictionary = compiled[track_key]
+		mml_parts.append(entry["mml"])
+		total_notes += entry["notes"]
+
+	var full_mml: String = ";".join(PackedStringArray(mml_parts))
+	DebugOverlay.log("music/batch", null, "BATCH: play %d voices, %d notes, mml=%s" % [compiled.size(), total_notes, full_mml.substr(0, 100)])
+	driver.call("play", full_mml)
+
+	DebugOverlay.log("music/batch", null, "BATCH: playing — %d voices, %d notes" % [
+		compiled.size(), total_notes])
+
+
+## Tracks from previous cycles that should be retired (stopped after they finish)
+var _retiring_tracks: Array[int] = []
+
+func _retire_old_tracks() -> void:
+	## Stop tracks from 2+ cycles ago, move current tracks to retiring.
+	for tid in _retiring_tracks:
+		driver.call("sequence_off", tid, 0, 0, true)
+	_retiring_tracks.clear()
+	# Move current active tracks to retiring (they'll be stopped next cycle)
+	for track_key in _active_tracks:
+		_retiring_tracks.append(_active_tracks[track_key])
+	_active_tracks.clear()
+
+
+func _play_oscillator(wav: AudioStreamWAV) -> void:
+	## Play a rendered oscillator WAV via AudioStreamPlayer on the Music bus.
+	if _osc_player:
+		_osc_player.stop()
+		_osc_player.queue_free()
+		_osc_player = null
+	_osc_player = AudioStreamPlayer.new()
+	_osc_player.stream = wav
+	_osc_player.bus = MusicManager.MUSIC_BUS_NAME if MusicManager._music_bus_idx > 0 else "Master"
+	MusicManager.add_child(_osc_player)
+	_osc_player.play()
+
+
+func stop_oscillator() -> void:
+	## Stop the oscillator player.
+	if _osc_player:
+		_osc_player.stop()
+		_osc_player.queue_free()
+		_osc_player = null
+
+
+func stop_all_sequences() -> void:
+	## Stop all active batch-mode sequence tracks, oscillator, and clear buffers.
+	stop_oscillator()
+	DebugOverlay.log("music/batch", null, "BATCH_DBG: stop_all_sequences (active=%d, retiring=%d, streaming=%s)" % [
+		_active_tracks.size(), _retiring_tracks.size(), str(MusicManager._sion_streaming)])
+	if MusicManager._sion_streaming and driver:
+		for track_key in _active_tracks:
+			var track_id: int = _active_tracks[track_key]
+			DebugOverlay.log("music/batch", null, "BATCH_DBG: sequence_off track=%d" % track_id)
+			driver.call("sequence_off", track_id, 0, 0, true)
+		for tid in _retiring_tracks:
+			driver.call("sequence_off", tid, 0, 0, true)
+	_active_tracks.clear()
+	_retiring_tracks.clear()
+	_cycle_buffer.clear()
+	_cycle_buffer_int = -1
+	_batch_dispatched = false
+
+
+func _apply_batch_effects(haps: Array) -> void:
+	## Extract audio controls from haps and apply bus effects once per batch.
+	var merged: Dictionary = {}
+	for hap in haps:
+		if hap.value is Dictionary:
+			for key in EFFECT_KEYS:
+				if hap.value.has(key):
+					merged[key] = float(hap.value[key])
+
+	if merged.is_empty():
+		if not _last_fx.is_empty():
+			MusicManager.reset_music_effects()
+			_last_fx.clear()
+	elif merged != _last_fx:
+		MusicManager.set_music_effects(merged)
+		_last_fx = merged.duplicate()
+
+
+func _emit_note(note_num: int, voice: Variant, length_ticks: float,
+				hap_value: Variant, target_time: float, hap: Variant) -> void:
+	## Fire note_on immediately (for notes with deadline <= 0).
+	var cycle_pos: float = hap.w().begin.to_float() if hap != null and hap is StrudelHap and hap.whole != null else 0.0
+	_do_emit(note_num, voice, length_ticks, hap_value, target_time, cycle_pos)
+
+
+func _emit_note_deferred(p: Dictionary) -> void:
+	## Fire a note from the deferred queue.
+	_do_emit(p["note_num"], p["voice"], p["length_ticks"],
+			 p["hap_value"], p["target_time"], p["cycle_pos"])
+
+
+func _do_emit(note_num: int, voice: Variant, length_ticks: float,
+			  hap_value: Variant, target_time: float, cycle_pos: float) -> void:
+	## Actually fire note_on on the SiON driver and record timing.
+	var emit_ms: float = Time.get_ticks_msec()
 	driver.call("note_on", note_num, voice, length_ticks)
 
-	DebugOverlay.log("strudel/trigger", null, "STRUDEL_TRIGGER: note=%d dur=%.3f ticks=%.1f val=%s" % [
-		note_num, length_sec, length_ticks, str(hap.value)])
+	# Timing instrumentation
+	if timing_log:
+		if _timing_records.is_empty():
+			_timing_start_ms = emit_ms - target_time * 1000.0
+		var actual_ms: float = emit_ms - _timing_start_ms
+		var target_ms: float = target_time * 1000.0
+		var rec := {
+			"note": note_num, "actual_ms": snapped(actual_ms, 0.1),
+			"target_ms": snapped(target_ms, 0.1),
+			"delta_ms": snapped(actual_ms - target_ms, 0.1),
+			"cycle": snapped(cycle_pos, 0.001),
+		}
+		_timing_records.append(rec)
+		print("TIMING: note=%d cycle=%.3f actual=%.1f target=%.1f delta=%+.1fms" % [
+			note_num, cycle_pos, actual_ms, target_ms, rec["delta_ms"]])
+
+	# Per-note effect correction
+	_apply_hap_effects(hap_value)
+
+	# Evaluate signal controls at this cycle position (e.g., sine.range(200, 2000))
+	if not _signal_controls.is_empty() and cycle_pos >= 0:
+		var sig_fx: Dictionary = {}
+		for sig_pat in _signal_controls:
+			var sig_haps: Array = sig_pat.query_arc(cycle_pos, cycle_pos + 0.001)
+			if not sig_haps.is_empty():
+				var val: Variant = sig_haps[0].value
+				if val is Dictionary:
+					for k in val:
+						sig_fx[k] = float(val[k])
+		if not sig_fx.is_empty():
+			DebugOverlay.log("music/effects", null, "SIGNAL_FX: cycle=%.3f %s" % [cycle_pos, str(sig_fx)])
+			MusicManager.set_music_effects(sig_fx)
+		else:
+			DebugOverlay.log("music/effects", null, "SIGNAL_FX: cycle=%.3f no values (signals=%d)" % [cycle_pos, _signal_controls.size()])
+
+	DebugOverlay.log("strudel/trigger", null, "STRUDEL_TRIGGER: note=%d ticks=%.1f val=%s" % [
+		note_num, length_ticks, str(hap_value)])
+
+
+func timing_start() -> void:
+	## Start timing capture — clears previous records.
+	_timing_records.clear()
+	_timing_start_ms = 0.0
+	timing_log = true
+	print("TIMING: capture started")
+
+
+func timing_stop() -> String:
+	## Stop capture and return analysis.
+	timing_log = false
+	return timing_analyze()
+
+
+func timing_analyze() -> String:
+	## Analyze captured timing data: jitter, drift, statistics.
+	if _timing_records.is_empty():
+		return "TIMING: no records captured"
+
+	var lines: Array[String] = []
+	lines.append("=== TIMING ANALYSIS (%d notes) ===" % _timing_records.size())
+
+	# Compute statistics on delta (actual - target)
+	var deltas: Array[float] = []
+	var abs_deltas: Array[float] = []
+	for rec in _timing_records:
+		deltas.append(rec["delta_ms"])
+		abs_deltas.append(absf(rec["delta_ms"]))
+
+	var min_d: float = deltas[0]
+	var max_d: float = deltas[0]
+	var sum_d: float = 0.0
+	var sum_abs: float = 0.0
+	for d in deltas:
+		min_d = minf(min_d, d)
+		max_d = maxf(max_d, d)
+		sum_d += d
+	for d in abs_deltas:
+		sum_abs += d
+	var mean_d: float = sum_d / deltas.size()
+	var mean_abs: float = sum_abs / abs_deltas.size()
+
+	# Variance and stddev
+	var sum_sq: float = 0.0
+	for d in deltas:
+		sum_sq += (d - mean_d) * (d - mean_d)
+	var stddev: float = sqrt(sum_sq / deltas.size())
+
+	lines.append("  Notes captured:  %d" % _timing_records.size())
+	lines.append("  Mean delta:      %+.1f ms (bias)" % mean_d)
+	lines.append("  Mean |delta|:    %.1f ms (avg error)" % mean_abs)
+	lines.append("  Std deviation:   %.1f ms (jitter)" % stddev)
+	lines.append("  Min delta:       %+.1f ms" % min_d)
+	lines.append("  Max delta:       %+.1f ms" % max_d)
+	lines.append("  Range:           %.1f ms" % (max_d - min_d))
+
+	# Inter-note intervals: compare actual gaps to theoretical gaps
+	if _timing_records.size() >= 2:
+		var interval_errors: Array[float] = []
+		for i in range(1, _timing_records.size()):
+			var actual_gap: float = _timing_records[i]["actual_ms"] - _timing_records[i - 1]["actual_ms"]
+			var target_gap: float = _timing_records[i]["target_ms"] - _timing_records[i - 1]["target_ms"]
+			if target_gap > 0:
+				interval_errors.append(actual_gap - target_gap)
+		if not interval_errors.is_empty():
+			var ie_sum: float = 0.0
+			var ie_abs_sum: float = 0.0
+			for e in interval_errors:
+				ie_sum += e
+				ie_abs_sum += absf(e)
+			lines.append("  --- Inter-note Intervals ---")
+			lines.append("  Mean interval err: %+.1f ms" % (ie_sum / interval_errors.size()))
+			lines.append("  Mean |interval|:   %.1f ms" % (ie_abs_sum / interval_errors.size()))
+
+	# Drift: is there a trend? Compare first-half mean to second-half mean
+	if deltas.size() >= 10:
+		var half: int = deltas.size() / 2
+		var first_sum: float = 0.0
+		var second_sum: float = 0.0
+		for i in range(half):
+			first_sum += deltas[i]
+		for i in range(half, deltas.size()):
+			second_sum += deltas[i]
+		var first_mean: float = first_sum / half
+		var second_mean: float = second_sum / (deltas.size() - half)
+		var drift: float = second_mean - first_mean
+		lines.append("  --- Drift ---")
+		lines.append("  First half mean:   %+.1f ms" % first_mean)
+		lines.append("  Second half mean:  %+.1f ms" % second_mean)
+		lines.append("  Drift:             %+.1f ms (%s)" % [
+			drift, "drifting late" if drift > 2.0 else "drifting early" if drift < -2.0 else "stable"])
+
+	# Per-note detail (first 20 and last 5)
+	lines.append("  --- Per-note (first 20) ---")
+	for i in range(mini(_timing_records.size(), 20)):
+		var r: Dictionary = _timing_records[i]
+		lines.append("    #%02d note=%d cy=%.3f actual=%.1f target=%.1f Δ=%+.1fms" % [
+			i, r["note"], r["cycle"], r["actual_ms"], r["target_ms"], r["delta_ms"]])
+	if _timing_records.size() > 20:
+		lines.append("    ... (%d more) ..." % (_timing_records.size() - 25))
+		for i in range(maxi(_timing_records.size() - 5, 20), _timing_records.size()):
+			var r: Dictionary = _timing_records[i]
+			lines.append("    #%02d note=%d cy=%.3f actual=%.1f target=%.1f Δ=%+.1fms" % [
+				i, r["note"], r["cycle"], r["actual_ms"], r["target_ms"], r["delta_ms"]])
+
+	var result: String = "\n".join(lines)
+	print(result)
+	return result
+
+
+func _apply_hap_effects(value: Variant) -> void:
+	## Read audio control keys from a hap's value dict and forward
+	## to MusicManager. Skips if nothing changed since last trigger.
+	if not (value is Dictionary):
+		# No controls on this hap — if effects were active, clear them
+		if not _last_fx.is_empty():
+			MusicManager.reset_music_effects()
+			_last_fx.clear()
+		return
+
+	var fx: Dictionary = {}
+	for key in EFFECT_KEYS:
+		if value.has(key):
+			fx[key] = float(value[key])
+
+	if fx.is_empty():
+		if not _last_fx.is_empty():
+			MusicManager.reset_music_effects()
+			_last_fx.clear()
+		return
+
+	# Only update if the controls actually changed (avoid redundant AudioServer calls)
+	if fx != _last_fx:
+		MusicManager.set_music_effects(fx)
+		_last_fx = fx.duplicate()
 
 
 func _resolve_note(value: Variant) -> int:

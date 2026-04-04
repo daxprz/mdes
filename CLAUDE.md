@@ -12,6 +12,10 @@ DAX is a 2D action game built in Godot 4.6, rendered entirely via `_draw()` (no 
 - **Debug Overlay** system with per-aspect visual/textual toggles
 - **Test infrastructure** with JSON-defined test scenarios and ETZ/DAZ zone verification
 
+## Agents
+
+@AI/agents/ROSTER.md
+
 ## Agent Recommendation
 
 When the user is working on testing, debugging, or monitoring the running game, suggest using the **tumu** agent:

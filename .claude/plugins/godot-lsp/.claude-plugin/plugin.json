@@ -1,0 +1,5 @@
+{
+  "name": "godot-lsp",
+  "description": "GDScript Language Server via Godot headless mode",
+  "version": "1.0.1"
+}

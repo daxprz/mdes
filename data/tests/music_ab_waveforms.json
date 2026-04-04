@@ -1,0 +1,63 @@
+{
+  "name": "music_ab_waveforms",
+  "description": "A/B test: compare our engine output to Strudel reference for basic waveforms",
+  "script": [
+    "var inspect default=30",
+
+    "announce A/B WAVEFORM TEST — requires ref server on port 9998",
+
+    "# === Test 1: Sine wave ===",
+    "announce 1/4: SINE — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\")",
+    "wait 1",
+    "announce 1/4: SINE — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_sine",
+    "wait 1",
+    "notify {SCRIPT} \"SINE: ref=ref_wave-sine.wav ours=ab_ours_sine.wav — analyze and callback\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 2: Sawtooth ===",
+    "announce 2/4: SAWTOOTH — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\")",
+    "wait 1",
+    "announce 2/4: SAWTOOTH — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"sawtooth\").pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_sawtooth",
+    "wait 1",
+    "notify {SCRIPT} \"SAWTOOTH: ref=ref_wave-sawtooth.wav ours=ab_ours_sawtooth.wav — analyze and callback\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 3: Square ===",
+    "announce 3/4: SQUARE — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"square\")",
+    "wait 1",
+    "announce 3/4: SQUARE — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"square\").pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_square",
+    "wait 1",
+    "notify {SCRIPT} \"SQUARE: ref=ref_wave-square.wav ours=ab_ours_square.wav — analyze and callback\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 4: Triangle ===",
+    "announce 4/4: TRIANGLE — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"triangle\")",
+    "wait 1",
+    "announce 4/4: TRIANGLE — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"triangle\").pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_triangle",
+    "wait 1",
+    "notify {SCRIPT} \"TRIANGLE: ref=ref_wave-triangle.wav ours=ab_ours_triangle.wav — analyze and callback\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "announce A/B WAVEFORM TESTS COMPLETE"
+  ]
+}

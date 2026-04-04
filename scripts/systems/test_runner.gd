@@ -396,7 +396,7 @@ func _parse_script_check(line: String) -> Dictionary:
 			else:
 				i += 1
 
-		var check_dict: Dictionary = {"command": subcmd, "label": label}
+		var check_dict: Dictionary = {"command": subcmd, "full_command": after, "label": label}
 		if not extract.is_empty():
 			check_dict["extract"] = extract
 		else:
@@ -441,6 +441,16 @@ func _parse_wait_line(line: String) -> Dictionary:
 					j += 1
 				conditions.append(cond)
 				i = j
+			elif cond_type == "silent":
+				# "unless silent" — end wait early when audio stops
+				var cond: Dictionary = {
+					"cond_type": "silent",
+					"idx": cond_idx,
+					"patterns": [],
+				}
+				cond_idx += 1
+				conditions.append(cond)
+				i += 2
 			elif cond_type == "exit_circle" and i + 5 < parts.size():
 				var cond: Dictionary = {
 					"cond_type": "exit_circle",
@@ -943,11 +953,18 @@ func _execute_check_task(task: Dictionary) -> void:
 				test_result["passed"] = false
 			continue
 
-		var response: String = rcon._execute(cmd)
+		var full_cmd: String = check.get("full_command", cmd)
+		var response: String = rcon._execute(full_cmd)
 		var value: float = _extract_value(response, extract_key)
 
 		var passed: bool = true
 		var expected_str: String = ""
+
+		# Auto-fail if response starts with "FAIL"
+		if response.begins_with("FAIL"):
+			passed = false
+			expected_str = "OK (got: %s)" % response.substr(0, 60)
+
 		if check.has("expect_gt"):
 			passed = value > float(check["expect_gt"])
 			expected_str = "> %s" % str(check["expect_gt"])
@@ -1599,6 +1616,28 @@ func _check_breach_conditions() -> void:
 				if entity.global_position.distance_to(center) > radius:
 					_breach_result = {"breached": true, "entity": entity.name, "pos": entity.global_position, "condition": cond}
 					return
+
+		elif cond_type == "silent":
+			# Audio silence — triggers when no audio is playing.
+			# Checks: SiON not streaming/playing, ab_player finished, bus peak is silent.
+			var is_silent: bool = true
+			# Check ab_player (WAV playback)
+			var rcon_node := get_node_or_null("/root/RCON")
+			if rcon_node and rcon_node.get("_ab_player") and rcon_node._ab_player != null:
+				if rcon_node._ab_player.playing:
+					is_silent = false
+			# Check SiON
+			if MusicManager._strudel_playing:
+				is_silent = false
+			# Check audio bus peak level as fallback
+			if is_silent:
+				var bus_idx: int = AudioServer.get_bus_index("Master")
+				var peak: float = AudioServer.get_bus_peak_volume_left_db(bus_idx, 0)
+				if peak > -60.0:  # Above -60dB = still audible
+					is_silent = false
+			if is_silent:
+				_breach_result = {"breached": true, "entity": "audio", "pos": Vector2.ZERO, "condition": cond}
+				return
 
 
 func _find_matching_entities(patterns: Array) -> Array:

@@ -10,6 +10,9 @@
     "music_compositions",
     "music_named_lines",
     "music_viz_showcase",
-    "music_viz_multiline"
+    "music_viz_multiline",
+    "music_effects",
+    "music_effects_drawer",
+    "music_effects_rcon"
   ]
 }

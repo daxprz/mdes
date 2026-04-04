@@ -1,0 +1,61 @@
+{
+  "name": "music_effects_rcon",
+  "description": "Sound check: verify RCON fx commands — set, status, reset, hot-swap effects",
+  "script": [
+    "var inspect default=8",
+
+    "announce RCON EFFECTS COMMANDS — SOUND CHECKS",
+    "wait 1",
+
+    "# ====== FX SET VIA INLINE PARAMS ======",
+    "announce 1/6: Inline params — strudel <pattern> lpf=800",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 lpf=800",
+    "wait 4",
+
+    "# ====== FX SET VIA STRUDEL FX ======",
+    "announce 2/6: strudel fx command — add reverb to running pattern",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5",
+    "wait 2",
+    "strudel fx room=0.7",
+    "announce 2/6: reverb should now be audible",
+    "wait 4",
+
+    "# ====== FX HOT-SWAP ======",
+    "announce 3/6: Hot-swap — change effects on a running pattern",
+    "strudel [c3,e3,g3] [f3,a3,c4] cps=0.3",
+    "wait 3",
+    "announce 3/6: adding lpf=400 (should get muffled)",
+    "strudel fx lpf=400",
+    "wait 3",
+    "announce 3/6: changing to hpf=800 (should get thin)",
+    "strudel fx hpf=800",
+    "wait 3",
+
+    "# ====== FX RESET ======",
+    "announce 4/6: FX off — effects should disappear",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 lpf=400 room=0.6",
+    "wait 3",
+    "announce 4/6: resetting... sound should return to clean",
+    "strudel fx off",
+    "wait 3",
+
+    "# ====== STOP RESETS FX ======",
+    "announce 5/6: Stop resets — apply effects, stop, restart clean",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 room=0.8 delay=0.5",
+    "wait 3",
+    "strudel stop",
+    "wait 1",
+    "announce 5/6: restarting — should be clean (no reverb/delay)",
+    "strudel start",
+    "wait 4",
+
+    "# ====== ALL PARAMS ======",
+    "announce 6/6: All effects at once — lpf+hpf+room+delay+distort+pan",
+    "strudel [c3 e3 g3 c4]*2 cps=0.5 lpf=1200 hpf=200 room=0.4 delay=0.3 distort=0.2 pan=0.6",
+    "wait 5",
+
+    "strudel stop",
+    "wait 1",
+    "notify {SCRIPT} \"Did RCON fx set/reset/hot-swap work correctly?\" [\"All good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

@@ -4,7 +4,7 @@ description: Strudel v1.2.0 pattern engine integration status — what works, wh
 type: project
 ---
 
-Strudel v1.2.0 pattern algebra ported to GDScript (v0.10.47-v0.10.52). Music Drawer (Ctrl+M) with multi-line editor, 6 visualizer types, 90+ SiON voice presets, 148 unit tests.
+Strudel v1.2.0 pattern algebra ported to GDScript (v0.10.47-v0.10.52+). Music Drawer (Ctrl+M) with multi-line editor, 6 visualizer types, 90+ SiON voice presets, 148 unit tests. Audio effects (lpf, hpf, reverb, delay, distortion, crush, pan) via Godot AudioBus post-processing — 19 of 274 Strudel controls supported.
 
 **Why:** User wants Strudel-compatible live-coding music in their Godot game. Tenets: no feature additions, retain Strudel compatibility, depth-first implementation.
 

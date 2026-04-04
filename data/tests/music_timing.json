@@ -1,0 +1,42 @@
+{
+  "name": "music_timing",
+  "description": "Timing accuracy test — fast notes at known tempo, measures actual vs theoretical emission times",
+  "script": [
+    "var inspect default=15",
+
+    "announce TIMING ACCURACY TEST",
+    "wait 1",
+
+    "# Start timing capture, play fast pattern, stop, analyze",
+
+    "# === Test 1: 8 notes/cycle at 1 cps (8 notes/sec, 125ms apart) ===",
+    "announce 1/3: 8 notes/sec (125ms intervals) — capturing timing...",
+    "strudel timing on",
+    "strudel [c4 d4 e4 f4 g4 a4 b4 c5]*1 cps=1",
+    "wait 5",
+    "strudel stop",
+    "strudel timing off",
+    "wait 1",
+
+    "# === Test 2: 16 notes/cycle at 1 cps (16 notes/sec, 62.5ms apart) ===",
+    "announce 2/3: 16 notes/sec (62.5ms intervals) — capturing timing...",
+    "strudel timing on",
+    "strudel [c4 d4 e4 f4 g4 a4 b4 c5]*2 cps=1",
+    "wait 5",
+    "strudel stop",
+    "strudel timing off",
+    "wait 1",
+
+    "# === Test 3: 4 notes/cycle at 2 cps (8 notes/sec, 125ms apart, double tempo) ===",
+    "announce 3/3: 4 notes at 2 cps (125ms intervals, higher tempo) — capturing...",
+    "strudel timing on",
+    "strudel c4 e4 g4 c5 cps=2",
+    "wait 5",
+    "strudel stop",
+    "strudel timing off",
+    "wait 1",
+
+    "announce Check godot log for TIMING analysis",
+    "notify {SCRIPT} \"Timing tests done. Check log for analysis.\" [\"OK\"] {inspect} blocking"
+  ]
+}

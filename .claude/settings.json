@@ -1,0 +1,96 @@
+{
+  "permissions": {
+    "allow": [
+      "// ============================================================",
+      "// CORE TOOLS",
+      "// ============================================================",
+      "Edit",
+      "Read",
+      "WebFetch(domain:docs.godotengine.org)",
+      "WebFetch(domain:julienduranleau-sandbox.github.io)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "Write",
+      "// ============================================================",
+      "// BASH - File System",
+      "// ============================================================",
+      "Bash(cat *)",
+      "Bash(cd *)",
+      "Bash(chmod *)",
+      "Bash(echo *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(ls *)",
+      "Bash(mkdir *)",
+      "Bash(open *)",
+      "Bash(printf *)",
+      "Bash(sed *)",
+      "Bash(wc *)",
+      "// ============================================================",
+      "// BASH - Process & System",
+      "// ============================================================",
+      "Bash(osascript *)",
+      "Bash(pkill *)",
+      "Bash(ps *)",
+      "Bash(sleep *)",
+      "// ============================================================",
+      "// BASH - Git",
+      "// ============================================================",
+      "Bash(gh api *)",
+      "Bash(git *)",
+      "// ============================================================",
+      "// BASH - Godot",
+      "// ============================================================",
+      "Bash(/Applications/Godot.app/Contents/MacOS/Godot *)",
+      "// ============================================================",
+      "// BASH - RCON (game communication)",
+      "// ============================================================",
+      "Bash(nc -w1 localhost 9999)",
+      "Bash(nc -w2 localhost 9999)",
+      "Bash(nc -w3 localhost 9999)",
+      "// ============================================================",
+      "// BASH - Test Scripts",
+      "// ============================================================",
+      "Bash(bash .claude/scripts/*)",
+      "Bash(bash scripts/*)",
+      "Bash(scripts/run_test.sh *)",
+      "Bash(scripts/run_suites.sh *)",
+      "// ============================================================",
+      "// BASH - Python & Tools",
+      "// ============================================================",
+      "Bash(python3 *)",
+      "Bash(tools/mocap/run.sh)"
+    ],
+    "deny": [
+      "**/.git/**",
+      "**/.godot/**",
+      "**/.import/**",
+      "**/build/**"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/scripts/tidy-settings.py",
+            "statusMessage": "Tidying settings..."
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "godot-lsp@tumu-plugins": true
+  },
+  "extraKnownMarketplaces": {
+    "tumu-plugins": {
+      "source": {
+        "source": "directory",
+        "path": "/var/tumu/workspace/.claude/plugins"
+      }
+    }
+  }
+}

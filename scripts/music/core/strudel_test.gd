@@ -37,6 +37,9 @@ func run(suite: String = "all") -> String:
 			_test_mini()
 			_test_integration()
 			_test_voices()
+			_test_effects_parsing()
+			_test_effects_bus()
+			_test_mml_compiler()
 		"algebra":
 			_test_fraction()
 			_test_timespan()
@@ -53,8 +56,13 @@ func run(suite: String = "all") -> String:
 			_test_integration()
 		"voices":
 			_test_voices()
+		"effects":
+			_test_effects_parsing()
+			_test_effects_bus()
+		"mml_compiler", "mml":
+			_test_mml_compiler()
 		_:
-			return "ERR: unknown suite '%s'. Try: all, algebra, composers, combinators, signals, mini, integration, voices" % suite
+			return "ERR: unknown suite '%s'. Try: all, algebra, composers, combinators, signals, mini, integration, voices, effects, mml" % suite
 
 	var total: int = _pass_count + _fail_count
 	var result: String = "=== %d/%d PASS ===" % [_pass_count, total]
@@ -465,6 +473,366 @@ func _test_voices() -> void:
 	_ok("alias: syn", trigger._voices.has("syn"))
 
 	print("  Voices: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# Effects: method chain parsing and AudioBus setup
+# ==============================================================================
+
+func _test_effects_parsing() -> void:
+	var start: int = _pass_count + _fail_count
+
+	# Helper: parse a line through the drawer and return parsed dict
+	# MusicDrawer is an autoload so we can call its method directly
+	var line: Dictionary
+
+	# --- Single audio control method ---
+	line = MusicDrawer._make_line('"c4 e4".lpf(800)')
+	var r: Dictionary = MusicDrawer._parse_line_text(line)
+	_ok("lpf parsed: is_valid", r["is_valid"])
+	_eq("lpf parsed: pattern_text", r["pattern_text"], "c4 e4")
+	_ok("lpf parsed: has audio_controls", r.has("audio_controls"))
+	_ok("lpf parsed: controls has lpf", r["audio_controls"].has("lpf"))
+	_eq("lpf parsed: value", str(r["audio_controls"]["lpf"]), "800.0")
+
+	# --- Single hpf ---
+	line = MusicDrawer._make_line('"c4 e4".hpf(300)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("hpf parsed", r["audio_controls"].has("hpf"))
+	_eq("hpf value", str(r["audio_controls"]["hpf"]), "300.0")
+
+	# --- Multiple audio controls chained ---
+	line = MusicDrawer._make_line('"c4 e4".lpf(600).room(0.5)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("multi: is_valid", r["is_valid"])
+	_eq("multi: pattern_text", r["pattern_text"], "c4 e4")
+	_ok("multi: has lpf", r["audio_controls"].has("lpf"))
+	_ok("multi: has room", r["audio_controls"].has("room"))
+	_eq("multi: lpf value", str(r["audio_controls"]["lpf"]), "600.0")
+	_eq("multi: room value", str(r["audio_controls"]["room"]), "0.5")
+
+	# --- Audio controls + viz method ---
+	line = MusicDrawer._make_line('"c4 e4".lpf(800).room(0.5).pianoroll()')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("with viz: is_valid", r["is_valid"])
+	_eq("with viz: pattern_text", r["pattern_text"], "c4 e4")
+	_ok("with viz: has lpf", r["audio_controls"].has("lpf"))
+	_ok("with viz: has room", r["audio_controls"].has("room"))
+	_eq("with viz: viz is pianoroll", r["viz"], MusicDrawer.VIZ_PIANOROLL)
+
+	# --- Audio controls + viz with options ---
+	line = MusicDrawer._make_line('"c4 e4".delay(0.3).pianoroll({labels:1})')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("viz+opts: is_valid", r["is_valid"])
+	_ok("viz+opts: has delay", r["audio_controls"].has("delay"))
+	_eq("viz+opts: delay value", str(r["audio_controls"]["delay"]), "0.3")
+	_eq("viz+opts: viz", r["viz"], MusicDrawer.VIZ_PIANOROLL)
+	_ok("viz+opts: labels option", r.get("viz_options", {}).get("labels", 0) == 1)
+
+	# --- All supported audio controls ---
+	line = MusicDrawer._make_line('"c4".lpf(800).hpf(200).room(0.7).delay(0.4).distort(0.3).crush(8).pan(0.5)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("all controls: is_valid", r["is_valid"])
+	var ctrl: Dictionary = r["audio_controls"]
+	_ok("all: lpf", ctrl.has("lpf"))
+	_ok("all: hpf", ctrl.has("hpf"))
+	_ok("all: room", ctrl.has("room"))
+	_ok("all: delay", ctrl.has("delay"))
+	_ok("all: distort", ctrl.has("distort"))
+	_ok("all: crush", ctrl.has("crush"))
+	_ok("all: pan", ctrl.has("pan"))
+	_eq("all: 7 controls", str(ctrl.size()), "7")
+
+	# --- Named line with audio controls ---
+	line = MusicDrawer._make_line('drums: "c4(3,8)".lpf(400).scope()')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("named: is_valid", r["is_valid"])
+	_eq("named: name", r["name"], "drums")
+	_ok("named: has lpf", r["audio_controls"].has("lpf"))
+	_eq("named: viz is scope", r["viz"], MusicDrawer.VIZ_SCOPE)
+
+	# --- No audio controls = empty dict ---
+	line = MusicDrawer._make_line('"c4 e4".pianoroll()')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("no fx: is_valid", r["is_valid"])
+	_eq("no fx: empty controls", str(r["audio_controls"].size()), "0")
+	_eq("no fx: viz", r["viz"], MusicDrawer.VIZ_PIANOROLL)
+
+	# --- Bare mini (no quotes, no methods) = no controls ---
+	line = MusicDrawer._make_line("c4 e4 g4 c5")
+	r = MusicDrawer._parse_line_text(line)
+	_ok("bare: is_valid", r["is_valid"])
+	_eq("bare: pattern_text", r["pattern_text"], "c4 e4 g4 c5")
+	_eq("bare: no controls", str(r["audio_controls"].size()), "0")
+
+	# --- note() wrapper with controls ---
+	line = MusicDrawer._make_line('note("c4 e4").lpf(500).pianoroll()')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("note(): is_valid", r["is_valid"])
+	_eq("note(): pattern_text", r["pattern_text"], "c4 e4")
+	_ok("note(): has lpf", r["audio_controls"].has("lpf"))
+	_eq("note(): viz", r["viz"], MusicDrawer.VIZ_PIANOROLL)
+
+	# --- Aliases resolve ---
+	line = MusicDrawer._make_line('"c4".lowpass(800)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("alias lowpass: has lpf", r["audio_controls"].has("lpf"))
+
+	line = MusicDrawer._make_line('"c4".highpass(300)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("alias highpass: has hpf", r["audio_controls"].has("hpf"))
+
+	# --- Roomsize and delaytime ---
+	line = MusicDrawer._make_line('"c4".room(0.6).roomsize(0.9).delay(0.5).delaytime(0.25)')
+	r = MusicDrawer._parse_line_text(line)
+	_ok("extended: has roomsize", r["audio_controls"].has("roomsize"))
+	_ok("extended: has delaytime", r["audio_controls"].has("delaytime"))
+	_eq("extended: roomsize value", str(r["audio_controls"]["roomsize"]), "0.9")
+	_eq("extended: delaytime value", str(r["audio_controls"]["delaytime"]), "0.25")
+
+	print("  Effects parsing: %d tests" % (_pass_count + _fail_count - start))
+
+
+func _test_effects_bus() -> void:
+	var start: int = _pass_count + _fail_count
+
+	# Verify bus exists
+	var bus_idx: int = MusicManager._music_bus_idx
+	_ok("music bus initialized", bus_idx >= 0)
+
+	if bus_idx < 0:
+		print("  Effects bus: SKIP (bus not set up)")
+		return
+
+	var bus_name: String = AudioServer.get_bus_name(bus_idx)
+	_ok("bus has a name", not bus_name.is_empty())
+
+	# Verify correct number of effect slots
+	var fx_count: int = AudioServer.get_bus_effect_count(bus_idx)
+	_eq("bus has 6 effect slots", str(fx_count), str(MusicManager.FX_SLOT_COUNT))
+
+	# All effects should start disabled
+	for i in range(mini(fx_count, MusicManager.FX_SLOT_COUNT)):
+		_ok("slot %d disabled" % i, not AudioServer.is_bus_effect_enabled(bus_idx, i))
+
+	# Effect instances exist
+	_ok("lpf instance", MusicManager._fx_lpf != null)
+	_ok("hpf instance", MusicManager._fx_hpf != null)
+	_ok("distort instance", MusicManager._fx_distort != null)
+	_ok("reverb instance", MusicManager._fx_reverb != null)
+	_ok("delay instance", MusicManager._fx_delay != null)
+	_ok("pan instance", MusicManager._fx_pan != null)
+
+	# --- Apply lpf control ---
+	MusicManager.set_music_effects({"lpf": 800.0})
+	_ok("lpf enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+	_ok("hpf still disabled", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_HPF))
+	_ok("reverb still disabled", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_REVERB))
+	_eq("lpf cutoff", str(MusicManager._fx_lpf.cutoff_hz), "800.0")
+
+	# --- Apply room control ---
+	MusicManager.set_music_effects({"room": 0.6})
+	_ok("reverb enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_REVERB))
+	_ok("lpf now disabled (controls replaced)", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+	_eq("reverb wet", str(snapped(MusicManager._fx_reverb.wet, 0.01)), "0.6")
+
+	# --- Apply multiple controls ---
+	MusicManager.set_music_effects({"lpf": 400.0, "room": 0.3, "delay": 0.5, "pan": -0.5})
+	_ok("multi: lpf enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+	_ok("multi: reverb enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_REVERB))
+	_ok("multi: delay enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_DELAY))
+	_ok("multi: pan enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_PAN))
+	_ok("multi: distort disabled", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_DISTORT))
+	_eq("multi: lpf cutoff", str(MusicManager._fx_lpf.cutoff_hz), "400.0")
+	_eq("multi: pan value", str(MusicManager._fx_pan.pan), "-0.5")
+
+	# --- Distortion modes ---
+	MusicManager.set_music_effects({"distort": 0.5})
+	_ok("distort: enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_DISTORT))
+	_eq("distort: clip mode", str(MusicManager._fx_distort.mode), str(AudioEffectDistortion.MODE_CLIP))
+
+	MusicManager.set_music_effects({"crush": 4.0})
+	_ok("crush: enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_DISTORT))
+	_eq("crush: lofi mode", str(MusicManager._fx_distort.mode), str(AudioEffectDistortion.MODE_LOFI))
+
+	MusicManager.set_music_effects({"shape": 0.3})
+	_ok("shape: enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_DISTORT))
+	_eq("shape: waveshape mode", str(MusicManager._fx_distort.mode), str(AudioEffectDistortion.MODE_WAVESHAPE))
+
+	# --- Reset ---
+	MusicManager.reset_music_effects()
+	for i in range(mini(fx_count, MusicManager.FX_SLOT_COUNT)):
+		_ok("reset: slot %d disabled" % i, not AudioServer.is_bus_effect_enabled(bus_idx, i))
+	_ok("reset: active_controls empty", MusicManager._active_controls.is_empty())
+
+	# --- Clamping ---
+	MusicManager.set_music_effects({"lpf": 99999.0})
+	_eq("clamp: lpf max", str(MusicManager._fx_lpf.cutoff_hz), "20500.0")
+	MusicManager.set_music_effects({"lpf": -100.0})
+	_eq("clamp: lpf min", str(MusicManager._fx_lpf.cutoff_hz), "20.0")
+	MusicManager.set_music_effects({"pan": 5.0})
+	_eq("clamp: pan max", str(MusicManager._fx_pan.pan), "1.0")
+	MusicManager.set_music_effects({"pan": -5.0})
+	_eq("clamp: pan min", str(MusicManager._fx_pan.pan), "-1.0")
+
+	# --- Per-hap trigger feedback loop ---
+	# Controls injected into pattern haps should flow through the trigger
+	# and update the bus on each note onset.
+	MusicManager.reset_music_effects()
+	if MusicManager._sion_trigger:
+		var trigger: StrudelSionTrigger = MusicManager._sion_trigger
+		trigger._last_fx.clear()
+
+		# Simulate a hap with controls — trigger should update bus
+		trigger._apply_hap_effects({"note": "c4", "lpf": 800.0, "room": 0.5})
+		_ok("hap fx: lpf enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+		_ok("hap fx: reverb enabled", AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_REVERB))
+		_eq("hap fx: lpf cutoff", str(MusicManager._fx_lpf.cutoff_hz), "800.0")
+
+		# Same controls again — should NOT re-call set_music_effects (change detection)
+		var prev_controls: Dictionary = MusicManager._active_controls.duplicate()
+		trigger._apply_hap_effects({"note": "e4", "lpf": 800.0, "room": 0.5})
+		_ok("hap fx: no change, same controls", MusicManager._active_controls == prev_controls)
+
+		# Different controls — should update
+		trigger._apply_hap_effects({"note": "g4", "lpf": 400.0, "room": 0.5})
+		_eq("hap fx: lpf changed", str(MusicManager._fx_lpf.cutoff_hz), "400.0")
+
+		# Hap without controls — should reset
+		trigger._apply_hap_effects("c4")
+		_ok("hap fx: string value resets", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+		_ok("hap fx: reverb also reset", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_REVERB))
+
+		# Dict hap without effect keys — also resets
+		trigger._last_fx = {"lpf": 800.0}
+		MusicManager.set_music_effects({"lpf": 800.0})
+		trigger._apply_hap_effects({"note": "c4", "s": "piano"})
+		_ok("hap fx: dict without fx resets", not AudioServer.is_bus_effect_enabled(bus_idx, MusicManager.FX_IDX_LPF))
+
+	# Clean up
+	MusicManager.reset_music_effects()
+
+	print("  Effects bus: %d tests" % (_pass_count + _fail_count - start))
+
+
+# ==============================================================================
+# MML Batch Compiler
+# ==============================================================================
+
+func _test_mml_compiler() -> void:
+	var start: int = _pass_count + _fail_count
+	var compiler := MmlBatchCompiler.new()
+
+	# --- Duration decomposition: fraction of whole note → MML length ---
+
+	# Simple powers of 2
+	_eq("dur 1/1 = whole", compiler._duration_to_mml(StrudelFraction.new(1, 1)), "1")
+	_eq("dur 1/2 = half", compiler._duration_to_mml(StrudelFraction.new(1, 2)), "2")
+	_eq("dur 1/4 = quarter", compiler._duration_to_mml(StrudelFraction.new(1, 4)), "4")
+	_eq("dur 1/8 = eighth", compiler._duration_to_mml(StrudelFraction.new(1, 8)), "8")
+	_eq("dur 1/16 = 16th", compiler._duration_to_mml(StrudelFraction.new(1, 16)), "16")
+	_eq("dur 1/32 = 32nd", compiler._duration_to_mml(StrudelFraction.new(1, 32)), "32")
+	_eq("dur 1/64 = 64th", compiler._duration_to_mml(StrudelFraction.new(1, 64)), "64")
+
+	# Dotted notes (value * 3/2)
+	_eq("dur 3/8 = dotted quarter", compiler._duration_to_mml(StrudelFraction.new(3, 8)), "4.")
+	_eq("dur 3/4 = dotted half", compiler._duration_to_mml(StrudelFraction.new(3, 4)), "2.")
+	_eq("dur 3/16 = dotted eighth", compiler._duration_to_mml(StrudelFraction.new(3, 16)), "8.")
+	_eq("dur 3/32 = dotted 16th", compiler._duration_to_mml(StrudelFraction.new(3, 32)), "16.")
+
+	# Tied notes (sum of two lengths)
+	# 5/16 = 1/4 + 1/16
+	var dur_5_16: String = compiler._duration_to_mml(StrudelFraction.new(5, 16))
+	_ok("dur 5/16 contains tie", "^" in dur_5_16)
+
+	# Triplets (SiON supports arbitrary denominators)
+	_eq("dur 1/3 = triplet", compiler._duration_to_mml(StrudelFraction.new(1, 3)), "3")
+	_eq("dur 1/6 = triplet eighth", compiler._duration_to_mml(StrudelFraction.new(1, 6)), "6")
+	_eq("dur 1/12 = triplet 16th", compiler._duration_to_mml(StrudelFraction.new(1, 12)), "12")
+
+	# Edge: very small
+	_eq("dur tiny = 64", compiler._duration_to_mml(StrudelFraction.new(1, 128)), "64")
+
+	# Edge: zero
+	_eq("dur zero = 64", compiler._duration_to_mml(StrudelFraction.new(0, 1)), "64")
+
+	# 2/4 = 1/2 (should reduce)
+	_eq("dur 2/4 = half", compiler._duration_to_mml(StrudelFraction.new(2, 4)), "2")
+
+	# --- Note name resolution (standalone, no trigger) ---
+	_eq("midi c4 = 60", str(MmlBatchCompiler._note_name_to_midi("c4")), "60")
+	_eq("midi a4 = 69", str(MmlBatchCompiler._note_name_to_midi("a4")), "69")
+	_eq("midi eb4 = 63", str(MmlBatchCompiler._note_name_to_midi("eb4")), "63")
+	_eq("midi 60 = 60", str(MmlBatchCompiler._note_name_to_midi("60")), "60")
+
+	# --- Single-voice MML generation ---
+	# Create haps from mini-notation and compile to MML
+	var pat: StrudelPattern = StrudelMini.mini("c4 e4 g4 c5")
+	var haps: Array = pat.first_cycle()
+	_eq("4-note pattern: 4 haps", str(haps.size()), "4")
+
+	var mml: String = compiler._haps_to_mml(haps, 120)
+	_ok("mml not empty", not mml.is_empty())
+	_ok("mml has tempo", "t120" in mml)
+	# Notes use MML letter names: o4 c, o4 e, o4 g, o5 c
+	_ok("mml has o4 (octave 4)", "o4" in mml)
+	_ok("mml has c (C note)", " c" in mml)
+	_ok("mml has e (E note)", " e" in mml)
+	_ok("mml has g (G note)", " g" in mml)
+
+	# Each note should be a quarter (l4) since 4 equal notes per cycle
+	_ok("mml has quarter notes", " c4 " in mml or "c4 " in mml)
+
+	# --- Euclidean rhythm MML ---
+	var euc_pat: StrudelPattern = StrudelMini.mini("c4(3,8)")
+	var euc_haps: Array = euc_pat.first_cycle()
+	_eq("euclidean (3,8): 3 haps", str(euc_haps.size()), "3")
+
+	var euc_mml: String = compiler._haps_to_mml(euc_haps, 240)
+	_ok("euclidean mml not empty", not euc_mml.is_empty())
+	_ok("euclidean mml has tempo", "t240" in euc_mml)
+	_ok("euclidean mml has c note", " c" in euc_mml)
+
+	# --- Voice grouping ---
+	var stacked: StrudelPattern = Strudel.stack([
+		StrudelMini.mini("c4 e4").set_in(Strudel.pure({"s": "flute"})),
+		StrudelMini.mini("c2 g2").set_in(Strudel.pure({"s": "bass"})),
+	])
+	var stacked_haps: Array = stacked.first_cycle()
+	_eq("stacked: 4 haps", str(stacked_haps.size()), "4")
+
+	var groups: Dictionary = compiler._group_by_voice(stacked_haps)
+	_ok("groups has flute", groups.has("flute"))
+	_ok("groups has bass", groups.has("bass"))
+	_eq("flute group: 2 haps", str(groups["flute"]["haps"].size()), "2")
+	_eq("bass group: 2 haps", str(groups["bass"]["haps"].size()), "2")
+
+	# --- Full compile_cycle ---
+	var result: Dictionary = compiler.compile_cycle(stacked_haps, 0.5)
+	_ok("compile_cycle: has flute track", result.has("flute"))
+	_ok("compile_cycle: has bass track", result.has("bass"))
+	_ok("compile_cycle: flute has mml", result["flute"].has("mml"))
+	_ok("compile_cycle: bass has mml", result["bass"].has("mml"))
+	_ok("compile_cycle: flute mml not empty", not result["flute"]["mml"].is_empty())
+
+	# Verify the MML can be compiled by SiON (requires driver)
+	if MusicManager.driver:
+		for track_key in result:
+			var compiled: Variant = MusicManager.driver.call("compile", result[track_key]["mml"])
+			_ok("SiON compile '%s': success" % track_key, compiled != null)
+	else:
+		print("  MML compiler: SKIP SiON compile test (no driver)")
+
+	# --- Lane splitting (polyphony within same voice) ---
+	var chord: StrudelPattern = StrudelMini.mini("[c4,e4,g4]")
+	var chord_haps: Array = chord.first_cycle()
+	_eq("chord: 3 haps", str(chord_haps.size()), "3")
+
+	# All same onset → should split into 3 lanes
+	var lanes: Array = compiler._split_into_lanes(chord_haps)
+	_ok("chord lanes >= 2", lanes.size() >= 2)
+
+	print("  MML compiler: %d tests" % (_pass_count + _fail_count - start))
 
 
 # ==============================================================================

@@ -62,7 +62,21 @@ git tag -a "vX.Y.Z" -m "vX.Y.Z"
 git push origin "vX.Y.Z"
 ```
 
-### 6. Report
+### 6. Post to Discord
+
+Announce the release to Discord:
+```bash
+bash .claude/scripts/discord-release.sh "vX.Y.Z"
+```
+
+If forced, pass the flag:
+```bash
+bash .claude/scripts/discord-release.sh "vX.Y.Z" --force
+```
+
+If the webhook URL isn't configured (`/var/tumu/etc/discord.env`), this will print an error but NOT block the release — the tag is already pushed. Tell the user to configure the webhook.
+
+### 7. Report
 
 Print:
 ```
@@ -70,4 +84,5 @@ Released vX.Y.Z
   Commit: <hash>
   Gate suites: chained PASS, combat PASS, leaping PASS, scaling PASS  (or "SKIPPED (force)" if forced)
   Tag: vX.Y.Z pushed to origin
+  Discord: posted (or "skipped — webhook not configured")
 ```

@@ -1,0 +1,25 @@
+{
+  "name": "ab_sawtooth",
+  "description": "A/B: sawtooth wave C4",
+  "script": [
+    "strudel stop",
+    "music off",
+    "ab_dir ab_sawtooth",
+
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\")",
+    "announce REF: sawtooth C4",
+    "ab_play ref.wav",
+    "wait 10 unless silent",
+
+    "announce OURS: sawtooth C4",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"sawtooth\").pianoroll() cps=0.5",
+    "wait 10 unless silent",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5"
+  ]
+}

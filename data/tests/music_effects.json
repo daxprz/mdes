@@ -1,0 +1,73 @@
+{
+  "name": "music_effects",
+  "description": "Sound check: verify each audio effect works — baseline then effect, listen for the change",
+  "script": [
+    "var inspect default=8",
+
+    "announce AUDIO EFFECTS — SOUND CHECKS",
+    "wait 1",
+
+    "# ====== LOW-PASS FILTER ======",
+    "announce 1/7: LOW-PASS — baseline (no filter)",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5",
+    "wait 3",
+    "announce 1/7: LOW-PASS — lpf=400 (should sound muffled/dark)",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 lpf=400",
+    "wait 4",
+    "announce 1/7: LOW-PASS — lpf=1500 (warmer, less muffled)",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 lpf=1500",
+    "wait 4",
+
+    "# ====== HIGH-PASS FILTER ======",
+    "announce 2/7: HIGH-PASS — baseline (no filter)",
+    "strudel [c3 e3 g3 c4]*2 cps=0.5",
+    "wait 3",
+    "announce 2/7: HIGH-PASS — hpf=600 (bass removed, thin/tinny)",
+    "strudel [c3 e3 g3 c4]*2 cps=0.5 hpf=600",
+    "wait 4",
+
+    "# ====== REVERB ======",
+    "announce 3/7: REVERB — baseline (dry)",
+    "strudel c4 ~ e4 ~ g4 ~ c5 ~ cps=0.4",
+    "wait 4",
+    "announce 3/7: REVERB — room=0.8 (should ring out, spacious)",
+    "strudel c4 ~ e4 ~ g4 ~ c5 ~ cps=0.4 room=0.8",
+    "wait 5",
+    "announce 3/7: REVERB — room=0.3 (subtle tail)",
+    "strudel c4 ~ e4 ~ g4 ~ c5 ~ cps=0.4 room=0.3",
+    "wait 5",
+
+    "# ====== DELAY ======",
+    "announce 4/7: DELAY — baseline (no echo)",
+    "strudel c4 ~ ~ ~ e4 ~ ~ ~ cps=0.5",
+    "wait 4",
+    "announce 4/7: DELAY — delay=0.6 (should hear echoes/repeats)",
+    "strudel c4 ~ ~ ~ e4 ~ ~ ~ cps=0.5 delay=0.6",
+    "wait 5",
+
+    "# ====== DISTORTION ======",
+    "announce 5/7: DISTORT — baseline (clean)",
+    "strudel [c3 e3 g3 c4]*2 cps=0.5",
+    "wait 3",
+    "announce 5/7: DISTORT — distort=0.5 (crunchy/clipped)",
+    "strudel [c3 e3 g3 c4]*2 cps=0.5 distort=0.5",
+    "wait 4",
+
+    "# ====== BIT CRUSH ======",
+    "announce 6/7: CRUSH — baseline (clean)",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5",
+    "wait 3",
+    "announce 6/7: CRUSH — crush=4 (lo-fi/8-bit character)",
+    "strudel [c4 e4 g4 c5]*2 cps=0.5 crush=4",
+    "wait 4",
+
+    "# ====== COMBINED ======",
+    "announce 7/7: COMBINED — lpf=600 + room=0.5 + delay=0.3",
+    "strudel [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] cps=0.3 lpf=600 room=0.5 delay=0.3",
+    "wait 6",
+
+    "strudel stop",
+    "wait 1",
+    "notify {SCRIPT} \"Did each effect sound different from its baseline?\" [\"All good\",\"Some issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

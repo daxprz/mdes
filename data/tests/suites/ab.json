@@ -1,0 +1,8 @@
+{
+  "name": "ab",
+  "description": "A/B comparison suite — Strudel reference vs DAX engine",
+  "tests": [
+    "music_ab_waveforms",
+    "music_ab_lpf"
+  ]
+}

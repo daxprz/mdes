@@ -131,9 +131,11 @@ func _register_all() -> void:
 	r.call("music/layers", "Layer activation/deactivation and variant switches")
 	r.call("music/beats", "Beat and timer tick events (verbose)")
 	r.call("music/events", "Game event hooks triggering intensity changes")
+	r.call("music/effects", "Audio bus effects: lpf, hpf, reverb, delay, distortion, pan")
 
 	# -- Strudel --
 	r.call("strudel/trigger", "Note trigger events: note number, duration, value")
+	r.call("music/batch", "MML batch compilation: compile, sequence_on, track lifecycle")
 	r.call("strudel/scheduler", "Cyclist tick, query window, CPS changes")
 	r.call("strudel/parse", "Mini-notation parse: AST, leaf locations, errors")
 	r.call("strudel/pattern", "Pattern evaluation: hap count, first cycle dump")

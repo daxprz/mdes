@@ -80,7 +80,7 @@
 | .wordfall() | ✓ | ✓ | MATCH |
 | .spiral() | ✓ | ✓ | MATCH |
 | .pitchwheel() | ✓ | ✓ | MATCH |
-| Viz options (cycles, playhead, fold, labels, etc.) | ✓ | ✗ | MISSING |
+| Viz options (cycles, playhead, fold, labels, etc.) | ✓ | ✓ | MATCH (pianoroll opts) |
 | .onPaint() custom drawing | ✓ | ✗ | MISSING |
 | Source code highlighting | ✓ | ✓ | MATCH |
 
@@ -105,15 +105,23 @@ We only parse the mini-notation inside quotes. The JS method chains, variables, 
 - `.cut()` — cut groups (monophonic voice management)
 
 **3. Audio Synthesis Controls (274 registered)**
-We support 6 of 274 controls. Missing:
-- **Oscillator**: `s("sawtooth")`, `s("square")`, `s("triangle")` — Web Audio oscillator types
-- **Filter**: `lpf`, `hpf`, `bpf`, `lpq`, `hpq`, `lpenv`, `lpd`, `lpa`, `lps` — filter cutoff, resonance, envelope
-- **Envelope**: `attack`, `decay`, `sustain`, `release`, `hold`
-- **Effects**: `room`, `roomsize`, `delay`, `delaytime`, `delayfeedback`, `phaser`, `distort`, `crush`, `shape`
+We support 19 of 274 controls. Supported (bus-level post-processing):
+- **Filter**: `lpf`, `hpf`, `lpq`, `hpq` — via Godot AudioEffectLowPassFilter/HighPassFilter (bus-level, not per-note)
+- **Effects**: `room`, `roomsize`, `roomlp` — via AudioEffectReverb (bus-level, matches Strudel's orbit-shared reverb)
+- **Effects**: `delay`, `delaytime`, `delayfeedback` — via AudioEffectDelay (bus-level, matches Strudel's orbit-shared delay)
+- **Effects**: `distort`, `crush`, `shape` — via AudioEffectDistortion (bus-level, clip/lofi/waveshape modes)
+- **Pan**: `pan` — via AudioEffectPanner (bus-level)
+- **Note**: `note`, `s`, `n`, `gain`, `velocity`, `cps` — per-note via SiON
+
+Missing:
+- **Oscillator**: `s("sawtooth")`, `s("square")`, `s("triangle")` — mapped to FM voices (approximate)
+- **Filter**: `bpf`, `lpenv`, `lpd`, `lpa`, `lps` — envelope-modulated filters
+- **Envelope**: `attack`, `decay`, `sustain`, `release`, `hold` — per-note ADSR (SiON voices have baked envelopes)
 - **FM**: `fm`, `fmh`, `fmi`, `fmenv`, `fmattack`, `fmdecay`
 - **Modulation**: `vib`, `vibmod`, `tremolo`
-- **Pan**: `pan`, `panspan`
-- **MIDI**: `ccn`, `ccv`, `channel`, `velocity`
+- **Pan**: `panspan` — stereo width
+- **MIDI**: `ccn`, `ccv`, `channel`
+- **Phaser**: `phaser` — not yet mapped to AudioEffectPhaser
 
 **4. Chord/Scale System** (from @strudel/tonal)
 - `chord()` — chord name to notes
@@ -129,10 +137,10 @@ We support 6 of 274 controls. Missing:
 - `p("name")` — named pattern slots with independent lifecycle
 - Hot-swap with transition (crossfade between patterns)
 
-**6. Import/Export**
-- No way to save/load pattern files
-- No way to share patterns
-- No clipboard format for patterns
+**6. Import/Export** *(partially supported)*
+- ✓ `strudel save/load` — save/load pattern files
+- ✗ No way to share patterns externally
+- ✗ No clipboard format for patterns
 
 ## What We Have That Strudel Doesn't
 
@@ -147,9 +155,12 @@ We support 6 of 274 controls. Missing:
 
 ## Priority Path to Better Compatibility
 
-1. **Oscillator types**: `s("sawtooth")` should select SiON FM voices that sound like sawtooth/square/triangle
-2. **Basic ADSR**: `attack`, `release`, `decay`, `sustain` → map to SiON note length/envelope
-3. **Basic filter**: `lpf`, `hpf` → map to SiON filter effects
-4. **Sample loading**: Even just bundled drum samples (`bd`, `sd`, `hh`, `cp`)
-5. **Import/export**: Save/load .txt pattern files (Strudel format)
-6. **Viz options**: `pianoroll({labels: 1, fold: 0, cycles: 8})`
+1. ~~**Oscillator types**: mapped to closest SiON FM voices~~ ✓ DONE
+2. **Basic ADSR**: `attack`, `release`, `decay`, `sustain` → per-note SiON envelope (requires GDSiON API investigation)
+3. ~~**Basic filter**: `lpf`, `hpf` → Godot AudioBus effects~~ ✓ DONE (bus-level)
+4. **Sample loading**: Bundled drum samples (`bd`, `sd`, `hh`, `cp`) as .wav via AudioStreamPlayer
+5. ~~**Import/export**: `strudel save/load`~~ ✓ DONE
+6. ~~**Viz options**: `pianoroll({labels: 1, fold: 0, cycles: 8})`~~ ✓ DONE
+7. **JS expression subset**: `stack()`, `setcps()`, `.s()`, `.lpf()` method chains (partial — method chains parsed in drawer)
+8. **Phaser**: map to AudioEffectPhaser
+9. **Game event patterns**: replace MML adaptive layers with Strudel patterns

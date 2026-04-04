@@ -1,0 +1,33 @@
+{
+  "name": "tumu-plugins",
+  "owner": {
+    "name": "Jeremy Przasnyski"
+  },
+  "metadata": {
+    "description": "Local plugins for the TUMU/DAX Godot project"
+  },
+  "plugins": [
+    {
+      "name": "godot-lsp",
+      "source": "./godot-lsp",
+      "description": "GDScript Language Server via Godot headless mode — provides completions, go-to-definition, hover, references, and rename for .gd files",
+      "version": "1.0.1",
+      "strict": false,
+      "lspServers": {
+        "gdscript": {
+          "command": "bash",
+          "args": [
+            "${CLAUDE_PLUGIN_ROOT}/scripts/godot-lsp.sh"
+          ],
+          "extensionToLanguage": {
+            ".gd": "gdscript",
+            ".gdshader": "gdshader"
+          },
+          "startupTimeout": 20000,
+          "restartOnCrash": true,
+          "maxRestarts": 3
+        }
+      }
+    }
+  ]
+}

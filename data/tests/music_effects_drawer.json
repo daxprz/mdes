@@ -1,0 +1,45 @@
+{
+  "name": "music_effects_drawer",
+  "description": "Sound check: verify audio effects work via Music Drawer .method() syntax",
+  "script": [
+    "var inspect default=8",
+
+    "announce DRAWER EFFECTS — SOUND CHECKS (Ctrl+M)",
+    "md open",
+    "wait 1",
+
+    "# ====== BASELINE ======",
+    "announce 1/6: Baseline — no effects, drawer pianoroll",
+    "strudel edit \"c4 e4 g4 c5\".pianoroll() cps=0.5",
+    "wait 4",
+
+    "# ====== LPF VIA DRAWER ======",
+    "announce 2/6: .lpf(400) via drawer — muffled + pianoroll",
+    "strudel edit \"c4 e4 g4 c5\".lpf(400).pianoroll() cps=0.5",
+    "wait 5",
+
+    "# ====== ROOM VIA DRAWER ======",
+    "announce 3/6: .room(0.7) via drawer — reverb + pianoroll",
+    "strudel edit \"c4 ~ e4 ~ g4 ~ c5 ~\".room(0.7).pianoroll() cps=0.4",
+    "wait 5",
+
+    "# ====== DELAY VIA DRAWER ======",
+    "announce 4/6: .delay(0.5) via drawer — echo + scope",
+    "strudel edit \"c4 ~ ~ ~ e4 ~ ~ ~\".delay(0.5).scope() cps=0.5",
+    "wait 5",
+
+    "# ====== COMBINED CHAIN ======",
+    "announce 5/6: .lpf(600).room(0.4).delay(0.3) — combined + pianoroll",
+    "strudel edit \"[c3,e3,g3] [f3,a3,c4] [g3,b3,d4]\".lpf(600).room(0.4).delay(0.3).pianoroll() cps=0.3",
+    "wait 6",
+
+    "# ====== MULTI-LINE WITH EFFECTS ======",
+    "announce 6/6: Multi-line — bass with filter, melody dry",
+    "strudel edit bass: \"c2 g2 c2 e2\".lpf(400).pianoroll() | melody: \"c4 e4 g4 c5\".pianoroll() cps=0.4",
+    "wait 6",
+
+    "strudel stop",
+    "wait 1",
+    "notify {SCRIPT} \"Did .lpf/.room/.delay produce audible changes from drawer?\" [\"All good\",\"Issues\",\"Broken\"] {inspect} blocking"
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "name": "music_ab_lpf",
+  "description": "A/B test: compare LPF behavior — static and signal-modulated",
+  "script": [
+    "var inspect default=30",
+
+    "announce A/B LPF TEST — requires ref server on port 9998",
+
+    "# === Test 1: LPF open (4000Hz) ===",
+    "announce 1/4: LPF OPEN — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\").lpf(4000)",
+    "wait 1",
+    "announce 1/4: LPF OPEN — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"sawtooth\").lpf(4000).pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_lpf_open",
+    "wait 1",
+    "notify {SCRIPT} \"LPF_OPEN: ref=strudel_ref.wav ours=ab_ours_lpf_open.wav\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 2: LPF closed (200Hz) ===",
+    "announce 2/4: LPF CLOSED — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\").lpf(200)",
+    "wait 1",
+    "announce 2/4: LPF CLOSED — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4\".s(\"sawtooth\").lpf(200).pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_lpf_closed",
+    "wait 1",
+    "notify {SCRIPT} \"LPF_CLOSED: ref=strudel_ref.wav ours=ab_ours_lpf_closed.wav\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 3: LPF sine sweep ===",
+    "announce 3/4: LPF SINE SWEEP — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\").lpf(sine.range(100,4000))",
+    "wait 1",
+    "announce 3/4: LPF SINE SWEEP — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4 c4 c4 c4 c4\".s(\"sawtooth\").lpf(sine.range(100,4000)).pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_lpf_sine",
+    "wait 1",
+    "notify {SCRIPT} \"LPF_SINE: ref=strudel_ref.wav ours=ab_ours_lpf_sine.wav\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "# === Test 4: LPF saw sweep ===",
+    "announce 4/4: LPF SAW SWEEP — rendering reference...",
+    "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\").lpf(saw.range(100,4000))",
+    "wait 1",
+    "announce 4/4: LPF SAW SWEEP — recording our engine...",
+    "strudel record start",
+    "strudel edit \"c4 c4 c4 c4 c4 c4 c4 c4\".s(\"sawtooth\").lpf(saw.range(100,4000)).pianoroll() cps=0.5",
+    "wait 4",
+    "strudel stop",
+    "strudel record stop ab_ours_lpf_saw",
+    "wait 1",
+    "notify {SCRIPT} \"LPF_SAW: ref=strudel_ref.wav ours=ab_ours_lpf_saw.wav\" [\"pass\",\"fail\",\"skip\"] {inspect} blocking",
+
+    "announce A/B LPF TESTS COMPLETE"
+  ]
+}

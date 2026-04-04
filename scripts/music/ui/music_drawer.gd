@@ -108,6 +108,105 @@ const VIZ_FSCOPE := "fscope"        ## .fscope() — frequency spectrum
 const VIZ_TYPES := [VIZ_NONE, VIZ_PIANOROLL, VIZ_SCOPE, VIZ_WORDFALL, VIZ_SPIRAL, VIZ_PITCHWHEEL, VIZ_FSCOPE]
 const VIZ_STRIP_HEIGHT := 32.0    ## Height of visualizer strip when active
 
+## Audio control method names → canonical Strudel control key.
+## These are parsed from method chains like .lpf(800).room(0.5) and applied
+## as bus-level post-processing effects via MusicManager.set_music_effects().
+const AUDIO_CONTROL_METHODS := {
+	"lpf": "lpf", "lowpass": "lpf",
+	"hpf": "hpf", "highpass": "hpf",
+	"lpq": "lpq", "hpq": "hpq",
+	"room": "room", "roomsize": "roomsize", "roomlp": "roomlp",
+	"delay": "delay", "delaytime": "delaytime", "delayfeedback": "delayfeedback",
+	"distort": "distort", "crush": "crush", "shape": "shape",
+	"pan": "pan",
+	"gain": "gain",
+	"s": "s", "sound": "s",
+}
+
+## Signal names → factory callables for the signal expression parser.
+const SIGNAL_NAMES := ["sine", "saw", "isaw", "cosine", "tri", "square", "rand"]
+
+static func _parse_signal_expr(expr: String) -> StrudelPattern:
+	## Parse a Strudel signal expression like "sine.range(200, 2000).slow(2)".
+	## Returns a StrudelPattern, or null if the expression isn't a signal.
+	##
+	## Supported syntax:
+	##   sine                          → unipolar sine [0,1]
+	##   sine.range(200, 2000)         → mapped to [200, 2000]
+	##   saw.range(0, 0.8).slow(2)     → sawtooth, range-mapped, half speed
+	##   cosine.segment(8)             → discretized to 8 steps per cycle
+	expr = expr.strip_edges()
+	if expr.is_empty():
+		return null
+
+	# Extract the signal name (first token before '.' or end)
+	var dot_pos: int = expr.find(".")
+	var signal_name: String = expr if dot_pos < 0 else expr.substr(0, dot_pos)
+	signal_name = signal_name.strip_edges().to_lower()
+
+	if signal_name not in SIGNAL_NAMES:
+		return null
+
+	# Create the base signal pattern
+	var pat: StrudelPattern = null
+	match signal_name:
+		"sine": pat = StrudelSignal.sine()
+		"saw": pat = StrudelSignal.saw()
+		"isaw": pat = StrudelSignal.isaw()
+		"cosine": pat = StrudelSignal.cosine()
+		"tri": pat = StrudelSignal.tri()
+		"square": pat = StrudelSignal.square()
+		"rand": pat = StrudelSignal.rand()
+
+	if pat == null:
+		return null
+
+	# Parse chained methods: .range(200, 2000).slow(2).segment(8)
+	if dot_pos < 0:
+		return pat  # Just the signal name, no methods
+
+	var remaining: String = expr.substr(dot_pos)  # ".range(200, 2000).slow(2)"
+
+	while not remaining.is_empty():
+		if not remaining.begins_with("."):
+			break
+		remaining = remaining.substr(1)  # skip dot
+
+		# Extract method name
+		var paren_pos: int = remaining.find("(")
+		if paren_pos < 0:
+			break
+		var method: String = remaining.substr(0, paren_pos).strip_edges()
+		var close_pos: int = remaining.find(")", paren_pos)
+		if close_pos < 0:
+			break
+		var args_str: String = remaining.substr(paren_pos + 1, close_pos - paren_pos - 1).strip_edges()
+		remaining = remaining.substr(close_pos + 1)
+
+		# Parse args (comma-separated floats)
+		var args: Array[float] = []
+		for arg in args_str.split(","):
+			arg = arg.strip_edges()
+			if arg.is_valid_float():
+				args.append(float(arg))
+
+		# Apply method
+		match method:
+			"range":
+				if args.size() >= 2:
+					pat = pat._range(args[0], args[1])
+			"slow":
+				if args.size() >= 1:
+					pat = pat._slow(args[0])
+			"fast":
+				if args.size() >= 1:
+					pat = pat._fast(args[0])
+			"segment":
+				if args.size() >= 1:
+					pat = pat._segment(int(args[0]))
+
+	return pat
+
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
 	return {"text": text, "name": name, "muted": muted, "viz": viz, "viz_options": {}, "pattern_offset": 0}
 
@@ -598,12 +697,14 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	# or: note("mini-notation").pianoroll()
 	#
 	# We support:
-	#   "c4 e4 g4 c5".pianoroll()    — quoted mini + viz chain
-	#   note("c4 e4 g4").scope()     — note() wrapper (strip note(), keep inner)
-	#   s("bd sd hh").pianoroll()    — s() wrapper
-	#   c4 e4 g4 c5                  — bare unquoted mini (no method chain)
+	#   "c4 e4 g4 c5".pianoroll()             — quoted mini + viz chain
+	#   "c4 e4".lpf(800).room(0.5).pianoroll() — audio controls + viz
+	#   note("c4 e4 g4").scope()              — note() wrapper + scope
+	#   s("bd sd hh").pianoroll()             — s() wrapper
+	#   c4 e4 g4 c5                           — bare unquoted mini (no method chain)
 	#
-	# Method chain: strip .method() suffixes from right to left
+	# Method chain: strip .method() suffixes from right to left,
+	# handling both visualizer methods and audio control methods.
 
 	# Viz method names → viz type
 	var viz_names := {
@@ -615,40 +716,105 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		"fscope": VIZ_FSCOPE,
 	}
 
-	# Parse viz method + options from the end of the text.
-	# Matches: .pianoroll() or .pianoroll({labels:1, fold:0}) or .pianoroll({ labels: 1 })
 	var stripped_text: String = text.strip_edges()
 	var viz_options: Dictionary = {}
+	var audio_controls: Dictionary = {}
+	var signal_controls: Array = []  ## Signal patterns like sine.range(200,2000) wrapped as {key: val}
+	var found_viz: bool = false
 
-	for method_name in viz_names:
-		var method_prefix: String = "." + method_name + "("
-		var m_idx: int = stripped_text.rfind(method_prefix)
-		if m_idx < 0:
-			continue
-		# Find the matching closing paren
-		var paren_start: int = m_idx + method_prefix.length()
-		var paren_end: int = stripped_text.find(")", paren_start)
-		if paren_end < 0:
-			continue
-		# Check this is at the end of the text
-		if paren_end != stripped_text.length() - 1:
-			continue
+	# Build combined lookup of all known method names (viz + audio controls).
+	var all_methods: Dictionary = {}  # method_name -> "viz" or "audio"
+	for k in viz_names:
+		all_methods[k] = "viz"
+	for k in AUDIO_CONTROL_METHODS:
+		all_methods[k] = "audio"
 
-		result["viz"] = viz_names[method_name]
-		line["viz"] = viz_names[method_name]
+	# Parse method chain from right to left: find the rightmost known
+	# .method(args) whose closing paren is at the end of the string,
+	# strip it, and repeat. We search for ".method_name(" explicitly
+	# to avoid false-matching decimal dots inside arguments (e.g. 0.5).
+	var chain_changed: bool = true
+	while chain_changed:
+		chain_changed = false
 
-		# Parse options inside the parens (simple key:value pairs)
-		var opts_str: String = stripped_text.substr(paren_start, paren_end - paren_start).strip_edges()
-		if not opts_str.is_empty():
-			viz_options = _parse_viz_options(opts_str)
-		result["viz_options"] = viz_options
-		line["viz_options"] = viz_options
+		# Find the rightmost known .method( whose closing paren is at the end
+		var best_pos: int = -1
+		var best_method: String = ""
+		var best_paren_open: int = -1
+		var best_paren_close: int = -1
 
-		stripped_text = stripped_text.substr(0, m_idx).strip_edges()
-		break
+		for method_name in all_methods:
+			var prefix: String = "." + method_name + "("
+			var pos: int = stripped_text.rfind(prefix)
+			if pos < 0:
+				continue
+			var po: int = pos + prefix.length()
+			# Find BALANCED closing paren (handles nested parens in signal expressions)
+			var depth: int = 1
+			var pc: int = po
+			while pc < stripped_text.length() and depth > 0:
+				if stripped_text[pc] == "(":
+					depth += 1
+				elif stripped_text[pc] == ")":
+					depth -= 1
+				if depth > 0:
+					pc += 1
+			if depth != 0:
+				continue
+			# Must be at end of string (nothing meaningful after closing paren)
+			if pc < stripped_text.length() - 1:
+				var after: String = stripped_text.substr(pc + 1).strip_edges()
+				if not after.is_empty():
+					continue
+			# Take the rightmost match
+			if pos > best_pos:
+				best_pos = pos
+				best_method = method_name
+				best_paren_open = po
+				best_paren_close = pc
 
-	# If no viz found, clear stored text-based viz (keep manual Ctrl+. toggle)
-	if result["viz"] == VIZ_NONE:
+		if best_pos < 0:
+			break
+
+		var args_str: String = stripped_text.substr(best_paren_open, best_paren_close - best_paren_open).strip_edges()
+		var kind: String = all_methods[best_method]
+
+		if kind == "viz":
+			if not found_viz:
+				result["viz"] = viz_names[best_method]
+				line["viz"] = viz_names[best_method]
+				if not args_str.is_empty():
+					viz_options = _parse_viz_options(args_str)
+				result["viz_options"] = viz_options
+				line["viz_options"] = viz_options
+				found_viz = true
+		else:
+			var control_key: String = AUDIO_CONTROL_METHODS[best_method]
+			if control_key == "s":
+				# Voice/sound: strip quotes from string value
+				var voice_val: String = args_str.replace("\"", "").replace("'", "").strip_edges()
+				if not voice_val.is_empty():
+					result["sound"] = voice_val
+			elif args_str.is_valid_float():
+				audio_controls[control_key] = float(args_str)
+			else:
+				# Try parsing as a signal expression: sine.range(200, 2000)
+				var signal_pat: StrudelPattern = _parse_signal_expr(args_str)
+				if signal_pat != null:
+					# Wrap the signal as a control pattern: {lpf: value}
+					var ck: String = control_key
+					signal_pat = signal_pat.fmap(func(v: Variant) -> Dictionary:
+						return {ck: float(v)})
+					signal_controls.append(signal_pat)
+
+		stripped_text = stripped_text.substr(0, best_pos).strip_edges()
+		chain_changed = true
+
+	result["audio_controls"] = audio_controls
+	result["signal_controls"] = signal_controls
+
+	# If no viz found from method chain, clear stored text-based viz
+	if not found_viz:
 		var had_viz_text: bool = false
 		for method_name in viz_names:
 			if ("." + method_name + "(") in raw:
@@ -680,7 +846,7 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 
 	text = stripped_text
 
-	# Extract key=value parameters
+	# Extract key=value parameters (cps, sound, and audio controls)
 	for param in ["cps=", "sound=", "s="]:
 		var p_idx: int = text.find(param)
 		if p_idx >= 0:
@@ -695,6 +861,21 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 				result["sound"] = p_val
 			text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
 
+	# Also extract audio control key=value params (gain=0.3, lpf=800, etc.)
+	for ctrl_param in ["gain=", "velocity=", "lpf=", "hpf=", "room=", "delay=",
+						"distort=", "crush=", "pan=", "roomsize=", "delaytime=",
+						"delayfeedback=", "shape=", "lpq=", "hpq=", "roomlp="]:
+		var p_idx: int = text.find(ctrl_param)
+		if p_idx >= 0:
+			var p_val: String = text.substr(p_idx + ctrl_param.length()).strip_edges()
+			var space_idx: int = p_val.find(" ")
+			if space_idx >= 0:
+				p_val = p_val.substr(0, space_idx)
+			if p_val.is_valid_float():
+				var key: String = ctrl_param.substr(0, ctrl_param.length() - 1)  # Strip trailing =
+				audio_controls[key] = float(p_val)
+			text = (text.substr(0, p_idx) + text.substr(p_idx + ctrl_param.length() + p_val.length())).strip_edges()
+
 	if not text.is_empty():
 		result["pattern_text"] = text
 		result["is_valid"] = true
@@ -704,8 +885,11 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 func _play_current() -> void:
 	## Parse all non-muted, non-empty lines into patterns and stack them.
 	## Also stores per-line patterns for individual pianoroll rendering.
+	## Collects audio controls from all lines and applies as bus effects.
 	var active_patterns: Array = []
 	var display_parts: Array[String] = []
+	var merged_controls: Dictionary = {}  # Collect audio controls from all lines
+	var _line_tracks: Array = []  # Per-line data for batch mode compilation
 
 	# Resize per-line arrays to match line count
 	_line_patterns.resize(_lines.size())
@@ -724,16 +908,43 @@ func _play_current() -> void:
 		if not parsed["is_valid"]:
 			continue
 
+		# Merge audio controls from this line (last-write-wins for conflicts)
+		var line_controls: Dictionary = parsed.get("audio_controls", {})
+		for key in line_controls:
+			merged_controls[key] = line_controls[key]
+
 		var text: String = parsed["pattern_text"]
 		var sound_name: String = parsed["sound"]
 
-		var pat: StrudelPattern = StrudelMini.mini(text)
-		if not sound_name.is_empty():
-			pat = pat.set_in(Strudel.pure({"s": sound_name}))
+		var clean_pat: StrudelPattern = StrudelMini.mini(text)
+		var display_pat: StrudelPattern = clean_pat
 
-		_line_patterns[i] = pat
+		# Signal control patterns (e.g., .lpf(sine.range(200, 2000)))
+		# Instead of merging into the note pattern (which fragments timing via set_in),
+		# store them separately. They're evaluated per-note at trigger time.
+		var line_signals: Array = parsed.get("signal_controls", [])
+
+		# In note mode, inject voice via set_in (needed for per-note voice resolution).
+		# In batch mode, DON'T — set_in fragments hap timing which breaks pianoroll.
+		# Batch mode passes voice separately via _line_tracks.
+		var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
+		if not sound_name.is_empty() and not is_batch:
+			display_pat = clean_pat.set_in(Strudel.pure({"s": sound_name}))
+
+		_line_patterns[i] = display_pat
 		_lines[i]["pattern_offset"] = parsed["pattern_offset"]
-		active_patterns.append(pat)
+		active_patterns.append(display_pat)
+
+		# Store per-line metadata for batch mode compilation
+		var line_name: String = parsed["name"] if not parsed["name"].is_empty() else "line%d" % i
+		_line_tracks.append({
+			"pattern": StrudelMini.mini(text),  # Clean pattern (no set_in)
+			"voice": sound_name,
+			"gain": float(line_controls.get("gain", line_controls.get("velocity", 1.0))),
+			"name": line_name,
+			"controls": line_controls,
+			"signals": line_signals,  # Signal patterns for trigger-time evaluation
+		})
 
 		# Use the original line text for display (preserves quotes, viz methods)
 		display_parts.append(_lines[i].get("text", "").strip_edges())
@@ -747,14 +958,40 @@ func _play_current() -> void:
 	else:
 		combined = Strudel.stack(active_patterns)
 
-	var display: String = " | ".join(PackedStringArray(display_parts))
-	_self_triggered = true
-	MusicManager.strudel_play(combined, _cps, display)
+	var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
+
+	if is_batch:
+		# Batch mode: compile each line separately into its own MML track.
+		# Avoids set_in fragmentation by using clean per-line patterns.
+		_self_triggered = true
+		MusicManager.strudel_play_batch(_line_tracks, _cps)
+		# Still set up cyclist for UI sync
+		MusicManager._strudel_source_text = " | ".join(PackedStringArray(display_parts))
+		MusicManager._strudel_pattern = combined
+		MusicManager._strudel_playing = true
+	else:
+		# Note mode: stack all patterns and play combined
+		var display: String = " | ".join(PackedStringArray(display_parts))
+		_self_triggered = true
+		MusicManager.strudel_play(combined, _cps, display)
+
+	# Pass signal controls to the trigger for per-note evaluation
+	if MusicManager._sion_trigger:
+		MusicManager._sion_trigger._signal_controls.clear()
+		for t in _line_tracks:
+			MusicManager._sion_trigger._signal_controls.append_array(t.get("signals", []))
+
 	_is_playing = true
 	# Reset rolling buffer on pattern change
 	_visible_haps.clear()
 	_last_query_end = 0.0
 	_active_locations.clear()
+
+	# Apply audio effects from method chains (lpf, room, delay, etc.)
+	if merged_controls.is_empty():
+		MusicManager.reset_music_effects()
+	else:
+		MusicManager.set_music_effects(merged_controls)
 
 
 func _stop() -> void:

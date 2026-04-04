@@ -195,4 +195,6 @@ static func _mod_int(numerator: int, modulus: int, denominator: int = 1) -> int:
 		floor_val = numerator / denominator
 	else:
 		floor_val = (numerator / denominator) - 1
+	if modulus == 0:
+		return 0
 	return ((floor_val % modulus) + modulus) % modulus
