@@ -867,12 +867,17 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 			result["pattern_text"] = ""  # Built from stack_exprs, not raw text
 			return result
 
-	# Strip Strudel wrappers: note("..."), s("...")
-	# These are JS function calls that wrap mini-notation in Strudel
-	for wrapper in ["note(", "s(", "sound("]:
+	# Strip Strudel wrappers: note("..."), s("..."), sound("..."), n("...")
+	# These are JS function calls that wrap mini-notation in Strudel.
+	# s() and sound() set the voice/sample name on each event.
+	# n() sets the sample index.
+	var wrapper_type: String = ""  # "note", "s", or "n"
+	for wrapper in ["note(", "s(", "sound(", "n("]:
 		if stripped_text.begins_with(wrapper) and stripped_text.ends_with(")"):
+			wrapper_type = "s" if wrapper in ["s(", "sound("] else ("n" if wrapper == "n(" else "note")
 			stripped_text = stripped_text.substr(wrapper.length(), stripped_text.length() - wrapper.length() - 1).strip_edges()
 			break
+	result["wrapper_type"] = wrapper_type
 
 	# Strip surrounding quotes (Strudel mini-notation is quoted in JS)
 	if stripped_text.length() >= 2:
@@ -982,11 +987,22 @@ static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern
 			voice = args.replace("\"", "").replace("'", "").strip_edges()
 			text = (text.substr(0, pos) + text.substr(pc + 1)).strip_edges()
 
-	# Strip note() wrapper — track offset shift
+	# Strip wrapper — track offset shift and wrapper type
+	var sub_wrapper: String = ""  # "note", "s", or "n"
 	if text.begins_with("note(") and text.ends_with(")"):
+		sub_wrapper = "note"
 		inner_offset += 5  # skip "note("
 		text = text.substr(5, text.length() - 6).strip_edges()
+	elif text.begins_with("sound(") and text.ends_with(")"):
+		sub_wrapper = "s"
+		inner_offset += 6
+		text = text.substr(6, text.length() - 7).strip_edges()
 	elif text.begins_with("s(") and text.ends_with(")"):
+		sub_wrapper = "s"
+		inner_offset += 2
+		text = text.substr(2, text.length() - 3).strip_edges()
+	elif text.begins_with("n(") and text.ends_with(")"):
+		sub_wrapper = "n"
 		inner_offset += 2
 		text = text.substr(2, text.length() - 3).strip_edges()
 
@@ -998,6 +1014,15 @@ static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern
 			text = text.substr(1, text.length() - 2)
 
 	var pat: StrudelPattern = StrudelMini.mini(text, inner_offset)
+
+	# s() wrapper: each token is a voice name → wrap as {s: name, note: "c4"}
+	if sub_wrapper == "s":
+		pat = pat.fmap(func(v: Variant) -> Dictionary:
+			return {"s": str(v), "note": "c4"})
+	elif sub_wrapper == "n":
+		pat = pat.fmap(func(v: Variant) -> Dictionary:
+			return {"n": int(v) if v is float or v is int else 0})
+
 	if not voice.is_empty():
 		pat = pat.set_in(Strudel.pure({"s": voice}))
 	return pat
@@ -1298,6 +1323,17 @@ func _play_current() -> void:
 		else:
 			var text: String = parsed["pattern_text"]
 			clean_pat = StrudelMini.mini(text)
+
+			# s() wrapper: tokens are voice names, wrap each value as {s: name}
+			# n() wrapper: tokens are sample indices, wrap as {n: value}
+			var wt: String = parsed.get("wrapper_type", "")
+			if wt == "s":
+				clean_pat = clean_pat.fmap(func(v: Variant) -> Dictionary:
+					return {"s": str(v), "note": "c4"})  # default note c4 for drum patterns
+			elif wt == "n":
+				clean_pat = clean_pat.fmap(func(v: Variant) -> Dictionary:
+					return {"n": int(v) if v is float or v is int else 0})
+
 			# Apply deferred pattern combinators (.degrade(), .fast(), etc.)
 			clean_pat = _apply_deferred_ops(clean_pat, ops)
 			display_pat = clean_pat

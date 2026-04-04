@@ -1,0 +1,24 @@
+{
+  "name": "ab_s_function",
+  "description": "A/B: s() top-level function — cycling waveforms",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_s_function",
+    "strudel ref s(\"sawtooth square triangle sine\").pianoroll() cps=0.5",
+    "announce REF: s() waveform cycle",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: s() waveform cycle",
+    "strudel edit s(\"sawtooth square triangle sine\").pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.10 0.5 500"
+  ]
+}
