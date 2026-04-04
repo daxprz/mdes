@@ -162,6 +162,9 @@ const EFFECT_KEYS := [
 	"distort", "crush", "shape",
 	"pan",
 ]
+## Per-note ADSR keys — these are NOT bus effects, they modify the SiON voice
+## envelope on a per-note basis. Extracted in _do_emit, not set_music_effects.
+const ADSR_KEYS := ["attack", "att", "decay", "dec", "sustain", "sus", "release", "rel"]
 
 ## Last-applied effect controls — used for change detection.
 ## Only calls set_music_effects() when the values actually differ,
@@ -557,11 +560,64 @@ func _emit_note_deferred(p: Dictionary) -> void:
 			 p["hap_value"], p["target_time"], p["cycle_pos"])
 
 
+static func _seconds_to_rate(seconds: float) -> int:
+	## Convert Strudel ADSR time (seconds) to SiON envelope rate (0-63).
+	## SiON: 63 = instant, 0 = slowest (~10s). Logarithmic mapping.
+	if seconds <= 0.001:
+		return 63  # Instant
+	if seconds >= 6.0:
+		return 1   # Very slow
+	# Logarithmic curve: rate = 63 - log2(1 + seconds * 8) * 8
+	var rate: int = 63 - int(log(1.0 + seconds * 8.0) / log(2.0) * 8.0)
+	return clampi(rate, 1, 63)
+
+
 func _do_emit(note_num: int, voice: Variant, length_ticks: float,
 			  hap_value: Variant, target_time: float, cycle_pos: float) -> void:
 	## Actually fire note_on on the SiON driver and record timing.
+	## If hap_value has ADSR controls, clone the voice and apply custom envelope.
 	var emit_ms: float = Time.get_ticks_msec()
-	driver.call("note_on", note_num, voice, length_ticks)
+	var final_voice: Variant = voice
+
+	# Per-note ADSR: extract attack/decay/sustain/release from hap value
+	if hap_value is Dictionary:
+		var has_adsr: bool = false
+		var att: float = -1.0
+		var dec: float = -1.0
+		var sus: float = -1.0
+		var rel: float = -1.0
+		for key in ["attack", "att"]:
+			if hap_value.has(key):
+				att = float(hap_value[key])
+				has_adsr = true
+		for key in ["decay", "dec"]:
+			if hap_value.has(key):
+				dec = float(hap_value[key])
+				has_adsr = true
+		for key in ["sustain", "sus"]:
+			if hap_value.has(key):
+				sus = float(hap_value[key])
+				has_adsr = true
+		for key in ["release", "rel"]:
+			if hap_value.has(key):
+				rel = float(hap_value[key])
+				has_adsr = true
+
+		if has_adsr and voice != null:
+			# Clone the voice and apply custom envelope.
+			# SiON envelope rates: 0 = slowest, 63 = instant.
+			# Strudel uses seconds. Convert: rate = 63 - clamp(seconds * 10, 0, 62)
+			# (0s → rate 63 instant, 6.2s → rate 1 very slow)
+			final_voice = voice.call("duplicate") if voice.has_method("duplicate") else voice
+			if final_voice != voice:  # Only if clone succeeded
+				var ar: int = _seconds_to_rate(att) if att >= 0.0 else 48  # Default fast attack
+				var dr: int = _seconds_to_rate(dec) if dec >= 0.0 else 32  # Default moderate decay
+				var sr: int = 0 if sus >= 0.0 else 0  # Sustain rate: 0 = hold level
+				var rr: int = _seconds_to_rate(rel) if rel >= 0.0 else 32  # Default moderate release
+				var sl: int = int(clampf((1.0 - sus) * 15.0, 0, 15)) if sus >= 0.0 else 4  # 0=full, 15=quiet
+				final_voice.call("set_envelope", ar, dr, sr, rr, sl, 0)
+
+	driver.call("note_on", note_num, final_voice, length_ticks)
 
 	# Timing instrumentation
 	if timing_log:

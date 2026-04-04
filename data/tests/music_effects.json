@@ -62,12 +62,29 @@
     "wait 4",
 
     "# ====== COMBINED ======",
-    "announce 7/7: COMBINED — lpf=600 + room=0.5 + delay=0.3",
+    "announce 7/11: COMBINED — lpf=600 + room=0.5 + delay=0.3",
     "strudel [c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3] cps=0.3 lpf=600 room=0.5 delay=0.3",
+    "wait 6",
+
+    "# ====== ADSR ENVELOPE ======",
+    "announce 8/11: ADSR BASELINE — default envelope (instant attack/release)",
+    "strudel edit note(\"c4 e4 g4 c5\").pianoroll() cps=0.3",
+    "wait 5",
+
+    "announce 9/11: ADSR ATTACK — .attack(0.5) should fade in slowly",
+    "strudel edit note(\"c4 e4 g4 c5\").attack(0.5).pianoroll() cps=0.3",
+    "wait 5",
+
+    "announce 10/11: ADSR RELEASE — .release(1.0) should ring out after note ends",
+    "strudel edit note(\"c4 e4 g4 c5\").release(1.0).pianoroll() cps=0.3",
+    "wait 5",
+
+    "announce 11/11: FULL ADSR — .attack(0.3).decay(0.1).sustain(0.5).release(0.8)",
+    "strudel edit note(\"c3 e3 g3 c4\").attack(0.3).decay(0.1).sustain(0.5).release(0.8).pianoroll() cps=0.25",
     "wait 6",
 
     "strudel stop",
     "wait 1",
-    "notify {SCRIPT} \"Did each effect sound different from its baseline?\" [\"All good\",\"Some issues\",\"Broken\"] {inspect} blocking"
+    "notify {SCRIPT} \"Did effects and ADSR sound correct?\" [\"All good\",\"Some issues\",\"Broken\"] {inspect} blocking"
   ]
 }

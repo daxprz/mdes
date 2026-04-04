@@ -121,6 +121,11 @@ const AUDIO_CONTROL_METHODS := {
 	"pan": "pan",
 	"gain": "gain",
 	"s": "s", "sound": "s",
+	# Per-note ADSR (applied to SiON voice envelope, not bus effects)
+	"attack": "attack", "att": "attack",
+	"decay": "decay", "dec": "decay",
+	"sustain": "sustain", "sus": "sustain",
+	"release": "release", "rel": "release",
 }
 
 ## Signal names → factory callables for the signal expression parser.
