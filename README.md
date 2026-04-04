@@ -203,6 +203,21 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.58
+**add/sub/mul transposition, per-window frequency match, annotated spectrograms, 36 A/B tests**
+
+- **add(note(7)) transposition**: bare note strings now wrap as `{note: value}` in compose ops, enabling `note("c4").add(note(7))` → g4
+- **Signed WAV fix**: `_load_wav_mono` was reading unsigned 16-bit PCM (all samples 0-2), now correctly signed (-1 to 1). Fixes all spectral analysis accuracy.
+- **Per-window frequency match**: zero-crossing rate comparison per 100ms window detects pitch/timing mismatches that spectral band averages miss
+- **Annotated spectrograms**: `ab_show` overlays red/cyan frequency markers on mismatched windows, green on matched
+- **Failure diagnostics**: worst mismatches shown with time and Hz (`@0.8s:ref=490Hz/our=340Hz`)
+- **Centroid threshold**: configurable per-test as 6th arg to `ab_compare` (0=skip, 0.7=strict)
+- **add/sub/mul as method chains**: `.add(note(7))`, `.sub(note(3))`, `.mul(2)` in deferred ops and arrow functions
+- **superimpose/layer**: `.superimpose(x=>x.add(note(7)))`, `.layer(fast(2), rev)` recognized and applied
+- **Full-height spectrograms**: 3× taller (800×1200) with aspect-ratio-aware overlay dialog
+- **4 new focused tests**: ab_add_simple, ab_add_octave, ab_superimpose_add, ab_add (36 total, all passing)
+- **Test order fix**: `ab_compare` runs before `ab_show` so freq data is available for overlay annotations
+
 ### v0.10.57
 **Function combinators, s()/n() functions, polymeter fix, 32 A/B tests**
 

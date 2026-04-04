@@ -1634,17 +1634,28 @@ var _ab_overlay: CanvasLayer = null
 
 func _show_ab_overlay(tex: ImageTexture) -> void:
 	## Display a texture as a full-screen overlay. Click or Escape to dismiss.
+	## Fills the screen vertically and scales width to match image aspect ratio.
 	if _ab_overlay:
 		_ab_overlay.queue_free()
 
 	_ab_overlay = CanvasLayer.new()
 	_ab_overlay.layer = 120  # Above everything
 
+	# Compute panel size: fill screen height, scale width to image aspect ratio
+	var img_w: float = tex.get_width()
+	var img_h: float = tex.get_height()
+	var aspect: float = img_w / maxf(img_h, 1.0)
+	# Fill ~95% of screen height, compute width from aspect ratio
+	var v_margin: float = 0.025
+	var panel_h_frac: float = 1.0 - 2.0 * v_margin
+	var panel_w_frac: float = minf(panel_h_frac * aspect, 0.95)  # Cap at 95% screen width
+	var h_margin: float = (1.0 - panel_w_frac) / 2.0
+
 	var panel := Panel.new()
-	panel.anchor_left = 0.25
-	panel.anchor_top = 0.25
-	panel.anchor_right = 0.75
-	panel.anchor_bottom = 0.75
+	panel.anchor_left = h_margin
+	panel.anchor_top = v_margin
+	panel.anchor_right = 1.0 - h_margin
+	panel.anchor_bottom = 1.0 - v_margin
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0, 0, 0, 0.92)
 	style.corner_radius_top_left = 8
