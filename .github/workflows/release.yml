@@ -7,6 +7,7 @@ on:
 
 env:
   GODOT_VERSION: "4.4.1"
+  GDSION_VERSION: "0.7-beta8"
 
 jobs:
   build-linux-windows:
@@ -18,9 +19,11 @@ jobs:
           - preset: "Linux"
             export_path: "build/linux/TheUltimateMuffin.x86_64"
             artifact_name: "TheUltimateMuffin-Linux"
+            gdsion_platform: "linux"
           - preset: "Windows"
             export_path: "build/windows/TheUltimateMuffin.exe"
             artifact_name: "TheUltimateMuffin-Windows"
+            gdsion_platform: "windows"
 
     steps:
       - name: Checkout
@@ -41,6 +44,12 @@ jobs:
           wget -q https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
           unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
           mv templates/* ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable/
+
+      - name: Install GDSiON
+        run: |
+          wget -q https://github.com/YuriSizov/gdsion/releases/download/${GDSION_VERSION}/libgdsion-${{ matrix.gdsion_platform }}.zip
+          unzip -qo libgdsion-${{ matrix.gdsion_platform }}.zip -d .
+          ls -la bin/libgdsion.* | head -10
 
       - name: Import Project
         run: |
