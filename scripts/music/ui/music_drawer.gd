@@ -734,6 +734,8 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		"chunk",
 		"segment",
 		"sometimes", "often", "rarely",
+		"add", "sub", "mul",
+		"superimpose", "layer",
 		"jux",
 		"off",
 		"iter",
@@ -1116,6 +1118,27 @@ static func _parse_method_chain_transform(chain: String) -> Variant:
 		return result
 
 
+static func _parse_transform_arg(args_str: String) -> Variant:
+	## Parse a transform argument — a number, quoted string, or note() wrapper.
+	## Returns a value suitable for add_in/sub_in/mul_in (number, string, or Pattern).
+	var s: String = args_str.strip_edges()
+	if s.is_empty():
+		return null
+	# note(N) wrapper → treat N as a number
+	if s.begins_with("note(") and s.ends_with(")"):
+		s = s.substr(5, s.length() - 6).strip_edges()
+	# Strip quotes
+	if s.length() >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
+		s = s.substr(1, s.length() - 2)
+	# Try as number
+	if s.is_valid_float():
+		return float(s)
+	# Try as mini-notation pattern (e.g., "0,2" or "<0 5 7 0>")
+	if not s.is_empty():
+		return s  # Will be reified by add_in → Strudel.reify()
+	return null
+
+
 static func _build_single_transform(fn_name: String, args_str: String) -> Variant:
 	## Build a single transform Callable from a function name and args string.
 	## Returns Callable(StrudelPattern) -> StrudelPattern, or null.
@@ -1140,6 +1163,19 @@ static func _build_single_transform(fn_name: String, args_str: String) -> Varian
 			if args_str.is_valid_float():
 				var v: float = float(args_str)
 				return func(p: StrudelPattern) -> StrudelPattern: return p._late(StrudelFraction.from_float(v))
+		"add":
+			# add(N) transposes by N semitones. Accepts number or quoted mini.
+			var add_val: Variant = _parse_transform_arg(args_str)
+			if add_val != null:
+				return func(p: StrudelPattern) -> StrudelPattern: return p.add_in(add_val)
+		"sub":
+			var sub_val: Variant = _parse_transform_arg(args_str)
+			if sub_val != null:
+				return func(p: StrudelPattern) -> StrudelPattern: return p.sub_in(sub_val)
+		"mul":
+			var mul_val: Variant = _parse_transform_arg(args_str)
+			if mul_val != null:
+				return func(p: StrudelPattern) -> StrudelPattern: return p.mul_in(mul_val)
 		"rev":
 			return func(p: StrudelPattern) -> StrudelPattern: return p._rev()
 		"palindrome":
@@ -1230,6 +1266,21 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 				var ra_fn: Variant = _parse_transform_fn(args)
 				if ra_fn != null:
 					pat = pat._rarely(ra_fn)
+			"superimpose":
+				var si_fn: Variant = _parse_transform_fn(args)
+				if si_fn != null:
+					pat = pat.superimpose([si_fn])
+			"layer":
+				# layer(fn1, fn2, ...) — apply multiple transforms and stack
+				var layer_parts: Array = _split_top_level_commas(args)
+				var layer_fns: Array = []
+				for lp in layer_parts:
+					var lp_text: String = lp["text"] if lp is Dictionary else str(lp)
+					var lf: Variant = _parse_transform_fn(lp_text)
+					if lf != null:
+						layer_fns.append(lf)
+				if not layer_fns.is_empty():
+					pat = pat.layer(layer_fns)
 			"jux":
 				var jx_fn: Variant = _parse_transform_fn(args)
 				if jx_fn != null:
@@ -1269,6 +1320,18 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 			"ply":
 				if args.is_valid_float():
 					pat = pat._ply(int(float(args)))
+			"add":
+				var add_v: Variant = _parse_transform_arg(args)
+				if add_v != null:
+					pat = pat.add_in(add_v)
+			"sub":
+				var sub_v: Variant = _parse_transform_arg(args)
+				if sub_v != null:
+					pat = pat.sub_in(sub_v)
+			"mul":
+				var mul_v: Variant = _parse_transform_arg(args)
+				if mul_v != null:
+					pat = pat.mul_in(mul_v)
 	return pat
 
 
