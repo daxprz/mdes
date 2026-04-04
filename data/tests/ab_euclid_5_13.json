@@ -1,6 +1,6 @@
 {
   "name": "ab_euclid_5_13",
-  "description": "A/B: euclidean (5,13) — complex rhythm",
+  "description": "A/B: euclidean (5,13) \u2014 complex rhythm",
   "script": [
     "ab_dismiss",
     "strudel stop",
@@ -18,7 +18,7 @@
     "strudel stop",
     "music off",
     "strudel record stop ours",
-    "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "ab_show ref.wav ours.wav"
   ]
 }

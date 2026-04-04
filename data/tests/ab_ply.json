@@ -1,6 +1,6 @@
 {
   "name": "ab_ply",
-  "description": "A/B: ply(3) — repeat each event 3 times within its span",
+  "description": "A/B: ply(3) \u2014 repeat each event 3 times within its span",
   "script": [
     "ab_dismiss",
     "strudel stop",
@@ -18,7 +18,7 @@
     "strudel stop",
     "music off",
     "strudel record stop ours",
-    "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "ab_show ref.wav ours.wav"
   ]
 }

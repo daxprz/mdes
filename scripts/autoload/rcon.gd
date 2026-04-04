@@ -1249,16 +1249,18 @@ func _cmd_gameconfig(parts: PackedStringArray) -> String:
 
 func _cmd_ab_compare(parts: PackedStringArray) -> String:
 	## A/B spectral + timing comparison of two WAV files.
-	## Usage: ab_compare <ref_file> <our_file> [max_hi_diff] [max_shape_diff] [max_onset_ms]
-	## Returns OK/FAIL with spectral and timing analysis details.
+	## Usage: ab_compare <ref> <our> [hi] [shape] [onset_ms] [centroid]
+	## All thresholds have sensible defaults. Set centroid=0 to skip centroid check.
+	## Returns OK/FAIL with spectral, centroid, and timing analysis details.
 	if parts.size() < 3:
-		return "Usage: ab_compare <ref.wav> <our.wav> [max_hi_diff=0.05] [max_shape_diff=0.5] [max_onset_ms=50]"
+		return "Usage: ab_compare <ref.wav> <our.wav> [hi=0.05] [shape=0.5] [onset_ms=500] [centroid=0.7]"
 
 	var ref_path: String = _ab_path(parts[1])
 	var our_path: String = _ab_path(parts[2])
 	var max_hi_diff: float = float(parts[3]) if parts.size() > 3 else 0.05
 	var max_shape_diff: float = float(parts[4]) if parts.size() > 4 else 0.5
-	var max_onset_ms: float = float(parts[5]) if parts.size() > 5 else 50.0
+	var max_onset_ms: float = float(parts[5]) if parts.size() > 5 else 500.0
+	var min_centroid_r: float = float(parts[6]) if parts.size() > 6 else 0.7
 
 	# Load WAV files
 	var ref_data: PackedFloat32Array = _load_wav_mono(ref_path)
@@ -1343,29 +1345,88 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 	var ref_density: float = float(ref_active_windows) / maxf(1.0, float(ref_centroids.size()))
 	# Only check centroid when ref has high variance, enough windows, AND dense audio
 	# (>60% of windows have energy = continuous sound, not sparse notes with gaps)
-	var centroid_matters: bool = ref_centroid_var > 200.0 and paired_windows >= 10 and ref_density > 0.6
+	# Centroid check: skip if threshold is 0, or if signal is too sparse/simple
+	var centroid_matters: bool = min_centroid_r > 0.0 and ref_centroid_var > 200.0 and paired_windows >= 10 and ref_density > 0.6
 	var centroid_ok: bool = true
 	if centroid_matters:
-		centroid_ok = centroid_corr >= 0.8
+		centroid_ok = centroid_corr >= min_centroid_r
 	var timing_ok: bool = onset_diff_ms <= max_onset_ms
-	# Centroid correlation is informational, not a hard gate.
-	# The spectral band comparison (hi + shape) is the primary check.
-	# Centroid correlation adds value for filter sweeps but is unreliable
-	# for sparse tonal patterns where timing alignment dominates.
-	var passed: bool = spectral_ok and timing_ok
+
+	# Per-window frequency match: compare dominant frequency in 100ms windows.
+	# Uses zero-crossing rate as a cheap pitch proxy.
+	# Catches pitch/timing differences that spectral averages miss.
+	# Collects per-window data for diagnostic output and visual overlay.
+	var win_samples: int = 4410  # 100ms at 44100Hz
+	var hop_samples: int = 2205  # 50ms hop
+	var compare_len: int = mini(ref_data.size(), our_data.size())
+	var freq_match_count: int = 0
+	var freq_total_count: int = 0
+	var freq_windows: Array = []  # {time, ref_hz, our_hz, match} per window
+	var pos: int = 0
+	while pos + win_samples < compare_len:
+		var ref_zc: int = 0
+		var our_zc: int = 0
+		var ref_ms: float = 0.0
+		var our_ms: float = 0.0
+		for j in range(1, win_samples):
+			var ri: int = pos + j
+			ref_ms += ref_data[ri] * ref_data[ri]
+			our_ms += our_data[ri] * our_data[ri]
+			if (ref_data[ri] > 0.0) != (ref_data[ri - 1] > 0.0):
+				ref_zc += 1
+			if (our_data[ri] > 0.0) != (our_data[ri - 1] > 0.0):
+				our_zc += 1
+		ref_ms /= float(win_samples)
+		our_ms /= float(win_samples)
+		var t: float = float(pos) / 44100.0
+		if ref_ms > 0.001 and our_ms > 0.001:
+			var ref_freq: float = float(ref_zc) * 44100.0 / (2.0 * float(win_samples))
+			var our_freq: float = float(our_zc) * 44100.0 / (2.0 * float(win_samples))
+			freq_total_count += 1
+			var matched: bool = ref_freq > 10.0 and absf(our_freq - ref_freq) / maxf(ref_freq, 1.0) < 0.15
+			if matched:
+				freq_match_count += 1
+			freq_windows.append({"time": t, "ref_hz": ref_freq, "our_hz": our_freq, "match": matched})
+		pos += hop_samples
+	var freq_match_pct: float = float(freq_match_count) / maxf(1.0, float(freq_total_count))
+	# Require 60% of windows to have matching frequencies
+	var freq_ok: bool = freq_total_count < 5 or freq_match_pct >= 0.6
+	# Store window data for overlay generation
+	_last_freq_windows = freq_windows
+
+	# Centroid correlation gates when the reference has meaningful pitch variation
+	# (dense audio with high centroid variance = multi-pitch content or filter sweeps).
+	# For sparse single-pitch patterns, centroid is unreliable and skipped.
+	var passed: bool = spectral_ok and timing_ok and centroid_ok and freq_ok
 	var verdict: String = "OK" if passed else "FAIL"
 
 	var reasons: Array[String] = []
 	if not spectral_ok:
 		reasons.append("spectral(hi=%.3f/%.3f shape=%.3f/%.3f)" % [
 			avg_hi_diff, max_hi_diff, avg_shape_diff, max_shape_diff])
-	if centroid_matters and not centroid_ok:
-		reasons.append("centroid_warn(r=%.3f<0.8)" % centroid_corr)
+	if not centroid_ok:
+		if centroid_matters:
+			reasons.append("centroid(r=%.3f<%.1f var=%.0f den=%.2f)" % [centroid_corr, min_centroid_r, ref_centroid_var, ref_density])
+		else:
+			reasons.append("centroid_skip(var=%.0f den=%.2f)" % [ref_centroid_var, ref_density])
 	if not timing_ok:
 		reasons.append("timing(%.0fms>%.0fms)" % [onset_diff_ms, max_onset_ms])
+	if not freq_ok:
+		# Show worst mismatches to help diagnose the issue
+		var worst: Array = []
+		for fw in freq_windows:
+			if not fw["match"]:
+				worst.append(fw)
+		worst.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return absf(a["ref_hz"] - a["our_hz"]) > absf(b["ref_hz"] - b["our_hz"]))
+		var detail: String = ""
+		for wi in range(mini(3, worst.size())):
+			var w: Dictionary = worst[wi]
+			detail += " @%.1fs:ref=%dHz/our=%dHz" % [w["time"], int(w["ref_hz"]), int(w["our_hz"])]
+		reasons.append("freq(%.0f%% match, %d/%d windows%s)" % [freq_match_pct * 100, freq_match_count, freq_total_count, detail])
 
-	return "%s: hi=%.4f shape=%.4f centroid_r=%.3f onset=%.0fms %s" % [
-		verdict, avg_hi_diff, avg_shape_diff, centroid_corr, onset_diff_ms,
+	return "%s: hi=%.4f shape=%.4f centroid_r=%.3f onset=%.0fms freq=%.0f%% %s" % [
+		verdict, avg_hi_diff, avg_shape_diff, centroid_corr, onset_diff_ms, freq_match_pct * 100,
 		("— " + ",".join(PackedStringArray(reasons))) if not passed else ""]
 
 
@@ -1406,7 +1467,10 @@ func _load_wav_mono(path: String) -> PackedFloat32Array:
 			for i in range(n_frames):
 				var sample: float = 0.0
 				if bits == 16:
-					sample = float(file.get_16()) / 32768.0
+					var raw: int = file.get_16()
+					if raw >= 32768:
+						raw -= 65536  # Convert unsigned to signed
+					sample = float(raw) / 32768.0
 				elif bits == 32:
 					sample = file.get_float()
 				# Skip extra channels
@@ -1468,6 +1532,7 @@ func _spectral_bands(samples: PackedFloat32Array, rate: int) -> Array:
 
 var _ab_player: AudioStreamPlayer = null
 var _ab_test_dir: String = ""  ## Current A/B test output folder name
+var _last_freq_windows: Array = []  ## Per-window freq data from last ab_compare
 
 func _ab_path(filename: String) -> String:
 	## Resolve a filename to the current A/B test directory.
@@ -1525,6 +1590,7 @@ func _cmd_ab_play(filename: String) -> String:
 
 func _cmd_ab_show(parts: PackedStringArray) -> String:
 	## Generate spectral comparison PNG and display as overlay.
+	## If ab_compare was run first, overlays freq match/mismatch markers.
 	## Usage: ab_show <ref.wav> <our.wav>
 	if parts.size() < 3:
 		return "Usage: ab_show <ref.wav> <our.wav>"
@@ -1533,10 +1599,22 @@ func _cmd_ab_show(parts: PackedStringArray) -> String:
 	var our_path: String = _ab_path(parts[2])
 	var png_path: String = _ab_path("comparison.png")
 
+	# Write freq window data from last ab_compare (if available)
+	var freq_json_path: String = ""
+	if not _last_freq_windows.is_empty():
+		freq_json_path = _ab_path("freq_data.json")
+		var json_str: String = JSON.stringify(_last_freq_windows)
+		var f := FileAccess.open(freq_json_path, FileAccess.WRITE)
+		if f:
+			f.store_string(json_str)
+			f.close()
+
 	# Run Python spectral comparison script
 	var py: String = "/var/tumu/venv/bin/python3"
 	var script: String = "/var/tumu/strudel-ref/spectral_compare.py"
 	var args: PackedStringArray = [script, ref_path, our_path, png_path]
+	if not freq_json_path.is_empty():
+		args.append(freq_json_path)
 	var output: Array = []
 	var exit_code: int = OS.execute(py, args, output, true)
 	if exit_code != 0:
@@ -1637,6 +1715,22 @@ func _find_first_onset_ms(samples: PackedFloat32Array, rate: int, threshold: flo
 		if absf(samples[i]) > threshold:
 			return float(i) / rate * 1000.0
 	return -1.0
+
+
+func _count_onsets(samples: PackedFloat32Array, rate: int, threshold: float = 0.02, min_gap_ms: float = 30.0) -> Array:
+	## Detect note onsets: moments where the envelope crosses above threshold
+	## after being below it for at least min_gap_ms. Returns array of onset times in seconds.
+	var onsets: Array = []
+	var min_gap_samples: int = int(rate * min_gap_ms / 1000.0)
+	var last_onset: int = -min_gap_samples
+	var was_below: bool = true
+	for i in range(samples.size()):
+		var above: bool = absf(samples[i]) > threshold
+		if above and was_below and (i - last_onset) > min_gap_samples:
+			onsets.append(float(i) / rate)
+			last_onset = i
+		was_below = not above
+	return onsets
 
 
 func _send_to_ref_server(message: String) -> String:

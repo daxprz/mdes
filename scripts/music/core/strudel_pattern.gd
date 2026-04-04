@@ -552,6 +552,21 @@ static func _bjork_rec(ons: Array, offs: Array) -> Array:
 # ==============================================================================
 
 ## Helper: merge two values using a function. Handles Dictionary union.
+static func _numeral(v: Variant) -> Variant:
+	## Convert a value to a number for arithmetic, like Strudel's parseNumeral.
+	## Note names (c4, eb3) → MIDI number. Numbers pass through.
+	if v is float or v is int:
+		return v
+	if v is String:
+		if v.is_valid_float():
+			return float(v)
+		# Try note name → MIDI
+		var midi: int = StrudelOscillator._note_to_midi(v)
+		if midi >= 0:
+			return midi
+	return v  # Can't convert — return as-is
+
+
 static func _compose_op(a: Variant, b: Variant, op: Callable) -> Variant:
 	if a is Dictionary or b is Dictionary:
 		if not (a is Dictionary):
@@ -562,9 +577,10 @@ static func _compose_op(a: Variant, b: Variant, op: Callable) -> Variant:
 		result.merge(b)
 		for key in b:
 			if a.has(key):
-				result[key] = op.call(a[key], b[key])
+				# Convert note names to MIDI numbers before arithmetic
+				result[key] = op.call(_numeral(a[key]), _numeral(b[key]))
 		return result
-	return op.call(a, b)
+	return op.call(_numeral(a), _numeral(b))
 
 # -- add: numerical addition --
 func add_in(other: Variant) -> StrudelPattern:

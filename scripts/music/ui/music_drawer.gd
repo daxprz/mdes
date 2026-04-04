@@ -1119,14 +1119,32 @@ static func _parse_method_chain_transform(chain: String) -> Variant:
 
 
 static func _parse_transform_arg(args_str: String) -> Variant:
-	## Parse a transform argument — a number, quoted string, or note() wrapper.
-	## Returns a value suitable for add_in/sub_in/mul_in (number, string, or Pattern).
+	## Parse a transform argument — a number, note() wrapper, or quoted mini.
+	## Returns a value suitable for add_in/sub_in/mul_in.
+	##
+	## In Strudel, add() uses _opIn which merges dict values per-key.
+	## So note("c4").add(7) does NOT transpose — the 7 has no "note" key.
+	## To transpose notes: note("c4").add(note(7)) — both have "note" key.
+	##
+	## We handle common forms:
+	##   add(7)          → add_in(7) — works on plain numbers
+	##   add(note(7))    → add_in({note: 7}) — works on note patterns
+	##   add(note("7"))  → same
+	##   add("<0 5 7>")  → add_in(mini pattern)
 	var s: String = args_str.strip_edges()
 	if s.is_empty():
 		return null
-	# note(N) wrapper → treat N as a number
+	# note(N) wrapper → wrap as {note: N} dict for per-key merging
 	if s.begins_with("note(") and s.ends_with(")"):
-		s = s.substr(5, s.length() - 6).strip_edges()
+		var inner: String = s.substr(5, s.length() - 6).strip_edges()
+		# Strip quotes inside note()
+		if inner.length() >= 2 and ((inner[0] == '"' and inner[-1] == '"') or (inner[0] == "'" and inner[-1] == "'")):
+			inner = inner.substr(1, inner.length() - 2)
+		if inner.is_valid_float():
+			return {"note": float(inner)}
+		# Mini-notation inside note() → pattern
+		return StrudelMini.mini(inner).fmap(func(v: Variant) -> Dictionary:
+			return {"note": float(v) if v is float or v is int else 0})
 	# Strip quotes
 	if s.length() >= 2 and ((s[0] == '"' and s[-1] == '"') or (s[0] == "'" and s[-1] == "'")):
 		s = s.substr(1, s.length() - 2)

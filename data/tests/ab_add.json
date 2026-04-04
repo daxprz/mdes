@@ -1,24 +1,24 @@
 {
   "name": "ab_add",
-  "description": "A/B: off + add(7) — delayed fifth harmonization",
+  "description": "A/B: off + add(7) \u2014 delayed fifth harmonization",
   "script": [
     "ab_dismiss",
     "strudel stop",
     "music off",
     "wait 1",
     "ab_dir ab_add",
-    "strudel ref note(\"c4 e4 g4 c5\").off(0.125, x=>x.add(7)).pianoroll() cps=0.5",
+    "strudel ref note(\"c4 e4 g4 c5\").off(0.125, x=>x.add(note(7))).pianoroll() cps=0.5",
     "announce REF: off + add(7)",
     "ab_play ref.wav",
     "wait 10 unless silent 2.5",
     "announce OURS: off + add(7)",
-    "strudel edit note(\"c4 e4 g4 c5\").off(0.125, x=>x.add(7)).pianoroll() cps=0.5",
+    "strudel edit note(\"c4 e4 g4 c5\").off(0.125, x=>x.add(note(7))).pianoroll() cps=0.5",
     "strudel record start",
     "wait 10 unless silent 2.5",
     "strudel stop",
     "music off",
     "strudel record stop ours",
-    "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0.7",
+    "ab_show ref.wav ours.wav"
   ]
 }

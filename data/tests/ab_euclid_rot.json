@@ -18,7 +18,7 @@
     "strudel stop",
     "music off",
     "strudel record stop ours",
-    "ab_show ref.wav ours.wav",
-    "check ab_compare ref.wav ours.wav 0.10 0.5 500"
+    "check ab_compare ref.wav ours.wav 0.10 0.5 500 0",
+    "ab_show ref.wav ours.wav"
   ]
 }
