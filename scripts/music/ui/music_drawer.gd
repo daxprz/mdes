@@ -856,8 +856,12 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		var inner: String = stripped_text.substr(6, stripped_text.length() - 7)
 		var sub_exprs: Array = _split_top_level_commas(inner)
 		if sub_exprs.size() > 1:
+			# Compute where "stack(" starts in the original line text
+			var stack_pos: int = raw.find("stack(")
+			var stack_inner_offset: int = (stack_pos + 6) if stack_pos >= 0 else offset
 			result["is_stack"] = true
 			result["stack_exprs"] = sub_exprs
+			result["stack_offset"] = stack_inner_offset
 			result["is_valid"] = true
 			result["pattern_text"] = ""  # Built from stack_exprs, not raw text
 			return result
@@ -921,7 +925,8 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 
 
 static func _split_top_level_commas(text: String) -> Array:
-	## Split a string by commas, but only at the top level (depth 0).
+	## Split a string by commas at the top level (depth 0).
+	## Returns Array of {text: String, pos: int} with character positions.
 	## Respects nested parens, brackets, and quotes.
 	var parts: Array = []
 	var depth: int = 0
@@ -940,21 +945,22 @@ static func _split_top_level_commas(text: String) -> Array:
 		elif c == ")" or c == "]" or c == "}":
 			depth -= 1
 		elif c == "," and depth == 0:
-			parts.append(text.substr(start, i - start).strip_edges())
+			parts.append({"text": text.substr(start, i - start).strip_edges(), "pos": start})
 			start = i + 1
 	if start < text.length():
-		parts.append(text.substr(start).strip_edges())
+		parts.append({"text": text.substr(start).strip_edges(), "pos": start})
 	return parts
 
 
-static func _eval_sub_expr(expr: String) -> StrudelPattern:
+static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern:
 	## Evaluate a single Strudel sub-expression (e.g., note("c3 g3").s("sawtooth")).
 	## Handles note() wrapper, .s() voice, and method chains.
+	## base_offset: character position of expr within the full line (for source highlighting).
 	var text: String = expr.strip_edges()
+	var inner_offset: int = base_offset + (expr.length() - expr.strip_edges().length())
 	var voice: String = ""
 
 	# Strip method chains from right to left for .s() voice selection
-	# Look for .s("...") at the end or within the chain
 	var s_methods := [".s(", ".sound("]
 	for sm in s_methods:
 		var pos: int = text.rfind(sm)
@@ -975,19 +981,22 @@ static func _eval_sub_expr(expr: String) -> StrudelPattern:
 			voice = args.replace("\"", "").replace("'", "").strip_edges()
 			text = (text.substr(0, pos) + text.substr(pc + 1)).strip_edges()
 
-	# Strip note() wrapper
+	# Strip note() wrapper — track offset shift
 	if text.begins_with("note(") and text.ends_with(")"):
+		inner_offset += 5  # skip "note("
 		text = text.substr(5, text.length() - 6).strip_edges()
 	elif text.begins_with("s(") and text.ends_with(")"):
+		inner_offset += 2
 		text = text.substr(2, text.length() - 3).strip_edges()
 
-	# Strip quotes
+	# Strip quotes — track offset shift
 	if text.length() >= 2:
 		if (text[0] == '"' and text[-1] == '"') or \
 		   (text[0] == "'" and text[-1] == "'"):
+			inner_offset += 1  # skip opening quote
 			text = text.substr(1, text.length() - 2)
 
-	var pat: StrudelPattern = StrudelMini.mini(text)
+	var pat: StrudelPattern = StrudelMini.mini(text, inner_offset)
 	if not voice.is_empty():
 		pat = pat.set_in(Strudel.pure({"s": voice}))
 	return pat
@@ -1107,8 +1116,11 @@ func _play_current() -> void:
 		if parsed.get("is_stack", false):
 			# stack(expr1, expr2, ...) — evaluate each sub-expression independently
 			var sub_pats: Array = []
-			for expr in parsed["stack_exprs"]:
-				sub_pats.append(_eval_sub_expr(expr))
+			var stack_base: int = parsed.get("stack_offset", 0)
+			for sub in parsed["stack_exprs"]:
+				var sub_text: String = sub["text"] if sub is Dictionary else str(sub)
+				var sub_pos: int = sub["pos"] if sub is Dictionary else 0
+				sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
 			clean_pat = Strudel.stack(sub_pats)
 			clean_pat = _apply_deferred_ops(clean_pat, ops)
 			display_pat = clean_pat
@@ -1332,11 +1344,10 @@ func _update_pianoroll() -> void:
 					var new_haps: Array = pat.query_arc(wrap_start, wrap_end)
 					for hap in new_haps:
 						if hap.has_onset():
-							# Shift hap times to real display position
 							var shifted := StrudelHap.new(
 								hap.whole.shift_by(cycle_offset) if hap.whole != null else null,
 								hap.part.shift_by(cycle_offset),
-								hap.value)
+								hap.value, hap.context)
 							_line_haps[i].append(shifted)
 				else:
 					# Wraps around: query [wrap_start, bc) then [0, wrap_end)
@@ -1346,7 +1357,7 @@ func _update_pianoroll() -> void:
 							var shifted := StrudelHap.new(
 								hap.whole.shift_by(cycle_offset) if hap.whole != null else null,
 								hap.part.shift_by(cycle_offset),
-								hap.value)
+								hap.value, hap.context)
 							_line_haps[i].append(shifted)
 					var new_haps2: Array = pat.query_arc(0.0, wrap_end)
 					var offset2: float = cycle_offset + float(bc)
@@ -1355,7 +1366,7 @@ func _update_pianoroll() -> void:
 							var shifted := StrudelHap.new(
 								hap.whole.shift_by(offset2) if hap.whole != null else null,
 								hap.part.shift_by(offset2),
-								hap.value)
+								hap.value, hap.context)
 							_line_haps[i].append(shifted)
 			else:
 				var new_haps: Array = pat.query_arc(query_start, visible_end)

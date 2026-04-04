@@ -11,11 +11,13 @@ static var _parser: StrudelMiniParser = StrudelMiniParser.new()
 
 # -- Public API ----------------------------------------------------------------
 
-static func mini(input: String) -> StrudelPattern:
+static func mini(input: String, offset: int = 0) -> StrudelPattern:
 	## Parse a mini-notation string and return a Pattern.
 	## Input should NOT include surrounding quotes.
+	## offset: character position of this mini text within the source line
+	##         (used for source highlighting in the pianoroll).
 	var ast: Dictionary = _parser.parse(input)
-	return _patternify_ast(ast, input, 0)
+	return _patternify_ast(ast, input, offset)
 
 
 static func get_leaf_locations(input: String, offset: int = 0) -> Array:
