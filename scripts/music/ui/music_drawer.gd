@@ -735,6 +735,7 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		"segment",
 		"sometimes", "often", "rarely",
 		"jux",
+		"off",
 		"iter",
 		"ply",
 		"striate",
@@ -1002,6 +1003,143 @@ static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern
 	return pat
 
 
+static func _parse_transform_fn(expr: String) -> Variant:
+	## Parse a pattern-transforming function from a string.
+	## Returns a Callable(StrudelPattern) -> StrudelPattern, or null if unparseable.
+	##
+	## Supported forms:
+	##   rev                         → pat._rev()
+	##   fast(2)                     → pat._fast(2)
+	##   slow(2)                     → pat._slow(2)
+	##   early(0.125)                → pat._early(0.125)
+	##   hurry(2)                    → pat._fast(2)
+	##   x=>x.fast(2)               → pat._fast(2)
+	##   x=>x.fast(2).rev()         → pat._fast(2)._rev()
+	##   x => x.fast(2).degradeBy(0.5)  → chained transforms
+	var s: String = expr.strip_edges()
+	if s.is_empty():
+		return null
+
+	# Arrow function: x=>x.method(...) or x => x.method(...)
+	var arrow_idx: int = s.find("=>")
+	if arrow_idx >= 0:
+		var body: String = s.substr(arrow_idx + 2).strip_edges()
+		# Strip the parameter reference (x., p., pat.)
+		var dot_idx: int = body.find(".")
+		if dot_idx < 0:
+			return null
+		body = body.substr(dot_idx)  # now starts with ".method(..."
+		return _parse_method_chain_transform(body)
+
+	# Named transform with parens: fast(2), slow(0.5), early(1/8)
+	var paren_idx: int = s.find("(")
+	if paren_idx >= 0:
+		var fn_name: String = s.substr(0, paren_idx).strip_edges()
+		var args_str: String = s.substr(paren_idx + 1, s.length() - paren_idx - 2).strip_edges()
+		return _build_single_transform(fn_name, args_str)
+
+	# Bare name: rev, palindrome
+	return _build_single_transform(s, "")
+
+
+static func _parse_method_chain_transform(chain: String) -> Variant:
+	## Parse ".method1(args).method2(args)..." into a chained Callable.
+	## Returns Callable(StrudelPattern) -> StrudelPattern, or null.
+	var transforms: Array = []  # Array of Callable
+
+	var remaining: String = chain.strip_edges()
+	while remaining.begins_with("."):
+		remaining = remaining.substr(1)  # skip the dot
+		# Find method name (up to "(" or end)
+		var paren_pos: int = remaining.find("(")
+		var fn_name: String
+		var args_str: String = ""
+
+		if paren_pos < 0:
+			# Bare name like "rev" at end of chain
+			fn_name = remaining.strip_edges()
+			remaining = ""
+		else:
+			fn_name = remaining.substr(0, paren_pos).strip_edges()
+			# Find balanced closing paren
+			var depth: int = 1
+			var pc: int = paren_pos + 1
+			while pc < remaining.length() and depth > 0:
+				if remaining[pc] == "(":
+					depth += 1
+				elif remaining[pc] == ")":
+					depth -= 1
+				if depth > 0:
+					pc += 1
+			args_str = remaining.substr(paren_pos + 1, pc - paren_pos - 1).strip_edges()
+			remaining = remaining.substr(pc + 1).strip_edges()
+
+		var t: Variant = _build_single_transform(fn_name, args_str)
+		if t != null:
+			transforms.append(t)
+
+	if transforms.is_empty():
+		return null
+	if transforms.size() == 1:
+		return transforms[0]
+	# Chain multiple transforms
+	var fns: Array = transforms
+	return func(p: StrudelPattern) -> StrudelPattern:
+		var result: StrudelPattern = p
+		for fn in fns:
+			result = fn.call(result)
+		return result
+
+
+static func _build_single_transform(fn_name: String, args_str: String) -> Variant:
+	## Build a single transform Callable from a function name and args string.
+	## Returns Callable(StrudelPattern) -> StrudelPattern, or null.
+	match fn_name:
+		"fast":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._fast(v)
+		"slow":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._slow(v)
+		"hurry":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._fast(v)
+		"early":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._early(StrudelFraction.from_float(v))
+		"late":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._late(StrudelFraction.from_float(v))
+		"rev":
+			return func(p: StrudelPattern) -> StrudelPattern: return p._rev()
+		"palindrome":
+			return func(p: StrudelPattern) -> StrudelPattern: return p._palindrome()
+		"degrade":
+			return func(p: StrudelPattern) -> StrudelPattern: return p._degrade_by(0.5)
+		"degradeBy":
+			if args_str.is_valid_float():
+				var v: float = float(args_str)
+				return func(p: StrudelPattern) -> StrudelPattern: return p._degrade_by(v)
+		"ply":
+			if args_str.is_valid_float():
+				var v: int = int(float(args_str))
+				return func(p: StrudelPattern) -> StrudelPattern: return p._ply(v)
+		"segment":
+			if args_str.is_valid_float():
+				var v: int = int(float(args_str))
+				return func(p: StrudelPattern) -> StrudelPattern: return p._segment(v)
+		"iter":
+			if args_str.is_valid_float():
+				var v: int = int(float(args_str))
+				return func(p: StrudelPattern) -> StrudelPattern: return p._iter(v)
+	return null
+
+
 static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPattern:
 	## Apply deferred pattern combinator methods parsed from the method chain.
 	## ops is [{method: String, args: String}], applied in reverse order
@@ -1056,20 +1194,53 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 				if args.is_valid_float():
 					pat = pat._segment(int(float(args)))
 			"sometimes":
-				pass  # Requires a function argument — not parseable from string
+				var st_fn: Variant = _parse_transform_fn(args)
+				if st_fn != null:
+					pat = pat._sometimes(st_fn)
 			"often":
-				pass
+				var of_fn: Variant = _parse_transform_fn(args)
+				if of_fn != null:
+					pat = pat._often(of_fn)
 			"rarely":
-				pass
+				var ra_fn: Variant = _parse_transform_fn(args)
+				if ra_fn != null:
+					pat = pat._rarely(ra_fn)
 			"jux":
-				pass  # Requires a function argument
+				var jx_fn: Variant = _parse_transform_fn(args)
+				if jx_fn != null:
+					pat = pat._jux(jx_fn)
 			"iter":
 				if args.is_valid_float():
 					pat = pat._iter(int(float(args)))
 			"every":
-				pass  # Requires (n, function) — not parseable
+				# every(n, transform) — first arg is count, rest is the transform
+				var comma_pos: int = args.find(",")
+				if comma_pos > 0:
+					var n_str: String = args.substr(0, comma_pos).strip_edges()
+					var fn_str: String = args.substr(comma_pos + 1).strip_edges()
+					if n_str.is_valid_float():
+						var ev_fn: Variant = _parse_transform_fn(fn_str)
+						if ev_fn != null:
+							pat = pat._every(int(float(n_str)), ev_fn)
 			"chunk":
-				pass  # Requires (n, function) — not parseable
+				var ch_comma: int = args.find(",")
+				if ch_comma > 0:
+					var n_str: String = args.substr(0, ch_comma).strip_edges()
+					var fn_str: String = args.substr(ch_comma + 1).strip_edges()
+					if n_str.is_valid_float():
+						var ch_fn: Variant = _parse_transform_fn(fn_str)
+						if ch_fn != null:
+							pat = pat._chunk(int(float(n_str)), ch_fn)
+			"off":
+				# off(time, transform) — first arg is time offset, rest is transform
+				var off_comma: int = args.find(",")
+				if off_comma > 0:
+					var t_str: String = args.substr(0, off_comma).strip_edges()
+					var fn_str: String = args.substr(off_comma + 1).strip_edges()
+					if t_str.is_valid_float():
+						var off_fn: Variant = _parse_transform_fn(fn_str)
+						if off_fn != null:
+							pat = pat._off(StrudelFraction.from_float(float(t_str)), off_fn)
 			"ply":
 				if args.is_valid_float():
 					pat = pat._ply(int(float(args)))

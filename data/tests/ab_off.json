@@ -1,0 +1,24 @@
+{
+  "name": "ab_off",
+  "description": "A/B: off(0.125, fast(2)) — delayed double-speed echo",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_off",
+    "strudel ref note(\"c4 e4 g4 c5\").off(0.125, fast(2)).pianoroll() cps=0.5",
+    "announce REF: off(0.125, fast(2))",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: off(0.125, fast(2))",
+    "strudel edit note(\"c4 e4 g4 c5\").off(0.125, fast(2)).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+  ]
+}

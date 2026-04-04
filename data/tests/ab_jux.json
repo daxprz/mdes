@@ -1,0 +1,24 @@
+{
+  "name": "ab_jux",
+  "description": "A/B: jux(rev) — reversed copy superimposed",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_jux",
+    "strudel ref note(\"c4 e4 g4 c5\").jux(rev).pianoroll() cps=0.5",
+    "announce REF: jux(rev)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: jux(rev)",
+    "strudel edit note(\"c4 e4 g4 c5\").jux(rev).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+  ]
+}

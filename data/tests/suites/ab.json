@@ -29,6 +29,9 @@
     "ab_rests",
     "ab_slowcat",
     "ab_polymeter",
+    "ab_every",
+    "ab_jux",
+    "ab_off",
     "ab_degrade"
   ]
 }
