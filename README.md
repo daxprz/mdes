@@ -203,6 +203,20 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.57
+**Function combinators, s()/n() functions, polymeter fix, 32 A/B tests**
+
+- **Function-argument combinators**: `.every(3, fast(2))`, `.jux(rev)`, `.sometimes(x=>x.fast(2))`, `.off(0.125, fast(2))`, `.chunk(4, rev)` — parse named transforms and arrow functions from method chains
+- **Arrow function parser**: `x=>x.fast(2).rev()` — chained transforms in a single arrow expression
+- **`s()` top-level function**: `s("sawtooth square triangle sine")` cycles through waveforms, matching Strudel's control pattern API
+- **`n()` top-level function**: `n("0 1 2 3").s("piano")` for sample index patterns
+- **`off()` fix**: late applied before transform (matching Strudel's `stack(pat, fn(pat.late(t)))`)
+- **Polymeter fix**: `{c4 e4 g4}%8` single-child with `%n` now correctly applies `fast(n/steps)`
+- **`euclidRot()` support**: `.euclidRot(3,8,1)` recognized as method chain for rotated euclidean rhythms
+- **Source text highlighting**: fixed for `stack()` expressions (per-sub-expression offsets) and `degrade` patterns (preserve context in cycle-wrapped haps)
+- **12 new A/B tests**: slow, rev, fast3, ply, bandpass, euclid_rot, euclid_5_13, polymeter, every, jux, off, s_function
+- **32 total A/B tests**, all passing
+
 ### v0.10.56
 **Degrade PRNG fix, stack() parsing, per-cycle rendering, A/B test hardening**
 
