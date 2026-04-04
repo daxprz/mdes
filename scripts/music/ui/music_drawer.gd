@@ -675,7 +675,28 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	}
 
 	var stripped: String = raw.strip_edges()
-	if stripped.is_empty() or stripped.begins_with("#"):
+	if stripped.is_empty() or stripped.begins_with("#") or stripped.begins_with("//"):
+		return result
+
+	# Handle JS-style top-level function calls and keywords:
+	# setcps(N) — set cycles per second (tempo)
+	# setcpm(N) — set cycles per minute
+	# hush — silence all
+	if stripped.begins_with("setcps(") and stripped.ends_with(")"):
+		var inner: String = stripped.substr(7, stripped.length() - 8).strip_edges()
+		if inner.is_valid_float():
+			result["setcps"] = float(inner)
+			result["is_valid"] = false
+			return result
+	if stripped.begins_with("setcpm(") and stripped.ends_with(")"):
+		var inner: String = stripped.substr(7, stripped.length() - 8).strip_edges()
+		if inner.is_valid_float():
+			result["setcps"] = float(inner) / 60.0
+			result["is_valid"] = false
+			return result
+	if stripped == "hush" or stripped == "hush()":
+		result["hush"] = true
+		result["is_valid"] = false
 		return result
 
 	var text: String = raw
@@ -1381,6 +1402,14 @@ func _play_current() -> void:
 			continue
 
 		var parsed: Dictionary = _parse_line_text(_lines[i])
+		# Handle setcps() — applies tempo, not a pattern
+		if parsed.has("setcps"):
+			_cps = parsed["setcps"]
+		# Handle hush — stop all playback
+		if parsed.get("hush", false):
+			MusicManager.strudel_stop()
+			_is_playing = false
+			return
 		if not parsed["is_valid"]:
 			continue
 
