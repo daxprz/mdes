@@ -48,6 +48,13 @@ if [ -z "$CHANGELOG" ]; then
     CHANGELOG="No release notes found for ${VERSION}"
 fi
 
+# Discord embed fields have a 1024 char limit — truncate if needed
+if [ ${#CHANGELOG} -gt 950 ]; then
+    CHANGELOG="${CHANGELOG:0:920}
+
+... _(truncated — see full notes on GitHub)_"
+fi
+
 # Get gate suite status
 GATE_STATUS=""
 for suite in chained combat leaping scaling; do
@@ -76,6 +83,10 @@ json_escape() {
     python3 -c "import json,sys; print(json.dumps(sys.stdin.read()))" <<< "$1"
 }
 
+# Build release URL from git remote
+REPO_URL=$(git remote get-url origin 2>/dev/null | sed 's/git@github.com:/https:\/\/github.com\//' | sed 's/\.git$//')
+RELEASE_URL="${REPO_URL}/releases/tag/${VERSION}"
+
 CHANGELOG_ESCAPED=$(json_escape "$CHANGELOG")
 GATE_ESCAPED=$(json_escape "$GATE_STATUS")
 
@@ -85,6 +96,7 @@ PAYLOAD=$(cat <<ENDJSON
   "embeds": [
     {
       "title": "🧁 DAX ${VERSION} Released",
+      "url": "${RELEASE_URL}",
       "color": 16750848,
       "fields": [
         {
@@ -105,6 +117,11 @@ PAYLOAD=$(cat <<ENDJSON
         {
           "name": "Date",
           "value": "${COMMIT_DATE}",
+          "inline": true
+        },
+        {
+          "name": "Download",
+          "value": "[GitHub Release](${RELEASE_URL})",
           "inline": true
         }
       ],
