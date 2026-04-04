@@ -1,0 +1,24 @@
+{
+  "name": "ab_euclid_rot",
+  "description": "A/B: euclidean with rotation euclid(3,8,1)",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_euclid_rot",
+    "strudel ref note(\"c4\").euclidRot(3,8,1).pianoroll() cps=0.5",
+    "announce REF: euclid(3,8,1)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: euclid(3,8,1)",
+    "strudel edit note(\"c4\").euclidRot(3,8,1).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.10 0.5 500"
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "name": "ab_fast3",
+  "description": "A/B: fast(3) — triple speed",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_fast3",
+    "strudel ref note(\"c4 e4 g4 c5\").fast(3).pianoroll() cps=0.5",
+    "announce REF: fast(3)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: fast(3)",
+    "strudel edit note(\"c4 e4 g4 c5\").fast(3).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+  ]
+}

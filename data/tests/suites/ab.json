@@ -9,10 +9,26 @@
     "ab_lpf_sweep",
     "ab_lpf_saw_sweep",
     "ab_hpf",
+    "ab_hpf_sweep",
+    "ab_bandpass",
     "ab_scale",
     "ab_gain",
+    "ab_gain_sweep",
     "ab_euclid",
+    "ab_euclid_rot",
+    "ab_euclid_5_13",
     "ab_stack",
-    "ab_fast"
+    "ab_multi_voice",
+    "ab_fast",
+    "ab_fast_op",
+    "ab_fast3",
+    "ab_slow",
+    "ab_rev",
+    "ab_ply",
+    "ab_chords",
+    "ab_rests",
+    "ab_slowcat",
+    "ab_polymeter",
+    "ab_degrade"
   ]
 }

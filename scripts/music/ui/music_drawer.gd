@@ -729,7 +729,7 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		"fast", "slow", "hurry",
 		"early", "late",
 		"rev", "palindrome",
-		"euclid",
+		"euclid", "euclidRot",
 		"every",
 		"chunk",
 		"segment",
@@ -1041,8 +1041,8 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 				pat = pat._rev()
 			"palindrome":
 				pat = pat._palindrome()
-			"euclid":
-				# Parse euclid(pulses, steps) or euclid(pulses, steps, rotation)
+			"euclid", "euclidRot":
+				# Parse euclid(pulses, steps) or euclidRot(pulses, steps, rotation)
 				var euclid_args: PackedStringArray = args.split(",")
 				if euclid_args.size() >= 2:
 					var pulses: int = int(euclid_args[0].strip_edges())

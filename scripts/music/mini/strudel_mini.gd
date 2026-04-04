@@ -112,10 +112,9 @@ static func _patternify_pattern(ast: Dictionary, code: String, offset: int) -> S
 		"polymeter":
 			# {a b c, d e} = polymeter. Each sub-pattern loops at its own
 			# length, aligned to a shared step count (default = first child's length).
+			# {a b c}%8 = 3 notes over 8 steps = fast(8/3)
 			if children.is_empty():
 				return Strudel.silence()
-			if children.size() == 1:
-				return children[0]
 			# Determine steps per cycle
 			var spc: int = -1
 			if args.has("stepsPerCycle") and args["stepsPerCycle"] != null:
@@ -123,6 +122,12 @@ static func _patternify_pattern(ast: Dictionary, code: String, offset: int) -> S
 			if spc < 0:
 				# Default: step count from the first child's source
 				spc = sources[0].get("source_", []).size() if sources[0].get("type_") == "pattern" else 1
+			if children.size() == 1:
+				# Single child with %n: apply fast(spc / child_steps)
+				var child_steps: int = sources[0].get("source_", []).size() if sources[0].get("type_") == "pattern" else 1
+				if child_steps > 0 and child_steps != spc:
+					return children[0]._fast(StrudelFraction.new(spc, child_steps))
+				return children[0]
 			# Each child is fast-adjusted so its natural length fits into spc steps
 			var aligned: Array = []
 			for i in range(children.size()):

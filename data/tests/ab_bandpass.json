@@ -1,0 +1,24 @@
+{
+  "name": "ab_bandpass",
+  "description": "A/B: combined LPF+HPF bandpass on sawtooth",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_bandpass",
+    "strudel ref note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(2000).hpf(400).pianoroll() cps=0.5",
+    "announce REF: bandpass (lpf+hpf)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: bandpass (lpf+hpf)",
+    "strudel edit note(\"c4 c4 c4 c4 c4 c4 c4 c4\").s(\"sawtooth\").lpf(2000).hpf(400).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.08 0.5 500"
+  ]
+}

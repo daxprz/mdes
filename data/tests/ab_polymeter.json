@@ -1,0 +1,24 @@
+{
+  "name": "ab_polymeter",
+  "description": "A/B: polymeter {c4 e4 g4}%8 — 3 notes over 8 steps",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_polymeter",
+    "strudel ref note(\"{c4 e4 g4}%8\").pianoroll() cps=0.5",
+    "announce REF: polymeter 3/8",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+    "announce OURS: polymeter 3/8",
+    "strudel edit note(\"{c4 e4 g4}%8\").pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "ab_show ref.wav ours.wav",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500"
+  ]
+}
