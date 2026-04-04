@@ -1,0 +1,31 @@
+{
+  "name": "ab_adsr",
+  "description": "A/B: ADSR envelope — verify notes still play correctly WITH attack/release applied. Compares against ref WITHOUT ADSR (same pitches, different envelope).",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_adsr",
+
+    "# Reference: plain notes WITHOUT ADSR (from real Strudel)",
+    "strudel ref note(\"c4 e4 g4 c5\").pianoroll() cps=0.5",
+    "announce REF: plain c4 e4 g4 c5 (no ADSR)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+
+    "# Ours: same notes WITH ADSR",
+    "announce OURS: c4 e4 g4 c5 with attack=0.3 release=0.8",
+    "strudel edit note(\"c4 e4 g4 c5\").attack(0.3).release(0.8).pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+
+    "# Pitches should match (freq check) even though envelope differs.",
+    "# Relax shape/spectral thresholds since ADSR changes the timbre.",
+    "check ab_compare ref.wav ours.wav 0.15 0.8 500 0",
+    "ab_show ref.wav ours.wav"
+  ]
+}
