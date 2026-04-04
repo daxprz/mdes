@@ -1329,7 +1329,12 @@ func _cmd_ab_compare(parts: PackedStringArray) -> String:
 			ref_centroid_var += (c - c_mean) * (c - c_mean)
 		ref_centroid_var = sqrt(ref_centroid_var / ref_centroids.size())
 
-	var centroid_matters: bool = ref_centroid_var > 100.0  # Hz stddev — sweep present
+	# Centroid correlation only matters for dense, continuous patterns with
+	# filter sweeps. For sparse patterns or static tones, centroid variance
+	# comes from note-vs-silence transitions, not filter changes.
+	# Only check centroid when ref has high variance AND enough paired windows.
+	var paired_windows: int = mini(ref_centroids.size(), our_centroids.size())
+	var centroid_matters: bool = ref_centroid_var > 200.0 and paired_windows >= 10
 	var centroid_ok: bool = true
 	if centroid_matters:
 		centroid_ok = centroid_corr >= 0.8

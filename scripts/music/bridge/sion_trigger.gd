@@ -452,10 +452,13 @@ func _play_oscillator(wav: AudioStreamWAV) -> void:
 
 
 func stop_oscillator() -> void:
-	## Stop the oscillator player.
+	## Stop the oscillator player immediately.
 	if _osc_player:
 		_osc_player.stop()
-		_osc_player.queue_free()
+		# Free immediately, not deferred — prevents bleed into next test
+		if _osc_player.get_parent():
+			_osc_player.get_parent().remove_child(_osc_player)
+		_osc_player.free()
 		_osc_player = null
 
 

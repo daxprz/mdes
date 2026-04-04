@@ -522,6 +522,7 @@ static func _bjork(pulses: int, steps: int) -> Array:
 
 
 static func _bjork_rec(ons: Array, offs: Array) -> Array:
+	## Ported from Strudel v1.2.0 euclid.mjs _bjork/left/right.
 	if ons.is_empty() or offs.is_empty() or mini(ons.size(), offs.size()) <= 1:
 		var result: Array = []
 		for a in ons:
@@ -529,20 +530,20 @@ static func _bjork_rec(ons: Array, offs: Array) -> Array:
 		for a in offs:
 			result.append_array(a)
 		return result
-	if ons.size() >= offs.size():
-		# Left: pair each off with an on
+	if ons.size() > offs.size():
+		# Left: pair first offs.size() ons with offs, remainder stays as ons
 		var new_ons: Array = []
 		for i in range(offs.size()):
 			new_ons.append(ons[i] + offs[i])
 		var remaining: Array = ons.slice(offs.size())
 		return _bjork_rec(new_ons, remaining)
 	else:
-		# Right: pair each on with an off
-		var new_offs: Array = []
+		# Right: pair first ons.size() offs with ons, remainder stays as offs
+		var new_ons: Array = []
 		for i in range(ons.size()):
-			new_offs.append(offs[i] + ons[i])
+			new_ons.append(ons[i] + offs[i])
 		var remaining: Array = offs.slice(ons.size())
-		return _bjork_rec(remaining, new_offs)
+		return _bjork_rec(new_ons, remaining)
 
 
 # ==============================================================================

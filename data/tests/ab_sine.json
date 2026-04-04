@@ -5,6 +5,7 @@
     "ab_dismiss",
     "strudel stop",
     "music off",
+    "wait 1",
     "ab_dir ab_sine",
     "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\")",
     "announce REF: sine C4",

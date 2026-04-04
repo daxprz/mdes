@@ -442,15 +442,25 @@ func _parse_wait_line(line: String) -> Dictionary:
 				conditions.append(cond)
 				i = j
 			elif cond_type == "silent":
-				# "unless silent" — end wait early when audio stops
+				# "unless silent [<grace_sec>]" — end wait early when audio is
+				# silent for <grace_sec> seconds AFTER sound has been detected.
+				# Default grace = 0.5s. Prevents triggering on initial silence.
+				var grace: float = 0.5
+				if i + 2 < parts.size() and parts[i + 2].is_valid_float():
+					grace = float(parts[i + 2])
+					i += 3
+				else:
+					i += 2
 				var cond: Dictionary = {
 					"cond_type": "silent",
 					"idx": cond_idx,
 					"patterns": [],
+					"grace": grace,
+					"_heard_sound": false,
+					"_silent_since": -1.0,
 				}
 				cond_idx += 1
 				conditions.append(cond)
-				i += 2
 			elif cond_type == "exit_circle" and i + 5 < parts.size():
 				var cond: Dictionary = {
 					"cond_type": "exit_circle",
@@ -1619,25 +1629,33 @@ func _check_breach_conditions() -> void:
 
 		elif cond_type == "silent":
 			# Audio silence — triggers when no audio is playing.
-			# Checks: SiON not streaming/playing, ab_player finished, bus peak is silent.
+			# State machine: must hear sound first, then detect silence
+			# for at least "grace" seconds before triggering.
 			var is_silent: bool = true
-			# Check ab_player (WAV playback)
 			var rcon_node := get_node_or_null("/root/RCON")
 			if rcon_node and rcon_node.get("_ab_player") and rcon_node._ab_player != null:
 				if rcon_node._ab_player.playing:
 					is_silent = false
-			# Check SiON
 			if MusicManager._strudel_playing:
 				is_silent = false
-			# Check audio bus peak level as fallback
 			if is_silent:
 				var bus_idx: int = AudioServer.get_bus_index("Master")
 				var peak: float = AudioServer.get_bus_peak_volume_left_db(bus_idx, 0)
-				if peak > -60.0:  # Above -60dB = still audible
+				if peak > -60.0:
 					is_silent = false
-			if is_silent:
-				_breach_result = {"breached": true, "entity": "audio", "pos": Vector2.ZERO, "condition": cond}
-				return
+
+			if not is_silent:
+				# Sound detected — mark that we've heard audio
+				cond["_heard_sound"] = true
+				cond["_silent_since"] = -1.0
+			elif cond.get("_heard_sound", false):
+				# Was hearing sound, now silent — start grace timer
+				if cond["_silent_since"] < 0:
+					cond["_silent_since"] = Time.get_ticks_msec() / 1000.0
+				var silent_duration: float = Time.get_ticks_msec() / 1000.0 - cond["_silent_since"]
+				if silent_duration >= cond.get("grace", 0.5):
+					_breach_result = {"breached": true, "entity": "audio", "pos": Vector2.ZERO, "condition": cond}
+					return
 
 
 func _find_matching_entities(patterns: Array) -> Array:

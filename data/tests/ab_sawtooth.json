@@ -5,6 +5,7 @@
     "ab_dismiss",
     "strudel stop",
     "music off",
+    "wait 1",
     "ab_dir ab_sawtooth",
     "strudel ref note(\"c4\",\"c4\",\"c4\",\"c4\").s(\"sawtooth\")",
     "announce REF: sawtooth C4",
