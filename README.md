@@ -203,6 +203,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.61
+**`let` variable bindings, linked source highlights, pattern engine spec**
+
+- **`let` variable bindings**: `let melody = note("c4 e4 g4 c5")` then reference as `melody` or `melody.fast(2)`. Works in bare lines, method chains, and `stack()` sub-expressions.
+- **Linked highlight architecture**: let bindings compile patterns with location tags pointing to the definition line. `_tag_locations_line()` stamps each location with its source line index. Highlights for `stack(drums, melody)` render on each variable's definition line, not the stack line.
+- **No text substitution**: variable references are resolved via compiled pattern linking, not string expansion. The editor displays `melody`, not the expanded expression.
+- **`stack()` let resolution**: sub-expressions inside `stack(drums, melody)` resolve against let bindings, with suffix transforms supported (`stack(melody.rev(), drums)`).
+- **Pattern engine spec**: `docs/design/pattern_engine_spec.md` — clean-room functional specification describing the pattern algebra, mini-notation grammar, scheduler, and audio bridge in implementation-independent terms.
+- **Fixed `ab_every` flaky check**: `every(3, fast(2))` highlight check simplified to stable first-beat assertion.
+
 ### v0.10.60
 **File loading, legato/clip/dur, sub-expression method chains, 42 A/B tests**
 

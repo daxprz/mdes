@@ -689,6 +689,21 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 	if stripped.is_empty() or stripped.begins_with("#") or stripped.begins_with("//"):
 		return result
 
+	# Handle let bindings: let name = expression
+	# Stores the RHS expression text for later evaluation.
+	if stripped.begins_with("let "):
+		var after_let: String = stripped.substr(4).strip_edges()
+		var eq_idx: int = after_let.find("=")
+		if eq_idx > 0:
+			var var_name: String = after_let.substr(0, eq_idx).strip_edges()
+			var var_expr: String = after_let.substr(eq_idx + 1).strip_edges()
+			if var_name.is_valid_identifier() and not var_expr.is_empty():
+				result["is_let"] = true
+				result["let_name"] = var_name
+				result["let_expr"] = var_expr
+				result["is_valid"] = false  # let lines don't produce patterns directly
+				return result
+
 	# Handle JS-style top-level function calls and keywords:
 	# setcps(N) — set cycles per second (tempo)
 	# setcpm(N) — set cycles per minute
@@ -994,6 +1009,13 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 		result["pattern_text"] = text
 		result["is_valid"] = true
 	return result
+
+
+static func _is_ident_char(c: String) -> bool:
+	## Returns true if c is a valid identifier character (alphanumeric or underscore).
+	var code: int = c.unicode_at(0)
+	return (code >= 65 and code <= 90) or (code >= 97 and code <= 122) \
+		or (code >= 48 and code <= 57) or code == 95  # A-Z, a-z, 0-9, _
 
 
 static func _split_top_level_commas(text: String) -> Array:
@@ -1491,6 +1513,7 @@ func _play_current() -> void:
 	var display_parts: Array[String] = []
 	var merged_controls: Dictionary = {}  # Collect audio controls from all lines
 	var _line_tracks: Array = []  # Per-line data for batch mode compilation
+	var let_bindings: Dictionary = {}  # name → {pattern: Pattern, expr: String}
 
 	# Resize per-line arrays to match line count
 	_line_patterns.resize(_lines.size())
@@ -1505,6 +1528,48 @@ func _play_current() -> void:
 		if _line_muted(i):
 			continue
 
+		# Check for let variable references BEFORE parsing — a bare identifier
+		# like "melody" would be valid mini-notation, but if it matches a let
+		# binding, it should resolve as a variable reference instead.
+		var is_let_ref: bool = false
+		if not let_bindings.is_empty():
+			var raw_text: String = _lines[i].get("text", "").strip_edges()
+			if not raw_text.is_empty() and not raw_text.begins_with("//") \
+				and not raw_text.begins_with("#") and not raw_text.begins_with("let ") \
+				and not raw_text.begins_with("setcps") and not raw_text.begins_with("setcpm"):
+				var ref_name: String = ""
+				var ref_suffix: String = ""
+				var dot_pos: int = raw_text.find(".")
+				if dot_pos > 0:
+					var candidate: String = raw_text.substr(0, dot_pos).strip_edges()
+					if candidate.is_valid_identifier() and let_bindings.has(candidate):
+						ref_name = candidate
+						ref_suffix = raw_text.substr(dot_pos)
+				elif raw_text.is_valid_identifier() and let_bindings.has(raw_text):
+					ref_name = raw_text
+				if not ref_name.is_empty():
+					is_let_ref = true
+					var binding: Dictionary = let_bindings[ref_name]
+					var ref_pat: StrudelPattern = binding["pattern"]
+					if not ref_suffix.is_empty():
+						var suffix_line: Dictionary = _make_line("x" + ref_suffix)
+						var suffix_parsed: Dictionary = _parse_line_text(suffix_line)
+						var suffix_ops: Array = suffix_parsed.get("deferred_ops", [])
+						if not suffix_ops.is_empty():
+							ref_pat = _apply_deferred_ops(ref_pat, suffix_ops)
+						var suffix_controls: Dictionary = suffix_parsed.get("audio_controls", {})
+						for ck in suffix_controls:
+							merged_controls[ck] = suffix_controls[ck]
+					_lines[i]["_let_ref"] = ref_name
+					_lines[i]["_let_def_line"] = binding["def_line"]
+					_line_patterns[i] = ref_pat
+					var snd: String = binding["sound"]
+					if not snd.is_empty():
+						ref_pat = ref_pat.set_in(Strudel.pure({"s": snd}))
+					active_patterns.append(ref_pat)
+					display_parts.append(raw_text)
+					continue
+
 		var parsed: Dictionary = _parse_line_text(_lines[i])
 		# Handle setcps() — applies tempo, not a pattern
 		if parsed.has("setcps"):
@@ -1514,6 +1579,57 @@ func _play_current() -> void:
 			MusicManager.strudel_stop()
 			_is_playing = false
 			return
+		# Handle let bindings — compile the pattern with locations pointing
+		# to THIS line (the definition), then store for reference by later lines.
+		if parsed.get("is_let", false):
+			var let_name: String = parsed["let_name"]
+			var let_expr: String = parsed["let_expr"]
+			# Compute the offset where the expression starts in the let line
+			var let_line_text: String = _lines[i].get("text", "")
+			var eq_pos: int = let_line_text.find("=")
+			var expr_offset: int = eq_pos + 1 if eq_pos >= 0 else 0
+			# Skip whitespace after =
+			while expr_offset < let_line_text.length() and let_line_text[expr_offset] == " ":
+				expr_offset += 1
+			# Parse the RHS as if it were its own line, but with offset pointing
+			# into the let line so highlights render on the definition
+			var rhs_line: Dictionary = _make_line(let_expr)
+			var rhs_parsed: Dictionary = _parse_line_text(rhs_line)
+			if rhs_parsed["is_valid"]:
+				var let_pat: StrudelPattern
+				if rhs_parsed.get("is_stack", false):
+					var sub_pats: Array = []
+					var stack_base: int = rhs_parsed.get("stack_offset", 0) + expr_offset
+					for sub in rhs_parsed["stack_exprs"]:
+						sub_pats.append(_eval_sub_expr(
+							sub["text"] if sub is Dictionary else str(sub),
+							stack_base + (sub["pos"] if sub is Dictionary else 0)))
+					let_pat = Strudel.stack(sub_pats)
+				else:
+					var mini_offset: int = rhs_parsed["pattern_offset"] + expr_offset
+					let_pat = StrudelMini.mini(rhs_parsed["pattern_text"], mini_offset)
+					var wt: String = rhs_parsed.get("wrapper_type", "")
+					if wt == "s":
+						let_pat = let_pat.fmap(func(v: Variant) -> Dictionary:
+							return {"s": str(v), "note": "c4"})
+					elif wt == "n":
+						let_pat = let_pat.fmap(func(v: Variant) -> Dictionary:
+							return {"n": int(v) if v is float or v is int else 0})
+				var let_ops: Array = rhs_parsed.get("deferred_ops", [])
+				if not let_ops.is_empty():
+					let_pat = _apply_deferred_ops(let_pat, let_ops)
+				# Tag all locations with this line index so highlights render
+				# on the definition line regardless of where the pattern is referenced
+				let_pat = let_pat._tag_locations_line(i)
+				var let_sound: String = rhs_parsed["sound"]
+				let_bindings[let_name] = {
+					"pattern": let_pat,
+					"sound": let_sound,
+					"def_line": i,           # line index where let was defined
+					"expr": let_expr,
+					"controls": rhs_parsed.get("audio_controls", {}),
+				}
+			continue
 		if not parsed["is_valid"]:
 			continue
 
@@ -1533,9 +1649,29 @@ func _play_current() -> void:
 			var sub_pats: Array = []
 			var stack_base: int = parsed.get("stack_offset", 0)
 			for sub in parsed["stack_exprs"]:
-				var sub_text: String = sub["text"] if sub is Dictionary else str(sub)
+				var sub_text: String = (sub["text"] if sub is Dictionary else str(sub)).strip_edges()
 				var sub_pos: int = sub["pos"] if sub is Dictionary else 0
-				sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
+				# Resolve let variable references in stack sub-expressions
+				if sub_text.is_valid_identifier() and let_bindings.has(sub_text):
+					sub_pats.append(let_bindings[sub_text]["pattern"])
+				else:
+					# Check for var.method() form
+					var sub_dot: int = sub_text.find(".")
+					var sub_resolved: bool = false
+					if sub_dot > 0:
+						var sub_var: String = sub_text.substr(0, sub_dot).strip_edges()
+						if sub_var.is_valid_identifier() and let_bindings.has(sub_var):
+							var sub_pat: StrudelPattern = let_bindings[sub_var]["pattern"]
+							var sub_suffix: String = sub_text.substr(sub_dot)
+							var sfx_line: Dictionary = _make_line("x" + sub_suffix)
+							var sfx_parsed: Dictionary = _parse_line_text(sfx_line)
+							var sfx_ops: Array = sfx_parsed.get("deferred_ops", [])
+							if not sfx_ops.is_empty():
+								sub_pat = _apply_deferred_ops(sub_pat, sfx_ops)
+							sub_pats.append(sub_pat)
+							sub_resolved = true
+					if not sub_resolved:
+						sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
 			clean_pat = Strudel.stack(sub_pats)
 			clean_pat = _apply_deferred_ops(clean_pat, ops)
 			display_pat = clean_pat
@@ -1801,17 +1937,21 @@ func _update_pianoroll() -> void:
 						_line_haps[i].append(hap)
 			_line_query_ends[i] = visible_end
 
-		# Accumulate into global list + per-line highlighting
-		var line_text: String = _lines[i].get("text", "") if i < _lines.size() else ""
-		var pat_off: int = _lines[i].get("pattern_offset", 0) if i < _lines.size() else 0
+		# Accumulate into global list + per-line highlighting.
+		# Locations can carry an explicit "line" field (set by let bindings)
+		# that overrides the default line index. This allows highlights from
+		# stack(drums, melody) to render on each variable's definition line.
+		var default_line: int = _lines[i].get("_let_def_line", i) if i < _lines.size() else i
 		for hap in _line_haps[i]:
 			_visible_haps.append(hap)
 			if hap.whole == null or not hap.is_active(_current_time):
 				continue
 			var locations: Array = hap.context.get("locations", [])
 			for loc in locations:
-				# Key includes line index so highlights are per-line
-				var key: String = "%d:%d:%d" % [i, loc.get("start", 0), loc.get("end", 0)]
+				var loc_line: int = loc.get("line", default_line)
+				var line_text: String = _lines[loc_line].get("text", "") if loc_line < _lines.size() else ""
+				var pat_off: int = _lines[loc_line].get("pattern_offset", 0) if loc_line < _lines.size() else 0
+				var key: String = "%d:%d:%d" % [loc_line, loc.get("start", 0), loc.get("end", 0)]
 				if not _active_locations.has(key) or hap.w().begin.to_float() > _active_locations[key].w().begin.to_float():
 					_active_locations[key] = hap
 				# Track first-seen highlights bucketed by beat fraction
@@ -1825,7 +1965,7 @@ func _update_pianoroll() -> void:
 						var hl_end: int = clampi(int(loc.get("end", 0)) + pat_off, 0, line_text.length())
 						var hl_sub: String = line_text.substr(hl_start, hl_end - hl_start).strip_edges()
 						if not hl_sub.is_empty():
-							var entry: String = "L%d:%s" % [i + 1, hl_sub]
+							var entry: String = "L%d:%s" % [loc_line + 1, hl_sub]
 							if not _highlight_beats.has(beat_frac):
 								_highlight_beats[beat_frac] = []
 							if entry not in _highlight_beats[beat_frac]:

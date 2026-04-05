@@ -2110,6 +2110,8 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 							"|".join(PackedStringArray(actual_items)) if not actual_items.is_empty() else "empty"]
 				_:
 					# Show all beats sorted by fraction value
+					if not MusicDrawer:
+						return "ERR: MusicDrawer not available"
 					var beats: Dictionary = MusicDrawer._highlight_beats
 					var keys: Array = beats.keys()
 					# Sort by numeric value of fraction

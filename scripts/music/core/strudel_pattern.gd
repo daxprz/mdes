@@ -159,6 +159,22 @@ func _strip_locations() -> StrudelPattern:
 		return hap)
 
 
+func _tag_locations_line(line_idx: int) -> StrudelPattern:
+	## Tag all source locations with a line index. Used by let bindings so that
+	## highlights from referenced patterns render on the definition line.
+	return with_hap(func(hap: StrudelHap) -> StrudelHap:
+		if not hap.context.has("locations"):
+			return hap
+		var new_locs: Array = []
+		for loc in hap.context["locations"]:
+			var tagged: Dictionary = loc.duplicate()
+			tagged["line"] = line_idx
+			new_locs.append(tagged)
+		var new_ctx: Dictionary = hap.context.duplicate()
+		new_ctx["locations"] = new_locs
+		return hap.set_context(new_ctx))
+
+
 # ==============================================================================
 # Filters
 # ==============================================================================
