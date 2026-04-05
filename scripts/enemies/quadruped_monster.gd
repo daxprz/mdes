@@ -199,10 +199,10 @@ func _effective_speed(base_speed: float) -> float:
 
 ## Centralized state transition — all state changes route through here.
 ## Calls _exit_state / _enter_state hooks, logs via debug overlay, tracks strategy counts.
-func _change_state(new_state: State) -> void:
+func _change_state(new_state: int) -> void:
 	if new_state == _state:
 		return
-	var old_state := _state
+	var old_state: int = _state
 	_exit_state(old_state, new_state)
 	_state = new_state
 	_enter_state(new_state, old_state)
@@ -215,7 +215,7 @@ func _change_state(new_state: State) -> void:
 
 
 ## Notify MusicManager of musically-relevant state transitions.
-func _notify_music(old_state: State, new_state: State) -> void:
+func _notify_music(old_state: int, new_state: int) -> void:
 	match new_state:
 		State.CHASE:
 			# Only fire on first transition into chase (not re-entering from attacks)
@@ -238,7 +238,7 @@ func _notify_music(old_state: State, new_state: State) -> void:
 
 
 ## Cleanup when leaving a state. Resets transient flags that the old state owned.
-func _exit_state(old_state: State, new_state: State) -> void:
+func _exit_state(old_state: int, new_state: int) -> void:
 	match old_state:
 		State.BALL:
 			_exit_ball()
@@ -275,7 +275,7 @@ func _exit_state(old_state: State, new_state: State) -> void:
 ## Setup when entering a state. Initializes per-state defaults.
 ## Timer/cooldown resets that every attack shares live here so _start_* functions
 ## only need to set up state-specific data (targets, counters, skeleton poses).
-func _enter_state(new_state: State, _old_state: State) -> void:
+func _enter_state(new_state: int, _old_state: int) -> void:
 	# Reset attack timer for any state that ticks it
 	if new_state != State.PATROL and new_state != State.CHASE \
 		and new_state != State.STANDDOWN and new_state != State.DEAD:
@@ -511,8 +511,8 @@ func set_controller(ctrl: RefCounted) -> void:
 func is_player_controlled() -> bool:
 	return _controller != null and _controller.is_player()
 
-var _state: State = State.PATROL
-var _posture: Posture = Posture.QUADRUPED
+var _state = State.PATROL  # State enum — untyped to avoid Godot 4.6 reload parse errors
+var _posture = Posture.QUADRUPED  # Posture enum — untyped for same reason
 var _facing: float = 1.0  # 1=right, -1=left (blends smoothly toward _facing_target)
 var _facing_target: float = 1.0  # Desired facing direction (instant AI intent)
 var _facing_prev_target: float = 1.0  # Previous frame's facing_target (for turn commitment)
@@ -2484,7 +2484,7 @@ func _choose_attack(dist: float, to_target: Vector2) -> void:
 		return
 
 
-func _start_attack(attack_state: State) -> void:
+func _start_attack(attack_state: int) -> void:
 	_change_state(attack_state)
 	_state_lock_timer = 1.5  # Commit to this attack
 
@@ -5800,7 +5800,7 @@ func take_part_damage(part_name: String, amount: int, source_index: int = -1) ->
 		part["current_hp"] = 0
 
 	# Update damage state
-	var old_state: DamageState = part["damage_state"] as DamageState
+	var old_state: int = int(part["damage_state"])
 	var ratio: float = float(part["current_hp"]) / float(part["max_hp"])
 	if ratio > 0.66:
 		part["damage_state"] = DamageState.NONE

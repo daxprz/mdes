@@ -1075,18 +1075,33 @@ func strudel_start() -> void:
 
 
 func _strudel_play_title() -> void:
-	## Load the intro.strudel file for the title screen.
-	## Uses a short timer to ensure all autoloads (RCON, MusicDrawer) are ready.
-	get_tree().create_timer(0.5).timeout.connect(_strudel_play_title_deferred)
-
-
-func _strudel_play_title_deferred() -> void:
-	var rcon: Node = get_node_or_null("/root/Rcon")
-	if rcon:
-		var result: String = rcon._execute("strudel load intro")
-		print("MUSIC: title intro: %s" % result)
-	else:
-		print("MUSIC: title intro failed — RCON not available")
+	## Build the intro pattern directly — avoids file parsing stall on startup.
+	## Matches data/strudel/intro.strudel but constructed in code.
+	var sub_bass: StrudelPattern = Strudel.slowcat([
+		Strudel.pure("c1"), Strudel.pure("c1"),
+		Strudel.pure("eb1"), Strudel.pure("c1"),
+	])
+	var pad: StrudelPattern = Strudel.slowcat([
+		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("g2")]),
+		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("ab2")]),
+		Strudel.stack([Strudel.pure("bb1"), Strudel.pure("d2"), Strudel.pure("f2")]),
+		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("g2")]),
+	])
+	var sparkle: StrudelPattern = Strudel.sequence([
+		Strudel.pure("c5"), Strudel.pure("eb5"), Strudel.pure("g5"), Strudel.pure("bb5"),
+		Strudel.pure("c6"), Strudel.pure("g5"), Strudel.pure("eb5"), Strudel.pure("bb4"),
+	])._fast(2.0)._degrade_by(0.5)
+	var shimmer: StrudelPattern = Strudel.sequence([
+		Strudel.pure("g5"), Strudel.silence(), Strudel.pure("c6"), Strudel.silence(),
+		Strudel.pure("eb6"), Strudel.silence(), Strudel.pure("g5"), Strudel.silence(),
+	])
+	var pulse: StrudelPattern = Strudel.sequence([
+		Strudel.pure("c2"), Strudel.silence(), Strudel.silence(), Strudel.silence(),
+		Strudel.pure("c2"), Strudel.silence(), Strudel.silence(), Strudel.silence(),
+	])
+	var combined: StrudelPattern = Strudel.stack([sub_bass, pad, sparkle, shimmer, pulse])
+	strudel_play(combined, 0.2, "intro")
+	print("MUSIC: title intro playing (built in code)")
 
 
 func strudel_set_cps(cps: float) -> void:

@@ -34,7 +34,7 @@ var _base_config: Variant = null
 
 enum State { HELD, WINDUP, THROWN, STUCK_WALL, STUCK_PLATFORM, STUCK_CEILING, ATTACHED_ENEMY, RETRACTING }
 
-var state: State = State.HELD
+var state = State.HELD  # State enum — untyped to avoid Godot 4.6 reload parse errors
 var vel: Vector2 = Vector2.ZERO
 var anchor_body: Node2D = null          # Entity we're attached to
 var anchor_offset: Vector2 = Vector2.ZERO

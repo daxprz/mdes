@@ -203,6 +203,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.64
+**FPS overlay, dual intro themes, quadruped compile fix, fast title startup**
+
+- **FPS overlay**: `debug on perf/fps` shows current FPS, avg, min, and a rolling 200-frame graph. Color-coded: green (55+), yellow (30+), red (<30). Top-left corner, layer 120.
+- **Dual intro themes**: `intro_light.strudel` (C major, warm sine pads, gentle sparkles) and `intro_dark.strudel` (C minor, ominous sawtooth/square, heavy pulse). Designed for light→dark transition when monsters wake.
+- **Fast title startup**: title music built directly in code (pattern algebra) instead of file loading — eliminates the 5-8 second hang caused by `strudel load` blocking the main thread during init.
+- **Quadruped compile fix**: removed typed enum annotations (`State`, `Posture`, `DamageState`) that caused 96 Godot 4.6 parse errors on every startup. Variables and function params now use `int` type. Zero compile errors at launch.
+- **Shackle entity compile fix**: same enum type annotation fix for `shackle_entity.gd`.
+
 ### v0.10.63
 **Intro music, dynamic drawer height, stack expansion for file loading**
 

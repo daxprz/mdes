@@ -36,6 +36,7 @@ DebugDrawer="*res://scripts/ui/debug_drawer.gd"
 Factions="*res://scripts/autoload/factions.gd"
 MusicManager="*res://scripts/autoload/music_manager.gd"
 MusicDrawer="*res://scripts/music/ui/music_drawer.gd"
+FPSOverlay="*res://scripts/ui/fps_overlay.gd"
 
 [display]
 
