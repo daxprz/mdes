@@ -172,12 +172,13 @@ func make_psg_voice(wave_shape: int) -> SiONVoice:
 """
 	if _bridge.reload() == OK:
 		var helper = _bridge.new()
-		# PSG wave shapes: @0=custom(sine-ish), @1=saw, @2=triangle-ish, @3=square
-		# In SiON PSG, the wave table indices map to:
-		# 0 = sine (actually a rounded wave), 1 = saw-down, 2 = triangle
+		# PSG wave table indices: 0=sine, 1=saw-down, 2=triangle, 3=square
 		_voices["sine"] = helper.make_psg_voice(0)
+		_voices["sawtooth"] = helper.make_psg_voice(1)
+		_voices["saw"] = helper.make_psg_voice(1)
 		_voices["triangle"] = helper.make_psg_voice(2)
-		print("STRUDEL: created pure PSG voices for sine, triangle")
+		_voices["square"] = helper.make_psg_voice(3)
+		print("STRUDEL: created pure PSG voices for sine, saw, triangle, square")
 	else:
 		print("STRUDEL: PSG voice bridge failed, using FM fallback")
 

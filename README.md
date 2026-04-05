@@ -203,6 +203,12 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.66
+**PSG saw/square voices, intro_dark rebalanced**
+
+- **PSG sawtooth and square**: all four oscillator types (sine, saw, triangle, square) now use SiON's PSG wave table module — clean harmonic series instead of FM artifacts.
+- **intro_dark verified clean**: 0% clipping, 63% peak with PSG voices. Sawtooth texture and square pulse retain their character without FM grittiness.
+
 ### v0.10.65
 **Pure PSG waveforms, clipping fix, FPS bottom-right, intro_light default**
 
