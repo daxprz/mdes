@@ -1075,14 +1075,18 @@ func strudel_start() -> void:
 
 
 func _strudel_play_title() -> void:
-	## Play a Strudel-based title screen pattern.
-	## C minor arpeggio: C3, Eb3, G3, C4 cycling slowly.
-	var pat: StrudelPattern = Strudel.sequence([
-		Strudel.pure("c3"), Strudel.pure("eb3"),
-		Strudel.pure("g3"), Strudel.pure("c4"),
-	])
-	# Slow it down: 0.25 cps = 1 cycle every 4 seconds
-	strudel_play(pat, 0.25, "c3 eb3 g3 c4")
+	## Load the intro.strudel file for the title screen.
+	## Uses a short timer to ensure all autoloads (RCON, MusicDrawer) are ready.
+	get_tree().create_timer(0.5).timeout.connect(_strudel_play_title_deferred)
+
+
+func _strudel_play_title_deferred() -> void:
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if rcon:
+		var result: String = rcon._execute("strudel load intro")
+		print("MUSIC: title intro: %s" % result)
+	else:
+		print("MUSIC: title intro failed — RCON not available")
 
 
 func strudel_set_cps(cps: float) -> void:
