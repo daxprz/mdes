@@ -1075,33 +1075,33 @@ func strudel_start() -> void:
 
 
 func _strudel_play_title() -> void:
-	## Build the intro pattern directly — avoids file parsing stall on startup.
-	## Matches data/strudel/intro.strudel but constructed in code.
-	var sub_bass: StrudelPattern = Strudel.slowcat([
-		Strudel.pure("c1"), Strudel.pure("c1"),
-		Strudel.pure("eb1"), Strudel.pure("c1"),
+	## Build the intro_light pattern directly — avoids file parsing stall on startup.
+	## Warm C major version. Matches data/strudel/intro_light.strudel.
+	var sub: StrudelPattern = Strudel.slowcat([
+		Strudel.pure("c2"), Strudel.pure("c2"),
+		Strudel.pure("f2"), Strudel.pure("c2"),
 	])
 	var pad: StrudelPattern = Strudel.slowcat([
-		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("g2")]),
-		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("ab2")]),
-		Strudel.stack([Strudel.pure("bb1"), Strudel.pure("d2"), Strudel.pure("f2")]),
-		Strudel.stack([Strudel.pure("c2"), Strudel.pure("eb2"), Strudel.pure("g2")]),
+		Strudel.stack([Strudel.pure("c3"), Strudel.pure("e3"), Strudel.pure("g3")]),
+		Strudel.stack([Strudel.pure("f3"), Strudel.pure("a3"), Strudel.pure("c4")]),
+		Strudel.stack([Strudel.pure("g3"), Strudel.pure("b3"), Strudel.pure("d4")]),
+		Strudel.stack([Strudel.pure("c3"), Strudel.pure("e3"), Strudel.pure("g3")]),
 	])
 	var sparkle: StrudelPattern = Strudel.sequence([
-		Strudel.pure("c5"), Strudel.pure("eb5"), Strudel.pure("g5"), Strudel.pure("bb5"),
-		Strudel.pure("c6"), Strudel.pure("g5"), Strudel.pure("eb5"), Strudel.pure("bb4"),
+		Strudel.pure("g5"), Strudel.pure("c6"), Strudel.pure("e6"), Strudel.pure("g5"),
+		Strudel.pure("e6"), Strudel.pure("c6"), Strudel.pure("g5"), Strudel.pure("e5"),
 	])._fast(2.0)._degrade_by(0.5)
 	var shimmer: StrudelPattern = Strudel.sequence([
-		Strudel.pure("g5"), Strudel.silence(), Strudel.pure("c6"), Strudel.silence(),
-		Strudel.pure("eb6"), Strudel.silence(), Strudel.pure("g5"), Strudel.silence(),
+		Strudel.pure("e6"), Strudel.silence(), Strudel.pure("g6"), Strudel.silence(),
+		Strudel.pure("c6"), Strudel.silence(), Strudel.pure("e6"), Strudel.silence(),
 	])
 	var pulse: StrudelPattern = Strudel.sequence([
-		Strudel.pure("c2"), Strudel.silence(), Strudel.silence(), Strudel.silence(),
-		Strudel.pure("c2"), Strudel.silence(), Strudel.silence(), Strudel.silence(),
+		Strudel.pure("c3"), Strudel.silence(), Strudel.silence(), Strudel.pure("g3"),
+		Strudel.pure("c3"), Strudel.silence(), Strudel.silence(), Strudel.pure("e3"),
 	])
-	var combined: StrudelPattern = Strudel.stack([sub_bass, pad, sparkle, shimmer, pulse])
-	strudel_play(combined, 0.2, "intro")
-	print("MUSIC: title intro playing (built in code)")
+	var combined: StrudelPattern = Strudel.stack([sub, pad, sparkle, shimmer, pulse])
+	strudel_play(combined, 0.15, "intro_light")
+	print("MUSIC: title intro_light playing")
 
 
 func strudel_set_cps(cps: float) -> void:

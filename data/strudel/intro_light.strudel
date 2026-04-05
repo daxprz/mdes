@@ -2,10 +2,10 @@
 setcps(0.15)
 
 stack(
-  sub: note("<c2 c2 f2 c2>").s("sine").gain(0.25).legato(1.5),
-  pad: note("<[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]>").s("sine").gain(0.2).legato(1.2),
-  mid: note("<[e4,g4] [a4,c5] [b4,d5] [e4,g4]>").s("sine").gain(0.08).legato(0.8),
-  sparkle: note("g5 c6 e6 g5 e6 c6 g5 e5").fast(2).degrade().s("sine").gain(0.04).legato(0.25),
-  shimmer: note("e6 ~ g6 ~ c6 ~ e6 ~").s("sine").gain(0.03).legato(0.15),
-  pulse: note("c3 ~ ~ g3 c3 ~ ~ e3").s("sine").gain(0.1).legato(0.15)
+  sub: note("<c2 c2 f2 c2>").s("sine").gain(0.12).legato(1.2),
+  pad: note("<[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]>").s("sine").gain(0.08).legato(1.0),
+  mid: note("<[e4,g4] [a4,c5] [b4,d5] [e4,g4]>").s("sine").gain(0.04).legato(0.8),
+  sparkle: note("g5 c6 e6 g5 e6 c6 g5 e5").fast(2).degrade().s("sine").gain(0.02).legato(0.2),
+  shimmer: note("e6 ~ g6 ~ c6 ~ e6 ~").s("sine").gain(0.015).legato(0.15),
+  pulse: note("c3 ~ ~ g3 c3 ~ ~ e3").s("sine").gain(0.05).legato(0.15)
 )

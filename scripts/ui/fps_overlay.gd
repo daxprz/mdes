@@ -6,8 +6,7 @@ extends CanvasLayer
 
 const GRAPH_WIDTH := 200
 const GRAPH_HEIGHT := 60
-const GRAPH_X := 8.0
-const GRAPH_Y := 8.0
+const MARGIN := 8.0
 const MAX_SAMPLES := 200       # One sample per frame, 200 frames of history
 const TARGET_FPS := 60.0
 const GRAPH_MAX_FPS := 120.0   # Top of graph scale
@@ -46,9 +45,13 @@ func _draw_fps() -> void:
 
 	var font: Font = ThemeDB.fallback_font
 	var current_fps: float = _samples[-1]
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var total_h: float = GRAPH_HEIGHT + 20.0
+	var bx: float = vp.x - GRAPH_WIDTH - MARGIN  # bottom-right
+	var by: float = vp.y - total_h - MARGIN
 
 	# Background
-	_panel.draw_rect(Rect2(GRAPH_X - 2, GRAPH_Y - 2, GRAPH_WIDTH + 4, GRAPH_HEIGHT + 22),
+	_panel.draw_rect(Rect2(bx - 2, by - 2, GRAPH_WIDTH + 4, total_h + 4),
 		Color(0.0, 0.0, 0.0, 0.7))
 
 	# FPS text
@@ -59,7 +62,7 @@ func _draw_fps() -> void:
 		fps_color = Color(1.0, 0.9, 0.2)
 	else:
 		fps_color = Color(1.0, 0.3, 0.2)
-	_panel.draw_string(font, Vector2(GRAPH_X + 2, GRAPH_Y + 12),
+	_panel.draw_string(font, Vector2(bx + 2, by + 12),
 		"%d FPS" % int(current_fps), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, fps_color)
 
 	# Min/avg from visible history
@@ -69,13 +72,13 @@ func _draw_fps() -> void:
 		min_fps = minf(min_fps, s)
 		sum_fps += s
 	var avg_fps: float = sum_fps / _samples.size()
-	_panel.draw_string(font, Vector2(GRAPH_X + 70, GRAPH_Y + 12),
+	_panel.draw_string(font, Vector2(bx + 70, by + 12),
 		"avg:%d min:%d" % [int(avg_fps), int(min_fps)],
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.6, 0.7))
 
 	# Graph area
-	var gx: float = GRAPH_X
-	var gy: float = GRAPH_Y + 16.0
+	var gx: float = bx
+	var gy: float = by + 16.0
 	var gw: float = GRAPH_WIDTH
 	var gh: float = GRAPH_HEIGHT
 

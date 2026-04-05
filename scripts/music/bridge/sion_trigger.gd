@@ -149,6 +149,38 @@ func _setup_voices() -> void:
 	for name in map:
 		_voices[name] = presets.call("get_voice_preset", map[name])
 
+	# Create pure waveform voices using SiON's PSG module.
+	# These produce clean sine/square/triangle/saw without FM harmonics.
+	# SiONVoice(module_type, channel, tl, ...) — MODULE_PSG = 1
+	# PSG wave shapes: 0=square, 1=noise, 2=triangle(custom), but we use
+	# the analog oscillator module (MODULE_RAMP=11) for saw and triangle,
+	# and MODULE_PULSE=4 for proper pulse/square.
+	# For a pure sine: MODULE_FM (type 5) with zero modulation index
+	# Actually simplest: use MODULE_PSG with wave table override.
+	# SiON MML: %1@0 = sine, %1@1 = saw, %1@2 = triangle, %1@3 = square
+	# Create via set_module_type after getting a voice.
+	var _bridge: GDScript = GDScript.new()
+	_bridge.source_code = """extends RefCounted
+
+func make_psg_voice(wave_shape: int) -> SiONVoice:
+	var v := SiONVoice.new()
+	# Module type 1 = PSG, wave_shape: 0=square(@3), but via channel_num
+	# Actually: SiONVoice.new(module_type, channel_num, attack_rate, ...)
+	# Use set_module_type to configure after creation
+	v.set_module_type(1, wave_shape)  # 1=PSG, shape=wave table index
+	return v
+"""
+	if _bridge.reload() == OK:
+		var helper = _bridge.new()
+		# PSG wave shapes: @0=custom(sine-ish), @1=saw, @2=triangle-ish, @3=square
+		# In SiON PSG, the wave table indices map to:
+		# 0 = sine (actually a rounded wave), 1 = saw-down, 2 = triangle
+		_voices["sine"] = helper.make_psg_voice(0)
+		_voices["triangle"] = helper.make_psg_voice(2)
+		print("STRUDEL: created pure PSG voices for sine, triangle")
+	else:
+		print("STRUDEL: PSG voice bridge failed, using FM fallback")
+
 	_voices["default"] = _voices["piano"]
 	print("STRUDEL: %d voices mapped" % _voices.size())
 

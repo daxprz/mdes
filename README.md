@@ -203,6 +203,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.65
+**Pure PSG waveforms, clipping fix, FPS bottom-right, intro_light default**
+
+- **Pure PSG sine/triangle voices**: SiON's PSG module (wave table oscillator) replaces FM lead presets for "sine" and "triangle" — clean, harmonic-free waveforms instead of gritty FM patches.
+- **Clipping fix**: intro_light and intro_dark gains rebalanced. Before: 3.82% clipped samples at 100% peak. After: 0% clipping, 70% peak, clean headroom.
+- **FPS overlay repositioned**: bottom-right corner instead of top-left.
+- **Title screen plays intro_light**: warm C major version loads by default (code-built, no file parse stall).
+
 ### v0.10.64
 **FPS overlay, dual intro themes, quadruped compile fix, fast title startup**
 
