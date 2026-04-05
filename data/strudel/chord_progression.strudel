@@ -1,0 +1,7 @@
+// Simple chord progression — real-world Strudel file
+setcps(0.5)
+
+stack(
+  note("[c3,e3,g3] [f3,a3,c4] [g3,b3,d4] [c3,e3,g3]").s("sawtooth").lpf(600),
+  note("c2 f2 g2 c2")
+)

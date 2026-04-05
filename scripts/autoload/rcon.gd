@@ -108,45 +108,8 @@ func _execute(command: String) -> String:
 			_strudel_block_active = false
 			var raw_lines: Array[String] = _strudel_block.duplicate()
 			_strudel_block.clear()
-			# Preprocess: merge multi-line expressions by tracking paren depth.
-			# A real Strudel file has stack(\n  ...,\n  ...\n) as ONE expression.
-			# Lines with unclosed parens are continuation lines, not separate patterns.
-			var drawer_lines: Array[String] = []
-			var current: String = ""
-			var depth: int = 0
-			for rl in raw_lines:
-				var cl: String = rl.strip_edges()
-				if cl.is_empty() or cl.begins_with("//") or cl.begins_with("#"):
-					if depth == 0 and not current.is_empty():
-						drawer_lines.append(current)
-						current = ""
-					if cl.begins_with("//") or cl.begins_with("#"):
-						drawer_lines.append(cl)
-					continue
-				if current.is_empty():
-					current = cl
-				else:
-					current += " " + cl
-				# Count parens (outside of quoted strings)
-				var in_str: bool = false
-				var str_char: String = ""
-				for ci in range(cl.length()):
-					var ch: String = cl[ci]
-					if in_str:
-						if ch == str_char:
-							in_str = false
-					elif ch == '"' or ch == "'":
-						in_str = true
-						str_char = ch
-					elif ch == '(':
-						depth += 1
-					elif ch == ')':
-						depth = maxi(0, depth - 1)
-				if depth == 0:
-					drawer_lines.append(current)
-					current = ""
-			if not current.is_empty():
-				drawer_lines.append(current)
+			# Merge multi-line expressions (shared with strudel load)
+			var drawer_lines: Array[String] = _merge_continuation_lines(raw_lines)
 			# Set drawer lines and play
 			MusicDrawer._lines.clear()
 			for bl in drawer_lines:
@@ -1828,6 +1791,130 @@ func _count_onsets(samples: PackedFloat32Array, rate: int, threshold: float = 0.
 	return onsets
 
 
+func _cmd_strudel_load_list() -> String:
+	## List available .strudel/.js/.txt files from search paths.
+	var found: Array[String] = []
+	for dir_path in ["res://data/strudel/", "user://patterns/"]:
+		var dir := DirAccess.open(dir_path)
+		if not dir:
+			continue
+		dir.list_dir_begin()
+		var fname: String = dir.get_next()
+		while fname != "":
+			if fname.ends_with(".strudel") or fname.ends_with(".js") or fname.ends_with(".txt"):
+				found.append("%s (%s)" % [fname.get_basename(), dir_path])
+			fname = dir.get_next()
+	if found.is_empty():
+		return "No strudel files found. Place .strudel files in data/strudel/ or save with: strudel save <name>"
+	return "Available: %s" % ", ".join(PackedStringArray(found))
+
+
+func _cmd_strudel_load(path_or_name: String) -> String:
+	## Load a Strudel file, preprocess it, put lines in the drawer, and play.
+	## Resolves the path, reads raw lines, merges multi-line expressions,
+	## and feeds the result to the music drawer.
+	var resolved: String = _resolve_strudel_path(path_or_name)
+	if resolved.is_empty():
+		return "ERR: file not found: %s (searched res://data/strudel/, user://patterns/, and absolute)" % path_or_name
+	var file := FileAccess.open(resolved, FileAccess.READ)
+	if not file:
+		return "ERR: cannot read %s" % resolved
+	# Read all lines
+	var raw_lines: Array[String] = []
+	while not file.eof_reached():
+		raw_lines.append(file.get_line())
+	file.close()
+	# Strip trailing empties from EOF
+	while not raw_lines.is_empty() and raw_lines[-1].strip_edges().is_empty():
+		raw_lines.pop_back()
+	if raw_lines.is_empty():
+		return "ERR: file is empty: %s" % resolved
+	# Preprocess: merge multi-line expressions by tracking paren depth.
+	# This is the same logic as strudel begin/end — a real .strudel file
+	# can have stack(\n  ...,\n  ...\n) across multiple lines.
+	var drawer_lines: Array[String] = _merge_continuation_lines(raw_lines)
+	# Load into drawer and play
+	MusicDrawer._lines.clear()
+	for bl in drawer_lines:
+		MusicDrawer._lines.append(MusicDrawer._make_line(bl))
+	if MusicDrawer._lines.is_empty():
+		MusicDrawer._lines.append(MusicDrawer._make_line(""))
+	MusicDrawer._current_line = 0
+	MusicDrawer._editor_cursor = 0
+	MusicDrawer.open()
+	MusicDrawer._play_current()
+	return "OK: loaded %s (%d raw → %d lines), playing" % [
+		resolved.get_file(), raw_lines.size(), drawer_lines.size()]
+
+
+func _resolve_strudel_path(path_or_name: String) -> String:
+	## Resolve a strudel file path. Tries:
+	## 1. Absolute path as-is
+	## 2. res://data/strudel/<name> with .strudel/.js/.txt extensions
+	## 3. user://patterns/<name> with .txt extension
+	# Absolute or res:// path — try directly
+	if path_or_name.begins_with("/") or path_or_name.begins_with("res://") or path_or_name.begins_with("user://"):
+		if FileAccess.file_exists(path_or_name):
+			return path_or_name
+		# Try adding extensions
+		for ext in [".strudel", ".js", ".txt"]:
+			if FileAccess.file_exists(path_or_name + ext):
+				return path_or_name + ext
+		return ""
+	# Short name — search directories
+	var name: String = path_or_name
+	for dir_path in ["res://data/strudel/", "user://patterns/"]:
+		# Try with each extension
+		for ext in ["", ".strudel", ".js", ".txt"]:
+			var candidate: String = dir_path + name + ext
+			if FileAccess.file_exists(candidate):
+				return candidate
+	return ""
+
+
+func _merge_continuation_lines(raw_lines: Array[String]) -> Array[String]:
+	## Merge multi-line expressions by tracking paren depth.
+	## Lines with unclosed parens are continuation lines joined with spaces.
+	## Comments and blank lines are preserved as separate entries when at depth 0.
+	var result: Array[String] = []
+	var current: String = ""
+	var depth: int = 0
+	for rl in raw_lines:
+		var cl: String = rl.strip_edges()
+		if cl.is_empty() or cl.begins_with("//") or cl.begins_with("#"):
+			if depth == 0 and not current.is_empty():
+				result.append(current)
+				current = ""
+			if cl.begins_with("//") or cl.begins_with("#"):
+				result.append(cl)
+			continue
+		if current.is_empty():
+			current = cl
+		else:
+			current += " " + cl
+		# Count parens (outside of quoted strings)
+		var in_str: bool = false
+		var str_char: String = ""
+		for ci in range(cl.length()):
+			var ch: String = cl[ci]
+			if in_str:
+				if ch == str_char:
+					in_str = false
+			elif ch == '"' or ch == "'":
+				in_str = true
+				str_char = ch
+			elif ch == '(':
+				depth += 1
+			elif ch == ')':
+				depth = maxi(0, depth - 1)
+		if depth == 0:
+			result.append(current)
+			current = ""
+	if not current.is_empty():
+		result.append(current)
+	return result
+
+
 func _cmd_strudel_ref_code(code: String) -> String:
 	## Send multi-line Strudel code to the ref server for rendering.
 	## Strips display-only suffixes, joins lines with semicolons for JS eval.
@@ -2193,46 +2280,15 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			save_file.close()
 			return "OK: saved %d lines to %s" % [MusicDrawer._lines.size(), save_path]
 		"load":
-			# Load a pattern file into the drawer
-			# strudel load <filename>
+			# Load a Strudel file into the drawer and play it.
+			# strudel load <path_or_name>
+			# Accepts: absolute paths, res:// paths, or short names (searched in
+			# res://data/strudel/, user://patterns/, with .strudel/.js/.txt extensions).
+			# Multi-line expressions (stack(...)) are merged via paren-depth tracking.
 			if parts.size() < 3:
-				# List available files
-				var dir := DirAccess.open("user://patterns/")
-				if not dir:
-					return "No saved patterns. Save with: strudel save <name>"
-				var files: Array[String] = []
-				dir.list_dir_begin()
-				var fname: String = dir.get_next()
-				while fname != "":
-					if fname.ends_with(".txt"):
-						files.append(fname.replace(".txt", ""))
-					fname = dir.get_next()
-				if files.is_empty():
-					return "No saved patterns. Save with: strudel save <name>"
-				return "Saved patterns: %s" % ", ".join(PackedStringArray(files))
-			var load_name: String = parts[2].strip_edges()
-			if not load_name.ends_with(".txt"):
-				load_name += ".txt"
-			var load_path: String = "user://patterns/" + load_name
-			if not FileAccess.file_exists(load_path):
-				return "ERR: file not found: %s" % load_path
-			var load_file := FileAccess.open(load_path, FileAccess.READ)
-			if not load_file:
-				return "ERR: cannot read %s" % load_path
-			MusicDrawer._lines.clear()
-			while not load_file.eof_reached():
-				var line_text: String = load_file.get_line()
-				MusicDrawer._lines.append(MusicDrawer._make_line(line_text))
-			load_file.close()
-			# Remove trailing empty line from EOF
-			while not MusicDrawer._lines.is_empty() and MusicDrawer._lines[-1].get("text", "").strip_edges().is_empty():
-				MusicDrawer._lines.pop_back()
-			if MusicDrawer._lines.is_empty():
-				MusicDrawer._lines.append(MusicDrawer._make_line(""))
-			MusicDrawer._current_line = 0
-			MusicDrawer._editor_cursor = 0
-			MusicDrawer.open()
-			return "OK: loaded %d lines from %s" % [MusicDrawer._lines.size(), load_path]
+				return _cmd_strudel_load_list()
+			var load_arg: String = command.substr(command.find("load") + 5).strip_edges()
+			return _cmd_strudel_load(load_arg)
 		"edit":
 			# Set drawer lines directly and play. Lines separated by |
 			# strudel edit drums: c4(3,8).pianoroll() | bass: c2 ~ e2 ~.bar() | melody: c4 e4 g4 c5

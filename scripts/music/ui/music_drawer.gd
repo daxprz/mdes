@@ -126,6 +126,9 @@ const AUDIO_CONTROL_METHODS := {
 	"decay": "decay", "dec": "decay",
 	"sustain": "sustain", "sus": "sustain",
 	"release": "release", "rel": "release",
+	# Per-note duration control (modifies hap duration, not bus effects)
+	"clip": "clip", "legato": "clip",
+	"dur": "duration", "duration": "duration",
 }
 
 ## Signal names → factory callables for the signal expression parser.
@@ -860,6 +863,19 @@ func _parse_line_text(line: Dictionary) -> Dictionary:
 				var voice_val: String = args_str.replace("\"", "").replace("'", "").strip_edges()
 				if not voice_val.is_empty():
 					result["sound"] = voice_val
+			elif control_key in ["clip", "duration"]:
+				# Per-note duration controls — injected into hap values via set_in,
+				# NOT applied as bus effects. clip multiplies hap duration,
+				# duration overrides it in seconds.
+				if args_str.is_valid_float():
+					deferred_ops.append({"method": "_set_in", "args": control_key, "value": float(args_str)})
+				else:
+					var signal_pat: StrudelPattern = _parse_signal_expr(args_str)
+					if signal_pat != null:
+						var ck: String = control_key
+						signal_pat = signal_pat.fmap(func(v: Variant) -> Dictionary:
+							return {ck: float(v)})
+						signal_controls.append(signal_pat)
 			elif args_str.is_valid_float():
 				audio_controls[control_key] = float(args_str)
 			else:
@@ -1009,33 +1025,81 @@ static func _split_top_level_commas(text: String) -> Array:
 
 
 static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern:
-	## Evaluate a single Strudel sub-expression (e.g., note("c3 g3").s("sawtooth")).
-	## Handles note() wrapper, .s() voice, and method chains.
+	## Evaluate a single Strudel sub-expression (e.g., note("c3 g3").s("sawtooth").lpf(800)).
+	## Handles full method chains (audio controls, pattern transforms, viz),
+	## note()/s()/n() wrappers, and quoted mini-notation.
 	## base_offset: character position of expr within the full line (for source highlighting).
 	var text: String = expr.strip_edges()
 	var inner_offset: int = base_offset + (expr.length() - expr.strip_edges().length())
 	var voice: String = ""
+	var audio_controls: Dictionary = {}
+	var deferred_ops: Array = []
 
-	# Strip method chains from right to left for .s() voice selection
-	var s_methods := [".s(", ".sound("]
-	for sm in s_methods:
-		var pos: int = text.rfind(sm)
-		if pos < 0:
-			continue
-		var po: int = pos + sm.length()
-		var depth: int = 1
-		var pc: int = po
-		while pc < text.length() and depth > 0:
-			if text[pc] == "(":
-				depth += 1
-			elif text[pc] == ")":
-				depth -= 1
-			if depth > 0:
-				pc += 1
-		if depth == 0:
-			var args: String = text.substr(po, pc - po).strip_edges()
-			voice = args.replace("\"", "").replace("'", "").strip_edges()
-			text = (text.substr(0, pos) + text.substr(pc + 1)).strip_edges()
+	# Build method lookup (same as _parse_line_text)
+	var all_methods: Dictionary = {}
+	for k in AUDIO_CONTROL_METHODS:
+		all_methods[k] = "audio"
+	for pm in ["degrade", "degradeBy", "undegrade", "undegradeBy",
+				"fast", "slow", "hurry", "early", "late",
+				"rev", "palindrome", "euclid", "euclidRot", "every",
+				"chunk", "segment", "sometimes", "often", "rarely",
+				"add", "sub", "mul", "superimpose", "layer", "jux", "off",
+				"iter", "ply", "striate", "chop"]:
+		all_methods[pm] = "pattern"
+	for vz in ["pianoroll", "punchcard", "_pianoroll", "scope", "tscope", "_scope",
+				"wordfall", "spiral", "_spiral", "pitchwheel", "_pitchwheel", "fscope"]:
+		all_methods[vz] = "viz"
+
+	# Strip method chains from right to left (same algorithm as _parse_line_text).
+	var chain_changed: bool = true
+	while chain_changed:
+		chain_changed = false
+		var best_pos: int = -1
+		var best_method: String = ""
+		var best_paren_open: int = -1
+		var best_paren_close: int = -1
+		for method_name in all_methods:
+			var prefix: String = "." + method_name + "("
+			var pos: int = text.rfind(prefix)
+			if pos < 0:
+				continue
+			var po: int = pos + prefix.length()
+			var depth: int = 1
+			var pc: int = po
+			while pc < text.length() and depth > 0:
+				if text[pc] == "(":
+					depth += 1
+				elif text[pc] == ")":
+					depth -= 1
+				if depth > 0:
+					pc += 1
+			if depth != 0:
+				continue
+			if pc < text.length() - 1:
+				var after: String = text.substr(pc + 1).strip_edges()
+				if not after.is_empty():
+					continue
+			if pos > best_pos:
+				best_pos = pos
+				best_method = method_name
+				best_paren_open = po
+				best_paren_close = pc
+		if best_pos < 0:
+			break
+		var args_str: String = text.substr(best_paren_open, best_paren_close - best_paren_open).strip_edges()
+		var kind: String = all_methods[best_method]
+		if kind == "audio":
+			var control_key: String = AUDIO_CONTROL_METHODS[best_method]
+			if control_key == "s":
+				voice = args_str.replace("\"", "").replace("'", "").strip_edges()
+			elif args_str.is_valid_float():
+				audio_controls[control_key] = float(args_str)
+		elif kind == "pattern":
+			var args_offset_in_line: int = inner_offset + best_paren_open
+			deferred_ops.append({"method": best_method, "args": args_str, "args_offset": args_offset_in_line})
+		# Strip the method from text (viz methods just get dropped)
+		text = text.substr(0, best_pos).strip_edges()
+		chain_changed = true
 
 	# Strip wrapper — track offset shift and wrapper type
 	var sub_wrapper: String = ""  # "note", "s", or "n"
@@ -1072,6 +1136,10 @@ static func _eval_sub_expr(expr: String, base_offset: int = 0) -> StrudelPattern
 	elif sub_wrapper == "n":
 		pat = pat.fmap(func(v: Variant) -> Dictionary:
 			return {"n": int(v) if v is float or v is int else 0})
+
+	# Apply deferred pattern ops (fast, rev, add, etc.)
+	if not deferred_ops.is_empty():
+		pat = _apply_deferred_ops(pat, deferred_ops)
 
 	if not voice.is_empty():
 		pat = pat.set_in(Strudel.pure({"s": voice}))
@@ -1406,6 +1474,12 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 				var mul_v: Variant = _parse_transform_arg(args, op.get("args_offset", 0))
 				if mul_v != null:
 					pat = pat.mul_in(mul_v)
+			"_set_in":
+				# Inject a key=value into each hap via set_in.
+				# Used for per-note controls like clip and duration.
+				var si_key: String = args
+				var si_val: float = op.get("value", 1.0)
+				pat = pat.set_in(Strudel.pure({si_key: si_val}))
 	return pat
 
 

@@ -203,6 +203,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.60
+**File loading, legato/clip/dur, sub-expression method chains, 42 A/B tests**
+
+- **`strudel load`**: load `.strudel`/`.js`/`.txt` files from `data/strudel/`, `user://patterns/`, or absolute paths. Multi-line expressions merged via paren-depth tracking. Auto-plays on load.
+- **`legato(N)`/`clip(N)`**: per-note duration multiplier. `legato(0.5)` = staccato, `legato(2)` = overlapping. Injected into hap values via `set_in`, respected by `get_duration()` and `is_active()`.
+- **`dur(N)`/`duration(N)`**: absolute note duration in seconds, overrides slot-based duration.
+- **Sub-expression method chains**: `_eval_sub_expr` now handles full method chains (`.lpf()`, `.gain()`, `.fast()`, `.s()`, etc.) inside `stack()` — previously only `.s()` was supported.
+- **Ref server legato fix**: `renderWav` now uses `hap.duration` (clip-aware) instead of raw `whole.end`.
+- **Shared `_merge_continuation_lines()`**: `strudel begin/end` and `strudel load` both use the same paren-depth line merger.
+- **4 example `.strudel` files**: chord_progression, arpeggio, minimal, dungeon_ambience in `data/strudel/`.
+- **`ab_legato` test**: A/B comparison + per-beat highlight verification for legato(0.5).
+
 ### v0.10.59
 **Highlight sequence testing, multi-line blocks, harmonic frequency matching, 41 A/B tests**
 
