@@ -203,6 +203,15 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.62
+**Refactored _play_current: _resolve_line, _compile_parsed, _resolve_expr**
+
+- **`_resolve_line(i, bindings)`**: single function resolves any line — returns typed dict (`skip`/`setcps`/`hush`/`let`/`pattern`). Replaces inline let detection, let compilation, let reference resolution, and normal parsing.
+- **`_compile_parsed(parsed, bindings)`**: compiles a parsed line into a Pattern. Handles stack, mini-notation, wrapper types, deferred ops, and let variable resolution in stack sub-expressions. Eliminates duplicate compilation code between let definitions and normal lines.
+- **`_resolve_expr(text, bindings)`**: resolves a text reference against let bindings, applying suffix transforms. Used by both `_resolve_line` (bare references) and `_compile_parsed` (stack sub-expressions).
+- **`_play_current()` is now a clean match loop**: resolve → match type → collect. No inline let handling, no special-case branches.
+- **Locations always 0-based**: `_compile_parsed` returns 0-based locations. `pattern_offset` on the line dict handles draw-time alignment. Let definitions set `pattern_offset` to `rhs_offset + expr_offset` so the same draw-time mechanism works for both normal and let lines.
+
 ### v0.10.61
 **`let` variable bindings, linked source highlights, pattern engine spec**
 

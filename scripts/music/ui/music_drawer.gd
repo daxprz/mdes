@@ -1505,17 +1505,162 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 	return pat
 
 
+# -- Line Resolution (let bindings, pattern compilation) ----------------------
+
+
+func _compile_parsed(parsed: Dictionary, bindings: Dictionary = {}) -> StrudelPattern:
+	## Compile a parsed line result into a Pattern.
+	## Handles stack, mini-notation, wrapper types, and deferred ops.
+	## Locations are always 0-based relative to the mini text.
+	## The caller sets pattern_offset on the line dict for draw-time alignment.
+	## `bindings` resolves let variable names in stack sub-expressions.
+	var pat: StrudelPattern
+	if parsed.get("is_stack", false):
+		var sub_pats: Array = []
+		var stack_base: int = parsed.get("stack_offset", 0)
+		for sub in parsed["stack_exprs"]:
+			var sub_text: String = (sub["text"] if sub is Dictionary else str(sub)).strip_edges()
+			var sub_pos: int = sub["pos"] if sub is Dictionary else 0
+			var resolved: StrudelPattern = _resolve_expr(sub_text, bindings)
+			if resolved != null:
+				sub_pats.append(resolved)
+			else:
+				sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
+		pat = Strudel.stack(sub_pats)
+	else:
+		pat = StrudelMini.mini(parsed["pattern_text"])
+		var wt: String = parsed.get("wrapper_type", "")
+		if wt == "s":
+			pat = pat.fmap(func(v: Variant) -> Dictionary:
+				return {"s": str(v), "note": "c4"})
+		elif wt == "n":
+			pat = pat.fmap(func(v: Variant) -> Dictionary:
+				return {"n": int(v) if v is float or v is int else 0})
+	var ops: Array = parsed.get("deferred_ops", [])
+	if not ops.is_empty():
+		pat = _apply_deferred_ops(pat, ops)
+	return pat
+
+
+func _resolve_expr(text: String, bindings: Dictionary) -> StrudelPattern:
+	## Try to resolve `text` as a let variable reference.
+	## Returns the bound pattern (with suffix transforms applied), or null if not a reference.
+	## Handles: bare name ("melody"), method chain ("melody.fast(2)").
+	if bindings.is_empty():
+		return null
+	var name: String = ""
+	var suffix: String = ""
+	var dot_pos: int = text.find(".")
+	if dot_pos > 0:
+		var candidate: String = text.substr(0, dot_pos).strip_edges()
+		if candidate.is_valid_identifier() and bindings.has(candidate):
+			name = candidate
+			suffix = text.substr(dot_pos)
+	elif text.is_valid_identifier() and bindings.has(text):
+		name = text
+	if name.is_empty():
+		return null
+	var pat: StrudelPattern = bindings[name]["pattern"]
+	if not suffix.is_empty():
+		# Parse suffix as method chains on a dummy pattern
+		var sfx_parsed: Dictionary = _parse_line_text(_make_line("x" + suffix))
+		var sfx_ops: Array = sfx_parsed.get("deferred_ops", [])
+		if not sfx_ops.is_empty():
+			pat = _apply_deferred_ops(pat, sfx_ops)
+	return pat
+
+
+func _resolve_line(i: int, bindings: Dictionary) -> Dictionary:
+	## Resolve a single drawer line into a result dict.
+	## Returns: {type, pattern, sound, controls, signals, name, display}
+	##   type: "skip" | "setcps" | "hush" | "let" | "pattern"
+	##   For "let": adds let_name, let_binding
+	##   For "pattern": pattern is ready to play
+	var text: String = _lines[i].get("text", "").strip_edges()
+
+	# Muted or empty
+	if _line_muted(i) or text.is_empty() or text.begins_with("//") or text.begins_with("#"):
+		return {"type": "skip"}
+
+	# Let variable reference — check BEFORE parsing (bare identifiers are valid mini)
+	var ref_pat: StrudelPattern = _resolve_expr(text, bindings)
+	if ref_pat != null:
+		# Find which binding this references (for def_line)
+		var ref_name: String = text.split(".")[0].strip_edges() if "." in text else text
+		_lines[i]["_let_ref"] = ref_name
+		_lines[i]["_let_def_line"] = bindings[ref_name]["def_line"]
+		return {
+			"type": "pattern", "pattern": ref_pat,
+			"sound": bindings[ref_name].get("sound", ""),
+			"controls": bindings[ref_name].get("controls", {}),
+			"signals": [], "name": "", "display": text,
+		}
+
+	# Normal parse
+	var parsed: Dictionary = _parse_line_text(_lines[i])
+
+	if parsed.has("setcps"):
+		return {"type": "setcps", "value": parsed["setcps"]}
+	if parsed.get("hush", false):
+		return {"type": "hush"}
+
+	# Let definition — compile RHS, tag locations with this line
+	if parsed.get("is_let", false):
+		var let_name: String = parsed["let_name"]
+		var let_expr: String = parsed["let_expr"]
+		var line_text: String = _lines[i].get("text", "")
+		var eq_pos: int = line_text.find("=")
+		var expr_offset: int = eq_pos + 1 if eq_pos >= 0 else 0
+		while expr_offset < line_text.length() and line_text[expr_offset] == " ":
+			expr_offset += 1
+		var rhs_parsed: Dictionary = _parse_line_text(_make_line(let_expr))
+		if rhs_parsed["is_valid"]:
+			var let_pat: StrudelPattern = _compile_parsed(rhs_parsed, bindings)
+			# Set pattern_offset on the definition line so draw-time alignment works.
+			# Locations are 0-based (from _compile_parsed), and pattern_offset shifts
+			# them to point past "let name = note(" in the definition line.
+			_lines[i]["pattern_offset"] = rhs_parsed["pattern_offset"] + expr_offset
+			# Tag locations with this line index so they render on the definition line
+			let_pat = let_pat._tag_locations_line(i)
+			return {
+				"type": "let", "let_name": let_name,
+				"let_binding": {
+					"pattern": let_pat,
+					"sound": rhs_parsed["sound"],
+					"def_line": i,
+					"controls": rhs_parsed.get("audio_controls", {}),
+				},
+			}
+		return {"type": "skip"}
+
+	if not parsed["is_valid"]:
+		return {"type": "skip"}
+
+	# Normal pattern line
+	var pat: StrudelPattern = _compile_parsed(parsed, bindings)
+	_lines[i]["pattern_offset"] = parsed["pattern_offset"]
+	var sound_name: String = parsed["sound"]
+	var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
+	var display_pat: StrudelPattern = pat
+	if not sound_name.is_empty() and not is_batch:
+		display_pat = pat.set_in(Strudel.pure({"s": sound_name}))
+	return {
+		"type": "pattern", "pattern": display_pat, "clean_pattern": pat,
+		"sound": sound_name, "name": parsed.get("name", ""),
+		"controls": parsed.get("audio_controls", {}),
+		"signals": parsed.get("signal_controls", []),
+		"display": _lines[i].get("text", "").strip_edges(),
+	}
+
+
 func _play_current() -> void:
-	## Parse all non-muted, non-empty lines into patterns and stack them.
-	## Also stores per-line patterns for individual pianoroll rendering.
-	## Collects audio controls from all lines and applies as bus effects.
+	## Resolve all lines, collect patterns, and play.
 	var active_patterns: Array = []
 	var display_parts: Array[String] = []
-	var merged_controls: Dictionary = {}  # Collect audio controls from all lines
-	var _line_tracks: Array = []  # Per-line data for batch mode compilation
-	var let_bindings: Dictionary = {}  # name → {pattern: Pattern, expr: String}
+	var merged_controls: Dictionary = {}
+	var line_tracks: Array = []
+	var let_bindings: Dictionary = {}
 
-	# Resize per-line arrays to match line count
 	_line_patterns.resize(_lines.size())
 	_line_haps.resize(_lines.size())
 	_line_query_ends.resize(_lines.size())
@@ -1525,204 +1670,38 @@ func _play_current() -> void:
 		_line_haps[i] = []
 		_line_query_ends[i] = 0.0
 
-		if _line_muted(i):
-			continue
+		var resolved: Dictionary = _resolve_line(i, let_bindings)
 
-		# Check for let variable references BEFORE parsing — a bare identifier
-		# like "melody" would be valid mini-notation, but if it matches a let
-		# binding, it should resolve as a variable reference instead.
-		var is_let_ref: bool = false
-		if not let_bindings.is_empty():
-			var raw_text: String = _lines[i].get("text", "").strip_edges()
-			if not raw_text.is_empty() and not raw_text.begins_with("//") \
-				and not raw_text.begins_with("#") and not raw_text.begins_with("let ") \
-				and not raw_text.begins_with("setcps") and not raw_text.begins_with("setcpm"):
-				var ref_name: String = ""
-				var ref_suffix: String = ""
-				var dot_pos: int = raw_text.find(".")
-				if dot_pos > 0:
-					var candidate: String = raw_text.substr(0, dot_pos).strip_edges()
-					if candidate.is_valid_identifier() and let_bindings.has(candidate):
-						ref_name = candidate
-						ref_suffix = raw_text.substr(dot_pos)
-				elif raw_text.is_valid_identifier() and let_bindings.has(raw_text):
-					ref_name = raw_text
-				if not ref_name.is_empty():
-					is_let_ref = true
-					var binding: Dictionary = let_bindings[ref_name]
-					var ref_pat: StrudelPattern = binding["pattern"]
-					if not ref_suffix.is_empty():
-						var suffix_line: Dictionary = _make_line("x" + ref_suffix)
-						var suffix_parsed: Dictionary = _parse_line_text(suffix_line)
-						var suffix_ops: Array = suffix_parsed.get("deferred_ops", [])
-						if not suffix_ops.is_empty():
-							ref_pat = _apply_deferred_ops(ref_pat, suffix_ops)
-						var suffix_controls: Dictionary = suffix_parsed.get("audio_controls", {})
-						for ck in suffix_controls:
-							merged_controls[ck] = suffix_controls[ck]
-					_lines[i]["_let_ref"] = ref_name
-					_lines[i]["_let_def_line"] = binding["def_line"]
-					_line_patterns[i] = ref_pat
-					var snd: String = binding["sound"]
-					if not snd.is_empty():
-						ref_pat = ref_pat.set_in(Strudel.pure({"s": snd}))
-					active_patterns.append(ref_pat)
-					display_parts.append(raw_text)
-					continue
+		match resolved["type"]:
+			"skip":
+				continue
+			"setcps":
+				_cps = resolved["value"]
+			"hush":
+				MusicManager.strudel_stop()
+				_is_playing = false
+				return
+			"let":
+				let_bindings[resolved["let_name"]] = resolved["let_binding"]
+			"pattern":
+				var pat: StrudelPattern = resolved["pattern"]
+				_line_patterns[i] = pat
+				active_patterns.append(pat)
 
-		var parsed: Dictionary = _parse_line_text(_lines[i])
-		# Handle setcps() — applies tempo, not a pattern
-		if parsed.has("setcps"):
-			_cps = parsed["setcps"]
-		# Handle hush — stop all playback
-		if parsed.get("hush", false):
-			MusicManager.strudel_stop()
-			_is_playing = false
-			return
-		# Handle let bindings — compile the pattern with locations pointing
-		# to THIS line (the definition), then store for reference by later lines.
-		if parsed.get("is_let", false):
-			var let_name: String = parsed["let_name"]
-			var let_expr: String = parsed["let_expr"]
-			# Compute the offset where the expression starts in the let line
-			var let_line_text: String = _lines[i].get("text", "")
-			var eq_pos: int = let_line_text.find("=")
-			var expr_offset: int = eq_pos + 1 if eq_pos >= 0 else 0
-			# Skip whitespace after =
-			while expr_offset < let_line_text.length() and let_line_text[expr_offset] == " ":
-				expr_offset += 1
-			# Parse the RHS as if it were its own line, but with offset pointing
-			# into the let line so highlights render on the definition
-			var rhs_line: Dictionary = _make_line(let_expr)
-			var rhs_parsed: Dictionary = _parse_line_text(rhs_line)
-			if rhs_parsed["is_valid"]:
-				var let_pat: StrudelPattern
-				if rhs_parsed.get("is_stack", false):
-					var sub_pats: Array = []
-					var stack_base: int = rhs_parsed.get("stack_offset", 0) + expr_offset
-					for sub in rhs_parsed["stack_exprs"]:
-						sub_pats.append(_eval_sub_expr(
-							sub["text"] if sub is Dictionary else str(sub),
-							stack_base + (sub["pos"] if sub is Dictionary else 0)))
-					let_pat = Strudel.stack(sub_pats)
-				else:
-					var mini_offset: int = rhs_parsed["pattern_offset"] + expr_offset
-					let_pat = StrudelMini.mini(rhs_parsed["pattern_text"], mini_offset)
-					var wt: String = rhs_parsed.get("wrapper_type", "")
-					if wt == "s":
-						let_pat = let_pat.fmap(func(v: Variant) -> Dictionary:
-							return {"s": str(v), "note": "c4"})
-					elif wt == "n":
-						let_pat = let_pat.fmap(func(v: Variant) -> Dictionary:
-							return {"n": int(v) if v is float or v is int else 0})
-				var let_ops: Array = rhs_parsed.get("deferred_ops", [])
-				if not let_ops.is_empty():
-					let_pat = _apply_deferred_ops(let_pat, let_ops)
-				# Tag all locations with this line index so highlights render
-				# on the definition line regardless of where the pattern is referenced
-				let_pat = let_pat._tag_locations_line(i)
-				var let_sound: String = rhs_parsed["sound"]
-				let_bindings[let_name] = {
-					"pattern": let_pat,
-					"sound": let_sound,
-					"def_line": i,           # line index where let was defined
-					"expr": let_expr,
-					"controls": rhs_parsed.get("audio_controls", {}),
-				}
-			continue
-		if not parsed["is_valid"]:
-			continue
+				var controls: Dictionary = resolved.get("controls", {})
+				for key in controls:
+					merged_controls[key] = controls[key]
 
-		# Merge audio controls from this line (last-write-wins for conflicts)
-		var line_controls: Dictionary = parsed.get("audio_controls", {})
-		for key in line_controls:
-			merged_controls[key] = line_controls[key]
-
-		var clean_pat: StrudelPattern
-		var display_pat: StrudelPattern
-		var sound_name: String = parsed["sound"]
-		var ops: Array = parsed.get("deferred_ops", [])
-		var line_signals: Array = parsed.get("signal_controls", [])
-
-		if parsed.get("is_stack", false):
-			# stack(expr1, expr2, ...) — evaluate each sub-expression independently
-			var sub_pats: Array = []
-			var stack_base: int = parsed.get("stack_offset", 0)
-			for sub in parsed["stack_exprs"]:
-				var sub_text: String = (sub["text"] if sub is Dictionary else str(sub)).strip_edges()
-				var sub_pos: int = sub["pos"] if sub is Dictionary else 0
-				# Resolve let variable references in stack sub-expressions
-				if sub_text.is_valid_identifier() and let_bindings.has(sub_text):
-					sub_pats.append(let_bindings[sub_text]["pattern"])
-				else:
-					# Check for var.method() form
-					var sub_dot: int = sub_text.find(".")
-					var sub_resolved: bool = false
-					if sub_dot > 0:
-						var sub_var: String = sub_text.substr(0, sub_dot).strip_edges()
-						if sub_var.is_valid_identifier() and let_bindings.has(sub_var):
-							var sub_pat: StrudelPattern = let_bindings[sub_var]["pattern"]
-							var sub_suffix: String = sub_text.substr(sub_dot)
-							var sfx_line: Dictionary = _make_line("x" + sub_suffix)
-							var sfx_parsed: Dictionary = _parse_line_text(sfx_line)
-							var sfx_ops: Array = sfx_parsed.get("deferred_ops", [])
-							if not sfx_ops.is_empty():
-								sub_pat = _apply_deferred_ops(sub_pat, sfx_ops)
-							sub_pats.append(sub_pat)
-							sub_resolved = true
-					if not sub_resolved:
-						sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
-			clean_pat = Strudel.stack(sub_pats)
-			clean_pat = _apply_deferred_ops(clean_pat, ops)
-			display_pat = clean_pat
-		else:
-			var text: String = parsed["pattern_text"]
-			clean_pat = StrudelMini.mini(text)
-
-			# s() wrapper: tokens are voice names, wrap each value as {s: name}
-			# n() wrapper: tokens are sample indices, wrap as {n: value}
-			var wt: String = parsed.get("wrapper_type", "")
-			if wt == "s":
-				clean_pat = clean_pat.fmap(func(v: Variant) -> Dictionary:
-					return {"s": str(v), "note": "c4"})  # default note c4 for drum patterns
-			elif wt == "n":
-				clean_pat = clean_pat.fmap(func(v: Variant) -> Dictionary:
-					return {"n": int(v) if v is float or v is int else 0})
-
-			# Apply deferred pattern combinators (.degrade(), .fast(), etc.)
-			clean_pat = _apply_deferred_ops(clean_pat, ops)
-			display_pat = clean_pat
-
-			# Signal control patterns (e.g., .lpf(sine.range(200, 2000)))
-			# Instead of merging into the note pattern (which fragments timing via set_in),
-			# store them separately. They're evaluated per-note at trigger time.
-
-			# In note mode, inject voice via set_in (needed for per-note voice resolution).
-			# In batch mode, DON'T — set_in fragments hap timing which breaks pianoroll.
-			# Batch mode passes voice separately via _line_tracks.
-			var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
-			if not sound_name.is_empty() and not is_batch:
-				display_pat = clean_pat.set_in(Strudel.pure({"s": sound_name}))
-
-		_line_patterns[i] = display_pat
-		_lines[i]["pattern_offset"] = parsed["pattern_offset"]
-		active_patterns.append(display_pat)
-
-		# Store per-line metadata for batch mode compilation
-		# Use the SAME pattern object for both display and batch to ensure
-		# deterministic operations (like degrade) produce identical results.
-		var line_name: String = parsed["name"] if not parsed["name"].is_empty() else "line%d" % i
-		_line_tracks.append({
-			"pattern": clean_pat,  # Same pattern object as display (ensures degrade consistency)
-			"voice": sound_name,
-			"gain": float(line_controls.get("gain", line_controls.get("velocity", 1.0))),
-			"name": line_name,
-			"controls": line_controls,
-			"signals": line_signals,  # Signal patterns for trigger-time evaluation
-		})
-
-		# Use the original line text for display (preserves quotes, viz methods)
-		display_parts.append(_lines[i].get("text", "").strip_edges())
+				var line_name: String = resolved["name"] if not resolved.get("name", "").is_empty() else "line%d" % i
+				line_tracks.append({
+					"pattern": resolved.get("clean_pattern", pat),
+					"voice": resolved.get("sound", ""),
+					"gain": float(controls.get("gain", controls.get("velocity", 1.0))),
+					"name": line_name,
+					"controls": controls,
+					"signals": resolved.get("signals", []),
+				})
+				display_parts.append(resolved.get("display", ""))
 
 	if active_patterns.is_empty():
 		return
@@ -1736,25 +1715,24 @@ func _play_current() -> void:
 	var is_batch: bool = MusicManager._sion_trigger != null and MusicManager._sion_trigger.batch_mode
 
 	if is_batch:
-		# Batch mode: compile each line separately into its own MML track.
-		# Avoids set_in fragmentation by using clean per-line patterns.
 		_self_triggered = true
-		MusicManager.strudel_play_batch(_line_tracks, _cps)
-		# Still set up cyclist for UI sync
+		MusicManager.strudel_play_batch(line_tracks, _cps)
 		MusicManager._strudel_source_text = " | ".join(PackedStringArray(display_parts))
 		MusicManager._strudel_pattern = combined
 		MusicManager._strudel_playing = true
 	else:
-		# Note mode: stack all patterns and play combined
-		var display: String = " | ".join(PackedStringArray(display_parts))
 		_self_triggered = true
-		MusicManager.strudel_play(combined, _cps, display)
+		MusicManager.strudel_play(combined, _cps, " | ".join(PackedStringArray(display_parts)))
 
-	# Pass signal controls to the trigger for per-note evaluation
 	if MusicManager._sion_trigger:
 		MusicManager._sion_trigger._signal_controls.clear()
-		for t in _line_tracks:
+		for t in line_tracks:
 			MusicManager._sion_trigger._signal_controls.append_array(t.get("signals", []))
+
+	if merged_controls.is_empty():
+		MusicManager.reset_music_effects()
+	else:
+		MusicManager.set_music_effects(merged_controls)
 
 	_is_playing = true
 	# Reset rolling buffer on pattern change
