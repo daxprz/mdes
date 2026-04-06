@@ -1,0 +1,35 @@
+{
+  "name": "ab_multiline_block",
+  "description": "A/B: multi-line block in drawer — stack() split across lines merges, plays, and highlights correctly",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "strudel cps 0.5",
+    "wait 1",
+    "ab_dir ab_multiline_block",
+
+    "# Reference: single-line stack (known working)",
+    "strudel ref stack(note(\"c4 e4 g4 c5\"),note(\"c2 ~ c2 ~\")) cps=0.5",
+    "announce REF: stack(melody, bass) — single line",
+    "ab_play ref.wav",
+    "wait 10 unless silent 2.5",
+
+    "# Ours: same stack() split across drawer lines via | separator",
+    "# The drawer should detect unclosed parens and merge into one block",
+    "announce OURS: stack(melody, bass) — multi-line block",
+    "strudel highlights on",
+    "strudel edit stack(|  note(\"c4 e4 g4 c5\"),|  note(\"c2 ~ c2 ~\")|) cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 2.5",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "check strudel highlights check 0/1:[L2:c4|L3:c2]",
+    "check strudel highlights check 1/4:[L2:e4]",
+    "check strudel highlights check 1/2:[L2:g4|L3:c2]",
+    "check strudel highlights check 3/4:[L2:c5]",
+    "ab_show ref.wav ours.wav"
+  ]
+}

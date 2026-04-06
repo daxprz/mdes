@@ -157,38 +157,40 @@ func _setup_voices() -> void:
 	for name in map:
 		_voices[name] = presets.call("get_voice_preset", map[name])
 
-	# Create pure waveform voices using SiON's PSG module.
-	# These produce clean sine/square/triangle/saw without FM harmonics.
-	# SiONVoice(module_type, channel, tl, ...) — MODULE_PSG = 1
-	# PSG wave shapes: 0=square, 1=noise, 2=triangle(custom), but we use
-	# the analog oscillator module (MODULE_RAMP=11) for saw and triangle,
-	# and MODULE_PULSE=4 for proper pulse/square.
-	# For a pure sine: MODULE_FM (type 5) with zero modulation index
-	# Actually simplest: use MODULE_PSG with wave table override.
-	# SiON MML: %1@0 = sine, %1@1 = saw, %1@2 = triangle, %1@3 = square
-	# Create via set_module_type after getting a voice.
+	# Create pure waveform voices using correct SiON module types.
+	# GDSiON SiONModuleType enum (0-based, from binary inspection):
+	#   0 = MODULE_PSG     — PSG square wave
+	#   1 = MODULE_APU     — NES APU (NOT general PSG!)
+	#   6 = MODULE_FM      — FM synthesis (OPM-style)
+	#   8 = MODULE_PULSE   — Pulse wave with duty cycle
+	#   9 = MODULE_RAMP    — Ramp/saw/triangle
+	# For set_module_type(module, channel):
+	#   MODULE_RAMP(9): channel selects ramp shape
+	#   MODULE_PSG(0): channel selects wave table index
 	var _bridge: GDScript = GDScript.new()
 	_bridge.source_code = """extends RefCounted
 
-func make_psg_voice(wave_shape: int) -> SiONVoice:
+func make_voice(module_type: int, channel: int) -> SiONVoice:
 	var v := SiONVoice.new()
-	# Module type 1 = PSG, wave_shape: 0=square(@3), but via channel_num
-	# Actually: SiONVoice.new(module_type, channel_num, attack_rate, ...)
-	# Use set_module_type to configure after creation
-	v.set_module_type(1, wave_shape)  # 1=PSG, shape=wave table index
+	v.set_module_type(module_type, channel)
 	return v
 """
 	if _bridge.reload() == OK:
 		var helper = _bridge.new()
-		# PSG wave table indices: 0=sine, 1=saw-down, 2=triangle, 3=square
-		_voices["sine"] = helper.make_psg_voice(0)
-		_voices["sawtooth"] = helper.make_psg_voice(1)
-		_voices["saw"] = helper.make_psg_voice(1)
-		_voices["triangle"] = helper.make_psg_voice(2)
-		_voices["square"] = helper.make_psg_voice(3)
-		print("STRUDEL: created pure PSG voices for sine, saw, triangle, square")
+		# Sawtooth: MODULE_RAMP (9), channel 0 = ramp/saw wave
+		_voices["sawtooth"] = helper.make_voice(9, 0)
+		_voices["saw"] = _voices["sawtooth"]
+		# Triangle: MODULE_RAMP (9), channel 2 (triangle variant)
+		# Or try PSG(0) ch 2 if RAMP doesn't have triangle
+		_voices["triangle"] = helper.make_voice(9, 2)
+		# Square: MODULE_PSG (0), channel 0 = square
+		_voices["square"] = helper.make_voice(0, 0)
+		# Sine: MODULE_PSG (0) with wave table — try ch 0 or use FM
+		# PSG ch0 is square, so for sine use MODULE_FM (6) with zero modulation
+		_voices["sine"] = helper.make_voice(6, 0)
+		print("STRUDEL: voices — saw=RAMP(9,0) tri=RAMP(9,2) sq=PSG(0,0) sin=FM(6,0)")
 	else:
-		print("STRUDEL: PSG voice bridge failed, using FM fallback")
+		print("STRUDEL: voice bridge failed, using FM fallback")
 
 	_voices["default"] = _voices["piano"]
 	print("STRUDEL: %d voices mapped" % _voices.size())
@@ -272,9 +274,10 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 	var voice: Variant = _resolve_voice(hap.value)
 	var length_sec: float = maxf(duration, 0.02)
 
-	# SiON note_on length is in 16th-note ticks at the driver's current BPM.
+	# SiON note_on length is in 64th-note ticks at the driver's current BPM.
+	# (Empirically verified: 8 ticks at 60 BPM = 514ms ≈ 64ms/tick = 64th note)
 	var bpm: float = maxf(cps * 120.0, 30.0)
-	var length_ticks: float = maxf(1.0, length_sec * bpm * 4.0 / 60.0)
+	var length_ticks: float = maxf(1.0, length_sec * bpm * 16.0 / 60.0)
 
 	# Compute wall-clock emit time from the absolute target_time.
 	# deadline = target_time - phase (clock's virtual tick time, NOT wall-clock now).

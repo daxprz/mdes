@@ -971,6 +971,7 @@ func strudel_play(pattern: StrudelPattern, cps: float = -1.0, source_text: Strin
 		_cyclist.stop()
 	if _sion_trigger:
 		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
 		_sion_trigger._cycle_buffer_int = -1
 	# Stop any current audio (batch play or streaming)
 	driver.call("stop")
@@ -1013,6 +1014,8 @@ func strudel_play_batch(tracks: Array, cps: float) -> void:
 	# Stop old playback
 	if _strudel_playing:
 		_cyclist.stop()
+	_sion_trigger.clear_pending()
+	_sion_trigger.stop_all_sequences()
 	driver.call("stop")
 	_sion_streaming = false
 

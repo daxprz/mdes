@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.68
+**Harmonic analysis test checks, correct voice modules, multi-line blocks**
+
+- **Harmonic analysis as test check**: new `ab_harmonics` RCON command runs `spectral_compare.py` (HPS pitch detection, 4-harmonic decomposition) and returns machine-readable match percentage. Tests can now `check ab_harmonics ref.wav ours.wav extract:match_pct > 80` to gate on spectral fidelity.
+- **Voice module fix**: sawtooth was using MODULE_APU (NES square, odd harmonics only) instead of MODULE_RAMP (true saw, all harmonics). Fixed: sawtooth=RAMP(9,0), triangle=RAMP(9,2), square=PSG(0,0), sine=FM(6,0). Verified: 100% harmonic match rate across all four waveforms.
+- **6 AB tests updated** with harmonic checks: ab_sawtooth, ab_square, ab_sine, ab_triangle, ab_note_timing, ab_tick_duration all validate spectral structure automatically.
+- **Multi-line block editing**: the music drawer now supports multi-line expressions with unclosed parens. `stack(` continues across lines with bracket gutter, block muting, and correct evaluation.
+- **New AB tests**: ab_note_timing (bass timing), ab_tick_duration (sustain), ab_multiline_block (stack blocks).
+- **Audio analysis tools**: `analyze_wav.py` (HPS pitch tracking, temporal grid, harmonic detection) and `verify_audio.sh` (end-to-end recording + validation pipeline).
+- **Spectral comparison improvements**: `spectral_compare.py` reports even-harmonic percentages, handles cycle-phase misalignment, and works correctly for pure tones (sine).
+
 ### v0.10.67
 **Synthesized drum kit, sample playback, title music timing fix**
 

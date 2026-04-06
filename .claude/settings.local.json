@@ -16,7 +16,11 @@
       "Bash(nc -z localhost 6005)",
       "Bash(nc -w5 localhost 9999)",
       "Bash(nc -w10 localhost 9999)",
-      "Bash(afplay:*)"
+      "Bash(afplay:*)",
+      "Bash(SwitchAudioSource:*)",
+      "Bash(bash /Users/jeremy/.claude/skills/audio-mode/switch.sh develop)",
+      "Skill(gd)",
+      "Bash(kill %1)"
     ],
     "deny": [],
     "additionalDirectories": [

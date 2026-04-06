@@ -44,6 +44,13 @@ extends CanvasLayer
 ##
 ## Line format:
 ##   Each line is an independent pattern. Non-muted lines are stacked on eval.
+##   Multi-line blocks: lines with unclosed parens continue onto the next line.
+##   The block is visually grouped with a bracket gutter and treated as one
+##   expression on eval. Muting any line in a block mutes the whole block.
+##     stack(                         — block start (unclosed paren)
+##       s("bd sd hh cp"),            — continuation
+##       note("c2 e2").s("saw")       — continuation
+##     )                              — block end (parens balanced)
 ##   Lines support the Strudel label syntax:
 ##     drums: c4(3,8)                — named "drums"
 ##     bass: c2 ~ c2 ~ e2 ~ s=bass  — named "bass", voice override
@@ -76,7 +83,8 @@ var _panel: Control = null
 
 # Multi-line editor state — each line is a named, independently mutable pattern
 # Line format: "name: pattern_text" or just "pattern_text" (auto-named d1, d2, ...)
-var _lines: Array[Dictionary] = []  # [{text, name, muted}]
+var _lines: Array[Dictionary] = []  # [{text, name, muted, block_id}]
+var _block_map: Dictionary = {}  # block_id (first line idx) → Array of line indices
 var _current_line: int = 0     # Which line the cursor is on
 var _editor_cursor: int = 0    # Cursor position within the current line
 var _editor_focused: bool = true
@@ -216,7 +224,129 @@ static func _parse_signal_expr(expr: String) -> StrudelPattern:
 	return pat
 
 func _make_line(text: String = "", name: String = "", muted: bool = false, viz: String = VIZ_NONE) -> Dictionary:
-	return {"text": text, "name": name, "muted": muted, "viz": viz, "viz_options": {}, "pattern_offset": 0}
+	return {"text": text, "name": name, "muted": muted, "viz": viz, "viz_options": {}, "pattern_offset": 0, "block_id": -1}
+
+
+func _compute_blocks() -> void:
+	## Scan lines for multi-line blocks by tracking paren/bracket depth.
+	## Lines with unclosed parens are continuation lines of the block that opened them.
+	## Sets block_id on each line: first line index of the block, or -1 if standalone.
+	## Also builds _block_map: {block_start_idx: [line indices in the block]}.
+	_block_map.clear()
+	var depth: int = 0
+	var block_start: int = -1
+	for i in range(_lines.size()):
+		var text: String = _lines[i].get("text", "")
+		if depth > 0:
+			# We're inside a block — this line continues it
+			_lines[i]["block_id"] = block_start
+			_block_map[block_start].append(i)
+		else:
+			# Not inside a block yet — check if this line opens one
+			block_start = -1
+			_lines[i]["block_id"] = -1
+		# Count parens/brackets outside of quoted strings
+		var in_str: bool = false
+		var str_char: String = ""
+		for ci in range(text.length()):
+			var ch: String = text[ci]
+			if in_str:
+				if ch == str_char:
+					in_str = false
+			elif ch == '"' or ch == "'":
+				in_str = true
+				str_char = ch
+			elif ch == '(' or ch == '[':
+				if depth == 0 and block_start < 0:
+					# This line opens a new block
+					block_start = i
+					_lines[i]["block_id"] = i
+					_block_map[i] = [i]
+				depth += 1
+			elif ch == ')' or ch == ']':
+				depth = maxi(0, depth - 1)
+		# If parens balanced on the same line that opened the block, it's not
+		# actually multi-line — remove the block entry.
+		if depth == 0:
+			if block_start == i and _block_map.has(i) and _block_map[i].size() == 1:
+				_block_map.erase(i)
+				_lines[i]["block_id"] = -1
+			block_start = -1
+
+
+func _get_block_text(block_start: int) -> String:
+	## Merge all lines in a block into a single expression string.
+	if not _block_map.has(block_start):
+		return _lines[block_start].get("text", "")
+	var parts: Array[String] = []
+	for idx in _block_map[block_start]:
+		var t: String = _lines[idx].get("text", "").strip_edges()
+		if not t.is_empty():
+			parts.append(t)
+	return " ".join(parts)
+
+
+func _get_block_offset_table(block_start: int) -> Array:
+	## Build an offset table mapping merged-string positions to (line_idx, local_offset).
+	## Returns [{line_idx, merged_start, local_start, length}] for each non-empty line.
+	## local_start is the offset of the stripped text within the original line text.
+	var table: Array = []
+	var merged_pos: int = 0
+	for idx in _block_map.get(block_start, []):
+		var raw: String = _lines[idx].get("text", "")
+		var stripped: String = raw.strip_edges()
+		if stripped.is_empty():
+			continue
+		# Find where stripped text starts in the raw line (leading whitespace)
+		var local_start: int = raw.find(stripped)
+		table.append({
+			"line_idx": idx,
+			"merged_start": merged_pos,
+			"local_start": local_start,
+			"length": stripped.length(),
+		})
+		merged_pos += stripped.length() + 1  # +1 for the space separator
+	return table
+
+
+func _remap_block_locations(pat: StrudelPattern, block_start: int, pat_offset: int) -> StrudelPattern:
+	## Remap a pattern's source locations from merged-string coordinates to
+	## per-line coordinates. Each location gets a correct line index and
+	## start/end offsets relative to that line's text.
+	var table: Array = _get_block_offset_table(block_start)
+	if table.is_empty():
+		return pat
+	return pat.with_hap(func(hap: StrudelHap) -> StrudelHap:
+		if not hap.context.has("locations"):
+			return hap
+		var new_locs: Array = []
+		for loc in hap.context["locations"]:
+			var s: int = int(loc.get("start", 0)) + pat_offset
+			var e: int = int(loc.get("end", 0)) + pat_offset
+			# Find which table entry contains offset s
+			var found: bool = false
+			for ti in range(table.size()):
+				var entry: Dictionary = table[ti]
+				var seg_end: int = entry["merged_start"] + entry["length"]
+				if s >= entry["merged_start"] and s < seg_end:
+					var tagged: Dictionary = loc.duplicate()
+					tagged["line"] = entry["line_idx"]
+					# Remap to local line coordinates (subtract merged offset, add local whitespace)
+					tagged["start"] = s - entry["merged_start"] + entry["local_start"] - pat_offset
+					tagged["end"] = mini(e, seg_end) - entry["merged_start"] + entry["local_start"] - pat_offset
+					new_locs.append(tagged)
+					found = true
+					break
+			if not found:
+				new_locs.append(loc)
+		var new_ctx: Dictionary = hap.context.duplicate()
+		new_ctx["locations"] = new_locs
+		return hap.set_context(new_ctx))
+
+
+func _is_block_muted(block_start: int) -> bool:
+	## A block is muted if its first line is muted.
+	return _line_muted(block_start)
 
 
 static func _parse_viz_options(opts_str: String) -> Dictionary:
@@ -512,9 +642,16 @@ func _input(event: InputEvent) -> void:
 							get_viewport().set_input_as_handled()
 							return
 						KEY_SLASH:
-							# Ctrl+/: toggle mute on current line
+							# Ctrl+/: toggle mute on current line (or entire block)
 							if _current_line < _lines.size():
-								_lines[_current_line]["muted"] = not _line_muted(_current_line)
+								var mbid: int = _lines[_current_line].get("block_id", -1)
+								if mbid >= 0 and _block_map.has(mbid):
+									# Toggle all lines in the block together
+									var new_muted: bool = not _line_muted(mbid)
+									for bidx in _block_map[mbid]:
+										_lines[bidx]["muted"] = new_muted
+								else:
+									_lines[_current_line]["muted"] = not _line_muted(_current_line)
 							get_viewport().set_input_as_handled()
 							return
 						KEY_PERIOD:
@@ -1655,6 +1792,10 @@ func _resolve_line(i: int, bindings: Dictionary) -> Dictionary:
 
 func _play_current() -> void:
 	## Resolve all lines, collect patterns, and play.
+	## Multi-line blocks (unclosed parens) are merged into a single expression
+	## and resolved on the block's first line.
+	_compute_blocks()
+
 	var active_patterns: Array = []
 	var display_parts: Array[String] = []
 	var merged_controls: Dictionary = {}
@@ -1670,7 +1811,39 @@ func _play_current() -> void:
 		_line_haps[i] = []
 		_line_query_ends[i] = 0.0
 
-		var resolved: Dictionary = _resolve_line(i, let_bindings)
+		var bid: int = _lines[i].get("block_id", -1)
+		# Skip continuation lines — they're merged into their block's first line
+		if bid >= 0 and bid != i:
+			continue
+		# Skip muted blocks entirely
+		if bid >= 0 and _is_block_muted(bid):
+			continue
+
+		# Resolve: block start lines use merged text, standalone lines resolve normally
+		var resolved: Dictionary
+		if bid == i and _block_map.has(i):
+			var merged_text: String = _get_block_text(i)
+			var saved_text: String = _lines[i].get("text", "")
+			_lines[i]["text"] = merged_text
+			resolved = _resolve_line(i, let_bindings)
+			_lines[i]["text"] = saved_text
+			# Remap source locations from merged-string coords to per-line coords
+			if resolved["type"] == "pattern":
+				var pat_off: int = _lines[i].get("pattern_offset", 0)
+				var remapped: StrudelPattern = _remap_block_locations(
+					resolved["pattern"], i, pat_off)
+				resolved["pattern"] = remapped
+				if resolved.has("clean_pattern"):
+					resolved["clean_pattern"] = _remap_block_locations(
+						resolved["clean_pattern"], i, pat_off)
+				# Set pattern_offset on each block line so highlight drawing aligns
+				var offset_table: Array = _get_block_offset_table(i)
+				for entry in offset_table:
+					_lines[entry["line_idx"]]["pattern_offset"] = 0
+				for block_idx in _block_map[i]:
+					_line_patterns[block_idx] = remapped
+		else:
+			resolved = _resolve_line(i, let_bindings)
 
 		match resolved["type"]:
 			"skip":
@@ -1795,6 +1968,9 @@ func _update_pianoroll() -> void:
 					_lines.append(_make_line(src))
 				else:
 					_lines[0]["text"] = src
+					# Truncate to single line — old continuation/block lines are stale
+					if _lines.size() > 1:
+						_lines.resize(1)
 			_current_line = 0
 			_editor_cursor = _editor_text.length()
 			_select_start = -1
@@ -1856,6 +2032,14 @@ func _update_pianoroll() -> void:
 		if pat == null or _line_muted(i):
 			if i < _line_haps.size():
 				_line_haps[i] = []
+			continue
+
+		# Continuation lines in a block share the block start's hap buffer.
+		# Don't query independently — copy the reference to avoid duplicate haps.
+		var line_bid: int = _lines[i].get("block_id", -1) if i < _lines.size() else -1
+		if line_bid >= 0 and line_bid != i:
+			if line_bid < _line_haps.size():
+				_line_haps[i] = _line_haps[line_bid]
 			continue
 
 		# Prune old haps for this line
@@ -1953,6 +2137,9 @@ func _update_pianoroll() -> void:
 # -- Drawing -------------------------------------------------------------------
 
 func _draw_panel() -> void:
+	# Recompute blocks every frame so visual grouping stays in sync with edits
+	_compute_blocks()
+
 	var font: Font = ThemeDB.fallback_font
 	var vp_h: float = get_viewport().get_visible_rect().size.y
 	var vp_w: float = get_viewport().get_visible_rect().size.x
@@ -2007,10 +2194,18 @@ func _draw_panel() -> void:
 		_draw_editor_line_at(px + 8, draw_y, pw - 16, LINE_HEIGHT, font, i, is_current)
 		draw_y += LINE_HEIGHT
 
-		# Draw the per-line visualizer strip (if enabled)
-		if viz != VIZ_NONE:
-			if i < _line_haps.size():
-				_draw_line_viz(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT, font, i, viz)
+		# Draw the per-line visualizer strip (if enabled).
+		# For multi-line blocks, only show the viz on the block's first line
+		# (continuation lines skip the viz to keep the block visually compact).
+		var line_bid: int = _lines[i].get("block_id", -1) if i < _lines.size() else -1
+		var show_viz: bool = viz != VIZ_NONE
+		if show_viz and line_bid >= 0 and line_bid != i:
+			show_viz = false  # Continuation line — skip viz
+		if show_viz:
+			# For block start lines, use the block's first line index for hap data
+			var viz_line: int = line_bid if line_bid >= 0 else i
+			if viz_line < _line_haps.size():
+				_draw_line_viz(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT, font, viz_line, viz)
 			else:
 				# Hap buffer not ready yet — draw empty viz background
 				_panel.draw_rect(Rect2(px + 8, draw_y, pw - 16, VIZ_STRIP_HEIGHT), Color(0.03, 0.03, 0.05))
@@ -2029,37 +2224,69 @@ func _draw_panel() -> void:
 
 func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> void:
 	## Draw one editor line with source highlighting, name, and mute state.
+	## Lines that belong to a multi-line block get a bracket gutter and tinted background.
 	var line_text: String = _lines[line_idx].get("text", "") if line_idx < _lines.size() else ""
 	var is_muted: bool = _line_muted(line_idx)
 	var line_name: String = _line_name(line_idx)
 	var font_size: int = 12
 
-	# Background — brighter for current, dimmed for muted
+	# Block membership
+	var bid: int = _lines[line_idx].get("block_id", -1) if line_idx < _lines.size() else -1
+	var in_block: bool = bid >= 0
+	var is_block_start: bool = in_block and bid == line_idx
+	var is_block_end: bool = false
+	if in_block and _block_map.has(bid):
+		var members: Array = _block_map[bid]
+		is_block_end = line_idx == members[members.size() - 1]
+
+	# Background — brighter for current, dimmed for muted, tinted for blocks
 	var bg_color: Color
 	if is_muted:
 		bg_color = Color(0.06, 0.03, 0.03)
 	elif is_current:
 		bg_color = Color(0.07, 0.07, 0.11)
+	elif in_block:
+		bg_color = Color(0.05, 0.05, 0.09)  # Slightly brighter to show grouping
 	else:
 		bg_color = Color(0.04, 0.04, 0.07)
 	_panel.draw_rect(Rect2(x, y, w, h), bg_color)
 
-	# Left border accent — blue for current, red for muted
-	if is_current:
+	# Block bracket gutter — vertical bar with caps on first/last line
+	if in_block:
+		var bracket_x: float = x + 1.0
+		var bracket_color: Color = Color(0.35, 0.55, 0.85, 0.5) if not is_muted else Color(0.5, 0.2, 0.2, 0.4)
+		# Vertical bar spans the full line height
+		_panel.draw_rect(Rect2(bracket_x, y, 2, h), bracket_color)
+		# Top cap on first line of block
+		if is_block_start:
+			_panel.draw_rect(Rect2(bracket_x, y, 6, 1), bracket_color)
+		# Bottom cap on last line of block
+		if is_block_end:
+			_panel.draw_rect(Rect2(bracket_x, y + h - 1, 6, 1), bracket_color)
+	elif is_current:
+		# Left border accent — blue for current (standalone lines only)
 		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.4, 0.7, 1.0, 0.6))
 	elif is_muted:
 		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.6, 0.2, 0.2, 0.4))
 
 	# Line label: name + mute + viz indicator
+	# Continuation lines in a block show "..." instead of a label
 	var viz: String = _line_viz(line_idx)
-	var label: String = line_name
+	var label: String
+	if in_block and not is_block_start:
+		label = "..."
+	else:
+		label = line_name
 	var label_w: float = 32.0
 	var label_color: Color
 	if is_muted:
 		label_color = Color(0.5, 0.2, 0.2)
-		label = "x" + label
+		if is_block_start or not in_block:
+			label = "x" + label
 	elif is_current:
 		label_color = Color(0.5, 0.6, 0.8)
+	elif in_block:
+		label_color = Color(0.35, 0.45, 0.65)
 	else:
 		label_color = Color(0.3, 0.3, 0.4)
 	# Viz indicator: tiny character showing visualizer type

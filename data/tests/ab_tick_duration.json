@@ -1,0 +1,29 @@
+{
+  "name": "ab_tick_duration",
+  "description": "A/B: single note sustain — c4 repeated at cps=0.5, notes should not be unnaturally short",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_tick_duration",
+    "announce SUSTAIN TEST: c4 c4 c4 c4 (sawtooth, cps=0.5)",
+    "strudel highlights on",
+    "strudel edit note(\"c4 c4 c4 c4\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 3.0",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check strudel highlights check 0/1:[L1:c4]",
+    "check strudel highlights check 1/4:[L1:c4]",
+    "check strudel highlights check 1/2:[L1:c4]",
+    "check strudel highlights check 3/4:[L1:c4]",
+    "announce SUSTAIN TEST: Reference for comparison",
+    "strudel ref note(\"c4 c4 c4 c4\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "ab_play ref.wav",
+    "wait 10 unless silent 3.0",
+    "check ab_harmonics ref.wav ours.wav extract:match_pct > 80 label:harmonics",
+    "ab_show ref.wav ours.wav"
+  ]
+}

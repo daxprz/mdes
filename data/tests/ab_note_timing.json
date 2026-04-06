@@ -1,0 +1,29 @@
+{
+  "name": "ab_note_timing",
+  "description": "A/B: bass note timing — c2 rest eb2 f2 at cps=0.5, verify notes hit expected slots",
+  "script": [
+    "ab_dismiss",
+    "strudel stop",
+    "music off",
+    "wait 1",
+    "ab_dir ab_note_timing",
+    "strudel ref note(\"c2 ~ eb2 f2\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "announce REF: c2 ~ eb2 f2 (bass timing)",
+    "ab_play ref.wav",
+    "wait 10 unless silent 3.0",
+    "announce OURS: c2 ~ eb2 f2 (bass timing)",
+    "strudel highlights on",
+    "strudel edit note(\"c2 ~ eb2 f2\").s(\"sawtooth\").pianoroll() cps=0.5",
+    "strudel record start",
+    "wait 10 unless silent 3.0",
+    "strudel stop",
+    "music off",
+    "strudel record stop ours",
+    "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "check ab_harmonics ref.wav ours.wav extract:match_pct > 80 label:harmonics",
+    "check strudel highlights check 0/1:[L1:c2]",
+    "check strudel highlights check 1/2:[L1:eb2]",
+    "check strudel highlights check 3/4:[L1:f2]",
+    "ab_show ref.wav ours.wav"
+  ]
+}

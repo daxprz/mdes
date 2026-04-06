@@ -1103,6 +1103,9 @@ func _execute(command: String) -> String:
 		"ab_show":
 			return _cmd_ab_show(parts)
 
+		"ab_harmonics":
+			return _cmd_ab_harmonics(parts)
+
 		"ab_play":
 			# Play a WAV file from user://
 			# Usage: ab_play <filename.wav>
@@ -1675,6 +1678,97 @@ func _cmd_ab_show(parts: PackedStringArray) -> String:
 	var tex := ImageTexture.create_from_image(img)
 	_show_ab_overlay(tex)
 	return "OK: showing comparison (%dx%d)" % [img.get_width(), img.get_height()]
+
+
+func _cmd_ab_harmonics(parts: PackedStringArray) -> String:
+	## Run spectral harmonic analysis on two WAV files and return match percentage.
+	## Usage: ab_harmonics <ref.wav> <our.wav> [min_pct]
+	## Returns: "OK: match_pct=N (M/T harmonics, even: ref=R% ours=O%)"
+	##          "FAIL: match_pct=N (...)" if below min_pct
+	## The numeric value extractable by the check system is the match percentage.
+	if parts.size() < 3:
+		return "Usage: ab_harmonics <ref.wav> <our.wav> [min_pct]"
+
+	var ref_path: String = _ab_path(parts[1])
+	var our_path: String = _ab_path(parts[2])
+	var min_pct: float = float(parts[3]) if parts.size() > 3 else 80.0
+
+	if not FileAccess.file_exists(ref_path):
+		return "FAIL: ref not found: %s" % ref_path
+	if not FileAccess.file_exists(our_path):
+		return "FAIL: ours not found: %s" % our_path
+
+	# Generate the comparison PNG alongside the WAVs
+	var png_path: String = _ab_path("spectral_comparison.png")
+
+	# Write freq window data from last ab_compare (if available)
+	var freq_json_path: String = ""
+	if not _last_freq_windows.is_empty():
+		freq_json_path = _ab_path("freq_data.json")
+		var json_str: String = JSON.stringify(_last_freq_windows)
+		var f := FileAccess.open(freq_json_path, FileAccess.WRITE)
+		if f:
+			f.store_string(json_str)
+			f.close()
+
+	var py: String = "/var/tumu/venv/bin/python3"
+	var script: String = "/var/tumu/strudel-ref/spectral_compare.py"
+	var args: PackedStringArray = [script, ref_path, our_path, png_path]
+	if not freq_json_path.is_empty():
+		args.append(freq_json_path)
+	var output: Array = []
+	var exit_code: int = OS.execute(py, args, output, true)
+
+	if exit_code != 0:
+		return "FAIL: spectral_compare.py failed (exit=%d) %s" % [exit_code, str(output)]
+
+	# Parse stdout: "OK: /path/file.png (M match, N mismatch, S skipped, even: ref=R% ours=O%, zoom=Zhz)"
+	var stdout_text: String = str(output[0]) if output.size() > 0 else ""
+	var match_count: int = 0
+	var mismatch_count: int = 0
+	var skipped_count: int = 0
+	var ref_even: String = "?"
+	var our_even: String = "?"
+
+	# Extract numbers from the output line
+	var re_match := RegEx.new()
+	re_match.compile(r"(\d+)\s+match")
+	var re_mis := RegEx.new()
+	re_mis.compile(r"(\d+)\s+mismatch")
+	var re_skip := RegEx.new()
+	re_skip.compile(r"(\d+)\s+skipped")
+	var re_ref_even := RegEx.new()
+	re_ref_even.compile(r"ref=(\d+)%")
+	var re_our_even := RegEx.new()
+	re_our_even.compile(r"ours=(\d+)%")
+
+	var m := re_match.search(stdout_text)
+	if m:
+		match_count = int(m.get_string(1))
+	m = re_mis.search(stdout_text)
+	if m:
+		mismatch_count = int(m.get_string(1))
+	m = re_skip.search(stdout_text)
+	if m:
+		skipped_count = int(m.get_string(1))
+	m = re_ref_even.search(stdout_text)
+	if m:
+		ref_even = m.get_string(1)
+	m = re_our_even.search(stdout_text)
+	if m:
+		our_even = m.get_string(1)
+
+	var total: int = match_count + mismatch_count
+	var pct: float = (float(match_count) / float(total) * 100.0) if total > 0 else 0.0
+
+	var detail: String = "match_pct=%.0f (%d/%d harmonics, even: ref=%s%% ours=%s%%)" % [
+		pct, match_count, total, ref_even, our_even]
+	if skipped_count > 0:
+		detail += " [%d windows skipped]" % skipped_count
+
+	if pct >= min_pct:
+		return "OK: %s" % detail
+	return "FAIL: %s (need >= %.0f%%)" % [detail, min_pct]
 
 
 var _ab_overlay: CanvasLayer = null
@@ -2368,8 +2462,13 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			MusicDrawer._play_current()
 			return "OK: drawer set with %d lines, playing" % edit_lines.size()
 		_:
-			# Everything else is mini-notation
+			# Everything else is mini-notation (or JS-style expressions).
 			var mini_text: String = command.substr(command.find(" ") + 1).strip_edges()
+			# JS-style syntax (stack, note, s, sound wrappers) must go through
+			# the drawer's parser which handles these. Route via strudel edit.
+			var _lower: String = mini_text.split("(")[0].strip_edges().to_lower() if "(" in mini_text else ""
+			if _lower in ["stack", "note", "s", "sound", "n"]:
+				return _execute("strudel edit %s" % mini_text)
 			# Parse optional key=value parameters at the end
 			var mini_cps: float = -1.0
 			var mini_sound: String = ""
@@ -2444,6 +2543,8 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
   music play               — start adaptive layer system
   music stop               — stop adaptive layers
   music off                — stop ALL music (layers + strudel + MML)
+  music fx                 — show bus effects status
+  music fx reset           — disable all bus effects (lpf, hpf, reverb, etc.)
   music test               — play GDSiON test tone
   music score <name>       — play a named MML score
   music scores             — list all available scores
@@ -2597,6 +2698,18 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 			MusicManager.stop_direct()
 			MusicManager.strudel_stop()
 			return "OK: all music stopped"
+		"fx":
+			# Audio bus effects control: music fx reset | music fx status
+			if parts.size() < 3:
+				return _music_fx_status()
+			match parts[2].to_lower():
+				"reset", "off":
+					MusicManager.reset_music_effects()
+					return "OK: all bus effects reset"
+				"status":
+					return _music_fx_status()
+				_:
+					return "Usage: music fx reset|status"
 		"pat", "pattern":
 			# Play a Strudel pattern from note names
 			# music pat c4 e4 g4 c5          — sequence of notes
@@ -4736,3 +4849,37 @@ func _get_all_entities() -> Array:
 			seen[e.get_instance_id()] = true
 			result.append(e)
 	return result
+
+
+func _music_fx_status() -> String:
+	## Report current state of all Music bus audio effects.
+	var bus_idx: int = AudioServer.get_bus_index(MusicManager.MUSIC_BUS_NAME)
+	if bus_idx < 0:
+		return "Music bus not found"
+	var lines: Array = ["Music bus effects (bus=%d):" % bus_idx]
+	var slot_names: Array = ["LPF", "HPF", "Distort", "Reverb", "Delay", "Pan"]
+	for i in range(MusicManager.FX_SLOT_COUNT):
+		var enabled: bool = AudioServer.is_bus_effect_enabled(bus_idx, i)
+		var label: String = slot_names[i] if i < slot_names.size() else "Slot%d" % i
+		var detail: String = ""
+		if enabled:
+			var fx: Variant = AudioServer.get_bus_effect(bus_idx, i)
+			if fx is AudioEffectLowPassFilter:
+				detail = " cutoff=%.0f res=%.2f" % [fx.cutoff_hz, fx.resonance]
+			elif fx is AudioEffectHighPassFilter:
+				detail = " cutoff=%.0f res=%.2f" % [fx.cutoff_hz, fx.resonance]
+			elif fx is AudioEffectDistortion:
+				detail = " drive=%.2f" % fx.drive
+			elif fx is AudioEffectReverb:
+				detail = " room=%.2f wet=%.2f" % [fx.room_size, fx.wet]
+			elif fx is AudioEffectDelay:
+				detail = " feedback=%.2f" % fx.feedback
+			elif fx is AudioEffectPanner:
+				detail = " pan=%.2f" % fx.pan
+		lines.append("  [%d] %-8s %s%s" % [i, label, "ON" if enabled else "off", detail])
+	var ctrl: Dictionary = MusicManager._active_controls
+	if not ctrl.is_empty():
+		lines.append("Active controls: %s" % str(ctrl))
+	else:
+		lines.append("No active controls")
+	return "\n".join(lines)

@@ -20,6 +20,7 @@
     "music off",
     "strudel record stop ours",
     "check ab_compare ref.wav ours.wav 0.05 0.5 500 0",
+    "check ab_harmonics ref.wav ours.wav extract:match_pct > 80 label:harmonics",
     "check strudel highlights check 0/1:[L1:c4]",
     "check strudel highlights check 1/4:[L1:c4]",
     "check strudel highlights check 1/2:[L1:c4]",

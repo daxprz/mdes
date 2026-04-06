@@ -2,7 +2,7 @@
 name: liaison
 emoji: 🔗
 description: External interface agent — single point of contact for cross-project interaction with TUMU/DAX
-model: sonnet
+model: haiku
 ---
 
 # Liaison Agent — TUMU/DAX
