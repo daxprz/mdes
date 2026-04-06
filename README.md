@@ -203,6 +203,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.69
+**Audio headroom, soft-wrapping, gain control**
+
+- **Audio headroom fix**: SiON FM voices peaked at 0dBFS causing clipping on polyphonic passages and when mixed with other system audio. Added `AudioEffectAmplify` at -6dB as the first effect in the audio bus chain, reducing output before all other effects (including recorder). Result: 0% clipping across all test patterns (was 1.14% on melody, 45% on sawtooth chords).
+- **Gain control for SiON voices**: `.gain()` and `.velocity()` Strudel controls now affect SiON FM voices (previously only worked for sample playback). Gain adjusts the amplify effect relative to the -6dB headroom baseline.
+- **Soft-wrapping in music drawer**: long lines wrap visually at semantic boundaries with tiered priority: (1) before structural functions (`stack(`, `cat(`), (2) at method chain dots after `)`, (3) after commas in arg lists, (4) fallback at whitespace/operators. Continuation rows show ↩ indicator. Cursor, selection, and source highlights map correctly across wrapped rows.
+- **Effects chain reindexed**: gain effect at slot 0, all other effects shifted by 1. Status display includes gain level. Reset preserves gain (always enabled).
+
 ### v0.10.68
 **Harmonic analysis test checks, correct voice modules, multi-line blocks**
 

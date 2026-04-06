@@ -38,19 +38,24 @@ const INTENSITY_DECAY_RATE := 0.02
 # Reverb/delay are bus-level (same as Strudel's orbit-shared sends).
 # Filter/distortion are bus-level approximations of Strudel's per-note chains.
 const MUSIC_BUS_NAME := "Music"
-const FX_IDX_LPF := 0       ## AudioEffectLowPassFilter
-const FX_IDX_HPF := 1       ## AudioEffectHighPassFilter
-const FX_IDX_DISTORT := 2   ## AudioEffectDistortion (also handles crush)
-const FX_IDX_REVERB := 3    ## AudioEffectReverb
-const FX_IDX_DELAY := 4     ## AudioEffectDelay
-const FX_IDX_PAN := 5       ## AudioEffectPanner
-const FX_SLOT_COUNT := 6
+const FX_IDX_GAIN := 0      ## AudioEffectAmplify — headroom/gain control (always enabled)
+const FX_IDX_LPF := 1       ## AudioEffectLowPassFilter
+const FX_IDX_HPF := 2       ## AudioEffectHighPassFilter
+const FX_IDX_DISTORT := 3   ## AudioEffectDistortion (also handles crush)
+const FX_IDX_REVERB := 4    ## AudioEffectReverb
+const FX_IDX_DELAY := 5     ## AudioEffectDelay
+const FX_IDX_PAN := 6       ## AudioEffectPanner
+const FX_SLOT_COUNT := 7
 ## Minimum intensity to activate bass layer
 const BASS_THRESHOLD := 0.25
 ## Minimum intensity to activate drum layer
 const DRUMS_THRESHOLD := 0.45
 ## Minimum intensity to activate melody layer
 const MELODY_THRESHOLD := 0.65
+## Default headroom for SiON output.
+## SiON FM voices can peak at 0dBFS which clips when mixed with other audio.
+## -6dB gives ~4x headroom for polyphonic voices and system-level mixing.
+const SION_HEADROOM_DB := -6.0
 ## BPM range
 const BPM_MIN := 70
 const BPM_MAX := 160
@@ -89,6 +94,7 @@ var _next_track_id: int = 10
 ## Audio effects bus index (-1 = not set up yet)
 var _music_bus_idx: int = -1
 ## Effect instances (stored for runtime parameter tweaking)
+var _fx_gain: Variant = null          ## AudioEffectAmplify (headroom)
 var _fx_lpf: Variant = null           ## AudioEffectLowPassFilter
 var _fx_hpf: Variant = null           ## AudioEffectHighPassFilter
 var _fx_distort: Variant = null       ## AudioEffectDistortion
@@ -185,10 +191,14 @@ func gen_presets():
 
 	add_child(driver)
 
+	# Note: SiON driver's "volume" property doesn't affect audio output level.
+	# Headroom is applied via AudioEffectAmplify in the effects chain (_setup_audio_bus).
+
 	var version: String = str(helper.get_ver())
 	var flavor: String = str(helper.get_flavor())
 	_version_str = "v%s-%s" % [version, flavor]
-	print("MUSIC: SiON driver created (%s)" % _version_str)
+	print("MUSIC: SiON driver created (%s) master_vol=%.2f (%.0fdB)" % [
+		_version_str, headroom_linear, SION_HEADROOM_DB])
 
 	# Generate voice presets
 	presets = helper.gen_presets()
@@ -659,11 +669,21 @@ func _setup_audio_bus() -> void:
 			DebugOverlay.log("music/effects", null, "MUSIC_FX: SiON has no bus property — effects on Master")
 			print("MUSIC_FX: Warning — SiON driver lacks bus property, using Master bus")
 
+	# Bus volume at 0dB — headroom is applied via the gain effect in the chain.
+	AudioServer.set_bus_volume_db(_music_bus_idx, 0.0)
+
 	# Clear any existing effects on our bus (idempotent setup)
 	while AudioServer.get_bus_effect_count(_music_bus_idx) > 0:
 		AudioServer.remove_bus_effect(_music_bus_idx, 0)
 
-	# Slot 0: Low-pass filter
+	# Slot 0: Gain (headroom) — always enabled, reduces SiON output to prevent clipping.
+	# Applied first in chain so all downstream effects (including recorder) see clean signal.
+	_fx_gain = AudioEffectAmplify.new()
+	_fx_gain.volume_db = SION_HEADROOM_DB
+	AudioServer.add_bus_effect(_music_bus_idx, _fx_gain)
+	AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_GAIN, true)
+
+	# Slot 1: Low-pass filter
 	_fx_lpf = AudioEffectLowPassFilter.new()
 	_fx_lpf.cutoff_hz = 20500.0   # Wide open = no audible filtering
 	_fx_lpf.resonance = 0.5
@@ -831,14 +851,33 @@ func set_music_effects(controls: Dictionary) -> void:
 	else:
 		AudioServer.set_bus_effect_enabled(_music_bus_idx, FX_IDX_PAN, false)
 
+	# -- Gain (AudioEffectAmplify headroom) --
+	if controls.has("gain") or controls.has("velocity"):
+		var gain: float = float(controls.get("gain", controls.get("velocity", 1.0)))
+		gain = clampf(gain, 0.0, 2.0)
+		# Convert linear gain to dB offset on top of base headroom
+		var gain_db: float = SION_HEADROOM_DB + (20.0 * log(maxf(gain, 0.001)) / log(10.0))
+		if _fx_gain:
+			_fx_gain.volume_db = gain_db
+		DebugOverlay.log("music/effects", null, "MUSIC_FX: gain=%.2f (%.1fdB)", [gain, gain_db])
+	else:
+		# No explicit gain — restore default headroom
+		if _fx_gain:
+			_fx_gain.volume_db = SION_HEADROOM_DB
+
 
 func reset_music_effects() -> void:
-	## Disable all audio effects on the Music bus.
+	## Disable all audio effects on the Music bus (except gain which stays enabled).
 	if _music_bus_idx < 0:
 		return
 	for i in range(FX_SLOT_COUNT):
+		if i == FX_IDX_GAIN:
+			continue  # Keep gain/headroom effect always enabled
 		AudioServer.set_bus_effect_enabled(_music_bus_idx, i, false)
 	_active_controls.clear()
+	# Restore default headroom on gain effect
+	if _fx_gain:
+		_fx_gain.volume_db = SION_HEADROOM_DB
 	# Also clear the trigger's last-known state so it re-applies on next hap
 	if _sion_trigger:
 		_sion_trigger._last_fx.clear()
@@ -909,13 +948,14 @@ func get_effects_status() -> String:
 		return "Effects: not initialized"
 	var lines: Array[String] = ["Effects (bus='%s' idx=%d):" % [
 		AudioServer.get_bus_name(_music_bus_idx), _music_bus_idx]]
-	var names := ["lpf", "hpf", "distort", "reverb", "delay", "pan"]
+	var names := ["gain", "lpf", "hpf", "distort", "reverb", "delay", "pan"]
 	for i in range(FX_SLOT_COUNT):
 		var enabled: bool = AudioServer.is_bus_effect_enabled(_music_bus_idx, i)
 		var state: String = "ON" if enabled else "off"
 		var detail: String = ""
 		if enabled:
 			match i:
+				FX_IDX_GAIN: detail = " %.1fdB" % [_fx_gain.volume_db]
 				FX_IDX_LPF: detail = " cutoff=%.0f q=%.2f" % [_fx_lpf.cutoff_hz, _fx_lpf.resonance]
 				FX_IDX_HPF: detail = " cutoff=%.0f q=%.2f" % [_fx_hpf.cutoff_hz, _fx_hpf.resonance]
 				FX_IDX_DISTORT: detail = " mode=%d drive=%.2f" % [_fx_distort.mode, _fx_distort.drive]

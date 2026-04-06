@@ -203,7 +203,7 @@ const EFFECT_KEYS := [
 	"room", "roomsize", "roomlp",
 	"delay", "delaytime", "delayfeedback",
 	"distort", "crush", "shape",
-	"pan",
+	"pan", "gain", "velocity",
 ]
 ## Per-note ADSR keys — these are NOT bus effects, they modify the SiON voice
 ## envelope on a per-note basis. Extracted in _do_emit, not set_music_effects.
@@ -962,6 +962,7 @@ func _resolve_voice(value: Variant) -> Variant:
 
 
 func _resolve_velocity(value: Variant) -> float:
+	## Returns explicit gain/velocity from hap value, or 1.0 if not specified.
 	if value is Dictionary:
 		return float(value.get("velocity", value.get("gain", 1.0)))
 	return 1.0

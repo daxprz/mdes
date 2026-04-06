@@ -227,6 +227,104 @@ func _make_line(text: String = "", name: String = "", muted: bool = false, viz: 
 	return {"text": text, "name": name, "muted": muted, "viz": viz, "viz_options": {}, "pattern_offset": 0, "block_id": -1}
 
 
+const WRAP_INDENT := 12.0  ## Extra indent for soft-wrapped continuation rows
+
+
+## Strudel structural keywords that act as block-level splits.
+const WRAP_STRUCTURAL_FUNCS: PackedStringArray = ["stack(", "cat(", "slowcat(", "sequence(", "polymeter("]
+
+
+func _find_best_wrap_break(text: String, max_pos: int) -> int:
+	## Find the best break position within text[0..max_pos] using Strudel-aware
+	## semantic priorities. Returns the character index to break AT.
+	##
+	## Priority tiers (first match wins):
+	##   1. Before a structural function call: stack(, cat(, slowcat(, etc.
+	##   2. Before '.' after ')' — method chain boundary: ).lpf(800) → break before '.'
+	##   3. After a comma (possibly followed by space) — argument list split
+	##   4. At any of the above, only if (1)-(3) are found within the search window
+	var search_from: int = maxi(max_pos - 40, 1)  # Search back up to 40 chars
+
+	# Tier 1: Before a structural function call (stack, cat, etc.)
+	for j in range(max_pos, search_from, -1):
+		for kw in WRAP_STRUCTURAL_FUNCS:
+			if j + kw.length() <= text.length() and text.substr(j, kw.length()) == kw:
+				if j > 0:  # Don't break at position 0
+					return j
+
+	# Tier 2: Before '.' that follows ')' — method chain boundary
+	# Breaks ".lpf(800)" onto a new line after the previous chain link closes.
+	for j in range(max_pos, search_from, -1):
+		if j < text.length() and text[j] == "." and j > 0 and text[j - 1] == ")":
+			return j
+
+	# Tier 3: After comma — argument list boundary
+	# Prefer "after comma+space" but also accept "after comma"
+	for j in range(max_pos, search_from, -1):
+		if j > 1 and text[j - 2] == "," and text[j - 1] == " ":
+			return j
+		if j > 0 and text[j - 1] == "," and (j >= text.length() or text[j] != " "):
+			return j
+
+	# Tier 4 (fallback): at any space, paren, or operator
+	for j in range(max_pos, search_from, -1):
+		if j > 0 and text[j - 1] in " )|+-*/":
+			return j
+
+	return max_pos
+
+
+func _compute_wrap_rows(text: String, font: Font, font_size: int, max_w: float) -> Array:
+	## Split a line's text into visual rows for soft-wrapping.
+	## Returns Array of {text: String, char_offset: int} where char_offset
+	## is the character index in the original text where this row starts.
+	## Prefers breaking at Strudel-semantic boundaries (method chains, commas, parens).
+	if text.is_empty():
+		return [{"text": "", "char_offset": 0}]
+	var full_w: float = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	if full_w <= max_w:
+		return [{"text": text, "char_offset": 0}]
+	var rows: Array = []
+	var pos: int = 0
+	var is_first: bool = true
+	while pos < text.length():
+		var remaining: String = text.substr(pos)
+		var avail_w: float = max_w if is_first else max_w - WRAP_INDENT
+		var row_w: float = font.get_string_size(remaining, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		if row_w <= avail_w:
+			rows.append({"text": remaining, "char_offset": pos})
+			break
+		# Binary search for the max chars that fit within avail_w
+		var lo: int = 1
+		var hi: int = remaining.length()
+		while lo < hi:
+			var mid: int = (lo + hi + 1) / 2
+			var w: float = font.get_string_size(remaining.substr(0, mid), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			if w <= avail_w:
+				lo = mid
+			else:
+				hi = mid - 1
+		# lo = max chars that fit. Find the best semantic break point.
+		var break_at: int = _find_best_wrap_break(remaining, lo)
+		if break_at <= 0:
+			break_at = maxi(1, lo)
+		rows.append({"text": remaining.substr(0, break_at), "char_offset": pos})
+		pos += break_at
+		is_first = false
+	if rows.is_empty():
+		rows.append({"text": text, "char_offset": 0})
+	return rows
+
+
+func _char_to_wrap_row(char_idx: int, wrap_rows: Array) -> Dictionary:
+	## Map a character index in the full line text to a wrap row index and local offset.
+	## Returns {row: int, local_offset: int}.
+	for i in range(wrap_rows.size() - 1, -1, -1):
+		if char_idx >= wrap_rows[i]["char_offset"]:
+			return {"row": i, "local_offset": char_idx - wrap_rows[i]["char_offset"]}
+	return {"row": 0, "local_offset": char_idx}
+
+
 func _compute_blocks() -> void:
 	## Scan lines for multi-line blocks by tracking paren/bracket depth.
 	## Lines with unclosed parens are continuation lines of the block that opened them.
@@ -2183,16 +2281,15 @@ func _draw_panel() -> void:
 	var ey: float = TOOLBAR_HEIGHT + 4.0
 	var draw_y: float = ey
 	# Calculate how many lines fit in the available panel height
-	var available_h: float = ph - ey - 4.0
-	var max_visible: int = maxi(MIN_VISIBLE_LINES, int(available_h / LINE_HEIGHT))
+	# With soft-wrapping, we can't pre-compute a fixed line count — draw until full.
 
-	for i in range(_editor_scroll, mini(_editor_scroll + max_visible, _lines.size())):
+	for i in range(_editor_scroll, _lines.size()):
 		var is_current: bool = (i == _current_line)
 		var viz: String = _line_viz(i)
 
-		# Draw the code line
-		_draw_editor_line_at(px + 8, draw_y, pw - 16, LINE_HEIGHT, font, i, is_current)
-		draw_y += LINE_HEIGHT
+		# Draw the code line (returns actual height — may be > LINE_HEIGHT for wrapped lines)
+		var line_h: float = _draw_editor_line_at(px + 8, draw_y, pw - 16, LINE_HEIGHT, font, i, is_current)
+		draw_y += line_h
 
 		# Draw the per-line visualizer strip (if enabled).
 		# For multi-line blocks, only show the viz on the block's first line
@@ -2222,13 +2319,16 @@ func _draw_panel() -> void:
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.5))
 
 
-func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> void:
-	## Draw one editor line with source highlighting, name, and mute state.
+func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> float:
+	## Draw one editor line with source highlighting, name, mute state, and soft-wrapping.
 	## Lines that belong to a multi-line block get a bracket gutter and tinted background.
+	## Long lines soft-wrap into multiple visual rows with a wrap indicator.
+	## Returns the total height consumed (may be > h for wrapped lines).
 	var line_text: String = _lines[line_idx].get("text", "") if line_idx < _lines.size() else ""
 	var is_muted: bool = _line_muted(line_idx)
 	var line_name: String = _line_name(line_idx)
 	var font_size: int = 12
+	var label_w: float = 32.0
 
 	# Block membership
 	var bid: int = _lines[line_idx].get("block_id", -1) if line_idx < _lines.size() else -1
@@ -2239,45 +2339,55 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 		var members: Array = _block_map[bid]
 		is_block_end = line_idx == members[members.size() - 1]
 
-	# Background — brighter for current, dimmed for muted, tinted for blocks
+	# Compute soft-wrap rows
+	var text_w: float = w - label_w - 4
+	var wrap_rows: Array = _compute_wrap_rows(line_text, font, font_size, text_w)
+	var num_rows: int = wrap_rows.size()
+	var total_h: float = h * num_rows
+	var is_wrapped: bool = num_rows > 1
+
+	# Background — spans all visual rows
 	var bg_color: Color
 	if is_muted:
 		bg_color = Color(0.06, 0.03, 0.03)
 	elif is_current:
 		bg_color = Color(0.07, 0.07, 0.11)
 	elif in_block:
-		bg_color = Color(0.05, 0.05, 0.09)  # Slightly brighter to show grouping
+		bg_color = Color(0.05, 0.05, 0.09)
 	else:
 		bg_color = Color(0.04, 0.04, 0.07)
-	_panel.draw_rect(Rect2(x, y, w, h), bg_color)
+	_panel.draw_rect(Rect2(x, y, w, total_h), bg_color)
 
-	# Block bracket gutter — vertical bar with caps on first/last line
+	# Block bracket gutter — vertical bar with caps spanning all visual rows
 	if in_block:
 		var bracket_x: float = x + 1.0
 		var bracket_color: Color = Color(0.35, 0.55, 0.85, 0.5) if not is_muted else Color(0.5, 0.2, 0.2, 0.4)
-		# Vertical bar spans the full line height
-		_panel.draw_rect(Rect2(bracket_x, y, 2, h), bracket_color)
-		# Top cap on first line of block
+		_panel.draw_rect(Rect2(bracket_x, y, 2, total_h), bracket_color)
 		if is_block_start:
 			_panel.draw_rect(Rect2(bracket_x, y, 6, 1), bracket_color)
-		# Bottom cap on last line of block
 		if is_block_end:
-			_panel.draw_rect(Rect2(bracket_x, y + h - 1, 6, 1), bracket_color)
+			_panel.draw_rect(Rect2(bracket_x, y + total_h - 1, 6, 1), bracket_color)
 	elif is_current:
-		# Left border accent — blue for current (standalone lines only)
-		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.4, 0.7, 1.0, 0.6))
+		_panel.draw_rect(Rect2(x, y, 2, total_h), Color(0.4, 0.7, 1.0, 0.6))
 	elif is_muted:
-		_panel.draw_rect(Rect2(x, y, 2, h), Color(0.6, 0.2, 0.2, 0.4))
+		_panel.draw_rect(Rect2(x, y, 2, total_h), Color(0.6, 0.2, 0.2, 0.4))
 
-	# Line label: name + mute + viz indicator
-	# Continuation lines in a block show "..." instead of a label
+	# Soft-wrap gutter — thin dotted line on wrapped continuation rows
+	if is_wrapped:
+		var wrap_color: Color = Color(0.5, 0.4, 0.2, 0.35) if is_current else Color(0.4, 0.3, 0.2, 0.25)
+		for ri in range(1, num_rows):
+			var ry: float = y + h * ri
+			# Small wrap arrow in the label area
+			_panel.draw_string(font, Vector2(x + label_w - 8, ry + h * 0.72),
+				String.chr(0x21A9), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, wrap_color)
+
+	# Line label (first visual row only)
 	var viz: String = _line_viz(line_idx)
 	var label: String
 	if in_block and not is_block_start:
 		label = "..."
 	else:
 		label = line_name
-	var label_w: float = 32.0
 	var label_color: Color
 	if is_muted:
 		label_color = Color(0.5, 0.2, 0.2)
@@ -2289,7 +2399,6 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 		label_color = Color(0.35, 0.45, 0.65)
 	else:
 		label_color = Color(0.3, 0.3, 0.4)
-	# Viz indicator: tiny character showing visualizer type
 	var viz_char: String = ""
 	match viz:
 		VIZ_PIANOROLL: viz_char = "P"
@@ -2303,55 +2412,7 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 	_panel.draw_string(font, Vector2(x + 3, y + h * 0.72), label,
 		HORIZONTAL_ALIGNMENT_LEFT, label_w, 8, label_color)
 
-	var text_x: float = x + label_w + 2
-	var text_y: float = y + h * 0.72
-	var text_w: float = w - label_w - 4
-
-	# Draw source highlights behind text (active notes glow)
-	# Keys are "line_idx:start:end" where start/end are offsets into the PATTERN text.
-	# We need to shift them by pattern_offset to align with the displayed line text.
-	var pat_offset: int = _lines[line_idx].get("pattern_offset", 0) if line_idx < _lines.size() else 0
-	for key in _active_locations:
-		var loc_parts: PackedStringArray = key.split(":")
-		if loc_parts.size() != 3:
-			continue
-		var loc_line: int = int(loc_parts[0])
-		if loc_line != line_idx:
-			continue
-		# Shift parser offsets to line text space
-		var loc_start: int = int(loc_parts[1]) + pat_offset
-		var loc_end: int = int(loc_parts[2]) + pat_offset
-		# Only highlight if this location falls within this line's text
-		if loc_start >= line_text.length() or loc_end <= 0:
-			continue
-		loc_start = clampi(loc_start, 0, line_text.length())
-		loc_end = clampi(loc_end, 0, line_text.length())
-		var pre_text: String = line_text.substr(0, loc_start)
-		var highlight_text: String = line_text.substr(loc_start, loc_end - loc_start)
-		var pre_w: float = font.get_string_size(pre_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var hl_w: float = font.get_string_size(highlight_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var hap: StrudelHap = _active_locations[key]
-		var progress: float = 0.0
-		if hap.whole != null:
-			var dur: float = hap.get_duration().to_float()
-			if dur > 0:
-				progress = clampf((_current_time - hap.w().begin.to_float()) / dur, 0.0, 1.0)
-		var alpha: float = lerpf(0.5, 0.1, progress)
-		_panel.draw_rect(Rect2(text_x + pre_w, y + 2, hl_w, h - 4),
-			Color(0.3, 0.6, 1.0, alpha))
-
-	# Draw selection highlight (only on current line)
-	if is_current and _has_selection():
-		var sel_from: int = mini(_select_start, _editor_cursor)
-		var sel_to: int = maxi(_select_start, _editor_cursor)
-		var sel_x_from: float = text_x + font.get_string_size(
-			line_text.substr(0, sel_from), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		var sel_x_to: float = text_x + font.get_string_size(
-			line_text.substr(0, sel_to), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		_panel.draw_rect(Rect2(sel_x_from, y + 2, sel_x_to - sel_x_from, h - 4),
-			Color(0.3, 0.5, 0.8, 0.4))
-
-	# Draw the text
+	# Text color
 	var text_color: Color
 	if is_muted:
 		text_color = Color(0.4, 0.3, 0.3)
@@ -2359,14 +2420,87 @@ func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, li
 		text_color = Color(0.4, 0.5, 0.4)
 	else:
 		text_color = Color(0.9, 0.9, 0.95)
-	_panel.draw_string(font, Vector2(text_x, text_y), line_text,
-		HORIZONTAL_ALIGNMENT_LEFT, text_w, font_size, text_color)
 
-	# Draw cursor (only on current line, blinking)
-	if is_current and _editor_focused and int(_cursor_blink * 2.0) % 2 == 0:
-		var cursor_text: String = line_text.substr(0, _editor_cursor)
-		var cursor_x: float = text_x + font.get_string_size(cursor_text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
-		_panel.draw_line(Vector2(cursor_x, y + 3), Vector2(cursor_x, y + h - 3), Color(1.0, 0.8, 0.2), 1.5)
+	# Draw source highlights, selection, text, and cursor for each wrap row
+	var pat_offset: int = _lines[line_idx].get("pattern_offset", 0) if line_idx < _lines.size() else 0
+
+	for ri in range(num_rows):
+		var row: Dictionary = wrap_rows[ri]
+		var row_text: String = row["text"]
+		var row_char_off: int = row["char_offset"]
+		var row_y: float = y + h * ri
+		var row_text_x: float = x + label_w + 2 + (WRAP_INDENT if ri > 0 else 0.0)
+		var row_text_y: float = row_y + h * 0.72
+		var row_text_w: float = text_w - (WRAP_INDENT if ri > 0 else 0.0)
+
+		# Source highlights — map global char offsets to this row
+		for key in _active_locations:
+			var loc_parts: PackedStringArray = key.split(":")
+			if loc_parts.size() != 3:
+				continue
+			if int(loc_parts[0]) != line_idx:
+				continue
+			var loc_start: int = int(loc_parts[1]) + pat_offset
+			var loc_end: int = int(loc_parts[2]) + pat_offset
+			if loc_start >= line_text.length() or loc_end <= 0:
+				continue
+			loc_start = clampi(loc_start, 0, line_text.length())
+			loc_end = clampi(loc_end, 0, line_text.length())
+			# Intersect with this row's character range
+			var row_end_off: int = row_char_off + row_text.length()
+			if loc_end <= row_char_off or loc_start >= row_end_off:
+				continue
+			var hl_start: int = maxi(loc_start, row_char_off) - row_char_off
+			var hl_end: int = mini(loc_end, row_end_off) - row_char_off
+			var pre_w: float = font.get_string_size(row_text.substr(0, hl_start), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			var hl_w: float = font.get_string_size(row_text.substr(hl_start, hl_end - hl_start), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+			var hap: StrudelHap = _active_locations[key]
+			var progress: float = 0.0
+			if hap.whole != null:
+				var dur: float = hap.get_duration().to_float()
+				if dur > 0:
+					progress = clampf((_current_time - hap.w().begin.to_float()) / dur, 0.0, 1.0)
+			var alpha: float = lerpf(0.5, 0.1, progress)
+			_panel.draw_rect(Rect2(row_text_x + pre_w, row_y + 2, hl_w, h - 4),
+				Color(0.3, 0.6, 1.0, alpha))
+
+		# Selection highlight — map to this row
+		if is_current and _has_selection():
+			var sel_from: int = mini(_select_start, _editor_cursor)
+			var sel_to: int = maxi(_select_start, _editor_cursor)
+			var row_end_off: int = row_char_off + row_text.length()
+			if sel_to > row_char_off and sel_from < row_end_off:
+				var vis_from: int = maxi(sel_from, row_char_off) - row_char_off
+				var vis_to: int = mini(sel_to, row_end_off) - row_char_off
+				var sx_from: float = row_text_x + font.get_string_size(
+					row_text.substr(0, vis_from), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+				var sx_to: float = row_text_x + font.get_string_size(
+					row_text.substr(0, vis_to), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+				_panel.draw_rect(Rect2(sx_from, row_y + 2, sx_to - sx_from, h - 4),
+					Color(0.3, 0.5, 0.8, 0.4))
+
+		# Draw row text
+		_panel.draw_string(font, Vector2(row_text_x, row_text_y), row_text,
+			HORIZONTAL_ALIGNMENT_LEFT, row_text_w, font_size, text_color)
+
+		# Cursor (only on the row containing the cursor position)
+		if is_current and _editor_focused and int(_cursor_blink * 2.0) % 2 == 0:
+			var row_end_off: int = row_char_off + row_text.length()
+			# Cursor is on this row if its char offset falls within [row_char_off, row_end_off]
+			# (use <= for end-of-row to allow cursor at the end of the last row)
+			var cursor_on_row: bool
+			if ri == num_rows - 1:
+				cursor_on_row = _editor_cursor >= row_char_off and _editor_cursor <= row_end_off
+			else:
+				cursor_on_row = _editor_cursor >= row_char_off and _editor_cursor < row_end_off
+			if cursor_on_row:
+				var local_cursor: int = _editor_cursor - row_char_off
+				var cursor_x: float = row_text_x + font.get_string_size(
+					row_text.substr(0, local_cursor), HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+				_panel.draw_line(Vector2(cursor_x, row_y + 3), Vector2(cursor_x, row_y + h - 3),
+					Color(1.0, 0.8, 0.2), 1.5)
+
+	return total_h
 
 
 func _draw_line_viz(x: float, y: float, w: float, h: float, font: Font, line_idx: int, viz_type: String) -> void:
