@@ -203,6 +203,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.67
+**Synthesized drum kit, sample playback, title music timing fix**
+
+- **Sample library**: 13 synthesized drum samples (bd, sd, hh, oh, cp, rim, cr, rd, lt, mt, ht, sh, cb) generated from PCM math at startup. `s("bd sd hh cp")` plays actual drum sounds instead of FM voice proxies.
+- **External sample loading**: drop `.wav`/`.ogg` files in `data/samples/<name>/` subdirectories to add custom samples. External samples override synthesized ones.
+- **AudioStreamPlayer pool**: up to 16 concurrent sample voices with automatic voice stealing, routed through the Music bus for shared effects (reverb, delay, filter).
+- **Sample-aware note routing**: drum voice names bypass SiON entirely — `_do_emit()` checks sample library before `note_on()`. Non-pitched drums (sd, hh, etc.) no longer require valid MIDI note numbers.
+- **Title music timing fix**: intro_light now plays in note mode (per-note dispatch) instead of batch MML — fixes mangled timing from the batch compiler's `l<N>` equal-spacing assumption on multi-layer patterns.
+- **Batch mode restored after title**: subsequent patterns (AB tests, drawer edits) use batch mode with correct MML note durations.
+- **RCON**: `strudel samples` lists all available sample names.
+- **Debug**: `music/samples` aspect for sample playback diagnostics.
+
 ### v0.10.66
 **PSG saw/square voices, intro_dark rebalanced**
 

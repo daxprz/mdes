@@ -12,12 +12,20 @@ var _voices: Dictionary = {}   ## name -> SiONVoice
 var batch_cycle_count: int = 1 ## Actual cycles in current batch WAV (set by start_batch_from_tracks)
 var _active_notes: Dictionary = {} ## track_id -> scheduled_off_time
 
+## Sample library for drum/percussion playback (PCM-synthesized + external .wav)
+var _sample_library: SampleLibrary = null
+
 
 func _init(p_driver: Variant, p_presets: Variant) -> void:
 	driver = p_driver
 	presets = p_presets
 	_setup_voices()
 	_batch_compiler = MmlBatchCompiler.new(self)
+
+
+func init_sample_library(parent: Node) -> void:
+	## Create the sample library (must be called after constructor since we need a Node parent).
+	_sample_library = SampleLibrary.new(parent)
 
 
 func _setup_voices() -> void:
@@ -253,7 +261,12 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 		return
 
 	var note_num: int = _resolve_note(hap.value)
-	if note_num < 0:
+
+	# For sample voices, note_num -1 is OK (drums don't need a pitch).
+	# For SiON voices, we must have a valid MIDI note.
+	var voice_name_check: String = _resolve_voice_name(hap.value)
+	var is_sample: bool = _sample_library != null and _sample_library.has_sample(voice_name_check)
+	if note_num < 0 and not is_sample:
 		return
 
 	var voice: Variant = _resolve_voice(hap.value)
@@ -364,6 +377,17 @@ func start_batch_from_tracks(tracks: Array, cps: float) -> void:
 
 		all_onset_haps.sort_custom(MmlBatchCompiler._sort_by_onset)
 
+		# Route: sample voices play per-note via sample library (skip MML/oscillator)
+		var use_sample: bool = _sample_library != null and _sample_library.has_sample(voice_name)
+		if use_sample:
+			# Samples are played per-note via the cyclist's trigger() → _do_emit() path.
+			# In batch mode, we pre-schedule them here instead.
+			_schedule_batch_samples(all_onset_haps, cps, gain)
+			total_notes += all_onset_haps.size()
+			DebugOverlay.log("music/batch", null, "BATCH: track '%s' → samples (%d notes)" % [
+				track.get("name", "?"), all_onset_haps.size()])
+			continue
+
 		# Route: oscillator types (or default/no voice) bypass SiON entirely
 		var use_osc: bool = voice_name.is_empty() or StrudelOscillator.is_oscillator(voice_name)
 		if use_osc:
@@ -437,6 +461,45 @@ func start_batch_from_tracks(tracks: Array, cps: float) -> void:
 	elif osc_groups.is_empty():
 		DebugOverlay.log("music/batch", null, "BATCH: nothing to play")
 	_batch_dispatched = true
+
+
+func _schedule_batch_samples(haps: Array, cps: float, gain: float) -> void:
+	## Schedule sample playback for batch mode. Samples are one-shot and don't loop,
+	## so we use a Timer-based approach: compute onset times and queue them.
+	## For short patterns, this provides correct timing with the cyclist.
+	if not _sample_library:
+		return
+
+	var cycle_dur: float = 1.0 / cps
+	for hap in haps:
+		var voice_name: String = _resolve_voice_name(hap.value)
+		if not _sample_library.has_sample(voice_name):
+			continue
+		var note_num: int = _resolve_note(hap.value)
+		var onset: float = hap.w().begin.to_float() if hap.whole != null else 0.0
+		var dur: float = hap.get_duration().to_float() * cycle_dur
+
+		# Merge track-level gain into hap value so _do_emit sees it
+		var hap_value: Variant = hap.value
+		if gain < 0.99 and hap_value is Dictionary:
+			hap_value = hap_value.duplicate()
+			hap_value["gain"] = float(hap_value.get("gain", 1.0)) * gain
+
+		# For batch mode, we fire samples immediately at their onset offset.
+		# The cyclist handles cycling — we just need onset-relative scheduling.
+		# Wrap onset to [0, batch_cycle_count) and compute delay.
+		var onset_sec: float = fmod(onset, float(BATCH_RENDER_CYCLES)) * cycle_dur
+		# Queue via the pending notes mechanism (same deferred dispatch)
+		var now_ms: float = Time.get_ticks_msec()
+		_pending_notes.append({
+			"emit_at_ms": now_ms + onset_sec * 1000.0,
+			"note_num": note_num,
+			"voice": null,  # null voice — sample path in _do_emit
+			"length_ticks": dur * 4.0,  # Approximate
+			"hap_value": hap_value,
+			"target_time": onset_sec,
+			"cycle_pos": onset,
+		})
 
 
 func start_batch_playback(pattern: StrudelPattern, cps: float) -> void:
@@ -542,8 +605,10 @@ func stop_oscillator() -> void:
 
 
 func stop_all_sequences() -> void:
-	## Stop all active batch-mode sequence tracks, oscillator, and clear buffers.
+	## Stop all active batch-mode sequence tracks, oscillator, samples, and clear buffers.
 	stop_oscillator()
+	if _sample_library:
+		_sample_library.stop_all()
 	DebugOverlay.log("music/batch", null, "BATCH_DBG: stop_all_sequences (active=%d, retiring=%d, streaming=%s)" % [
 		_active_tracks.size(), _retiring_tracks.size(), str(MusicManager._sion_streaming)])
 	if MusicManager._sion_streaming and driver:
@@ -609,48 +674,61 @@ func _do_emit(note_num: int, voice: Variant, length_ticks: float,
 			  hap_value: Variant, target_time: float, cycle_pos: float) -> void:
 	## Actually fire note_on on the SiON driver and record timing.
 	## If hap_value has ADSR controls, clone the voice and apply custom envelope.
+	## If the voice name is a sample, route to SampleLibrary instead of SiON.
 	var emit_ms: float = Time.get_ticks_msec()
-	var final_voice: Variant = voice
 
-	# Per-note ADSR: extract attack/decay/sustain/release from hap value
-	if hap_value is Dictionary:
-		var has_adsr: bool = false
-		var att: float = -1.0
-		var dec: float = -1.0
-		var sus: float = -1.0
-		var rel: float = -1.0
-		for key in ["attack", "att"]:
-			if hap_value.has(key):
-				att = float(hap_value[key])
-				has_adsr = true
-		for key in ["decay", "dec"]:
-			if hap_value.has(key):
-				dec = float(hap_value[key])
-				has_adsr = true
-		for key in ["sustain", "sus"]:
-			if hap_value.has(key):
-				sus = float(hap_value[key])
-				has_adsr = true
-		for key in ["release", "rel"]:
-			if hap_value.has(key):
-				rel = float(hap_value[key])
-				has_adsr = true
+	# Check if this note should be played as a sample instead of SiON
+	var voice_name: String = _resolve_voice_name(hap_value)
+	if _sample_library != null and _sample_library.has_sample(voice_name):
+		var gain: float = _resolve_velocity(hap_value)
+		var bpm: float = maxf(MusicManager._cyclist.cps * 120.0, 30.0) if MusicManager._cyclist != null else 120.0
+		var dur_sec: float = length_ticks / (bpm * 4.0 / 60.0)
+		_sample_library.play_sample(voice_name, note_num, gain, dur_sec)
+		# Still record timing and apply effects below
+	else:
+		# SiON path: apply ADSR envelope and note_on
+		var final_voice: Variant = voice
 
-		if has_adsr and voice != null:
-			# Clone the voice and apply custom envelope.
-			# SiON envelope rates: 0 = slowest, 63 = instant.
-			# Strudel uses seconds. Convert: rate = 63 - clamp(seconds * 10, 0, 62)
-			# (0s → rate 63 instant, 6.2s → rate 1 very slow)
-			final_voice = voice.call("duplicate") if voice.has_method("duplicate") else voice
-			if final_voice != voice:  # Only if clone succeeded
-				var ar: int = _seconds_to_rate(att) if att >= 0.0 else 48  # Default fast attack
-				var dr: int = _seconds_to_rate(dec) if dec >= 0.0 else 32  # Default moderate decay
-				var sr: int = 0 if sus >= 0.0 else 0  # Sustain rate: 0 = hold level
-				var rr: int = _seconds_to_rate(rel) if rel >= 0.0 else 32  # Default moderate release
-				var sl: int = int(clampf((1.0 - sus) * 15.0, 0, 15)) if sus >= 0.0 else 4  # 0=full, 15=quiet
-				final_voice.call("set_envelope", ar, dr, sr, rr, sl, 0)
+		# Per-note ADSR: extract attack/decay/sustain/release from hap value
+		if hap_value is Dictionary:
+			var has_adsr: bool = false
+			var att: float = -1.0
+			var dec: float = -1.0
+			var sus: float = -1.0
+			var rel: float = -1.0
+			for key in ["attack", "att"]:
+				if hap_value.has(key):
+					att = float(hap_value[key])
+					has_adsr = true
+			for key in ["decay", "dec"]:
+				if hap_value.has(key):
+					dec = float(hap_value[key])
+					has_adsr = true
+			for key in ["sustain", "sus"]:
+				if hap_value.has(key):
+					sus = float(hap_value[key])
+					has_adsr = true
+			for key in ["release", "rel"]:
+				if hap_value.has(key):
+					rel = float(hap_value[key])
+					has_adsr = true
 
-	driver.call("note_on", note_num, final_voice, length_ticks)
+			if has_adsr and voice != null:
+				# Clone the voice and apply custom envelope.
+				# SiON envelope rates: 0 = slowest, 63 = instant.
+				# Strudel uses seconds. Convert: rate = 63 - clamp(seconds * 10, 0, 62)
+				# (0s → rate 63 instant, 6.2s → rate 1 very slow)
+				final_voice = voice.call("duplicate") if voice.has_method("duplicate") else voice
+				if final_voice != voice:  # Only if clone succeeded
+					var ar: int = _seconds_to_rate(att) if att >= 0.0 else 48  # Default fast attack
+					var dr: int = _seconds_to_rate(dec) if dec >= 0.0 else 32  # Default moderate decay
+					var sr: int = 0 if sus >= 0.0 else 0  # Sustain rate: 0 = hold level
+					var rr: int = _seconds_to_rate(rel) if rel >= 0.0 else 32  # Default moderate release
+					var sl: int = int(clampf((1.0 - sus) * 15.0, 0, 15)) if sus >= 0.0 else 4  # 0=full, 15=quiet
+					final_voice.call("set_envelope", ar, dr, sr, rr, sl, 0)
+
+		if final_voice != null:
+			driver.call("note_on", note_num, final_voice, length_ticks)
 
 	# Timing instrumentation
 	if timing_log:
@@ -851,6 +929,17 @@ func _resolve_note(value: Variant) -> int:
 		if value.has("freq"):
 			return _freq_to_midi(float(value["freq"]))
 	return -1  # Can't resolve — skip
+
+
+func _resolve_voice_name(value: Variant) -> String:
+	## Get the voice name string from a hap value (for sample library lookup).
+	if value is Dictionary:
+		for key in ["s", "sound", "voice"]:
+			if value.has(key):
+				return str(value[key]).to_lower()
+	if value is String:
+		return value.to_lower()
+	return ""
 
 
 func _resolve_voice(value: Variant) -> Variant:

@@ -934,6 +934,7 @@ func _init_strudel() -> void:
 		return
 
 	_sion_trigger = StrudelSionTrigger.new(driver, presets)
+	_sion_trigger.init_sample_library(self)  # Sample library for drum/percussion playback
 	_cyclist = StrudelCyclist.new(
 		_sion_trigger.trigger,      # on_trigger callback (per-note mode)
 		func() -> float: return _strudel_time,  # get_time
@@ -1077,6 +1078,8 @@ func strudel_start() -> void:
 func _strudel_play_title() -> void:
 	## Build the intro_light pattern directly — avoids file parsing stall on startup.
 	## Warm C major version. Matches data/strudel/intro_light.strudel.
+	## Uses note mode (per-note dispatch) for correct timing of the multi-layer pattern.
+	## Batch mode's l<N> MML compiler can't handle patterns with mixed note durations.
 	var sub: StrudelPattern = Strudel.slowcat([
 		Strudel.pure("c2"), Strudel.pure("c2"),
 		Strudel.pure("f2"), Strudel.pure("c2"),
@@ -1100,8 +1103,20 @@ func _strudel_play_title() -> void:
 		Strudel.pure("c3"), Strudel.silence(), Strudel.silence(), Strudel.pure("e3"),
 	])
 	var combined: StrudelPattern = Strudel.stack([sub, pad, sparkle, shimmer, pulse])
+
+	# Force note mode for title music — batch MML's l<N> equal-spacing
+	# can't handle multi-layer patterns with different note durations.
+	if _sion_trigger:
+		_sion_trigger.batch_mode = false
+	if _cyclist:
+		_cyclist.batch_mode = false
 	strudel_play(combined, 0.15, "intro_light")
-	print("MUSIC: title intro_light playing")
+	# Restore batch mode for subsequent patterns (simple patterns work fine in batch).
+	if _sion_trigger:
+		_sion_trigger.batch_mode = true
+	if _cyclist:
+		_cyclist.batch_mode = true
+	print("MUSIC: title intro_light playing (note mode)")
 
 
 func strudel_set_cps(cps: float) -> void:

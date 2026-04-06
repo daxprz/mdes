@@ -136,6 +136,9 @@ func _register_all() -> void:
 	r.call("music/events", "Game event hooks triggering intensity changes")
 	r.call("music/effects", "Audio bus effects: lpf, hpf, reverb, delay, distortion, pan")
 
+	# -- Samples --
+	r.call("music/samples", "Sample library: load, play, pool, cache, drum kit synthesis")
+
 	# -- Strudel --
 	r.call("strudel/trigger", "Note trigger events: note number, duration, value")
 	r.call("music/batch", "MML batch compilation: compile, sequence_on, track lifecycle")

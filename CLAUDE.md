@@ -90,8 +90,10 @@ Do NOT use tumu when:
 | `scripts/music/mini/strudel_mini.gd` | Mini-notation → Pattern converter (AST to pattern tree) |
 | `scripts/music/mini/strudel_mini_parser.gd` | Recursive-descent parser for Strudel mini-notation |
 | `scripts/music/scheduler/strudel_cyclist.gd` | Cycle-based pattern scheduler (Cyclist) |
-| `scripts/music/bridge/sion_trigger.gd` | Hap → SiON note_on bridge |
+| `scripts/music/bridge/sion_trigger.gd` | Hap → SiON note_on bridge, sample routing, per-note ADSR |
+| `scripts/music/bridge/sample_library.gd` | Synthesized drum kit (13 samples) + external .wav loading, AudioStreamPlayer pool |
 | `data/music/scores.json` | 18 community MML arrangements (Chrono Trigger, FFV, Castlevania, etc.) |
+| `data/samples/` | External sample directory — drop .wav files in subdirs for custom drums |
 | `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
 | `docs/epics/EPIC_strudel_integration.md` | Strudel integration design — 5 EPICs, architecture, compatibility notes |
 

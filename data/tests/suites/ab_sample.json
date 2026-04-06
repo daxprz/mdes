@@ -1,0 +1,16 @@
+{
+  "name": "ab_sample",
+  "description": "Quick sampling of AB tests — diverse waveforms, effects, combinators",
+  "tests": [
+    "ab_sine",
+    "ab_square",
+    "ab_euclid",
+    "ab_fast",
+    "ab_stack",
+    "ab_lpf_sweep",
+    "ab_gain",
+    "ab_rev",
+    "ab_chords",
+    "ab_s_function"
+  ]
+}

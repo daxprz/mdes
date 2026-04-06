@@ -2086,6 +2086,21 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 				lines.append("Usage: strudel c4 e4 g4 c5 sound=flute")
 				return "\n".join(lines)
 			return "ERR: trigger not initialized"
+		"samples":
+			if MusicManager._sion_trigger and MusicManager._sion_trigger._sample_library:
+				var names: PackedStringArray = MusicManager._sion_trigger._sample_library.get_sample_names()
+				var lines: Array[String] = ["Available samples (%d):" % names.size()]
+				var row: String = " "
+				for n in names:
+					if row.length() + n.length() > 70:
+						lines.append(row)
+						row = " "
+					row += " " + n
+				if not row.strip_edges().is_empty():
+					lines.append(row)
+				lines.append("Usage: s(\"bd sd hh cp\")")
+				return "\n".join(lines)
+			return "ERR: sample library not initialized"
 		"cps":
 			if parts.size() < 3:
 				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
