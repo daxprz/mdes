@@ -1145,6 +1145,9 @@ func _execute(command: String) -> String:
 						return "Usage: composition transition <movement_id>"
 					MusicManager.composition_transition_to(parts[2])
 					return "OK: transition to '%s' requested" % parts[2]
+				"reset":
+					MusicManager.play_composition()
+					return "OK: composition reset to beginning"
 				"status":
 					var comp2: MusicComposition = MusicManager.get_composition()
 					if not comp2:

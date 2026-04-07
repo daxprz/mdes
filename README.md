@@ -203,6 +203,11 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.74
+**Composition reset button**
+- **Reset button**: `|<` button in MusicDrawer toolbar resets the composition to its beginning (default movement, bar 0)
+- **RCON `comp reset`**: composition reset available via console command
+
 ### v0.10.73
 **Record timeline, action buttons, transition queueing**
 - **Record timeline strip**: color-coded bar strip below the scrub bar visualizes played, current, and cued bars — movements get per-id palette colors (warm blue/deep purple), bridges show amber, turnarounds show gold; current bar has white outline and playhead

@@ -551,6 +551,7 @@ var _btn_prev: Rect2 = Rect2()
 var _btn_next: Rect2 = Rect2()
 var _scrub_rect: Rect2 = Rect2()
 var _scrub_dragging: bool = false
+var _btn_reset: Rect2 = Rect2()
 var _btn_transition: Rect2 = Rect2()
 
 # Per-line pattern state (set on eval, used for per-line pianoroll)
@@ -666,6 +667,10 @@ func _input(event: InputEvent) -> void:
 				return
 			elif _btn_next.has_point(event.position):
 				MusicManager.strudel_next_cycle()
+				get_viewport().set_input_as_handled()
+				return
+			elif _btn_reset.size != Vector2.ZERO and _btn_reset.has_point(event.position):
+				_on_reset_button_pressed()
 				get_viewport().set_input_as_handled()
 				return
 			elif _btn_transition.size != Vector2.ZERO and _btn_transition.has_point(event.position):
@@ -1766,6 +1771,12 @@ func _toggle_play_pause() -> void:
 		_play_current()
 
 
+func _on_reset_button_pressed() -> void:
+	## Reset the composition to its beginning (default movement, bar 0).
+	if MusicManager.get_composition():
+		MusicManager.play_composition()
+
+
 func _on_transition_button_pressed() -> void:
 	## Handle click on the composition transition button.
 	## Triggers a transition to the first available target movement.
@@ -2021,6 +2032,8 @@ func _draw_panel() -> void:
 	# Background
 	_panel.draw_rect(Rect2(px, 0, pw, ph), Color(0.08, 0.08, 0.12, 0.95))
 
+	var has_composition: bool = MusicManager.get_record() != null and MusicManager.get_composition() != null
+
 	# -- Toolbar --
 	_panel.draw_rect(Rect2(px, 0, pw, TOOLBAR_HEIGHT), Color(0.12, 0.12, 0.18))
 
@@ -2069,8 +2082,21 @@ func _draw_panel() -> void:
 		Vector2(next_x + 2, nav_y + nav_sz - 1),
 	]), PackedColorArray([nav_color, nav_color, nav_color]))
 
+	# Reset button |< (vertical bar + left-pointing triangle)
+	var reset_x: float = next_x + nav_sz + 6
+	var reset_color: Color = Color(0.7, 0.8, 0.9) if has_composition else Color(0.3, 0.3, 0.4)
+	_btn_reset = Rect2(reset_x, nav_y, nav_sz, nav_sz)
+	# Vertical bar on the left
+	_panel.draw_rect(Rect2(reset_x + 1, nav_y + 1, 2.0, nav_sz - 2), reset_color)
+	# Left-pointing triangle
+	_panel.draw_polygon(PackedVector2Array([
+		Vector2(reset_x + nav_sz - 1, nav_y + 1),
+		Vector2(reset_x + 4, nav_y + nav_sz / 2.0),
+		Vector2(reset_x + nav_sz - 1, nav_y + nav_sz - 1),
+	]), PackedColorArray([reset_color, reset_color, reset_color]))
+
 	# Cycle counter
-	var info_x: float = next_x + nav_sz + 8
+	var info_x: float = reset_x + nav_sz + 8
 	var cycle_num: int = int(floorf(_current_time)) if (_is_playing or paused) else 0
 	_panel.draw_string(font, Vector2(info_x, btn_y + 13),
 		"Cy %d" % cycle_num, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.9, 0.6))
@@ -2107,7 +2133,6 @@ func _draw_panel() -> void:
 
 	# -- Record Timeline Strip (composition mode) --
 	var record_strip_bottom: float = scrub_y + SCRUB_HEIGHT
-	var has_composition: bool = MusicManager.get_record() != null and MusicManager.get_composition() != null
 	if has_composition:
 		_draw_record_strip(px, record_strip_bottom, pw, RECORD_STRIP_HEIGHT, font)
 		record_strip_bottom += RECORD_STRIP_HEIGHT
