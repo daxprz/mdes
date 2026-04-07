@@ -1,0 +1,11 @@
+// Captured Piano — ambient piano, gentle and consonant
+// Core harmony: A major (A C# E) with E and F#m passing chords
+// Sparse opening, builds gently, long trailing decay
+setcps(0.25)
+
+stack(
+  bass: note("<[~ ~ a2 ~] [a2 ~ e2 ~] [a2 e2 fs2 e2] [a2 [e2,b2] fs2 e2]>").s("piano").decay(3).sustain(0.1).release(4).gain(0.55),
+  pad: note("<~ [a3,cs4,e4] [a3,cs4,e4] [a3,cs4,e4]> <~ ~ [e3,b3] [e3,gs3,b3]> <~ ~ [fs3,a3,cs4] [fs3,a3,cs4]> <~ ~ ~ [e3,a3,cs4]>").s("piano").decay(2.5).sustain(0.15).release(3.5).gain(0.35),
+  melody: note("<[~ ~ e5 ~] [cs6 ~ a5 ~] [cs6 a5 e5 cs6] [cs6 [a5,e5] b5 [e5,a5]]>").s("piano").decay(2).sustain(0.2).release(3).gain(0.3),
+  high: note("<~ [~ ~ ~ ~] [~ ~ ~ e6] [~ e6 ~ cs6]>").s("piano").decay(1.5).sustain(0.1).release(3.5).gain(0.18)
+)

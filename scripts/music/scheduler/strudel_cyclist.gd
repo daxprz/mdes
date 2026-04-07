@@ -113,9 +113,22 @@ func _on_clock_tick(phase: float, duration: float, tick: int, t: float) -> void:
 func now() -> float:
 	## Current cycle position (for visualization).
 	if not started:
-		return 0.0
+		return _last_begin  # Preserve position when paused (don't snap to 0)
 	var seconds_since_last_tick: float = _get_time.call() - _last_tick - _clock.duration
 	return _last_begin + seconds_since_last_tick * cps
+
+
+func seek(target_cycle: float) -> void:
+	## Seek to a specific cycle position. Resets internal bookkeeping so the
+	## next tick window starts from target_cycle. Clock keeps running if it was.
+	_last_end = target_cycle
+	_last_begin = target_cycle
+	_num_cycles_at_cps_change = target_cycle
+	_num_ticks_since_cps_change = 0
+	_seconds_at_cps_change = _get_time.call()
+	_last_tick = _get_time.call()
+	_clock.phase = _get_time.call() + _clock.min_latency
+	_clock.tick = 0
 
 
 func start() -> void:

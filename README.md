@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.70
+**Transport controls, scrub bar, ambient piano**
+
+- **Strudel transport controls**: play/pause, seek to cycle, next/prev cycle navigation added to MusicManager API, RCON commands (`strudel pause`, `strudel seek <n>`, `strudel next`, `strudel prev`), and music drawer UI buttons.
+- **Scrub bar**: 10px cycle timeline below the toolbar with tick marks every cycle (bold every 4th), green playhead indicator, click-to-seek and drag-to-scrub.
+- **Keyboard shortcuts**: Ctrl+Space toggles play/pause, Alt+Left/Right jumps prev/next cycle.
+- **Pianoroll pause rendering**: pianoroll stays visible and frozen at the current position when paused (previously cleared to blank).
+- **Cyclist seek**: new `seek()` method on StrudelCyclist resets all internal bookkeeping for clean cycle-accurate seeking. `now()` preserves position when paused instead of snapping to 0.
+- **Removed M-key monster spawn**: bare M key on title screen no longer spawns monsters, eliminating conflict with Ctrl+M music drawer toggle.
+- **New piece**: `captured_piano.strudel` — ambient A-major piano, 4 layers (bass, pad, melody, high), builds sparse-to-dense over 4 cycles at cps=0.25.
+
 ### v0.10.69
 **Audio headroom, soft-wrapping, gain control**
 

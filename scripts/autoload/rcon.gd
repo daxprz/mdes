@@ -2151,6 +2151,24 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 		"start":
 			MusicManager.strudel_start()
 			return "OK: strudel %s" % ("resumed" if MusicManager._strudel_playing else "nothing to resume")
+		"pause":
+			MusicManager.strudel_toggle_pause()
+			var state: String = "paused" if MusicManager._strudel_paused else "playing"
+			return "OK: strudel %s" % state
+		"seek":
+			if parts.size() < 3:
+				return "ERR: usage: strudel seek <cycle>"
+			var seek_target: float = float(parts[2])
+			MusicManager.strudel_seek(seek_target)
+			return "OK: strudel seek → cycle %.1f" % seek_target
+		"next":
+			MusicManager.strudel_next_cycle()
+			var next_cycle: float = MusicManager._cyclist.now() if MusicManager._cyclist else 0.0
+			return "OK: strudel next → cycle %.0f" % next_cycle
+		"prev":
+			MusicManager.strudel_prev_cycle()
+			var prev_cycle: float = MusicManager._cyclist.now() if MusicManager._cyclist else 0.0
+			return "OK: strudel prev → cycle %.0f" % prev_cycle
 		"test":
 			# Run strudel test suite: strudel test [suite_name]
 			var test_node: Node = get_node_or_null("/root/StrudelTestRunner")

@@ -123,6 +123,7 @@ var _strudel_source_text: String = ""  ## Mini-notation text that produced the c
 var _strudel_time: float = 0.0
 ## Whether strudel engine is active
 var _strudel_playing: bool = false
+var _strudel_paused: bool = false   ## True when paused (position preserved, audio stopped)
 
 # -- Layer State ---------------------------------------------------------------
 
@@ -197,8 +198,8 @@ func gen_presets():
 	var version: String = str(helper.get_ver())
 	var flavor: String = str(helper.get_flavor())
 	_version_str = "v%s-%s" % [version, flavor]
-	print("MUSIC: SiON driver created (%s) master_vol=%.2f (%.0fdB)" % [
-		_version_str, headroom_linear, SION_HEADROOM_DB])
+	print("MUSIC: SiON driver created (%s) headroom=%.0fdB" % [
+		_version_str, SION_HEADROOM_DB])
 
 	# Generate voice presets
 	presets = helper.gen_presets()
@@ -1097,6 +1098,7 @@ func strudel_stop() -> void:
 	if _cyclist and _strudel_playing:
 		_cyclist.stop()
 	_strudel_playing = false
+	_strudel_paused = false
 	_strudel_pattern = null
 	# Clear any deferred notes and stop batch sequences
 	if _sion_trigger:
@@ -1116,6 +1118,99 @@ func strudel_start() -> void:
 		strudel_play(_strudel_last_pattern, -1.0, _strudel_last_source)
 	else:
 		print("MUSIC: nothing to resume")
+
+
+func strudel_pause() -> void:
+	## Pause playback — freeze clock, stop audio, but preserve position and pattern.
+	if not _strudel_playing or not _cyclist:
+		return
+	_cyclist.pause()
+	_strudel_playing = false
+	_strudel_paused = true
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
+	if driver:
+		driver.call("stop")
+		_sion_streaming = false
+	print("MUSIC: Strudel paused at cycle %.1f" % _cyclist.now())
+
+
+func strudel_resume() -> void:
+	## Resume from pause — restart audio from current cycle position.
+	if not _strudel_paused or not _cyclist or not _strudel_pattern:
+		return
+	_strudel_paused = false
+	_strudel_playing = true
+	var is_batch: bool = _sion_trigger != null and _sion_trigger.batch_mode
+	if is_batch:
+		_sion_trigger.start_batch_playback(_strudel_pattern, _cyclist.cps)
+	else:
+		driver.call("stream", false)
+		_sion_streaming = true
+	# Restart cyclist clock from current wall time (cycle position preserved)
+	_cyclist._seconds_at_cps_change = _strudel_time
+	_cyclist._last_tick = _strudel_time
+	_cyclist._clock.phase = _strudel_time + _cyclist._clock.min_latency
+	_cyclist._clock.tick = 0
+	_cyclist._num_ticks_since_cps_change = 0
+	_cyclist._clock.running = true
+	_cyclist.started = true
+	print("MUSIC: Strudel resumed at cycle %.1f" % _cyclist.now())
+
+
+func strudel_toggle_pause() -> void:
+	## Toggle between paused and playing states.
+	if _strudel_paused:
+		strudel_resume()
+	elif _strudel_playing:
+		strudel_pause()
+
+
+func strudel_seek(target_cycle: float) -> void:
+	## Seek to a specific cycle position. Works while playing or paused.
+	if not _cyclist:
+		return
+	target_cycle = maxf(0.0, target_cycle)
+	# Stop current audio
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
+	if driver:
+		driver.call("stop")
+		_sion_streaming = false
+	# Reset time source to match target
+	_strudel_time = target_cycle / _cyclist.cps
+	# Seek the cyclist
+	_cyclist.seek(target_cycle)
+	# If actively playing (not paused), restart audio from new position
+	if _strudel_playing and _strudel_pattern:
+		var is_batch: bool = _sion_trigger != null and _sion_trigger.batch_mode
+		if is_batch:
+			_sion_trigger.start_batch_playback(_strudel_pattern, _cyclist.cps)
+		else:
+			driver.call("stream", false)
+			_sion_streaming = true
+
+
+func strudel_next_cycle() -> void:
+	## Seek to the start of the next integer cycle.
+	if not _cyclist:
+		return
+	var current: float = _cyclist.now()
+	strudel_seek(floorf(current) + 1.0)
+
+
+func strudel_prev_cycle() -> void:
+	## Seek to the start of the current or previous integer cycle.
+	if not _cyclist:
+		return
+	var current: float = _cyclist.now()
+	var target: float = floorf(current)
+	# If very close to start of current cycle, jump to previous
+	if current - target < 0.05:
+		target -= 1.0
+	strudel_seek(maxf(0.0, target))
 
 
 func _strudel_play_title() -> void:

@@ -431,13 +431,6 @@ func _input(event: InputEvent) -> void:
 		if DebugOverlay.global_enabled:
 			_debug_regenerate_nearest_scenery()
 
-	# Debug: M key spawns a quadruped monster, Shift+M spawns player-controlled
-	if event is InputEventKey and event.pressed and event.keycode == KEY_M:
-		if DebugOverlay.global_enabled:
-			if event.shift_pressed:
-				_debug_spawn_player_monster(-1)
-			else:
-				_debug_spawn_monster()
 
 	# Debug: Select+Triangle on controller spawns player-controlled monster
 	if event is InputEventJoypadButton and event.pressed and DebugOverlay.global_enabled:
@@ -492,8 +485,6 @@ func _toggle_help() -> void:
 			["TAB", "Cycle enemy selection (debug)"],
 			["SPACE", "Dump skeleton JSON (debug)"],
 			["I", "Toggle debug draw on all enemies"],
-			["M", "Spawn monster (debug)"],
-			["Shift+M", "Spawn player monster (debug)"],
 			["G", "Regen nearest tree (debug)"],
 			["", ""],
 			["LEVEL EDITOR", ""],

@@ -71,6 +71,7 @@ extends CanvasLayer
 const SLIDE_SPEED := 1200.0
 const PANEL_WIDTH := 420.0
 const TOOLBAR_HEIGHT := 36.0
+const SCRUB_HEIGHT := 10.0
 const LINE_HEIGHT := 24.0     # Height of each editor line
 const MIN_VISIBLE_LINES := 8  # Minimum visible lines (fallback)
 const PIANOROLL_CYCLES := 4.0
@@ -531,6 +532,13 @@ func _line_muted(idx: int) -> bool:
 var _is_playing: bool = false
 var _cps: float = 0.5
 
+# Transport button hit areas (computed during draw, tested during input)
+var _btn_play: Rect2 = Rect2()
+var _btn_prev: Rect2 = Rect2()
+var _btn_next: Rect2 = Rect2()
+var _scrub_rect: Rect2 = Rect2()
+var _scrub_dragging: bool = false
+
 # Per-line pattern state (set on eval, used for per-line pianoroll)
 var _line_patterns: Array = []   # Array[StrudelPattern or null] — one per line
 var _line_haps: Array = []       # Array[Array[StrudelHap]] — per-line rolling hap buffers
@@ -626,11 +634,60 @@ func _input(event: InputEvent) -> void:
 			return
 
 	if not _active or not _editor_focused:
+		# Still handle scrub drag release even when unfocused
+		if event is InputEventMouseButton and not event.pressed and _scrub_dragging:
+			_scrub_dragging = false
+		return
+
+	# -- Mouse input for transport controls --
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			if _btn_play.has_point(event.position):
+				_toggle_play_pause()
+				get_viewport().set_input_as_handled()
+				return
+			elif _btn_prev.has_point(event.position):
+				MusicManager.strudel_prev_cycle()
+				get_viewport().set_input_as_handled()
+				return
+			elif _btn_next.has_point(event.position):
+				MusicManager.strudel_next_cycle()
+				get_viewport().set_input_as_handled()
+				return
+			elif _scrub_rect.has_point(event.position):
+				_scrub_dragging = true
+				_scrub_seek_to_mouse(event.position.x)
+				get_viewport().set_input_as_handled()
+				return
+		else:
+			if _scrub_dragging:
+				_scrub_dragging = false
+				get_viewport().set_input_as_handled()
+				return
+
+	if event is InputEventMouseMotion and _scrub_dragging:
+		_scrub_seek_to_mouse(event.position.x)
+		get_viewport().set_input_as_handled()
 		return
 
 	if event is InputEventKey and event.pressed:
 		var shift: bool = event.shift_pressed
 		var ctrl: bool = event.ctrl_pressed or event.meta_pressed
+
+		# Transport shortcuts (before editor keys)
+		if event.keycode == KEY_SPACE and ctrl:
+			# Ctrl+Space: toggle play/pause
+			_toggle_play_pause()
+			get_viewport().set_input_as_handled()
+			return
+		if event.alt_pressed and event.keycode == KEY_LEFT:
+			MusicManager.strudel_prev_cycle()
+			get_viewport().set_input_as_handled()
+			return
+		if event.alt_pressed and event.keycode == KEY_RIGHT:
+			MusicManager.strudel_next_cycle()
+			get_viewport().set_input_as_handled()
+			return
 
 		match event.keycode:
 			KEY_ESCAPE:
@@ -2026,6 +2083,27 @@ func _stop() -> void:
 	_active_locations.clear()
 
 
+func _toggle_play_pause() -> void:
+	if MusicManager._strudel_paused:
+		MusicManager.strudel_resume()
+		_is_playing = true
+	elif _is_playing:
+		MusicManager.strudel_pause()
+		_is_playing = false
+	else:
+		# Stopped — evaluate and start
+		_play_current()
+
+
+func _scrub_seek_to_mouse(mouse_x: float) -> void:
+	if _scrub_rect.size.x <= 0:
+		return
+	var frac: float = clampf((mouse_x - _scrub_rect.position.x) / _scrub_rect.size.x, 0.0, 1.0)
+	var scrub_max: float = maxf(floorf(_current_time) + 8.0, 8.0)
+	var target_cycle: float = frac * scrub_max
+	MusicManager.strudel_seek(target_cycle)
+
+
 func _update_leaf_locations() -> void:
 	# Source locations are embedded in the pattern's hap contexts
 	# They'll be extracted per-frame in _update_pianoroll
@@ -2038,7 +2116,7 @@ var _last_known_pattern: StrudelPattern = null  ## Track pattern changes from ou
 var _self_triggered: bool = false  ## True when we initiated the pattern change (skip sync)
 
 func _update_pianoroll() -> void:
-	if not MusicManager._cyclist or not MusicManager._strudel_playing:
+	if not MusicManager._cyclist or (not MusicManager._strudel_playing and not MusicManager._strudel_paused):
 		_visible_haps.clear()
 		_current_time = 0.0
 		_last_query_end = 0.0
@@ -2254,31 +2332,89 @@ func _draw_panel() -> void:
 	# -- Toolbar --
 	_panel.draw_rect(Rect2(px, 0, pw, TOOLBAR_HEIGHT), Color(0.12, 0.12, 0.18))
 
-	# Play/Stop button
+	# Transport buttons
 	var btn_x: float = px + 8.0
 	var btn_y: float = 8.0
-	var btn_color: Color = Color(0.3, 0.9, 0.3) if _is_playing else Color(0.7, 0.7, 0.7)
+	var btn_sz: float = 18.0
+	var paused: bool = MusicManager._strudel_paused
+
+	# Play/Pause button
+	_btn_play = Rect2(btn_x, btn_y, btn_sz, btn_sz)
 	if _is_playing:
-		# Stop icon (square)
-		_panel.draw_rect(Rect2(btn_x, btn_y, 16, 16), btn_color)
+		# Pause icon (two vertical bars) — green
+		var bar_w: float = 5.0
+		var gap: float = 3.0
+		var bx: float = btn_x + (btn_sz - bar_w * 2 - gap) / 2.0
+		_panel.draw_rect(Rect2(bx, btn_y + 2, bar_w, btn_sz - 4), Color(0.3, 0.9, 0.3))
+		_panel.draw_rect(Rect2(bx + bar_w + gap, btn_y + 2, bar_w, btn_sz - 4), Color(0.3, 0.9, 0.3))
 	else:
-		# Play icon (triangle)
+		# Play icon (triangle) — white if paused, gray if stopped
+		var play_color: Color = Color(1.0, 1.0, 1.0) if paused else Color(0.5, 0.5, 0.5)
 		_panel.draw_polygon(PackedVector2Array([
-			Vector2(btn_x, btn_y),
-			Vector2(btn_x + 16, btn_y + 8),
-			Vector2(btn_x, btn_y + 16),
-		]), PackedColorArray([btn_color, btn_color, btn_color]))
+			Vector2(btn_x + 3, btn_y + 1),
+			Vector2(btn_x + btn_sz - 2, btn_y + btn_sz / 2.0),
+			Vector2(btn_x + 3, btn_y + btn_sz - 1),
+		]), PackedColorArray([play_color, play_color, play_color]))
+
+	# Prev cycle button (left-pointing triangle)
+	var prev_x: float = btn_x + btn_sz + 6
+	var nav_sz: float = 14.0
+	var nav_y: float = btn_y + (btn_sz - nav_sz) / 2.0
+	_btn_prev = Rect2(prev_x, nav_y, nav_sz, nav_sz)
+	var nav_color: Color = Color(0.7, 0.8, 0.9)
+	_panel.draw_polygon(PackedVector2Array([
+		Vector2(prev_x + nav_sz - 2, nav_y + 1),
+		Vector2(prev_x + 2, nav_y + nav_sz / 2.0),
+		Vector2(prev_x + nav_sz - 2, nav_y + nav_sz - 1),
+	]), PackedColorArray([nav_color, nav_color, nav_color]))
+
+	# Next cycle button (right-pointing triangle)
+	var next_x: float = prev_x + nav_sz + 4
+	_btn_next = Rect2(next_x, nav_y, nav_sz, nav_sz)
+	_panel.draw_polygon(PackedVector2Array([
+		Vector2(next_x + 2, nav_y + 1),
+		Vector2(next_x + nav_sz - 2, nav_y + nav_sz / 2.0),
+		Vector2(next_x + 2, nav_y + nav_sz - 1),
+	]), PackedColorArray([nav_color, nav_color, nav_color]))
+
+	# Cycle counter
+	var info_x: float = next_x + nav_sz + 8
+	var cycle_num: int = int(floorf(_current_time)) if (_is_playing or paused) else 0
+	_panel.draw_string(font, Vector2(info_x, btn_y + 13),
+		"Cy %d" % cycle_num, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.9, 0.6))
 
 	# CPS display
-	_panel.draw_string(font, Vector2(btn_x + 24, btn_y + 12), "cps=%.2f" % _cps,
+	_panel.draw_string(font, Vector2(info_x + 44, btn_y + 13), "cps=%.2f" % _cps,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.6, 0.8, 1.0))
 
 	# Title
-	_panel.draw_string(font, Vector2(px + pw - 80, btn_y + 12), "Strudel",
+	_panel.draw_string(font, Vector2(px + pw - 80, btn_y + 13), "Strudel",
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color(0.5, 0.7, 1.0))
 
+	# -- Scrub Bar --
+	var scrub_y: float = TOOLBAR_HEIGHT
+	var scrub_pad: float = 6.0
+	_scrub_rect = Rect2(px + scrub_pad, scrub_y, pw - scrub_pad * 2, SCRUB_HEIGHT)
+	_panel.draw_rect(_scrub_rect, Color(0.06, 0.06, 0.1))
+	# Determine scrub range (auto-extend as playback progresses)
+	var scrub_max: float = maxf(floorf(_current_time) + 8.0, 8.0)
+	# Cycle tick marks
+	var tick_c: int = 0
+	while tick_c < int(scrub_max):
+		var tick_frac: float = float(tick_c) / scrub_max
+		var tick_px: float = _scrub_rect.position.x + tick_frac * _scrub_rect.size.x
+		var tick_alpha: float = 0.15 if tick_c % 4 == 0 else 0.06
+		_panel.draw_line(Vector2(tick_px, scrub_y + 1), Vector2(tick_px, scrub_y + SCRUB_HEIGHT - 1),
+			Color(1.0, 1.0, 1.0, tick_alpha), 1.0)
+		tick_c += 1
+	# Playhead indicator
+	if _is_playing or paused:
+		var head_frac: float = clampf(_current_time / scrub_max, 0.0, 1.0)
+		var head_px: float = _scrub_rect.position.x + head_frac * _scrub_rect.size.x
+		_panel.draw_rect(Rect2(head_px - 1.5, scrub_y + 1, 3.0, SCRUB_HEIGHT - 2), Color(0.3, 0.9, 0.3, 0.9))
+
 	# -- Editor Lines (multi-line with per-line visualizers) --
-	var ey: float = TOOLBAR_HEIGHT + 4.0
+	var ey: float = TOOLBAR_HEIGHT + SCRUB_HEIGHT + 4.0
 	var draw_y: float = ey
 	# Calculate how many lines fit in the available panel height
 	# With soft-wrapping, we can't pre-compute a fixed line count — draw until full.
