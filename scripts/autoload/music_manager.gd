@@ -125,6 +125,22 @@ var _strudel_time: float = 0.0
 var _strudel_playing: bool = false
 var _strudel_paused: bool = false   ## True when paused (position preserved, audio stopped)
 
+# -- Music Scene / Segment Queue (LEGACY — being replaced by Composition) ------
+var _segments: Dictionary = {}
+var _segment_queue: Array = []
+var _current_segment: String = ""
+var _segment_cycles_remaining: int = -1
+var _last_cycle_boundary: int = -1
+
+# -- Composition System --------------------------------------------------------
+# The Composition system plays music as individual Tracks, never stacking them.
+# Each Track's Phrase is dispatched independently to the playback engine.
+
+var _composition: MusicComposition = null
+var _record: MusicRecord = null
+var _bar_scheduler: BarScheduler = null
+var _last_bar_section_id: String = ""
+
 # -- Layer State ---------------------------------------------------------------
 
 class LayerState:
@@ -325,6 +341,11 @@ func _process(delta: float) -> void:
 	if _strudel_playing and _cyclist != null:
 		_strudel_time += delta
 		_cyclist.process()
+		# Composition system: per-Track bar scheduling
+		if _bar_scheduler:
+			_bar_scheduler.process()
+		# Legacy segment queue transitions
+		_check_segment_boundary()
 
 	# Process deferred note queue — fires notes at their correct wall-clock time
 	if _sion_trigger:
@@ -1274,6 +1295,413 @@ func strudel_load_file(name_or_path: String) -> String:
 	if not rcon_node:
 		return "ERR: RCON autoload not available"
 	return rcon_node._cmd_strudel_load(name_or_path)
+
+
+# =============================================================================
+# Music Scene — Segment Queue
+# =============================================================================
+# Pre-load segments (named patterns), then transition between them at cycle
+# boundaries. Transitions are 1-cycle segments that play once then advance.
+#
+# Usage:
+#   MusicManager.scene_load_segment("light", "intro_light")
+#   MusicManager.scene_load_segment("dark", "intro_dark")
+#   MusicManager.scene_load_segment("bridge", "intro_bridge")
+#   MusicManager.scene_play("light")                    # start looping
+#   MusicManager.scene_transition("bridge", "dark")     # at next cycle boundary:
+#                                                        #   bridge (1 cycle) → dark (loop)
+
+
+func scene_load_segment(name: String, strudel_file: String, cps: float = -1.0) -> String:
+	## Pre-compile a .strudel file and store as a named segment.
+	## Does NOT play or load into the drawer.  Returns OK or ERR.
+	## Uses StrudelLineCompiler — no dependency on MusicDrawer or RCON.
+	var compiled: Dictionary = StrudelLineCompiler.compile_strudel_file(strudel_file)
+	if not compiled["error"].is_empty():
+		return "ERR: %s" % compiled["error"]
+
+	# Caller-specified CPS overrides the file's setcps()
+	var final_cps: float = cps if cps > 0 else compiled["cps"]
+
+	_segments[name] = {
+		"pattern": compiled["stacked"],
+		"source": compiled["source"],
+		"cps": final_cps,
+		"file": strudel_file,
+		"tracks": compiled["tracks"],
+	}
+
+	DebugOverlay.log("music/status", null,
+		"SCENE: loaded segment '%s' from %s (%d tracks, cps=%.2f)",
+		[name, strudel_file, compiled["tracks"].size(), final_cps])
+	print("SCENE: loaded segment '%s' from %s (%d tracks)" % [name, strudel_file, compiled["tracks"].size()])
+	return "OK: segment '%s' loaded (%d tracks)" % [name, compiled["tracks"].size()]
+
+
+func scene_play(segment_name: String) -> String:
+	## Start playing a named segment immediately. Loops until interrupted.
+	if not _segments.has(segment_name):
+		return "ERR: unknown segment '%s'" % segment_name
+	var seg: Dictionary = _segments[segment_name]
+	_current_segment = segment_name
+	_segment_cycles_remaining = -1  # Loop forever
+	_last_cycle_boundary = -1
+	_segment_queue.clear()
+	var has_tracks: bool = not seg.get("tracks", []).is_empty()
+	var is_batch: bool = _sion_trigger != null and _sion_trigger.batch_mode
+	if is_batch and has_tracks:
+		# Batch mode: compile each track to separate MML
+		strudel_play_batch(seg.tracks, seg.cps)
+		_strudel_source_text = seg.source
+		_strudel_pattern = seg.pattern
+	else:
+		# Note mode: stacked pattern has per-hap gain values from compiler
+		strudel_play(seg.pattern, seg.cps, seg.source)
+	# Load the drawer with individual track lines so they display separately
+	if has_tracks:
+		_scene_load_drawer_lines(seg.tracks)
+	DebugOverlay.log("music/status", null, "SCENE: playing '%s'" % segment_name)
+	print("SCENE: playing segment '%s'" % segment_name)
+	return "OK: playing '%s'" % segment_name
+
+
+func _scene_load_drawer_lines(tracks: Array) -> void:
+	## Populate the MusicDrawer with individual track lines from a segment.
+	## This ensures the drawer shows separated voices, not a single stacked line.
+	var drawer: Node = get_node_or_null("/root/MusicDrawer")
+	if not drawer:
+		return
+	drawer._lines.clear()
+	for t in tracks:
+		drawer._lines.append(drawer._make_line(t.get("source_text", "")))
+	drawer._lines.append(drawer._make_line(""))
+	drawer._self_triggered = true
+
+
+func scene_transition(transition_name: String, target_name: String, transition_cycles: int = 1) -> String:
+	## Queue a transition: at the next cycle boundary, play the transition segment
+	## for N cycles, then switch to the target segment (looping).
+	## If transition_name is empty, jumps directly to target at next boundary.
+	if not transition_name.is_empty() and not _segments.has(transition_name):
+		return "ERR: unknown transition segment '%s'" % transition_name
+	if not _segments.has(target_name):
+		return "ERR: unknown target segment '%s'" % target_name
+
+	_segment_queue.clear()
+	if not transition_name.is_empty():
+		_segment_queue.append({ "name": transition_name, "cycles": transition_cycles })
+	_segment_queue.append({ "name": target_name, "cycles": -1 })  # Loop
+
+	DebugOverlay.log("music/status", null,
+		"SCENE: queued transition '%s' (%d cyc) → '%s' (loop)" % [
+			transition_name if not transition_name.is_empty() else "(direct)",
+			transition_cycles, target_name])
+	print("SCENE: transition queued → %s → %s" % [
+		transition_name if not transition_name.is_empty() else "(direct)", target_name])
+	return "OK: transition queued"
+
+
+func scene_jump(target_name: String) -> String:
+	## Jump directly to a segment at the next cycle boundary. No transition.
+	return scene_transition("", target_name)
+
+
+func _check_segment_boundary() -> void:
+	## Called every frame while playing. Detects cycle boundary crossings
+	## and advances the segment queue.
+	if _segment_queue.is_empty() and _segment_cycles_remaining < 0:
+		return  # Nothing queued, current segment loops forever
+	if not _cyclist:
+		return
+
+	var current_cycle: int = int(floor(_cyclist.now()))
+	if _last_cycle_boundary < 0:
+		_last_cycle_boundary = current_cycle
+		return
+
+	if current_cycle <= _last_cycle_boundary:
+		return  # No boundary crossed
+
+	# A cycle boundary was crossed
+	_last_cycle_boundary = current_cycle
+
+	# Count down cycles on the current segment
+	if _segment_cycles_remaining > 0:
+		_segment_cycles_remaining -= 1
+		if _segment_cycles_remaining > 0:
+			return  # Still has cycles left
+
+	# Current segment finished its allotted cycles (or we're looping with a queue)
+	# If there's nothing queued, and cycles_remaining hit 0, stop or loop
+	if _segment_cycles_remaining == 0 or not _segment_queue.is_empty():
+		_advance_segment_queue()
+
+
+func _advance_segment_queue() -> void:
+	## Pop the next segment from the queue and hot-swap to it.
+	if _segment_queue.is_empty():
+		return
+
+	var next: Dictionary = _segment_queue.pop_front()
+	var seg_name: String = next["name"]
+	var cycles: int = next["cycles"]
+
+	if not _segments.has(seg_name):
+		print("SCENE: ERR — segment '%s' not found, skipping" % seg_name)
+		return
+
+	var seg: Dictionary = _segments[seg_name]
+	_current_segment = seg_name
+	_segment_cycles_remaining = cycles  # -1 = loop forever
+
+	# Hot-swap the pattern on the cyclist without resetting time.
+	# This preserves the cycle position so the new pattern starts seamlessly
+	# at the next query window.
+	_cyclist.set_pattern(seg.pattern)
+	_strudel_pattern = seg.pattern
+	_strudel_source_text = seg.source
+
+	# Update CPS if the new segment has a different tempo
+	if seg.cps > 0 and absf(seg.cps - _cyclist.cps) > 0.001:
+		strudel_set_cps(seg.cps)
+
+	# Clear pending notes from the old segment
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
+
+	# In batch mode, use tracks for per-voice compilation
+	var is_batch: bool = _sion_trigger != null and _sion_trigger.batch_mode
+	if is_batch and not seg.get("tracks", []).is_empty():
+		strudel_play_batch(seg.tracks, seg.cps)
+	elif is_batch:
+		_sion_trigger.start_batch_playback(seg.pattern, _cyclist.cps)
+
+	# Update drawer with individual track lines for the new segment
+	var has_tracks: bool = not seg.get("tracks", []).is_empty()
+	if has_tracks:
+		_scene_load_drawer_lines(seg.tracks)
+
+	DebugOverlay.log("music/status", null,
+		"SCENE: → '%s' (%s)" % [seg_name, "loop" if cycles < 0 else "%d cyc" % cycles])
+	print("SCENE: now playing '%s' (%s)" % [seg_name, "loop" if cycles < 0 else "%d cycles" % cycles])
+
+
+func scene_get_segments() -> Array[String]:
+	## Return names of all loaded segments.
+	var names: Array[String] = []
+	for key in _segments:
+		names.append(key)
+	return names
+
+
+# -- Composition API -----------------------------------------------------------
+
+
+func load_composition(json_path: String) -> String:
+	## Load a composition from JSON.  Returns "OK: ..." or "ERR: ...".
+	var comp: MusicComposition = CompositionLoader.load_from_json(json_path)
+	if not comp:
+		return "ERR: failed to load composition from %s" % json_path
+	_composition = comp
+	print("COMPOSITION: loaded '%s' (%d movements, %d bridges)" % [
+		comp.id, comp.movements.size(), comp.bridges.size()])
+	return "OK: loaded '%s' (%d movements, %d bridges)" % [
+		comp.id, comp.movements.size(), comp.bridges.size()]
+
+
+func play_composition(comp: MusicComposition = null) -> void:
+	## Start playing a composition from its default movement.
+	## Each Track is played individually — patterns are never stacked.
+	if comp:
+		_composition = comp
+	if not _composition:
+		push_error("MusicManager: no composition loaded")
+		return
+	if not _cyclist:
+		push_error("MusicManager: cyclist not initialized")
+		return
+
+	# Stop any current playback
+	stop_title_music()
+	if is_playing:
+		stop()
+	if _strudel_playing:
+		_cyclist.stop()
+	if _sion_trigger:
+		_sion_trigger.clear_pending()
+		_sion_trigger.stop_all_sequences()
+	driver.call("stop")
+	_sion_streaming = false
+
+	# Build the Record
+	_record = MusicRecord.new()
+	_record.composition = _composition
+	_last_bar_section_id = ""
+
+	# Build initial cue — start with default movement
+	var movement: MusicMovement = _composition.get_default_movement()
+	if not movement:
+		push_error("MusicManager: default movement '%s' not found" % _composition.default_movement_id)
+		return
+
+	# Fill cue with initial bars
+	for i in range(8):
+		_record.cued_bars.append(MusicBar.from_movement(movement, i, i))
+
+	# Create scheduler
+	_bar_scheduler = BarScheduler.new()
+	_bar_scheduler.setup(_record, _cyclist)
+
+	# Set CPS from the movement
+	_cyclist.set_cps(movement.cps)
+
+	# Start note-mode streaming (per-track, per-note dispatch)
+	driver.call("stream", false)
+	_sion_streaming = true
+	var sion_bpm: float = _cyclist.cps * 120.0
+	driver.call("set_bpm", int(maxf(sion_bpm, 30.0)))
+
+	# Build the combined pattern for the cyclist (each track with gain injected)
+	_apply_bar_to_playback(_record.cued_bars[0])
+
+	_strudel_time = 0.0
+	_cyclist.start()
+	_strudel_playing = true
+	_record.is_playing = true
+
+	# Start the scheduler (advances to first bar)
+	_bar_scheduler.start()
+
+	# Connect bar signals to update playback on transitions
+	if not _record.bar_started.is_connected(_on_composition_bar_started):
+		_record.bar_started.connect(_on_composition_bar_started)
+
+	# Load drawer with first bar's track lines
+	_load_drawer_from_bar(_record.current_bar)
+
+	print("COMPOSITION: playing '%s' movement '%s' (%d tracks, cps=%.2f)" % [
+		_composition.id, movement.id, movement.tracks.size(), movement.cps])
+
+
+func composition_transition_to(movement_id: String) -> void:
+	## Transition to a different movement, using a bridge if one exists.
+	## Current bar plays to completion, then bridge → target.
+	if not _composition or not _record or not _bar_scheduler:
+		return
+
+	var current_movement_id: String = ""
+	if _record.current_bar and _record.current_bar.movement:
+		current_movement_id = _record.current_bar.movement.id
+
+	# Find bridge between current and target
+	var bridge: MusicBridge = _composition.get_bridge_between(current_movement_id, movement_id)
+	_bar_scheduler.transition_to(movement_id, bridge)
+
+	print("COMPOSITION: transition '%s' → '%s' %s" % [
+		current_movement_id, movement_id,
+		"via '%s'" % bridge.id if bridge else "(direct)"])
+
+
+func _on_composition_bar_started(bar: MusicBar) -> void:
+	## Called when the Record advances to a new bar.
+	## Updates playback engine with the new bar's phrases.
+	var new_section_id: String = bar.get_section_id()
+	var section_changed: bool = new_section_id != _last_bar_section_id
+	_last_bar_section_id = new_section_id
+
+	_apply_bar_to_playback(bar)
+	_load_drawer_from_bar(bar)
+
+	# Update CPS if the new bar has a different tempo
+	var bar_cps: float = bar.get_cps()
+	if bar_cps > 0 and absf(bar_cps - _cyclist.cps) > 0.001:
+		strudel_set_cps(bar_cps)
+
+	# Only clear pending notes on actual section transitions (entering a bridge
+	# or different movement).  Within the same looping movement, boundary notes
+	# must survive in the deferred queue so the trigger can fire them at their
+	# scheduled wall-clock time.
+	if section_changed and _sion_trigger:
+		_sion_trigger.clear_pending()
+
+
+func _apply_bar_to_playback(bar: MusicBar) -> void:
+	## Set up the cyclist pattern from a bar's phrases.
+	## Each Track's pattern already has voice (.s) and gain baked in by the
+	## compiler — we just stack them for the cyclist.
+	if not bar or bar.phrases.is_empty():
+		return
+
+	var track_patterns: Array = []
+	for phrase in bar.phrases:
+		if phrase.track and phrase.track.pattern:
+			track_patterns.append(phrase.track.pattern)
+
+	if track_patterns.is_empty():
+		return
+
+	var combined: StrudelPattern
+	if track_patterns.size() == 1:
+		combined = track_patterns[0]
+	else:
+		combined = Strudel.stack(track_patterns)
+
+	_cyclist.set_pattern(combined)
+	_strudel_pattern = combined
+
+	# Build source text from track source lines
+	var source_parts: PackedStringArray = PackedStringArray()
+	for phrase in bar.phrases:
+		if phrase.track:
+			source_parts.append(phrase.track.source_text)
+	_strudel_source_text = "\n".join(source_parts)
+
+
+func _load_drawer_from_bar(bar: MusicBar) -> void:
+	## Populate the MusicDrawer with individual track lines from a bar's phrases.
+	## Also builds _line_patterns so source highlights and pianoroll work.
+	## Sets _self_triggered so the drawer's auto-sync doesn't overwrite our lines.
+	if not bar:
+		return
+	var drawer: Node = get_node_or_null("/root/MusicDrawer")
+	if not drawer:
+		return
+	drawer._lines.clear()
+	drawer._line_patterns.clear()
+	drawer._line_haps.clear()
+	drawer._line_query_ends.clear()
+	for phrase in bar.phrases:
+		if phrase.track:
+			var line_dict: Dictionary = drawer._make_line(phrase.track.source_text)
+			drawer._lines.append(line_dict)
+			# Parse and compile the line pattern for highlights
+			var parsed: Dictionary = StrudelLineCompiler.parse_line(line_dict)
+			if parsed["is_valid"]:
+				var pat: StrudelPattern = StrudelLineCompiler.compile_parsed(parsed)
+				var snd: String = parsed.get("sound", "")
+				if not snd.is_empty():
+					pat = pat.set_in(Strudel.pure({"s": snd}))
+				drawer._line_patterns.append(pat)
+				line_dict["pattern_offset"] = parsed["pattern_offset"]
+			else:
+				drawer._line_patterns.append(null)
+			drawer._line_haps.append([])
+			drawer._line_query_ends.append(0.0)
+	drawer._lines.append(drawer._make_line(""))
+	drawer._line_patterns.append(null)
+	drawer._line_haps.append([])
+	drawer._line_query_ends.append(0.0)
+	# Tell the drawer WE loaded the lines — don't let it overwrite with source text
+	drawer._self_triggered = true
+
+
+func get_record() -> MusicRecord:
+	return _record
+
+
+func get_composition() -> MusicComposition:
+	return _composition
 
 
 func strudel_set_cps(cps: float) -> void:

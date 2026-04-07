@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.72
+**Composition architecture, per-note velocity, boundary note fix**
+- **Composition system**: new data architecture — Composition, Movement, Bridge, Turnaround, Track, Phrase, Bar, Record, PlayHead, BarScheduler (11 new files under `scripts/music/composition/` and `scripts/music/playback/`)
+- **StrudelLineCompiler**: ~750 lines of parser logic extracted from MusicDrawer into a pure static class — no UI dependencies, reusable by any system
+- **CompositionLoader**: JSON-driven composition definitions (`data/compositions/title_screen.json`) load `.strudel` files into typed Movement/Bridge objects with per-Track patterns
+- **Title screen migration**: uses `load_composition("title_screen")` / `play_composition()` instead of old segment queue; monster wake/death triggers `composition_transition_to("dark"/"light")`
+- **Per-note velocity**: SiON notes now receive individual velocity (0-256) from hap gain values via `SiMMLTrack.velocity`, enabling proper per-track volume mixing
+- **Bus gain stability fix**: removed "gain"/"velocity" from bus effect keys — per-note gain no longer bounces the master amplifier between track values
+- **Boundary note fix**: cycle-boundary notes (sub/pad/mid) were silently dropped by `clear_pending()` race condition; now only clears on actual section transitions, not same-movement bar loops
+- **MusicDrawer delegation**: parser calls delegate to StrudelLineCompiler; drawer reads composition Record for playback display
+
 ### v0.10.71
 **Arrow physics, damage numbers, title music hooks**
 - Ranger arrows: full projectile physics with arc flight, rotation tracking velocity

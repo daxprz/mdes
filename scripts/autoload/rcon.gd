@@ -1998,73 +1998,14 @@ func _resolve_strudel_path(path_or_name: String) -> String:
 
 func _expand_stacks_for_drawer(lines: Array[String]) -> Array[String]:
 	## Expand stack(...) lines into individual sub-expressions for the drawer.
-	## "stack(a, b, c)" becomes three lines: "a", "b", "c".
-	## Standalone comments are dropped (they were between stack sub-expressions
-	## in the file — noise in the drawer). The file comment at the top is kept
-	## only if it's the very first line.
-	var result: Array[String] = []
-	for li in range(lines.size()):
-		var stripped: String = lines[li].strip_edges()
-		# Drop standalone comments (except the very first line as a file header)
-		if stripped.begins_with("//") or stripped.begins_with("#"):
-			if li == 0:
-				result.append(stripped)
-			continue
-		if stripped.begins_with("stack(") and stripped.ends_with(")"):
-			var inner: String = stripped.substr(6, stripped.length() - 7)
-			var subs: Array = MusicDrawer._split_top_level_commas(inner)
-			if subs.size() > 1:
-				for sub in subs:
-					var sub_text: String = sub["text"] if sub is Dictionary else str(sub)
-					sub_text = sub_text.strip_edges()
-					if not sub_text.is_empty():
-						result.append(sub_text)
-				continue
-		result.append(stripped)
-	return result
+	## Delegates to StrudelLineCompiler.expand_stacks().
+	return StrudelLineCompiler.expand_stacks(lines)
 
 
 func _merge_continuation_lines(raw_lines: Array[String]) -> Array[String]:
 	## Merge multi-line expressions by tracking paren depth.
-	## Lines with unclosed parens are continuation lines joined with spaces.
-	## Comments and blank lines are preserved as separate entries when at depth 0.
-	var result: Array[String] = []
-	var current: String = ""
-	var depth: int = 0
-	for rl in raw_lines:
-		var cl: String = rl.strip_edges()
-		if cl.is_empty() or cl.begins_with("//") or cl.begins_with("#"):
-			if depth == 0 and not current.is_empty():
-				result.append(current)
-				current = ""
-			if cl.begins_with("//") or cl.begins_with("#"):
-				result.append(cl)
-			continue
-		if current.is_empty():
-			current = cl
-		else:
-			current += " " + cl
-		# Count parens (outside of quoted strings)
-		var in_str: bool = false
-		var str_char: String = ""
-		for ci in range(cl.length()):
-			var ch: String = cl[ci]
-			if in_str:
-				if ch == str_char:
-					in_str = false
-			elif ch == '"' or ch == "'":
-				in_str = true
-				str_char = ch
-			elif ch == '(':
-				depth += 1
-			elif ch == ')':
-				depth = maxi(0, depth - 1)
-		if depth == 0:
-			result.append(current)
-			current = ""
-	if not current.is_empty():
-		result.append(current)
-	return result
+	## Delegates to StrudelLineCompiler.merge_continuation_lines().
+	return StrudelLineCompiler.merge_continuation_lines(raw_lines)
 
 
 func _cmd_strudel_ref_code(code: String) -> String:
@@ -2506,6 +2447,57 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 				MusicDrawer._cps = edit_cps
 			MusicDrawer._play_current()
 			return "OK: drawer set with %d lines, playing" % edit_lines.size()
+		"scene":
+			# Music scene system: pre-load segments, play, transition
+			if parts.size() < 3:
+				# Show status
+				var segs: Array[String] = MusicManager.scene_get_segments()
+				if segs.is_empty():
+					return "No segments loaded. Usage: strudel scene load|play|transition|jump|list"
+				var status: String = "Segments: %s\nCurrent: %s\nQueue: %d" % [
+					", ".join(PackedStringArray(segs)),
+					MusicManager._current_segment if not MusicManager._current_segment.is_empty() else "(none)",
+					MusicManager._segment_queue.size()]
+				return status
+			match parts[2]:
+				"load":
+					# strudel scene load <name> <file> [cps]
+					if parts.size() < 5:
+						return "Usage: strudel scene load <name> <file> [cps]"
+					var seg_name: String = parts[3]
+					var seg_file: String = parts[4]
+					var seg_cps: float = float(parts[5]) if parts.size() > 5 else -1.0
+					return MusicManager.scene_load_segment(seg_name, seg_file, seg_cps)
+				"play":
+					# strudel scene play <name>
+					if parts.size() < 4:
+						return "Usage: strudel scene play <name>"
+					return MusicManager.scene_play(parts[3])
+				"transition":
+					# strudel scene transition <transition_segment> <target_segment> [cycles]
+					if parts.size() < 5:
+						return "Usage: strudel scene transition <bridge> <target> [cycles]"
+					var t_name: String = parts[3]
+					var t_target: String = parts[4]
+					var t_cycles: int = int(parts[5]) if parts.size() > 5 else 1
+					return MusicManager.scene_transition(t_name, t_target, t_cycles)
+				"jump":
+					# strudel scene jump <name> — jump to segment at next cycle boundary
+					if parts.size() < 4:
+						return "Usage: strudel scene jump <name>"
+					return MusicManager.scene_jump(parts[3])
+				"list":
+					var seg_list: Array[String] = MusicManager.scene_get_segments()
+					if seg_list.is_empty():
+						return "No segments loaded"
+					var lines: Array[String] = []
+					for sn in seg_list:
+						var seg: Dictionary = MusicManager._segments[sn]
+						var marker: String = " ◀" if sn == MusicManager._current_segment else ""
+						lines.append("  %s: %s (cps=%.2f)%s" % [sn, seg.file, seg.cps, marker])
+					return "Segments:\n" + "\n".join(PackedStringArray(lines))
+				_:
+					return "Usage: strudel scene load|play|transition|jump|list"
 		_:
 			# Everything else is mini-notation (or JS-style expressions).
 			var mini_text: String = command.substr(command.find(" ") + 1).strip_edges()

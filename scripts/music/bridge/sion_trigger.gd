@@ -203,7 +203,11 @@ const EFFECT_KEYS := [
 	"room", "roomsize", "roomlp",
 	"delay", "delaytime", "delayfeedback",
 	"distort", "crush", "shape",
-	"pan", "gain", "velocity",
+	"pan",
+	# NOTE: "gain" and "velocity" are intentionally NOT here.
+	# They are per-note properties handled by _resolve_velocity(), not bus effects.
+	# Routing them to set_music_effects() would cause the bus amplifier to bounce
+	# between different track gains on every note trigger.
 ]
 ## Per-note ADSR keys — these are NOT bus effects, they modify the SiON voice
 ## envelope on a per-note basis. Extracted in _do_emit, not set_music_effects.
@@ -731,7 +735,13 @@ func _do_emit(note_num: int, voice: Variant, length_ticks: float,
 					final_voice.call("set_envelope", ar, dr, sr, rr, sl, 0)
 
 		if final_voice != null:
-			driver.call("note_on", note_num, final_voice, length_ticks)
+			var track: Variant = driver.call("note_on", note_num, final_voice, length_ticks)
+			# Apply per-note velocity from the hap's gain/velocity value.
+			# SiON velocity range: 0-256 (256 = full volume).
+			if track != null:
+				var vel: float = _resolve_velocity(hap_value)
+				if vel < 1.0:
+					track.set("velocity", clampi(int(vel * 256.0), 0, 256))
 
 	# Timing instrumentation
 	if timing_log:

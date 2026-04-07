@@ -961,345 +961,21 @@ func _word_boundary_right() -> int:
 # -- Playback ------------------------------------------------------------------
 
 func _parse_line_text(line: Dictionary) -> Dictionary:
-	## Parse a line dict into {pattern_text, name, sound, is_valid, viz, pattern_offset}.
-	## pattern_offset = character position in the raw line where the mini-notation starts.
-	## This is needed so source highlights align with the displayed text.
-	##
-	## Supports Strudel-style syntax:
-	##   "name: pattern"           — named line (label)
-	##   "pattern s=voice"         — voice override
-	##   "pattern .pianoroll()"    — inline visualizer (at end of line)
-	##   "pattern .punchcard()"    — alias for pianoroll
-	##   "pattern .bar()"          — bar visualizer
-	var raw: String = line.get("text", "")
-	var result := {
-		"pattern_text": "", "name": line.get("name", ""), "sound": "",
-		"is_valid": false, "viz": VIZ_NONE, "pattern_offset": 0,
-	}
+	## Parse a line dict — delegates to StrudelLineCompiler.parse_line() and
+	## applies side-effects (line["name"], line["viz"], etc.) that the drawer needs.
+	var result: Dictionary = StrudelLineCompiler.parse_line(line)
 
-	var stripped: String = raw.strip_edges()
-	if stripped.is_empty() or stripped.begins_with("#") or stripped.begins_with("//"):
-		return result
-
-	# Handle let bindings: let name = expression
-	# Stores the RHS expression text for later evaluation.
-	if stripped.begins_with("let "):
-		var after_let: String = stripped.substr(4).strip_edges()
-		var eq_idx: int = after_let.find("=")
-		if eq_idx > 0:
-			var var_name: String = after_let.substr(0, eq_idx).strip_edges()
-			var var_expr: String = after_let.substr(eq_idx + 1).strip_edges()
-			if var_name.is_valid_identifier() and not var_expr.is_empty():
-				result["is_let"] = true
-				result["let_name"] = var_name
-				result["let_expr"] = var_expr
-				result["is_valid"] = false  # let lines don't produce patterns directly
-				return result
-
-	# Handle JS-style top-level function calls and keywords:
-	# setcps(N) — set cycles per second (tempo)
-	# setcpm(N) — set cycles per minute
-	# hush — silence all
-	if stripped.begins_with("setcps(") and stripped.ends_with(")"):
-		var inner: String = stripped.substr(7, stripped.length() - 8).strip_edges()
-		if inner.is_valid_float():
-			result["setcps"] = float(inner)
-			result["is_valid"] = false
-			return result
-	if stripped.begins_with("setcpm(") and stripped.ends_with(")"):
-		var inner: String = stripped.substr(7, stripped.length() - 8).strip_edges()
-		if inner.is_valid_float():
-			result["setcps"] = float(inner) / 60.0
-			result["is_valid"] = false
-			return result
-	if stripped == "hush" or stripped == "hush()":
-		result["hush"] = true
-		result["is_valid"] = false
-		return result
-
-	var text: String = raw
-	var offset: int = 0  # Track how many chars we've consumed from the front
-
-	# Check for "name: pattern" syntax (Strudel label style)
-	var colon_idx: int = text.find(": ")
-	if colon_idx > 0 and colon_idx < 20:
-		var candidate: String = text.substr(0, colon_idx).strip_edges()
-		if candidate.is_valid_identifier():
-			result["name"] = candidate
-			line["name"] = candidate
-			offset = colon_idx + 2
-			text = text.substr(offset)
-			# Skip leading whitespace after ": "
-			while not text.is_empty() and text[0] == " ":
-				offset += 1
-				text = text.substr(1)
-
-	result["pattern_offset"] = offset
-
-	# Strudel-compatible method chain parsing.
-	# In Strudel, the syntax is: "mini-notation".method1().method2()
-	# or: note("mini-notation").pianoroll()
-	#
-	# We support:
-	#   "c4 e4 g4 c5".pianoroll()             — quoted mini + viz chain
-	#   "c4 e4".lpf(800).room(0.5).pianoroll() — audio controls + viz
-	#   note("c4 e4 g4").scope()              — note() wrapper + scope
-	#   s("bd sd hh").pianoroll()             — s() wrapper
-	#   c4 e4 g4 c5                           — bare unquoted mini (no method chain)
-	#
-	# Method chain: strip .method() suffixes from right to left,
-	# handling both visualizer methods and audio control methods.
-
-	# Viz method names → viz type
-	var viz_names := {
-		"pianoroll": VIZ_PIANOROLL, "punchcard": VIZ_PIANOROLL, "_pianoroll": VIZ_PIANOROLL,
-		"scope": VIZ_SCOPE, "tscope": VIZ_SCOPE, "_scope": VIZ_SCOPE,
-		"wordfall": VIZ_WORDFALL,
-		"spiral": VIZ_SPIRAL, "_spiral": VIZ_SPIRAL,
-		"pitchwheel": VIZ_PITCHWHEEL, "_pitchwheel": VIZ_PITCHWHEEL,
-		"fscope": VIZ_FSCOPE,
-	}
-
-	var stripped_text: String = text.strip_edges()
-	var viz_options: Dictionary = {}
-	var audio_controls: Dictionary = {}
-	var signal_controls: Array = []  ## Signal patterns like sine.range(200,2000) wrapped as {key: val}
-	var found_viz: bool = false
-
-	# Pattern combinator methods — applied to the pattern after mini-notation eval.
-	# These are Strudel Pattern methods, not audio controls or visualizers.
-	var pattern_methods := [
-		"degrade", "degradeBy", "undegrade", "undegradeBy",
-		"fast", "slow", "hurry",
-		"early", "late",
-		"rev", "palindrome",
-		"euclid", "euclidRot",
-		"every",
-		"chunk",
-		"segment",
-		"sometimes", "often", "rarely",
-		"add", "sub", "mul",
-		"superimpose", "layer",
-		"jux",
-		"off",
-		"iter",
-		"ply",
-		"striate",
-		"chop",
-	]
-
-	# Build combined lookup of all known method names (viz + audio + pattern).
-	var all_methods: Dictionary = {}  # method_name -> "viz" or "audio" or "pattern"
-	for k in viz_names:
-		all_methods[k] = "viz"
-	for k in AUDIO_CONTROL_METHODS:
-		all_methods[k] = "audio"
-	for k in pattern_methods:
-		all_methods[k] = "pattern"
-	var deferred_ops: Array = []  # [{method: String, args: String}] applied after pattern build
-
-	# Parse method chain from right to left: find the rightmost known
-	# .method(args) whose closing paren is at the end of the string,
-	# strip it, and repeat. We search for ".method_name(" explicitly
-	# to avoid false-matching decimal dots inside arguments (e.g. 0.5).
-	var chain_changed: bool = true
-	while chain_changed:
-		chain_changed = false
-
-		# Find the rightmost known .method( whose closing paren is at the end
-		var best_pos: int = -1
-		var best_method: String = ""
-		var best_paren_open: int = -1
-		var best_paren_close: int = -1
-
-		for method_name in all_methods:
-			var prefix: String = "." + method_name + "("
-			var pos: int = stripped_text.rfind(prefix)
-			if pos < 0:
-				continue
-			var po: int = pos + prefix.length()
-			# Find BALANCED closing paren (handles nested parens in signal expressions)
-			var depth: int = 1
-			var pc: int = po
-			while pc < stripped_text.length() and depth > 0:
-				if stripped_text[pc] == "(":
-					depth += 1
-				elif stripped_text[pc] == ")":
-					depth -= 1
-				if depth > 0:
-					pc += 1
-			if depth != 0:
-				continue
-			# Must be at end of string (nothing meaningful after closing paren)
-			if pc < stripped_text.length() - 1:
-				var after: String = stripped_text.substr(pc + 1).strip_edges()
-				if not after.is_empty():
-					continue
-			# Take the rightmost match
-			if pos > best_pos:
-				best_pos = pos
-				best_method = method_name
-				best_paren_open = po
-				best_paren_close = pc
-
-		if best_pos < 0:
-			break
-
-		var args_str: String = stripped_text.substr(best_paren_open, best_paren_close - best_paren_open).strip_edges()
-		var kind: String = all_methods[best_method]
-
-		if kind == "viz":
-			if not found_viz:
-				result["viz"] = viz_names[best_method]
-				line["viz"] = viz_names[best_method]
-				if not args_str.is_empty():
-					viz_options = _parse_viz_options(args_str)
-				result["viz_options"] = viz_options
-				line["viz_options"] = viz_options
-				found_viz = true
-		elif kind == "pattern":
-			# Deferred pattern combinator — applied after pattern build.
-			# Store args_offset: position of the args within the full line text,
-			# so that sub-patterns (e.g. add(note("<0 5 7>"))) get correct source locations.
-			var args_offset_in_line: int = offset + best_paren_open
-			deferred_ops.append({"method": best_method, "args": args_str, "args_offset": args_offset_in_line})
-		else:
-			var control_key: String = AUDIO_CONTROL_METHODS[best_method]
-			if control_key == "s":
-				# Voice/sound: strip quotes from string value
-				var voice_val: String = args_str.replace("\"", "").replace("'", "").strip_edges()
-				if not voice_val.is_empty():
-					result["sound"] = voice_val
-			elif control_key in ["clip", "duration"]:
-				# Per-note duration controls — injected into hap values via set_in,
-				# NOT applied as bus effects. clip multiplies hap duration,
-				# duration overrides it in seconds.
-				if args_str.is_valid_float():
-					deferred_ops.append({"method": "_set_in", "args": control_key, "value": float(args_str)})
-				else:
-					var signal_pat: StrudelPattern = _parse_signal_expr(args_str)
-					if signal_pat != null:
-						var ck: String = control_key
-						signal_pat = signal_pat.fmap(func(v: Variant) -> Dictionary:
-							return {ck: float(v)})
-						signal_controls.append(signal_pat)
-			elif args_str.is_valid_float():
-				audio_controls[control_key] = float(args_str)
-			else:
-				# Try parsing as a signal expression: sine.range(200, 2000)
-				var signal_pat: StrudelPattern = _parse_signal_expr(args_str)
-				if signal_pat != null:
-					# Wrap the signal as a control pattern: {lpf: value}
-					var ck: String = control_key
-					signal_pat = signal_pat.fmap(func(v: Variant) -> Dictionary:
-						return {ck: float(v)})
-					signal_controls.append(signal_pat)
-
-		stripped_text = stripped_text.substr(0, best_pos).strip_edges()
-		chain_changed = true
-
-	result["audio_controls"] = audio_controls
-	result["signal_controls"] = signal_controls
-	result["deferred_ops"] = deferred_ops
-
-	# If no viz found from method chain, clear stored text-based viz
-	if not found_viz:
-		var had_viz_text: bool = false
-		for method_name in viz_names:
-			if ("." + method_name + "(") in raw:
-				had_viz_text = true
-				break
-		if had_viz_text:
-			line["viz"] = VIZ_NONE
-			line["viz_options"] = {}
-
-	# Handle stack(): split into sub-expressions evaluated independently.
-	# stack(expr1, expr2, ...) → evaluate each expr, return Strudel.stack()
-	if stripped_text.begins_with("stack(") and stripped_text.ends_with(")"):
-		var inner: String = stripped_text.substr(6, stripped_text.length() - 7)
-		var sub_exprs: Array = _split_top_level_commas(inner)
-		if sub_exprs.size() > 1:
-			# Compute where "stack(" starts in the original line text
-			var stack_pos: int = raw.find("stack(")
-			var stack_inner_offset: int = (stack_pos + 6) if stack_pos >= 0 else offset
-			# sub_exprs have stripped text but pos pointing to pre-strip start.
-			# Compute leading whitespace for each sub-expr so _eval_sub_expr
-			# gets the correct absolute offset.
-			for se in sub_exprs:
-				var raw_sub: String = inner.substr(se["pos"])
-				var comma_or_end: int = raw_sub.find(",")
-				if comma_or_end < 0:
-					comma_or_end = raw_sub.length()
-				raw_sub = raw_sub.substr(0, comma_or_end)
-				var leading: int = raw_sub.length() - raw_sub.lstrip(" \t").length()
-				se["pos"] = se["pos"] + leading  # shift past leading whitespace
-			result["is_stack"] = true
-			result["stack_exprs"] = sub_exprs
-			result["stack_offset"] = stack_inner_offset
-			result["is_valid"] = true
-			result["pattern_text"] = ""  # Built from stack_exprs, not raw text
-			return result
-
-	# Strip Strudel wrappers: note("..."), s("..."), sound("..."), n("...")
-	# These are JS function calls that wrap mini-notation in Strudel.
-	# s() and sound() set the voice/sample name on each event.
-	# n() sets the sample index.
-	var wrapper_type: String = ""  # "note", "s", or "n"
-	for wrapper in ["note(", "s(", "sound(", "n("]:
-		if stripped_text.begins_with(wrapper) and stripped_text.ends_with(")"):
-			wrapper_type = "s" if wrapper in ["s(", "sound("] else ("n" if wrapper == "n(" else "note")
-			stripped_text = stripped_text.substr(wrapper.length(), stripped_text.length() - wrapper.length() - 1).strip_edges()
-			break
-	result["wrapper_type"] = wrapper_type
-
-	# Strip surrounding quotes (Strudel mini-notation is quoted in JS)
-	if stripped_text.length() >= 2:
-		if (stripped_text[0] == '"' and stripped_text[-1] == '"') or \
-		   (stripped_text[0] == "'" and stripped_text[-1] == "'") or \
-		   (stripped_text[0] == '`' and stripped_text[-1] == '`'):
-			var inner: String = stripped_text.substr(1, stripped_text.length() - 2)
-			# Recalculate offset: quotes shifted the pattern start
-			var quote_pos: int = text.find(stripped_text[0])
-			if quote_pos >= 0:
-				offset += quote_pos + 1
-				result["pattern_offset"] = offset
-			stripped_text = inner
-
-	text = stripped_text
-
-	# Extract key=value parameters (cps, sound, and audio controls)
-	for param in ["cps=", "sound=", "s="]:
-		var p_idx: int = text.find(param)
-		if p_idx >= 0:
-			var p_val: String = text.substr(p_idx + param.length()).strip_edges()
-			var space_idx: int = p_val.find(" ")
-			if space_idx >= 0:
-				p_val = p_val.substr(0, space_idx)
-			if param == "cps=":
-				if p_val.is_valid_float():
-					_cps = float(p_val)
-			else:
-				result["sound"] = p_val
-			text = (text.substr(0, p_idx) + text.substr(p_idx + param.length() + p_val.length())).strip_edges()
-
-	# Also extract audio control key=value params (gain=0.3, lpf=800, etc.)
-	for ctrl_param in ["gain=", "velocity=", "lpf=", "hpf=", "room=", "delay=",
-						"distort=", "crush=", "pan=", "roomsize=", "delaytime=",
-						"delayfeedback=", "shape=", "lpq=", "hpq=", "roomlp="]:
-		var p_idx: int = text.find(ctrl_param)
-		if p_idx >= 0:
-			var p_val: String = text.substr(p_idx + ctrl_param.length()).strip_edges()
-			var space_idx: int = p_val.find(" ")
-			if space_idx >= 0:
-				p_val = p_val.substr(0, space_idx)
-			if p_val.is_valid_float():
-				var key: String = ctrl_param.substr(0, ctrl_param.length() - 1)  # Strip trailing =
-				audio_controls[key] = float(p_val)
-			text = (text.substr(0, p_idx) + text.substr(p_idx + ctrl_param.length() + p_val.length())).strip_edges()
-
-	if not text.is_empty():
-		result["pattern_text"] = text
-		result["is_valid"] = true
+	# Apply side-effects that the drawer expects on the line dict.
+	# StrudelLineCompiler.parse_line() is pure — it doesn't mutate the line.
+	if not result.get("name", "").is_empty():
+		line["name"] = result["name"]
+	if result.has("viz"):
+		line["viz"] = result["viz"]
+	if result.has("viz_options"):
+		line["viz_options"] = result["viz_options"]
+	# Inline cps= parameter — apply to drawer state
+	if result.has("inline_cps"):
+		_cps = result["inline_cps"]
 	return result
 
 
@@ -1802,36 +1478,13 @@ static func _apply_deferred_ops(pat: StrudelPattern, ops: Array) -> StrudelPatte
 
 func _compile_parsed(parsed: Dictionary, bindings: Dictionary = {}) -> StrudelPattern:
 	## Compile a parsed line result into a Pattern.
-	## Handles stack, mini-notation, wrapper types, and deferred ops.
-	## Locations are always 0-based relative to the mini text.
-	## The caller sets pattern_offset on the line dict for draw-time alignment.
-	## `bindings` resolves let variable names in stack sub-expressions.
-	var pat: StrudelPattern
-	if parsed.get("is_stack", false):
-		var sub_pats: Array = []
-		var stack_base: int = parsed.get("stack_offset", 0)
-		for sub in parsed["stack_exprs"]:
-			var sub_text: String = (sub["text"] if sub is Dictionary else str(sub)).strip_edges()
-			var sub_pos: int = sub["pos"] if sub is Dictionary else 0
-			var resolved: StrudelPattern = _resolve_expr(sub_text, bindings)
-			if resolved != null:
-				sub_pats.append(resolved)
-			else:
-				sub_pats.append(_eval_sub_expr(sub_text, stack_base + sub_pos))
-		pat = Strudel.stack(sub_pats)
-	else:
-		pat = StrudelMini.mini(parsed["pattern_text"])
-		var wt: String = parsed.get("wrapper_type", "")
-		if wt == "s":
-			pat = pat.fmap(func(v: Variant) -> Dictionary:
-				return {"s": str(v), "note": "c4"})
-		elif wt == "n":
-			pat = pat.fmap(func(v: Variant) -> Dictionary:
-				return {"n": int(v) if v is float or v is int else 0})
-	var ops: Array = parsed.get("deferred_ops", [])
-	if not ops.is_empty():
-		pat = _apply_deferred_ops(pat, ops)
-	return pat
+	## Delegates to StrudelLineCompiler.compile_parsed() with a resolver that
+	## handles let-variable bindings from the drawer's scope.
+	var resolver: Callable = Callable()
+	if not bindings.is_empty():
+		resolver = func(text: String) -> StrudelPattern:
+			return _resolve_expr(text, bindings)
+	return StrudelLineCompiler.compile_parsed(parsed, resolver)
 
 
 func _resolve_expr(text: String, bindings: Dictionary) -> StrudelPattern:
@@ -1855,10 +1508,10 @@ func _resolve_expr(text: String, bindings: Dictionary) -> StrudelPattern:
 	var pat: StrudelPattern = bindings[name]["pattern"]
 	if not suffix.is_empty():
 		# Parse suffix as method chains on a dummy pattern
-		var sfx_parsed: Dictionary = _parse_line_text(_make_line("x" + suffix))
+		var sfx_parsed: Dictionary = StrudelLineCompiler.parse_line(StrudelLineCompiler.make_line("x" + suffix))
 		var sfx_ops: Array = sfx_parsed.get("deferred_ops", [])
 		if not sfx_ops.is_empty():
-			pat = _apply_deferred_ops(pat, sfx_ops)
+			pat = StrudelLineCompiler.apply_deferred_ops(pat, sfx_ops)
 	return pat
 
 
@@ -1905,7 +1558,7 @@ func _resolve_line(i: int, bindings: Dictionary) -> Dictionary:
 		var expr_offset: int = eq_pos + 1 if eq_pos >= 0 else 0
 		while expr_offset < line_text.length() and line_text[expr_offset] == " ":
 			expr_offset += 1
-		var rhs_parsed: Dictionary = _parse_line_text(_make_line(let_expr))
+		var rhs_parsed: Dictionary = StrudelLineCompiler.parse_line(StrudelLineCompiler.make_line(let_expr))
 		if rhs_parsed["is_valid"]:
 			var let_pat: StrudelPattern = _compile_parsed(rhs_parsed, bindings)
 			# Set pattern_offset on the definition line so draw-time alignment works.

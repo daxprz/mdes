@@ -1,0 +1,11 @@
+// Bridge: Dark → Light — one cycle, ascending into major
+setcps(0.175)
+
+stack(
+  sub: note("[c2 eb2 f2 c2]").s("sine").gain(0.13).legato(1.2),
+  pad: note("[[c3,eb3,g3] [f3,ab3,c4] [g3,b3,d4] [c3,e3,g3]]").s("sine").gain(0.08).legato(1.0),
+  mid: note("[[eb4,g4] [f4,ab4] [g4,b4] [e4,g4]]").s("sine").gain(0.045).legato(0.8),
+  sparkle: note("eb5 g5 b5 c6 e6 g6 c6 e6").fast(2).s("sine").gain(0.025).legato(0.2),
+  shimmer: note("eb6 ~ g6 ~ b5 ~ e6 ~").s("sine").gain(0.018).legato(0.15),
+  pulse: note("c2 ~ ~ eb3 c3 ~ ~ g3").s("sine").gain(0.05).legato(0.15)
+)

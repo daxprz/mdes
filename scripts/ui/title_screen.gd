@@ -354,34 +354,48 @@ func _setup_splays_from_config(splays_config: Array) -> void:
 			splay_data["_creature_ref"] = result["creatures"][0]
 
 
-var _title_music_dark_loaded: bool = false  # Only swap to dark once
+var _title_music_dark_playing: bool = false  # Track whether dark theme is active
+var _title_music_loaded: bool = false       # Composition loaded once, reused
 
 func _setup_title_music(splays_config: Array) -> void:
-	# Multi-layer strudel patterns require note mode (batch MML can't handle mixed durations)
+	# Multi-layer strudel patterns require note mode (per-Track dispatch)
 	MusicManager.strudel_set_mode("note")
-	# Load intro_light into the drawer with full line expansion and play
-	MusicManager.strudel_load_file("intro_light")
+
+	# Load the title screen composition (movements + bridges from JSON)
+	if not _title_music_loaded:
+		MusicManager.load_composition("title_screen")
+		_title_music_loaded = true
+
+	# Play from the default movement ("light") — each Track is independent
+	_title_music_dark_playing = false
+	MusicManager.play_composition()
 
 	# Connect to every splay creature's woke signal to trigger dark music,
 	# and died signal to return to light music
 	for splay_data in splays_config:
 		var creature: Node = splay_data.get("_creature_ref")
 		if creature and creature.has_signal("woke"):
-			creature.woke.connect(_on_monster_woke)
+			if not creature.woke.is_connected(_on_monster_woke):
+				creature.woke.connect(_on_monster_woke)
 		if creature and creature.has_signal("died"):
-			creature.died.connect(_on_monster_died)
+			if not creature.died.is_connected(_on_monster_died):
+				creature.died.connect(_on_monster_died)
 
 
 func _on_monster_woke() -> void:
-	if _title_music_dark_loaded:
+	if _title_music_dark_playing:
 		return
-	_title_music_dark_loaded = true
-	MusicManager.strudel_load_file("intro_dark")
+	_title_music_dark_playing = true
+	# Bridge (1 cycle) → dark movement (loop)
+	MusicManager.composition_transition_to("dark")
 
 
 func _on_monster_died(_global_pos: Vector2) -> void:
-	_title_music_dark_loaded = false
-	MusicManager.strudel_load_file("intro_light")
+	if not _title_music_dark_playing:
+		return
+	_title_music_dark_playing = false
+	# Bridge (1 cycle) → light movement (loop)
+	MusicManager.composition_transition_to("light")
 
 
 # -- Process -------------------------------------------------------------------
@@ -675,7 +689,7 @@ func _deferred_rebuild() -> void:
 	_setup_splays_from_config(config.get("splays", []))
 
 	# Restart title music on level reload
-	_title_music_dark_loaded = false
+	_title_music_dark_playing = false
 	_setup_title_music(config.get("splays", []))
 
 

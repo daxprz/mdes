@@ -1,0 +1,13 @@
+{
+  "id": "title_screen",
+  "default_movement": "light",
+  "movements": [
+    {"id": "light", "file": "intro_light", "bars": -1},
+    {"id": "dark",  "file": "intro_dark",  "bars": -1}
+  ],
+  "bridges": [
+    {"id": "bridge_to_dark",  "file": "intro_bridge_to_dark",  "bars": 1, "from": "light", "to": "dark"},
+    {"id": "bridge_to_light", "file": "intro_bridge_to_light", "bars": 1, "from": "dark",  "to": "light"}
+  ],
+  "turnarounds": []
+}
