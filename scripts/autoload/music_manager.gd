@@ -1704,6 +1704,33 @@ func get_composition() -> MusicComposition:
 	return _composition
 
 
+func get_bar_scheduler() -> BarScheduler:
+	return _bar_scheduler
+
+
+func composition_get_available_transitions() -> Array:
+	## Return transitions available from the current movement.
+	## Returns [] if no composition active or in a bridge/turnaround.
+	if not _composition or not _record or not _record.current_bar:
+		return []
+	if not _record.current_bar.movement:
+		return []
+	return _composition.get_transitions_from(_record.current_bar.movement.id)
+
+
+func composition_is_in_transition() -> bool:
+	## True if the current bar is a bridge or turnaround.
+	if not _record or not _record.current_bar:
+		return false
+	return _record.current_bar.bridge != null or _record.current_bar.turnaround != null
+
+
+func composition_is_transition_queued() -> bool:
+	if not _bar_scheduler:
+		return false
+	return _bar_scheduler.is_transition_queued()
+
+
 func strudel_set_cps(cps: float) -> void:
 	if _cyclist:
 		_cyclist.set_cps(cps)

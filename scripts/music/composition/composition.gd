@@ -30,3 +30,13 @@ func get_bridge_between(from_id: String, to_id: String) -> MusicBridge:
 		if bridge.from_movement_id == from_id and bridge.to_movement_id == to_id:
 			return bridge
 	return null
+
+
+func get_transitions_from(from_id: String) -> Array:
+	## Return all bridges originating from `from_id`.
+	## Each entry: {target_id: String, bridge: MusicBridge}
+	var result: Array = []
+	for bridge in bridges.values():
+		if bridge.from_movement_id == from_id:
+			result.append({"target_id": bridge.to_movement_id, "bridge": bridge})
+	return result

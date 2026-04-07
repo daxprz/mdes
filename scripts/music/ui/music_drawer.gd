@@ -76,6 +76,19 @@ const LINE_HEIGHT := 24.0     # Height of each editor line
 const MIN_VISIBLE_LINES := 8  # Minimum visible lines (fallback)
 const PIANOROLL_CYCLES := 4.0
 const PIANOROLL_PLAYHEAD := 0.5  # Fraction of width where "now" is
+const RECORD_STRIP_HEIGHT := 14.0  # Height of the record timeline strip
+const ACTION_AREA_HEIGHT := 28.0   # Height of the composition action area
+
+## Color palette for movements — indexed by order of first appearance.
+const MOVEMENT_COLORS: Array[Color] = [
+	Color(0.35, 0.55, 0.85),   # warm blue (e.g. "light")
+	Color(0.45, 0.25, 0.65),   # deep purple (e.g. "dark")
+	Color(0.25, 0.7, 0.5),     # teal
+	Color(0.7, 0.35, 0.35),    # muted red
+	Color(0.6, 0.55, 0.3),     # olive
+]
+const BRIDGE_COLOR := Color(0.85, 0.6, 0.2)       # orange/amber
+const TURNAROUND_COLOR := Color(0.85, 0.75, 0.2)  # yellow/gold
 
 var _active: bool = false
 var _panel_x: float = 0.0      # Current X position of panel left edge
@@ -538,6 +551,7 @@ var _btn_prev: Rect2 = Rect2()
 var _btn_next: Rect2 = Rect2()
 var _scrub_rect: Rect2 = Rect2()
 var _scrub_dragging: bool = false
+var _btn_transition: Rect2 = Rect2()
 
 # Per-line pattern state (set on eval, used for per-line pianoroll)
 var _line_patterns: Array = []   # Array[StrudelPattern or null] — one per line
@@ -652,6 +666,10 @@ func _input(event: InputEvent) -> void:
 				return
 			elif _btn_next.has_point(event.position):
 				MusicManager.strudel_next_cycle()
+				get_viewport().set_input_as_handled()
+				return
+			elif _btn_transition.size != Vector2.ZERO and _btn_transition.has_point(event.position):
+				_on_transition_button_pressed()
 				get_viewport().set_input_as_handled()
 				return
 			elif _scrub_rect.has_point(event.position):
@@ -1748,6 +1766,19 @@ func _toggle_play_pause() -> void:
 		_play_current()
 
 
+func _on_transition_button_pressed() -> void:
+	## Handle click on the composition transition button.
+	## Triggers a transition to the first available target movement.
+	## If already queued, clicking again does nothing.
+	if MusicManager.composition_is_transition_queued():
+		return
+	var transitions: Array = MusicManager.composition_get_available_transitions()
+	if transitions.is_empty():
+		return
+	var target_id: String = transitions[0]["target_id"]
+	MusicManager.composition_transition_to(target_id)
+
+
 func _scrub_seek_to_mouse(mouse_x: float) -> void:
 	if _scrub_rect.size.x <= 0:
 		return
@@ -2074,8 +2105,15 @@ func _draw_panel() -> void:
 		var head_px: float = _scrub_rect.position.x + head_frac * _scrub_rect.size.x
 		_panel.draw_rect(Rect2(head_px - 1.5, scrub_y + 1, 3.0, SCRUB_HEIGHT - 2), Color(0.3, 0.9, 0.3, 0.9))
 
+	# -- Record Timeline Strip (composition mode) --
+	var record_strip_bottom: float = scrub_y + SCRUB_HEIGHT
+	var has_composition: bool = MusicManager.get_record() != null and MusicManager.get_composition() != null
+	if has_composition:
+		_draw_record_strip(px, record_strip_bottom, pw, RECORD_STRIP_HEIGHT, font)
+		record_strip_bottom += RECORD_STRIP_HEIGHT
+
 	# -- Editor Lines (multi-line with per-line visualizers) --
-	var ey: float = TOOLBAR_HEIGHT + SCRUB_HEIGHT + 4.0
+	var ey: float = record_strip_bottom + 4.0
 	var draw_y: float = ey
 	# Calculate how many lines fit in the available panel height
 	# With soft-wrapping, we can't pre-compute a fixed line count — draw until full.
@@ -2114,6 +2152,158 @@ func _draw_panel() -> void:
 		_panel.draw_string(font, Vector2(px + pw - 40, draw_y + 4),
 			"%d/%d" % [_current_line + 1, _lines.size()],
 			HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.5))
+
+	# -- Action Area (composition mode) --
+	if has_composition:
+		_draw_action_area(px, draw_y + 12, pw, ACTION_AREA_HEIGHT, font)
+
+
+func _draw_record_strip(x: float, y: float, w: float, h: float, font: Font) -> void:
+	## Draw the color-coded Record timeline: played bars, current bar, cued bars.
+	## Each bar is colored by section type: Movement (per-id color), Bridge (amber),
+	## Turnaround (gold).  Current bar has a white outline and playhead.
+	var record: MusicRecord = MusicManager.get_record()
+	var comp: MusicComposition = MusicManager.get_composition()
+	if not record or not comp:
+		return
+
+	# Background
+	_panel.draw_rect(Rect2(x, y, w, h), Color(0.05, 0.05, 0.08))
+
+	# Build movement → color map (palette indexed by iteration order)
+	var movement_color_map: Dictionary = {}
+	var mi: int = 0
+	for m_id in comp.movements:
+		movement_color_map[m_id] = MOVEMENT_COLORS[mi % MOVEMENT_COLORS.size()]
+		mi += 1
+
+	# Collect all bars: played + [current] + cued
+	var all_bars: Array = []
+	all_bars.append_array(record.played_bars)
+	var current_idx: int = all_bars.size()
+	if record.current_bar:
+		all_bars.append(record.current_bar)
+	all_bars.append_array(record.cued_bars)
+	if all_bars.is_empty():
+		return
+
+	# Bar sizing
+	var pad: float = 4.0
+	var bar_gap: float = 1.0
+	var usable_w: float = w - pad * 2
+	var bar_w: float = minf(16.0, (usable_w - bar_gap * maxf(all_bars.size() - 1, 0)) / maxf(all_bars.size(), 1))
+	bar_w = maxf(bar_w, 4.0)
+
+	# Scroll offset to keep current bar centered
+	var center_target: float = current_idx * (bar_w + bar_gap) + bar_w * 0.5
+	var scroll_offset: float = center_target - usable_w * 0.5
+
+	for i in range(all_bars.size()):
+		var bar: MusicBar = all_bars[i]
+		var bx: float = x + pad + i * (bar_w + bar_gap) - scroll_offset
+
+		# Cull bars outside visible range
+		if bx + bar_w < x or bx > x + w:
+			continue
+
+		# Color by section type
+		var color: Color
+		if bar.bridge:
+			color = BRIDGE_COLOR
+		elif bar.turnaround:
+			color = TURNAROUND_COLOR
+		elif bar.movement:
+			color = movement_color_map.get(bar.movement.id, Color(0.4, 0.4, 0.4))
+		else:
+			color = Color(0.3, 0.3, 0.3)
+
+		# Dimming: played bars fade, cued bars are semi-transparent
+		if i < current_idx:
+			var age: float = float(current_idx - i)
+			color.a = clampf(1.0 - age * 0.08, 0.2, 0.7)
+		elif i == current_idx:
+			color.a = 1.0
+		else:
+			color.a = 0.5
+
+		_panel.draw_rect(Rect2(bx, y + 1, bar_w, h - 2), color)
+
+		# Current bar: white outline + playhead
+		if i == current_idx:
+			_panel.draw_rect(Rect2(bx, y, bar_w, h), Color(1, 1, 1, 0.4), false, 1.0)
+			var progress: float = record.play_head.cycle_position
+			var head_x: float = bx + progress * bar_w
+			_panel.draw_line(Vector2(head_x, y), Vector2(head_x, y + h), Color(1, 1, 1, 0.8), 1.0)
+
+		# Movement initial inside the bar (if wide enough)
+		if bar_w >= 12.0 and bar.movement and not bar.bridge:
+			var label: String = bar.movement.id.substr(0, 1).to_upper()
+			_panel.draw_string(font, Vector2(bx + 2, y + h - 3), label,
+				HORIZONTAL_ALIGNMENT_LEFT, bar_w - 4, 7, Color(1, 1, 1, 0.5 * color.a))
+
+
+func _draw_action_area(x: float, y: float, w: float, h: float, font: Font) -> void:
+	## Draw composition action buttons below the editor lines.
+	## Shows a Transition button with state: active, disabled, or queued.
+	var comp: MusicComposition = MusicManager.get_composition()
+	var record: MusicRecord = MusicManager.get_record()
+	if not comp or not record or not record.current_bar:
+		_btn_transition = Rect2()
+		return
+
+	# Separator line
+	_panel.draw_line(Vector2(x + 8, y), Vector2(x + w - 8, y), Color(0.2, 0.2, 0.25), 1.0)
+
+	var transitions: Array = MusicManager.composition_get_available_transitions()
+	var in_transition: bool = MusicManager.composition_is_in_transition()
+	var is_queued: bool = MusicManager.composition_is_transition_queued()
+
+	if transitions.is_empty() and not in_transition and not is_queued:
+		_btn_transition = Rect2()
+		return
+
+	# Transition button
+	var btn_w: float = 100.0
+	var btn_h: float = 20.0
+	var btn_x: float = x + 8.0
+	var btn_y: float = y + (h - btn_h) / 2.0
+
+	var btn_color: Color
+	var btn_text: String
+	var btn_text_color: Color
+
+	if is_queued:
+		btn_color = Color(0.15, 0.13, 0.08)
+		btn_text = "Queued"
+		btn_text_color = Color(0.85, 0.7, 0.3)
+	elif in_transition:
+		btn_color = Color(0.08, 0.08, 0.1)
+		btn_text = "Transition"
+		btn_text_color = Color(0.35, 0.35, 0.4)
+	else:
+		var target_name: String = ""
+		if not transitions.is_empty():
+			target_name = transitions[0]["target_id"]
+		btn_text = "-> %s" % target_name if not target_name.is_empty() else "Transition"
+		btn_color = Color(0.15, 0.18, 0.25)
+		btn_text_color = Color(0.7, 0.85, 1.0)
+
+	_btn_transition = Rect2(btn_x, btn_y, btn_w, btn_h)
+	_panel.draw_rect(_btn_transition, btn_color)
+	_panel.draw_rect(_btn_transition, Color(btn_text_color.r, btn_text_color.g, btn_text_color.b, 0.3), false, 1.0)
+	_panel.draw_string(font, Vector2(btn_x + 8, btn_y + 14), btn_text,
+		HORIZONTAL_ALIGNMENT_LEFT, btn_w - 16, 11, btn_text_color)
+
+	# Current section label on the right
+	var section_label: String = ""
+	if record.current_bar.bridge:
+		section_label = "bridge"
+	elif record.current_bar.turnaround:
+		section_label = "turnaround"
+	elif record.current_bar.movement:
+		section_label = record.current_bar.movement.id
+	_panel.draw_string(font, Vector2(x + w - 80, btn_y + 14), section_label,
+		HORIZONTAL_ALIGNMENT_LEFT, 72, 10, Color(0.5, 0.5, 0.6))
 
 
 func _draw_editor_line_at(x: float, y: float, w: float, h: float, font: Font, line_idx: int, is_current: bool) -> float:

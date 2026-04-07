@@ -20,6 +20,11 @@ var _current_movement_id: String = ""
 ## Absolute cycle counter
 var _cycle_counter: int = 0
 
+## Queued transition — will execute when current bridge/turnaround ends.
+## Empty string = no queued transition.
+var _queued_transition_id: String = ""
+var _queued_transition_bridge: MusicBridge = null
+
 
 func setup(p_record: MusicRecord, p_cyclist: RefCounted) -> void:
 	record = p_record
@@ -60,7 +65,6 @@ func _on_cycle_boundary(_cycle_int: int) -> void:
 	## A new cycle has started.  Check if we need to advance the bar.
 	_cycle_counter += 1
 
-	# Check if current bar's section has a finite bar count
 	var bar: MusicBar = record.current_bar
 	if not bar:
 		return
@@ -71,14 +75,24 @@ func _on_cycle_boundary(_cycle_int: int) -> void:
 	if record.current_bar:
 		_current_movement_id = record.current_bar.movement.id if record.current_bar.movement else ""
 
+	# Check for queued transition — execute when we land on a pure movement bar
+	# (i.e. the bridge/turnaround that was blocking the transition has completed)
+	if not _queued_transition_id.is_empty() and record.current_bar:
+		if not record.current_bar.bridge and not record.current_bar.turnaround:
+			var target: MusicMovement = record.composition.movements.get(_queued_transition_id)
+			if target:
+				_execute_transition(_queued_transition_id, target, _queued_transition_bridge)
+
 	# Refill cue if running low
 	_refill_cue()
 
 
 func transition_to(target_movement_id: String, bridge: MusicBridge = null) -> void:
-	## Replace the cue queue to transition to a new movement.
-	## If bridge is provided, plays bridge bars first, then target movement.
-	## Current bar plays to completion — transition starts at next cycle boundary.
+	## Request a transition to a new movement.
+	## If currently in a bridge or turnaround (or the cue already starts with one),
+	## the transition is QUEUED — it will execute after the current transition
+	## completes.  If another transition is already queued, the new one replaces it.
+	## Otherwise, the cue is replaced immediately.
 	if not record or not record.composition:
 		return
 
@@ -87,6 +101,26 @@ func transition_to(target_movement_id: String, bridge: MusicBridge = null) -> vo
 		push_error("BarScheduler: unknown movement '%s'" % target_movement_id)
 		return
 
+	# If currently in a bridge or turnaround, queue the transition
+	if record.current_bar and (record.current_bar.bridge or record.current_bar.turnaround):
+		_queued_transition_id = target_movement_id
+		_queued_transition_bridge = bridge
+		return
+
+	# Also check if the cue already starts with bridge/turnaround bars
+	# (transition already in progress in the cue)
+	if not record.cued_bars.is_empty():
+		var next_bar: MusicBar = record.cued_bars[0]
+		if next_bar.bridge or next_bar.turnaround:
+			_queued_transition_id = target_movement_id
+			_queued_transition_bridge = bridge
+			return
+
+	_execute_transition(target_movement_id, target, bridge)
+
+
+func _execute_transition(target_movement_id: String, target: MusicMovement, bridge: MusicBridge) -> void:
+	## Actually replace the cue queue for a transition.
 	var new_cue: Array = []
 	var cycle: int = _cycle_counter + 1
 
@@ -102,6 +136,8 @@ func transition_to(target_movement_id: String, bridge: MusicBridge = null) -> vo
 		cycle += 1
 
 	_current_movement_id = target_movement_id
+	_queued_transition_id = ""
+	_queued_transition_bridge = null
 	record.replace_cued(new_cue)
 
 
@@ -127,3 +163,11 @@ func _refill_cue() -> void:
 		else:
 			# Finite movement — don't generate past the end
 			break
+
+
+func get_queued_transition_id() -> String:
+	return _queued_transition_id
+
+
+func is_transition_queued() -> bool:
+	return not _queued_transition_id.is_empty()

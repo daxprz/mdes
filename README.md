@@ -203,6 +203,14 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.73
+**Record timeline, action buttons, transition queueing**
+- **Record timeline strip**: color-coded bar strip below the scrub bar visualizes played, current, and cued bars — movements get per-id palette colors (warm blue/deep purple), bridges show amber, turnarounds show gold; current bar has white outline and playhead
+- **Composition action area**: context-aware transition button below editor lines — shows "-> dark" or "-> light" based on current movement, grays out during bridges/turnarounds, shows "Queued" state when a transition is pending
+- **Transition queueing**: requesting a transition during a bridge or turnaround queues it instead of dropping it; queued transition executes when the current transition completes; new requests replace the queued one (last-request-wins)
+- **RCON composition commands**: `comp status` shows section, transition state, queue, bar counts; `comp transition <id>` triggers transitions via console
+- **get_transitions_from()**: new method on MusicComposition returns all bridges originating from a given movement
+
 ### v0.10.72
 **Composition architecture, per-note velocity, boundary note fix**
 - **Composition system**: new data architecture — Composition, Movement, Bridge, Turnaround, Track, Phrase, Bar, Record, PlayHead, BarScheduler (11 new files under `scripts/music/composition/` and `scripts/music/playback/`)

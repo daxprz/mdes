@@ -1125,6 +1125,42 @@ func _execute(command: String) -> String:
 				MusicDrawer.toggle()
 			return "OK: music drawer %s" % ("open" if MusicDrawer.is_open() else "closed")
 
+		"composition", "comp":
+			# composition transition <movement_id>
+			# composition status
+			if parts.size() < 2:
+				# Status
+				var comp: MusicComposition = MusicManager.get_composition()
+				if not comp:
+					return "No composition loaded"
+				var rec: MusicRecord = MusicManager.get_record()
+				var section: String = rec.current_bar.get_section_id() if rec and rec.current_bar else "none"
+				var queued: String = MusicManager.get_bar_scheduler().get_queued_transition_id() if MusicManager.get_bar_scheduler() else ""
+				return "Composition: %s | section: %s | queued: %s | bars played: %d" % [
+					comp.id, section, queued if not queued.is_empty() else "none",
+					rec.played_bars.size() if rec else 0]
+			match parts[1].to_lower():
+				"transition", "trans":
+					if parts.size() < 3:
+						return "Usage: composition transition <movement_id>"
+					MusicManager.composition_transition_to(parts[2])
+					return "OK: transition to '%s' requested" % parts[2]
+				"status":
+					var comp2: MusicComposition = MusicManager.get_composition()
+					if not comp2:
+						return "No composition loaded"
+					var rec2: MusicRecord = MusicManager.get_record()
+					var section2: String = rec2.current_bar.get_section_id() if rec2 and rec2.current_bar else "none"
+					var queued2: String = MusicManager.get_bar_scheduler().get_queued_transition_id() if MusicManager.get_bar_scheduler() else ""
+					var in_trans: bool = MusicManager.composition_is_in_transition()
+					return "Composition: %s | section: %s | in_transition: %s | queued: %s | played: %d | cued: %d" % [
+						comp2.id, section2, str(in_trans),
+						queued2 if not queued2.is_empty() else "none",
+						rec2.played_bars.size() if rec2 else 0,
+						rec2.cued_bars.size() if rec2 else 0]
+				_:
+					return "Unknown composition subcommand: %s" % parts[1]
+
 		"ai_spawn":
 			# Spawn an AI-controlled player at a position.
 			# ai_spawn [x y | @e[...] ~dx ~dy] [class=executioner] [name=id]
