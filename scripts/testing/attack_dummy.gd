@@ -32,7 +32,7 @@ var _tether_target_b_part: String = ""    # Second anchor body part
 
 func _ready() -> void:
 	add_to_group("attack_dummies")
-	collision_layer = 0   # Invisible to physics queries
+	collision_layer = 8   # Layer 4 — detectable by projectiles (mask 9 includes layer 4)
 	collision_mask = 1    # Stands on world
 
 	# Collision shape so we stand on platforms
@@ -58,6 +58,17 @@ func _physics_process(delta: float) -> void:
 		_fire()
 
 	queue_redraw()
+
+
+var _damage_taken: int = 0
+
+
+func take_damage(amount: int, _attacker_index: int = -1) -> void:
+	## Accept damage from projectiles. Logs the hit for test verification.
+	_damage_taken += amount
+	DebugOverlay.log("player/projectiles", self,
+		"DUMMY HIT: dmg=%d total=%d pos=(%.0f,%.0f)",
+		[amount, _damage_taken, global_position.x, global_position.y])
 
 
 func set_target(enemy: Node2D) -> void:

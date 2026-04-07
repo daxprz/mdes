@@ -832,7 +832,7 @@ func _get_level_names() -> Array[String]:
 	## Return level names from LevelConfig's known levels.
 	var names: Array[String] = []
 	# Check bundled levels
-	var dir := DirAccess.open("res://data/levels/")
+	var dir := DirAccess.open("res://levels/")
 	if dir:
 		dir.list_dir_begin()
 		var fname: String = dir.get_next()
@@ -841,7 +841,7 @@ func _get_level_names() -> Array[String]:
 				names.append(fname.replace(".json", ""))
 			fname = dir.get_next()
 	# Check user override levels
-	dir = DirAccess.open("user://data/levels/")
+	dir = DirAccess.open("user://levels/")
 	if dir:
 		dir.list_dir_begin()
 		var fname2: String = dir.get_next()

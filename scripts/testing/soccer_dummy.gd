@@ -121,9 +121,9 @@ func _physics_process(delta: float) -> void:
 	_was_on_floor = is_on_floor()
 
 	# Rolling rotation: angular velocity = linear velocity / radius
+	# Rotate the body itself so child nodes (stuck arrows, etc.) follow
 	_rotation_angle += (velocity.x * delta) / cfg("radius", DEFAULT_RADIUS)
-	if _sprite:
-		_sprite.rotation = _rotation_angle
+	rotation = _rotation_angle
 
 	queue_redraw()
 
@@ -133,9 +133,6 @@ func take_damage(amount: int, _source: int = -1) -> void:
 	health -= amount
 	if health < 0:
 		health = 0
-	# Knockback from damage
-	var kb_dir: float = 1.0 if randf() > 0.5 else -1.0
-	velocity += Vector2(kb_dir * 120.0, -180.0)
 	queue_redraw()
 
 

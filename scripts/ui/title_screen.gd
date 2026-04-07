@@ -75,6 +75,9 @@ func _ready() -> void:
 	_setup_cave_walls_from_config(config.get("cave_walls", {}))
 	_setup_splays_from_config(config.get("splays", []))
 
+	# Start title music after MusicManager finishes deferred init
+	call_deferred("_setup_title_music", config.get("splays", []))
+
 	# Restore saved player choices or auto-join connected controllers
 	_returning_from_game = not saved_choices.is_empty()
 	if _returning_from_game:
@@ -349,6 +352,36 @@ func _setup_splays_from_config(splays_config: Array) -> void:
 		# Store creature reference for the level editor drag system
 		if not result.is_empty() and not result.get("creatures", []).is_empty():
 			splay_data["_creature_ref"] = result["creatures"][0]
+
+
+var _title_music_dark_loaded: bool = false  # Only swap to dark once
+
+func _setup_title_music(splays_config: Array) -> void:
+	# Multi-layer strudel patterns require note mode (batch MML can't handle mixed durations)
+	MusicManager.strudel_set_mode("note")
+	# Load intro_light into the drawer with full line expansion and play
+	MusicManager.strudel_load_file("intro_light")
+
+	# Connect to every splay creature's woke signal to trigger dark music,
+	# and died signal to return to light music
+	for splay_data in splays_config:
+		var creature: Node = splay_data.get("_creature_ref")
+		if creature and creature.has_signal("woke"):
+			creature.woke.connect(_on_monster_woke)
+		if creature and creature.has_signal("died"):
+			creature.died.connect(_on_monster_died)
+
+
+func _on_monster_woke() -> void:
+	if _title_music_dark_loaded:
+		return
+	_title_music_dark_loaded = true
+	MusicManager.strudel_load_file("intro_dark")
+
+
+func _on_monster_died(_global_pos: Vector2) -> void:
+	_title_music_dark_loaded = false
+	MusicManager.strudel_load_file("intro_light")
 
 
 # -- Process -------------------------------------------------------------------
@@ -640,6 +673,10 @@ func _deferred_rebuild() -> void:
 	_setup_spawn_positions_from_config(config.get("spawn_positions", []))
 	_setup_cave_walls_from_config(config.get("cave_walls", {}))
 	_setup_splays_from_config(config.get("splays", []))
+
+	# Restart title music on level reload
+	_title_music_dark_loaded = false
+	_setup_title_music(config.get("splays", []))
 
 
 func _debug_regenerate_nearest_scenery() -> void:

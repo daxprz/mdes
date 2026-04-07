@@ -979,13 +979,13 @@ func _handle_archer_aim(delta: float) -> void:
 	l2_pressed = p._is_trigger_pressed(JOY_AXIS_TRIGGER_LEFT)
 	r2_pressed = p._is_trigger_pressed(JOY_AXIS_TRIGGER_RIGHT)
 
-	# DEBUG: print trigger values every frame when trigger is pulled
-	if p.device_id >= 0:
-		var l2_val: float = Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_LEFT)
-		var r2_val: float = Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_RIGHT)
-		if l2_val > 0.01 or r2_val > 0.01:
-			DebugOverlay.log("player/archer_arcs", p,
-				"L2=%.3f R2=%.3f pressed=%s,%s aiming=%s", [l2_val, r2_val, l2_pressed, r2_pressed, p._archer_aiming])
+	# DEBUG: log trigger state when triggers are active
+	if l2_pressed or r2_pressed:
+		var l2_val: float = Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_LEFT) if p.device_id >= 0 else (1.0 if l2_pressed else 0.0)
+		var r2_val: float = Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_RIGHT) if p.device_id >= 0 else (1.0 if r2_pressed else 0.0)
+		DebugOverlay.log("player/archer_triggers", p,
+			"L2=%.3f R2=%.3f pressed=%s,%s aiming=%s ret=(%.0f,%.0f)",
+			[l2_val, r2_val, l2_pressed, r2_pressed, p._archer_aiming, p._archer_reticle_pos.x, p._archer_reticle_pos.y])
 
 	# Tick debug trails
 	var trail_i: int = p._archer_debug_trails.size() - 1
@@ -1040,7 +1040,9 @@ func _handle_archer_aim(delta: float) -> void:
 
 		# Partial trigger pull = max power cap
 		var l2_amount: float = 1.0
-		if p.device_id >= 0:
+		if p._ai_active and p._ai_triggers.get("l2", false):
+			l2_amount = 1.0  # AI triggers are full-pull
+		elif p.device_id >= 0:
 			l2_amount = clampf(Input.get_joy_axis(p.device_id, JOY_AXIS_TRIGGER_LEFT), 0.0, 1.0)
 		var trigger_max: float = lerpf(ARCHER_ARROW_MIN_SPEED, ARCHER_ARROW_MAX_SPEED, l2_amount)
 
@@ -1322,6 +1324,11 @@ func _build_arc_points_from_vel(vx: float, vy: float) -> void:
 
 func _archer_fire_aimed() -> void:
 	## Fire an arrow along the solved parabolic arc (does not consume ammo)
+	DebugOverlay.log("player/archer_fire", p,
+		"FIRE vx=%.1f vy=%.1f ret=(%.0f,%.0f) pos=(%.0f,%.0f)",
+		[p._archer_solved_vx, p._archer_solved_vy,
+		p._archer_reticle_pos.x, p._archer_reticle_pos.y,
+		p.global_position.x, p.global_position.y])
 	p._attack_cooldown = 0.5
 	AudioManager.play("crossbow_shoot", 0.0, 0.8)
 	p._rumble(0.4, 0.6, 0.15)
@@ -1351,11 +1358,12 @@ func _archer_fire_aimed() -> void:
 	proj.direction = Vector2.ZERO
 	proj.projectile_type = "crossbow_bolt"
 	proj.owner_index = p.player_index
-	proj.global_position = p.global_position
 	proj._is_arc = true
 	proj._arc_vel = Vector2(vx, vy)
 	proj._arc_gravity = ARCHER_ARROW_GRAVITY
-	get_parent().add_child(proj)
+	# Add to scene root so projectile position is in world space
+	p.get_tree().current_scene.add_child(proj)
+	proj.global_position = p.global_position
 
 	# Debug: track the actual arrow trail over time
 	if DebugOverlay.should_draw("player/archer_arcs", p):

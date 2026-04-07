@@ -2177,6 +2177,14 @@ func _update_pianoroll() -> void:
 	var visible_start: float = _current_time - lookbehind
 	var visible_end: float = _current_time + lookahead
 
+	# Detect seek (time jumped backward) — reset per-line rolling buffers so
+	# haps are re-queried for the new time range instead of stale high-water marks.
+	for i in range(_line_query_ends.size()):
+		if _line_query_ends[i] > visible_end + 0.01:
+			_line_query_ends[i] = 0.0
+			if i < _line_haps.size():
+				_line_haps[i] = []
+
 	# Per-line rolling buffer: query each line's pattern independently
 	_visible_haps.clear()
 	_active_locations.clear()

@@ -1185,11 +1185,26 @@ func _execute(command: String) -> String:
 			var aim := Vector2.ZERO
 			if parts.size() >= 5:
 				aim = Vector2(float(parts[3]), float(parts[4]))
-			var actions: Array = [action] if action != "none" else []
+			# Support comma-separated actions: ai_cmd l2,r2 0.2
+			var actions: Array = [] if action == "none" else Array(action.split(","))
 			for p in get_tree().get_nodes_in_group("players"):
 				if p.has_method("ai_queue_cmd") and p._ai_active:
 					p.ai_queue_cmd(actions, duration, aim)
 					return "OK: queued %s for %.1fs" % [action, duration]
+			return "ERR: no AI player"
+
+		"ai_hold":
+			# Persistent button hold: ai_hold <action> on|off
+			# Holds stay active until explicitly released. Independent of ai_cmd queue.
+			# Supports triggers (l2, r2) and regular actions (jump, attack, etc.)
+			if parts.size() < 3:
+				return "ERR: usage: ai_hold <action> on|off"
+			var hold_action: String = parts[1]
+			var hold_state: bool = parts[2] == "on"
+			for p in get_tree().get_nodes_in_group("players"):
+				if p.has_method("ai_set_hold") and p._ai_active:
+					p.ai_set_hold(hold_action, hold_state)
+					return "OK: %s %s" % [hold_action, "held" if hold_state else "released"]
 			return "ERR: no AI player"
 
 		"ai_off":
@@ -1198,6 +1213,18 @@ func _execute(command: String) -> String:
 					p.ai_set_active(false)
 					p.ai_clear()
 			return "OK: AI disabled"
+
+		"ai_reticle":
+			# Set the archer reticle position: ai_reticle <x> <y>
+			if parts.size() < 3:
+				return "ERR: usage: ai_reticle <x> <y>"
+			var rx: float = float(parts[1])
+			var ry: float = float(parts[2])
+			for p in get_tree().get_nodes_in_group("players"):
+				if "_archer_reticle_pos" in p and p._ai_active:
+					p._archer_reticle_pos = Vector2(rx, ry)
+					return "OK: reticle at (%.0f, %.0f)" % [rx, ry]
+			return "ERR: no AI player with archer reticle"
 
 		"reset", "player_reset":
 			# Reset all players (or specific index) to default start state
@@ -2954,8 +2981,8 @@ func _cmd_spawn(what: String, x: float = 960.0, y: float = 750.0, state: String 
 			dummy.add_to_group("players")
 			dummy.global_position = Vector2(x, y)
 			dummy.player_index = 0
-			dummy.collision_layer = 2  # Player layer
-			dummy.collision_mask = 1   # World
+			dummy.collision_layer = 2 | 8  # Player layer + layer 4 (projectile-detectable)
+			dummy.collision_mask = 1       # World
 			dummy.entity_id = dummy_id
 			container.add_child(dummy)
 			var dummy_result: String = "OK: spawned dummy '%s' at (%.0f, %.0f)" % [dummy.entity_id, x, y]

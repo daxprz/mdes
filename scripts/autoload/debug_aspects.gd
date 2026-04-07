@@ -108,6 +108,9 @@ func _register_all() -> void:
 	r.call("player/velocity_arrows", "Current velocity (green) and predicted jump (red) arrows")
 	r.call("player/jump_tracers", "Lingering jump impulse snapshots: pre-vel, impulse, post-vel")
 	r.call("player/archer_arcs", "Archer aim arc trajectory and debug trails")
+	r.call("player/archer_triggers", "L2/R2 trigger state, aim mode, reticle position")
+	r.call("player/archer_fire", "Arrow fire events: velocity, reticle, position")
+	r.call("player/projectiles", "Projectile position, velocity, lifetime each frame")
 	r.call("player/reticle_info", "Reticle position text overlay")
 	r.call("player/button_state", "Controller/keyboard button state labels on HUD")
 

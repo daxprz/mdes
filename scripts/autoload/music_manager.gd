@@ -230,9 +230,7 @@ func gen_presets():
 	# Set up audio effects bus (post-processing for Strudel controls)
 	_setup_audio_bus()
 
-	# Auto-start Strudel pattern on the title screen
-	if GameManager.current_state == GameManager.GameState.TITLE:
-		_strudel_play_title()
+	# Title screen music is now managed by title_screen.gd via strudel_load_file()
 
 
 func _setup_voices() -> void:
@@ -1257,6 +1255,27 @@ func _strudel_play_title() -> void:
 	print("MUSIC: title intro_light playing (note mode)")
 
 
+func strudel_set_mode(mode: String) -> void:
+	## Set Strudel playback mode: "note" (per-note dispatch) or "batch" (MML compile).
+	## Multi-layer patterns with mixed durations require note mode.
+	var is_note: bool = (mode == "note")
+	if _cyclist:
+		_cyclist.batch_mode = not is_note
+	if _sion_trigger:
+		_sion_trigger.batch_mode = not is_note
+
+
+func strudel_load_file(name_or_path: String) -> String:
+	## Load a .strudel file into the drawer and play it.
+	## Delegates to RCON's loader which handles path resolution, multi-line
+	## merging, stack expansion, and drawer population.
+	## Returns status message (OK/ERR).
+	var rcon_node: Node = get_node_or_null("/root/Rcon")
+	if not rcon_node:
+		return "ERR: RCON autoload not available"
+	return rcon_node._cmd_strudel_load(name_or_path)
+
+
 func strudel_set_cps(cps: float) -> void:
 	if _cyclist:
 		_cyclist.set_cps(cps)
@@ -1365,11 +1384,10 @@ func connect_player_health(health_comp: Node) -> void:
 func _on_game_state_changed(new_state: GameManager.GameState) -> void:
 	match new_state:
 		GameManager.GameState.TITLE:
-			# Play Strudel-based title pattern
+			# Title music is managed by title_screen.gd via strudel_load_file()
 			if is_playing:
 				stop()
 			stop_title_music()
-			_strudel_play_title()
 		GameManager.GameState.TOWER, GameManager.GameState.BOSS:
 			if not is_playing:
 				play()

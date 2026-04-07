@@ -1,0 +1,61 @@
+{
+  "name": "ranger_arrow_debug",
+  "description": "Debug test: spawn ranger, L2 aim (hold), R2 fire, check projectile spawning",
+  "script": [
+    "level flat_floor",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+
+    "# Enable debug visuals and logging for archer + projectiles",
+    "debug on player/archer_arcs",
+    "debug on player/projectiles",
+    "debug log player/archer_triggers",
+    "debug log player/archer_fire",
+    "debug log player/projectiles",
+
+    "announce Ranger Arrow Debug",
+
+    "# Spawn ranger + target",
+    "ai_spawn 500 876 class=ranged name=Ranger",
+    "wait 0.5",
+    "spawn dummy 900 876",
+    "wait 0.3",
+
+    "# Position reticle at the dummy (on the ball, not above it)",
+    "ai_reticle 900 876",
+    "wait 0.1",
+
+    "# Step 1: Hold L2 continuously (persistent hold) — charge begins",
+    "announce Step 1: L2 aim (hold continuous)",
+    "ai_hold l2 on",
+    "wait 3.0",
+
+    "# Step 2: Quick R2 press while L2 still held — FIRE",
+    "announce Step 2: FIRE (R2 tap)",
+    "ai_hold r2 on",
+    "wait 0.2",
+    "ai_hold r2 off",
+    "wait 1.0",
+
+    "# Step 3: Second shot — R2 again while L2 still held",
+    "announce Step 3: FIRE again",
+    "ai_hold r2 on",
+    "wait 0.2",
+    "ai_hold r2 off",
+    "wait 1.0",
+
+    "# Step 4: Release L2, observe arrows",
+    "ai_hold l2 off",
+    "announce Observe arrows...",
+    "wait 3.0",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"Arrows visible?\" [\"YES\",\"NO\"] 0 blocking"
+  ]
+}

@@ -203,6 +203,22 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.71
+**Arrow physics, damage numbers, title music hooks**
+- Ranger arrows: full projectile physics with arc flight, rotation tracking velocity
+- Arrow impact: sticks in targets, reparents to body (rotates/moves with hit entity)
+- Surface bouncing: angle-dependent stick (steep) vs ricochet (glancing) with speed loss
+- Chain deflection: arrows glance off chains ±5° with 30% speed loss
+- Velocity-proportional damage: slow arrows deal less damage, ricochets hit softer
+- Floating damage numbers: white text with black outline, arc upward, fade out
+- Blood particles: world-space drips from living targets only, proportional to damage
+- Thunk/ricochet/clink sounds: procedural synthesis for each impact type
+- AI `ai_hold` command: persistent async button holds independent of command queue
+- Title screen music: intro_light loads on startup, monster wake triggers intro_dark, death returns to light
+- Soccer dummy: body rotation (arrows rotate with rolling ball), projectile-detectable collision
+- Console autocomplete: fixed level name paths for tab-completion
+- Debug aspects: archer triggers, fire events, projectile tracking
+
 ### v0.10.70
 **Transport controls, scrub bar, ambient piano**
 

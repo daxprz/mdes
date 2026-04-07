@@ -439,6 +439,8 @@ var _ai_queue: Array = []                     # Array of command dicts
 var _ai_current_cmd: Dictionary = {}          # Currently executing command
 var _ai_cmd_timer: float = 0.0               # Time remaining on current command
 var _ai_cmd_first_frame: bool = false        # True on first frame of a command
+var _ai_triggers: Dictionary = {}            # AI-injected trigger state: {"l2": bool, "r2": bool}
+var _ai_holds: Dictionary = {}               # Persistent holds: {"l2": true, "r2": true, "jump": true, ...}
 
 
 func reset_state() -> void:
@@ -505,22 +507,43 @@ func ai_queue_cmd(actions: Array, duration: float, aim: Vector2 = Vector2.ZERO) 
 	_ai_queue.append(cmd)
 
 
+func ai_set_hold(action: String, held: bool) -> void:
+	## Set a persistent button hold. Independent of the command queue.
+	## Stays active until explicitly released via ai_set_hold(action, false).
+	if held:
+		_ai_holds[action] = true
+	else:
+		_ai_holds.erase(action)
+
+
 func ai_clear() -> void:
 	_ai_queue.clear()
 	_ai_current_cmd = {}
 	_ai_cmd_timer = 0.0
+	_ai_holds.clear()
 
 
 func _ai_tick() -> void:
 	## Called at the START of _physics_process, before any input is read.
 	## Injects actions into _controller_actions / _controller_just_pressed.
+	## Two layers: persistent holds (_ai_holds) and queued commands (_ai_queue).
+	## Holds are always applied, even when the queue is empty.
 	if not _ai_active:
 		return
 
-	# Advance current command
+	# Layer 1: Apply persistent holds every frame
+	for hold_action in _ai_holds:
+		if hold_action == "l2":
+			_ai_triggers["l2"] = true
+		elif hold_action == "r2":
+			_ai_triggers["r2"] = true
+		else:
+			_controller_actions[hold_action] = true
+
+	# Layer 2: Advance queued command (if any)
 	if _ai_current_cmd.is_empty():
 		if _ai_queue.is_empty():
-			return  # Nothing to do — AI is idle
+			return  # No queued work — holds still active above
 		_ai_current_cmd = _ai_queue.pop_front()
 		_ai_cmd_timer = _ai_current_cmd.get("duration", 0.0)
 		_ai_cmd_first_frame = true
@@ -529,19 +552,31 @@ func _ai_tick() -> void:
 	else:
 		_ai_cmd_first_frame = false
 
-	# Inject actions
+	# Inject queued command actions
 	var actions: Array = _ai_current_cmd.get("actions", [])
 	for action in actions:
-		_controller_actions[action] = true
-		if _ai_cmd_first_frame:
-			_controller_just_pressed[action] = true
+		if action == "l2":
+			_ai_triggers["l2"] = true
+		elif action == "r2":
+			_ai_triggers["r2"] = true
+		else:
+			_controller_actions[action] = true
+			if _ai_cmd_first_frame:
+				_controller_just_pressed[action] = true
 
 	# Tick timer
 	_ai_cmd_timer -= get_physics_process_delta_time()
 	if _ai_cmd_timer <= 0.0:
-		# Command finished — release all its actions
+		# Command finished — release actions NOT held by persistent holds
 		for action in actions:
-			_controller_actions[action] = false
+			if _ai_holds.has(action):
+				continue  # Persistent hold keeps this active
+			if action == "l2":
+				_ai_triggers["l2"] = false
+			elif action == "r2":
+				_ai_triggers["r2"] = false
+			else:
+				_controller_actions[action] = false
 		_ai_current_cmd = {}
 
 const HEALTH_BAR_SCENE := preload("res://scenes/ui/health_bar.tscn")
@@ -829,6 +864,12 @@ var _trigger_left_was_pressed: bool = false  # Previous frame L2 state
 func _is_trigger_pressed(axis: JoyAxis) -> bool:
 	## Check if an analog trigger is pressed with hysteresis.
 	## Higher threshold to START pressing, lower threshold to STOP.
+	# AI override: check injected trigger state
+	if _ai_active and not _ai_triggers.is_empty():
+		if axis == JOY_AXIS_TRIGGER_LEFT:
+			return _ai_triggers.get("l2", false)
+		elif axis == JOY_AXIS_TRIGGER_RIGHT:
+			return _ai_triggers.get("r2", false)
 	if device_id == -1:
 		if axis == JOY_AXIS_TRIGGER_LEFT:
 			return Input.is_key_pressed(KEY_TAB)
@@ -1559,7 +1600,7 @@ func _tick_executioner(delta: float) -> void:
 func _perform_attack() -> void:
 	var fn: Variant = _class_attack_fn.get(character_class)
 	if fn is Callable:
-		fn.call()
+		fn.call({})
 
 # -- Small class forwarders ---------------------------------------------------
 
@@ -1987,6 +2028,8 @@ func _spawn_projectile(damage: int, speed: float, type: String) -> void:
 	proj.owner_index = player_index
 	proj.global_position = global_position + aim * 16.0
 	get_parent().add_child(proj)
+
+
 func _handle_special() -> void:
 	if _special_cooldown > 0.0:
 		return
@@ -2003,7 +2046,7 @@ func _handle_special() -> void:
 func _perform_special() -> void:
 	var fn: Variant = _class_special_fn.get(character_class)
 	if fn is Callable:
-		fn.call()
+		fn.call({})
 
 
 var _shield_charging: bool = false

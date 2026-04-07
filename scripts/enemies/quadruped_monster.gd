@@ -9,6 +9,7 @@ const AIController = preload("res://scripts/enemies/monster_ai_controller.gd")
 const PlayerController = preload("res://scripts/enemies/monster_player_controller.gd")
 
 signal died(global_pos: Vector2)
+signal woke
 
 # -- Scale ---------------------------------------------------------------------
 # Single source of truth for monster size. 1.0 = default. 4.0 = 4x larger.
@@ -5759,6 +5760,7 @@ func take_damage(amount: int, source_index: int = -1) -> void:
 		_asleep = false
 		_standdown = false
 		AudioManager.play("grapple_hit", 2.0, 0.6)  # Growl on wake
+		woke.emit()
 
 	# Rift tentacle absorption
 	if has_meta("rift_tentacle"):
