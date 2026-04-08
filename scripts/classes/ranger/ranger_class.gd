@@ -177,11 +177,12 @@ func _handle_ranger_grapple() -> void:
 			_grapple_tick_swinging(delta)  # Player keeps swinging
 			_tether_tick_thrown(delta)
 
-	# Jump while connected = disconnect with jump boost (AFTER tick so p.velocity is current)
+	# Jump while connected = impulse upward, rope goes slack but stays attached.
+	# Detach is handled by the grapple button logic above (tug/tether/release flow).
 	if p._grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED,
 						   GrappleState.TETHER_WINDUP, GrappleState.TETHER_THROWN]:
 		if p._is_device_action_just_pressed("jump"):
-			_grapple_jump_release()
+			_grapple_jump_on_rope()
 
 	p.queue_redraw()
 
@@ -346,15 +347,15 @@ func _update_grapple_anchor() -> void:
 
 
 
-func _grapple_tick_connected(delta: float) -> void:
+func _grapple_tick_connected(_delta: float) -> void:
 	_update_grapple_anchor()
 
 	# If pulling, actively reel player toward anchor
 	if p._grapple_pulling:
 		var to_anchor: Vector2 = (p._grapple_anchor - p.global_position).normalized()
 		var pull_speed: float = abs(p.JUMP_VELOCITY) * GRAPPLE_LAUNCH_SPEED_RATIO
-		p.global_position += to_anchor * pull_speed * delta
-		p.velocity = to_anchor * pull_speed  # Keep p.velocity aligned for smooth transition
+		p.velocity = to_anchor * pull_speed  # move_and_slide() will handle collision
+		p._grapple_swing_drove_velocity = true
 		# Update rope length to match current distance
 		var dist: float = p.global_position.distance_to(p._grapple_anchor)
 		p._grapple_rope_len = dist
@@ -413,8 +414,11 @@ func _grapple_tick_swinging(delta: float) -> void:
 			if vel_along_rope > 0:
 				# Moving away from anchor — reflect with damping
 				p.velocity -= rope_dir * vel_along_rope * 1.5  # 1.5 = slight bounce
-			# Snap to rope length
-			p.global_position = p._grapple_anchor + rope_dir * p._grapple_rope_len
+			# Constrain to rope length — set velocity toward the taut position
+			# so move_and_slide() handles collision instead of teleporting through walls
+			var taut_pos: Vector2 = p._grapple_anchor + rope_dir * p._grapple_rope_len
+			var snap_delta: Vector2 = taut_pos - p.global_position
+			p.velocity += snap_delta / maxf(p.get_physics_process_delta_time(), 0.001)
 			# Re-enter pendulum from current p.velocity
 			_enter_swing_from_velocity()
 			p._rumble(0.4, 0.6, 0.1)  # Thump when rope snaps taut
@@ -463,19 +467,23 @@ func _grapple_tick_swinging(delta: float) -> void:
 		p._grapple_anchor.y + p._grapple_rope_len * cos(p._grapple_swing_angle)
 	)
 	if new_pos.y < p._grapple_anchor.y:
-		# Player swung above anchor — go slack, preserve p.velocity
+		# Player swung above anchor — go slack, preserve velocity
 		var tangent: Vector2 = Vector2(cos(p._grapple_swing_angle), -sin(p._grapple_swing_angle))
 		p.velocity = tangent * p._grapple_swing_vel * p._grapple_rope_len
 		p._grapple_rope_slack = true
 		return
 
-	p.global_position = new_pos
+	# Set velocity so move_and_slide() moves us toward the pendulum target.
+	# This replaces direct `global_position = new_pos` so the player collides
+	# with walls and platforms instead of clipping through them.
+	var delta_pos: Vector2 = new_pos - p.global_position
+	p.velocity = delta_pos / maxf(p.get_physics_process_delta_time(), 0.001)
 
-	# Update p.velocity to match pendulum motion (for momentum on release)
-	var tangent: Vector2 = Vector2(cos(p._grapple_swing_angle), -sin(p._grapple_swing_angle))
-	p.velocity = tangent * p._grapple_swing_vel * p._grapple_rope_len
+	# Flag for player_side to know the swing set velocity this frame
+	# (prevents _handle_movement from overriding it)
+	p._grapple_swing_drove_velocity = true
 
-	# Rumble scales with p.velocity: 5% at rest, 20% at full speed
+	# Rumble scales with speed: 5% at rest, 20% at full speed
 	var swing_speed: float = absf(p._grapple_swing_vel * p._grapple_rope_len)
 	var rumble_intensity: float = lerpf(0.05, 0.20, clampf(swing_speed / 600.0, 0.0, 1.0))
 	p._rumble(rumble_intensity, 0.0, 0.05)
@@ -539,8 +547,21 @@ func _grapple_pull_to_anchor() -> void:
 
 
 
+func _grapple_jump_on_rope() -> void:
+	## Jump while staying attached to the grapple line.
+	## Adds an upward impulse — the rope naturally goes slack as the player
+	## rises toward the anchor, then snaps taut again on the way down.
+	## This lets the player vault over obstacles, change swing direction,
+	## or gain height without losing the connection.
+	var jump_vel: float = p.cfg("jump_velocity", p.JUMP_VELOCITY) * 0.8  # Slightly weaker than ground jump
+	p.velocity.y = jump_vel
+	p._grapple_rope_slack = true  # Let normal gravity + movement run until rope catches
+	AudioManager.play("jump", -3.0)
+	p._rumble(0.2, 0.3, 0.08)
+
+
 func _grapple_jump_release() -> void:
-	## Jump while connected: disconnect and add jump p.velocity to current momentum
+	## Explicit detach: release grapple and add momentum-based impulse
 	var pre_vel: Vector2 = p.velocity  # Velocity from pendulum
 	var aim: Vector2 = p._get_aim_direction_analog()
 	var jump_impulse: Vector2 = aim * abs(p.JUMP_VELOCITY) * 0.25

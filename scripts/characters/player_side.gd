@@ -350,6 +350,7 @@ var _grapple_locked_aim: Vector2 = Vector2.RIGHT  # Persists last aim direction
 var _grapple_rope_slack: bool = false  # True when player is closer than rope length (rope loose)
 var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
 var _grapple_launch_immunity: float = 0.0  # Seconds where _handle_movement won't override velocity
+var _grapple_swing_drove_velocity: bool = false  # True when pendulum set velocity this frame (skip _handle_movement)
 
 # Tether system (dual-grapple)
 const TETHER_MAX_COUNT := 5
@@ -949,13 +950,16 @@ func _physics_process(delta: float) -> void:
 	_update_cooldowns(delta)
 	_update_combo_timer(delta)
 	_handle_delegate_toggle()
+	_grapple_swing_drove_velocity = false
 	_handle_ranger_grapple()
-	# While swinging taut on grapple, skip normal movement (pendulum handles it)
-	# But if rope is slack, allow normal movement/gravity
-	if _grapple_state == GrappleState.SWINGING and not _grapple_rope_slack:
+	# While swinging taut on grapple, pendulum drives velocity — skip normal
+	# movement handlers but still run move_and_slide() for collision resolution.
+	if _grapple_swing_drove_velocity:
 		_handle_archer_aim(delta)  # Can aim and shoot while swinging
 		_update_health_bar()
 		_update_animation(delta)
+		move_and_slide()
+		_grapple_post_slide_correct()
 		_controller_just_pressed.clear()
 		queue_redraw()
 		return
@@ -996,6 +1000,29 @@ func _update_cooldowns(delta: float) -> void:
 		_special_cooldown -= delta
 	if _grapple_launch_immunity > 0.0:
 		_grapple_launch_immunity -= delta
+
+
+func _grapple_post_slide_correct() -> void:
+	## After move_and_slide(), the player may have been pushed by a wall or floor.
+	## Re-sync the pendulum angle and rope length to match the actual position
+	## so the next frame's swing math starts from reality, not from the pre-collision
+	## target. Without this, the pendulum would fight the wall every frame.
+	if _grapple_state != GrappleState.SWINGING or _grapple_rope_slack:
+		return
+	var diff: Vector2 = global_position - _grapple_anchor
+	var actual_dist: float = diff.length()
+	if actual_dist < 1.0:
+		return
+	# Update pendulum angle to match where move_and_slide placed us
+	_grapple_swing_angle = atan2(diff.x, diff.y)
+	# If we hit a wall, the actual distance is shorter than rope length — go slack
+	# briefly so the player doesn't stick to the wall
+	if actual_dist < _grapple_rope_len * 0.9:
+		_grapple_rope_slack = true
+	# Kill angular velocity component that pushes INTO the wall
+	if get_slide_collision_count() > 0:
+		var tangent: Vector2 = Vector2(cos(_grapple_swing_angle), -sin(_grapple_swing_angle))
+		_grapple_swing_vel = velocity.dot(tangent) / maxf(actual_dist, 1.0)
 
 
 # -- Physics -------------------------------------------------------------------

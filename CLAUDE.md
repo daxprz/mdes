@@ -96,6 +96,8 @@ Do NOT use tumu when:
 | `data/samples/` | External sample directory — drop .wav files in subdirs for custom drums |
 | `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
 | `docs/epics/EPIC_strudel_integration.md` | Strudel integration design — 5 EPICs, architecture, compatibility notes |
+| `scripts/ui/fps_overlay.gd` | Performance monitor — FPS graph, 19 metrics, auto-spike detection, entity census, section profiler display |
+| `docs/perf/` | Performance documentation — monitor usage, profiler guide, spike investigation case study, Godot reference, known costs |
 
 ## Knowledge Contribution
 
