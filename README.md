@@ -203,6 +203,19 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.77
+**Debug digital whiteboard — collaborative diagramming for humans and AIs**
+- **Whiteboard system**: new `whiteboard.gd` (~900 lines) — data model, grid rendering, 10 component types (point, line, rect, circle, ellipse, arrow, vector, polyline, poly, normal), selection with pulsing glow, annotation callouts with `[H]`/`[A]` producer tags
+- **Control points**: every selected component shows draggable edit handles — corners for rects, endpoints for lines/arrows, center+radius for circles, vertex handles for polylines/polys, base+tip for normals
+- **Tool state machine**: `whiteboard_tools.gd` (~530 lines) — 12 tools (Select, Annotate, Point, Line, Polyline, Poly, Rect, Circle, Ellipse, Arrow, Vector, Normal) with dual creation modes (click-hold-drag-release OR two-click), CP hit testing and dragging, whole-component move
+- **Debug drawer tab**: 6th tab (W) with 5 subsections — Board (name, save/load/new/clear), Tools (2-column grid), Settings (color swatches, annotation input), Actions (delete/deselect/hide/show/grid), Inspector (selected component properties + annotations)
+- **RCON commands**: full `wb` command family — component CRUD, selection, annotations, groups, save/load, tool/drawer control (`wb open`, `wb close`, `wb tool`)
+- **Groups**: label-based component grouping with bounding box rendering
+- **Save/load**: JSON serialization to `data/whiteboards/`, round-trip preserves all state
+- **Whiteboard level**: blank dark canvas (`wb level`) with coordinate grid (minor/major lines, axis markers, labels)
+- **Normal components**: surface normals attached to any reference component via `t` parameter (0..1 along shape), with flipping and length control
+- **Documentation**: comprehensive EPIC spec and implementation guide with gotchas
+
 ### v0.10.76
 **Performance monitor, precog optimization, renderer switch, defensive freeing**
 - **Performance monitor**: FPS overlay upgraded to full perf monitor — 19 Godot Performance metrics, auto-spike detection (cooldown-protected), spacebar snapshot with entity census, monster section profiler, pool stats, music status

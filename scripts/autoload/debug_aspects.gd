@@ -144,6 +144,12 @@ func _register_all() -> void:
 	# -- Samples --
 	r.call("music/samples", "Sample library: load, play, pool, cache, drum kit synthesis")
 
+	# -- Whiteboard --
+	r.call("whiteboard/grid", "Whiteboard grid lines and coordinates")
+	r.call("whiteboard/components", "Whiteboard component rendering")
+	r.call("whiteboard/annotations", "Whiteboard annotation callouts")
+	r.call("whiteboard/selection", "Whiteboard selection highlights")
+
 	# -- Strudel --
 	r.call("strudel/trigger", "Note trigger events: note number, duration, value")
 	r.call("music/batch", "MML batch compilation: compile, sequence_on, track lifecycle")

@@ -13,7 +13,7 @@ const GROUP_ARROW_SIZE := 8.0
 var SCALE_PRESETS: Array[float] = [0.25, 0.5, 1.0, 2.0, 4.0]
 
 # Section management
-enum Section { DEBUG, TEST_RUNNER, CONFIG, LEVEL_EDITOR, BLUEPRINTS }
+enum Section { DEBUG, TEST_RUNNER, CONFIG, LEVEL_EDITOR, BLUEPRINTS, WHITEBOARD }
 var _current_section: Section = Section.DEBUG
 const ICON_BAR_WIDTH := 36.0
 const ICON_SIZE := 20.0
@@ -58,6 +58,71 @@ const CT_SUB_MIN := {
 	"ct_instances": 36.0,
 	"ct_editor":    60.0,
 }
+
+# Whiteboard section state
+var _wb_subsections: Array[Dictionary] = []
+var _wb_subsections_initialized: bool = false
+var _wb_sub_resize_idx: int = -1
+var _wb_sub_resize_start_y: float = 0.0
+var _wb_sub_resize_start_h: float = 0.0
+var _wb_sub_resize_next_h: float = 0.0
+var _wb_grip_last_click_idx: int = -1
+var _wb_grip_last_click_time: float = 0.0
+var _wb_inspector_scroll: int = 0
+var _wb_active_tool: int = 0  # Index into WB_TOOLS
+var _wb_tool_color: String = "red"
+var _wb_name_focused: bool = false
+var _wb_name_text: String = ""
+var _wb_annotate_focused: bool = false
+var _wb_annotate_text: String = ""
+var _wb_hover_tool_idx: int = -1
+var _wb_cached_file_list: Array[String] = []
+var _wb_show_file_picker: bool = false
+var _wb_hover_file_idx: int = -1
+var _wb_tools_instance: RefCounted = null  # WhiteboardTools
+var _wb_world_dragging: bool = false       # True during world-space drag
+var _wb_last_click_time: float = 0.0       # For double-click detection
+var _wb_last_click_pos: Vector2 = Vector2.ZERO
+const WB_DOUBLE_CLICK_MS := 350.0
+const WB_DOUBLE_CLICK_DIST := 10.0
+
+const WB_SUB_MIN := {
+	"wb_board":     30.0,
+	"wb_tools":     60.0,
+	"wb_settings":  36.0,
+	"wb_actions":   36.0,
+	"wb_inspector": SUB_HEADER_H + 6 * 16.0,
+}
+
+const WB_TOOLS: Array[Dictionary] = [
+	{"name": "Select",    "icon": "S"},
+	{"name": "Annotate",  "icon": "A"},
+	{"name": "Point",     "icon": "."},
+	{"name": "Line",      "icon": "/"},
+	{"name": "PolyLine",  "icon": "~"},
+	{"name": "Poly",      "icon": "P"},
+	{"name": "Rect",      "icon": "R"},
+	{"name": "Circle",    "icon": "O"},
+	{"name": "Ellipse",   "icon": "E"},
+	{"name": "Arrow",     "icon": ">"},
+	{"name": "Vector",    "icon": "V"},
+	{"name": "Normal",    "icon": "N"},
+]
+
+const WB_COLOR_SWATCHES: Array[Dictionary] = [
+	{"name": "red",     "color": Color(1.0, 0.27, 0.27)},
+	{"name": "green",   "color": Color(0.27, 1.0, 0.27)},
+	{"name": "blue",    "color": Color(0.27, 0.53, 1.0)},
+	{"name": "yellow",  "color": Color(1.0, 1.0, 0.27)},
+	{"name": "cyan",    "color": Color(0.27, 1.0, 1.0)},
+	{"name": "magenta", "color": Color(1.0, 0.27, 1.0)},
+	{"name": "orange",  "color": Color(1.0, 0.53, 0.27)},
+	{"name": "white",   "color": Color(1.0, 1.0, 1.0)},
+	{"name": "purple",  "color": Color(0.67, 0.27, 1.0)},
+	{"name": "pink",    "color": Color(1.0, 0.53, 0.67)},
+	{"name": "lime",    "color": Color(0.53, 1.0, 0.27)},
+	{"name": "gold",    "color": Color(1.0, 0.8, 0.27)},
+]
 
 # Cached level names
 var _le_cached_level_names: Array[String] = []
@@ -741,19 +806,42 @@ func _input(event: InputEvent) -> void:
 			_handle_cfg_text_input(event)
 			get_viewport().set_input_as_handled()
 			return
+		if _wb_name_focused or _wb_annotate_focused:
+			_handle_wb_text_input(event)
+			get_viewport().set_input_as_handled()
+			return
 
 		# Escape closes drawer or unfocuses
 		if event.keycode == KEY_ESCAPE:
-			if _filter_focused or _id_filter_focused or _config_filter_focused or _cfg_bp_filter_focused or _cfg_mod_filter_focused:
+			if _filter_focused or _id_filter_focused or _config_filter_focused or _cfg_bp_filter_focused or _cfg_mod_filter_focused or _wb_name_focused or _wb_annotate_focused:
 				_filter_focused = false
 				_id_filter_focused = false
 				_config_filter_focused = false
 				_cfg_bp_filter_focused = false
 				_cfg_mod_filter_focused = false
+				_wb_name_focused = false
+				_wb_annotate_focused = false
+			elif _wb_tools_instance and _wb_tools_instance.is_drawing():
+				# Cancel in-progress whiteboard drawing
+				_wb_tools_instance.cancel()
+				var wb := _get_whiteboard()
+				if wb:
+					wb._preview_component = {}
+				_wb_world_dragging = false
 			else:
 				toggle()
 			get_viewport().set_input_as_handled()
 			return
+
+		# Enter finalizes poly/polyline in whiteboard tools
+		if event.keycode == KEY_ENTER and _current_section == Section.WHITEBOARD:
+			if _wb_tools_instance and _wb_tools_instance.is_drawing():
+				_wb_tools_instance.handle_double_click(Vector2.ZERO)  # Finalizes poly
+				var wb := _get_whiteboard()
+				if wb:
+					wb._preview_component = _wb_tools_instance.get_preview()
+				get_viewport().set_input_as_handled()
+				return
 
 		# Scroll
 		if event.keycode == KEY_PAGEUP:
@@ -803,12 +891,27 @@ func _input(event: InputEvent) -> void:
 			_handle_cfg_sub_resize_release()
 			get_viewport().set_input_as_handled()
 			return
+		if _wb_sub_resize_idx >= 0:
+			_handle_wb_sub_resize_release()
+			_wb_sub_resize_idx = -1
+			_save_wb_layout()
+			get_viewport().set_input_as_handled()
+			return
 		if not _le_prop_dragging_key.is_empty():
 			_le_prop_dragging_key = ""
 			get_viewport().set_input_as_handled()
 			return
 		if not _ct_tree_prop_dragging.is_empty():
 			_ct_tree_prop_dragging = ""
+			get_viewport().set_input_as_handled()
+			return
+		if _wb_world_dragging:
+			_wb_world_dragging = false
+			if _wb_tools_instance:
+				_wb_tools_instance.handle_release(_wb_get_world_pos(event.position))
+				var wb := _get_whiteboard()
+				if wb:
+					wb._preview_component = _wb_tools_instance.get_preview()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -820,6 +923,34 @@ func _input(event: InputEvent) -> void:
 			# Click outside — unfocus any text field
 			_filter_focused = false
 			_id_filter_focused = false
+			# Route world-space click to whiteboard tools
+			if _current_section == Section.WHITEBOARD:
+				var tools := _wb_get_or_create_tools()
+				if tools:
+					var world_pos: Vector2 = _wb_get_world_pos(event.position)
+					# Double-click detection
+					var now: float = Time.get_ticks_msec()
+					if now - _wb_last_click_time < WB_DOUBLE_CLICK_MS and world_pos.distance_to(_wb_last_click_pos) < WB_DOUBLE_CLICK_DIST:
+						tools.handle_double_click(world_pos)
+						_wb_last_click_time = 0.0
+					else:
+						tools.handle_click(world_pos)
+						_wb_last_click_time = now
+						_wb_last_click_pos = world_pos
+					_wb_world_dragging = true
+					# Sync preview to whiteboard for rendering
+					var wb := _get_whiteboard()
+					if wb:
+						wb._preview_component = tools.get_preview()
+					# Auto-focus annotation field when using ANNOTATE tool
+					if _wb_active_tool == 1:  # ANNOTATE
+						var ann_wb2 := _get_whiteboard()
+						if ann_wb2:
+							var ann_sel2: Array = ann_wb2.get_selected_ids()
+							if not ann_sel2.is_empty():
+								_wb_annotate_focused = true
+								_wb_annotate_text = ""
+					get_viewport().set_input_as_handled()
 			return
 		var lx: float = mx - _panel_x
 		# Check if click is in the icon bar
@@ -833,6 +964,8 @@ func _input(event: InputEvent) -> void:
 			_handle_le_click(lx - ICON_BAR_WIDTH - 4, my)
 		elif _current_section == Section.BLUEPRINTS:
 			_handle_ct_click(lx - ICON_BAR_WIDTH - 4, my)
+		elif _current_section == Section.WHITEBOARD:
+			_handle_wb_click(lx - ICON_BAR_WIDTH - 4, my)
 		else:
 			_handle_click(lx - ICON_BAR_WIDTH - 4, my)
 		get_viewport().set_input_as_handled()
@@ -849,6 +982,8 @@ func _input(event: InputEvent) -> void:
 					_handle_ct_scroll(event.position.y, -3)
 				elif _current_section == Section.CONFIG:
 					_handle_cfg_scroll(event.position.y, -3)
+				elif _current_section == Section.WHITEBOARD:
+					_handle_wb_scroll(event.position.y, -3)
 				else:
 					_scroll_offset = maxi(0, _scroll_offset - 3)
 				get_viewport().set_input_as_handled()
@@ -861,6 +996,8 @@ func _input(event: InputEvent) -> void:
 					_handle_ct_scroll(event.position.y, 3)
 				elif _current_section == Section.CONFIG:
 					_handle_cfg_scroll(event.position.y, 3)
+				elif _current_section == Section.WHITEBOARD:
+					_handle_wb_scroll(event.position.y, 3)
 				else:
 					_scroll_offset += 3
 				get_viewport().set_input_as_handled()
@@ -893,11 +1030,20 @@ func _input(event: InputEvent) -> void:
 		elif _cfg_sub_resize_idx >= 0:
 			_handle_cfg_sub_resize_drag(event.position.y)
 			get_viewport().set_input_as_handled()
+		elif _wb_sub_resize_idx >= 0:
+			_handle_wb_sub_resize_drag(event.position.y)
+			get_viewport().set_input_as_handled()
 		elif not _le_prop_dragging_key.is_empty():
 			_handle_le_prop_drag(event.position.x)
 			get_viewport().set_input_as_handled()
 		elif not _ct_tree_prop_dragging.is_empty():
 			_handle_ct_tree_prop_drag(event.position.x)
+			get_viewport().set_input_as_handled()
+		elif _wb_world_dragging and _wb_tools_instance:
+			_wb_tools_instance.handle_drag(_wb_get_world_pos(event.position))
+			var wb := _get_whiteboard()
+			if wb:
+				wb._preview_component = _wb_tools_instance.get_preview()
 			get_viewport().set_input_as_handled()
 		elif event.position.x >= _panel_x + ICON_BAR_WIDTH and event.position.x <= _panel_x + _panel_width:
 			_last_hover_lx = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
@@ -909,6 +1055,8 @@ func _input(event: InputEvent) -> void:
 				_handle_ct_hover(event.position.y)
 			elif _current_section == Section.CONFIG:
 				_handle_cfg_hover(event.position.y)
+			elif _current_section == Section.WHITEBOARD:
+				_handle_wb_hover(event.position.y)
 			_update_hover(event.position.y)
 		elif event.position.x >= _panel_x and event.position.x < _panel_x + ICON_BAR_WIDTH:
 			# Mouse is over icon bar — clear all content hover state
@@ -1212,7 +1360,7 @@ func _update_game_viewport() -> void:
 
 func _handle_icon_click(my: float) -> void:
 	## Click on the icon bar — switch section or collapse.
-	var icon_sections: Array = [Section.DEBUG, Section.TEST_RUNNER, Section.CONFIG, Section.LEVEL_EDITOR, Section.BLUEPRINTS]
+	var icon_sections: Array = [Section.DEBUG, Section.TEST_RUNNER, Section.CONFIG, Section.LEVEL_EDITOR, Section.BLUEPRINTS, Section.WHITEBOARD]
 	var icon_btn_size: float = ICON_BAR_WIDTH - 4
 	for i in range(icon_sections.size()):
 		var iy: float = 8.0 + i * (icon_btn_size + 4)
@@ -1697,6 +1845,7 @@ func _draw_panel() -> void:
 		{"section": Section.CONFIG, "label": "C"},
 		{"section": Section.LEVEL_EDITOR, "label": "E"},
 		{"section": Section.BLUEPRINTS, "label": "B"},
+		{"section": Section.WHITEBOARD, "label": "W"},
 	]
 	var icon_btn_size: float = ICON_BAR_WIDTH - 4  # Fit within bar with 2px margin each side
 	var icon_x: float = _panel_x + 2
@@ -1723,6 +1872,8 @@ func _draw_panel() -> void:
 			_draw_level_editor_section(content_x, font, ph)
 		Section.BLUEPRINTS:
 			_draw_blueprints_section(content_x, font, ph)
+		Section.WHITEBOARD:
+			_draw_whiteboard_section(content_x, font, ph)
 
 
 func _draw_section_icon(center: Vector2, section: Section, active: bool) -> void:
@@ -1770,6 +1921,19 @@ func _draw_section_icon(center: Vector2, section: Section, active: bool) -> void
 			for li in range(3):
 				var ly: float = by + r * 0.6 + li * r * 0.35
 				_panel.draw_line(Vector2(bx + 2, ly), Vector2(bx + bw - 3, ly), col * Color(1, 1, 1, 0.5), 1.0)
+		Section.WHITEBOARD:
+			# Grid/whiteboard icon — crosshatch grid
+			var gx: float = center.x - r * 0.7
+			var gy: float = center.y - r * 0.7
+			var gs: float = r * 1.4
+			_panel.draw_rect(Rect2(gx, gy, gs, gs), col, false, 1.5)
+			# Grid lines
+			for gi in range(1, 3):
+				var frac: float = float(gi) / 3.0
+				_panel.draw_line(Vector2(gx + gs * frac, gy), Vector2(gx + gs * frac, gy + gs), col * Color(1, 1, 1, 0.4), 1.0)
+				_panel.draw_line(Vector2(gx, gy + gs * frac), Vector2(gx + gs, gy + gs * frac), col * Color(1, 1, 1, 0.4), 1.0)
+			# Small dot in center
+			_panel.draw_circle(center, 2.0, col)
 
 
 func _draw_debug_section(content_x: float, font: Font, ph: float) -> void:
@@ -7137,3 +7301,707 @@ func _draw_ct_tree_editor(x: float, y: float, pw: float, h: float, font: Font) -
 	if _le_scene_flash_timer > 0:
 		var alpha: float = clampf(_le_scene_flash_timer / 0.5, 0.0, 1.0)
 		_panel.draw_string(font, Vector2(x + pw * 0.55, ry + 14), _le_scene_flash, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.4, 9, Color(0.3, 1.0, 0.5, alpha))
+
+
+# ==============================================================================
+# WHITEBOARD SECTION
+# ==============================================================================
+
+func _get_whiteboard() -> Node2D:
+	## Get the whiteboard node (lazy-created by RCON or by us).
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	if not rcon:
+		return null
+	if is_instance_valid(rcon._whiteboard):
+		return rcon._whiteboard
+	# Create it via RCON helper
+	if rcon.has_method("_get_or_create_whiteboard"):
+		return rcon._get_or_create_whiteboard()
+	return null
+
+
+func _wb_get_or_create_tools() -> RefCounted:
+	## Lazy-create the WhiteboardTools instance and connect it to the whiteboard.
+	if _wb_tools_instance != null:
+		return _wb_tools_instance
+	var wb := _get_whiteboard()
+	if not wb:
+		return null
+	var ToolsClass: GDScript = load("res://scripts/ui/whiteboard_tools.gd")
+	_wb_tools_instance = ToolsClass.new()
+	_wb_tools_instance.setup(wb)
+	_wb_tools_instance.set_tool(_wb_active_tool)
+	_wb_tools_instance.set_color(_wb_tool_color)
+	return _wb_tools_instance
+
+
+func _wb_get_world_pos(screen_pos: Vector2) -> Vector2:
+	## Convert screen position to world position (same as level_editor pattern).
+	var cam := get_viewport().get_camera_2d()
+	if not cam:
+		return screen_pos
+	var vp_size: Vector2 = get_viewport().get_visible_rect().size
+	var zoom: Vector2 = cam.zoom if cam.zoom.x > 0 else Vector2.ONE
+	return (screen_pos - vp_size / 2.0) / zoom + cam.global_position
+
+
+func _init_wb_subsections() -> void:
+	_wb_subsections = []
+	for sid in ["wb_board", "wb_tools", "wb_settings", "wb_actions", "wb_inspector"]:
+		_wb_subsections.append({
+			"id": sid,
+			"title": sid.substr(3).capitalize(),  # Strip "wb_" prefix
+			"collapsed": false,
+			"height": _get_wb_preferred_height(sid),
+		})
+	var had_layout: bool = FileAccess.file_exists("user://whiteboard_layout.json")
+	_load_wb_layout()
+	if not had_layout:
+		_auto_snap_wb()
+	_wb_subsections_initialized = true
+
+
+func _load_wb_layout() -> void:
+	var path: String = "user://whiteboard_layout.json"
+	if not FileAccess.file_exists(path):
+		return
+	var file := FileAccess.open(path, FileAccess.READ)
+	if not file:
+		return
+	var json := JSON.new()
+	if json.parse(file.get_as_text()) != OK or not json.data is Dictionary:
+		return
+	var data: Dictionary = json.data
+	for sub in _wb_subsections:
+		if data.has(sub["id"]):
+			var sd: Dictionary = data[sub["id"]]
+			sub["collapsed"] = sd.get("collapsed", sub["collapsed"])
+			sub["height"] = sd.get("height", sub["height"])
+
+
+func _save_wb_layout() -> void:
+	var data: Dictionary = {}
+	for sub in _wb_subsections:
+		data[sub["id"]] = {"collapsed": sub["collapsed"], "height": sub["height"]}
+	var file := FileAccess.open("user://whiteboard_layout.json", FileAccess.WRITE)
+	if file:
+		file.store_string(JSON.stringify(data, "  "))
+
+
+func _auto_snap_wb() -> void:
+	if _wb_subsections.is_empty():
+		return
+	var last_idx: int = _wb_subsections.size() - 1
+	var last_sub: Dictionary = _wb_subsections[last_idx]
+	for i in range(last_idx):
+		var sub: Dictionary = _wb_subsections[i]
+		if sub["collapsed"]:
+			continue
+		var preferred: float = _get_wb_preferred_height(sub["id"])
+		var delta: float = preferred - sub["height"]
+		sub["height"] = preferred
+		last_sub["height"] -= delta
+	var last_min: float = WB_SUB_MIN.get(last_sub["id"], 30.0)
+	if last_sub["height"] < last_min:
+		last_sub["height"] = last_min
+
+
+func _get_wb_preferred_height(sid: String) -> float:
+	match sid:
+		"wb_board":
+			return SUB_HEADER_H + 50.0  # Name field + buttons
+		"wb_tools":
+			var rows: int = ceili(WB_TOOLS.size() / 2.0)
+			return SUB_HEADER_H + rows * 20.0 + 4.0
+		"wb_settings":
+			return SUB_HEADER_H + 60.0  # Color swatches + tool-specific
+		"wb_actions":
+			return SUB_HEADER_H + 60.0
+		"wb_inspector":
+			return SUB_HEADER_H + 8 * 16.0 + 4.0
+	return SUB_HEADER_H + 40.0
+
+
+func _snap_wb_height(sid: String, h: float) -> float:
+	var preferred: float = _get_wb_preferred_height(sid)
+	if absf(h - preferred) < SUB_SNAP_DISTANCE:
+		return preferred
+	return h
+
+
+# -- WB drawing ----------------------------------------------------------------
+
+func _draw_whiteboard_section(content_x: float, font: Font, ph: float) -> void:
+	if not _wb_subsections_initialized:
+		_init_wb_subsections()
+
+	var x: float = content_x
+	var pw: float = _content_width
+	var y: float = 0.0
+
+	for si in range(_wb_subsections.size()):
+		var sub: Dictionary = _wb_subsections[si]
+		if y > ph:
+			break
+
+		_draw_wb_sub_header(x, y, pw, font, sub)
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = y + SUB_HEADER_H
+		var body_h: float
+		if sub["id"] == "wb_inspector":
+			body_h = maxf(WB_SUB_MIN["wb_inspector"] - SUB_HEADER_H, ph - body_y)
+		else:
+			body_h = sub["height"] - SUB_HEADER_H
+
+		if body_h > 0:
+			match sub["id"]:
+				"wb_board":     _draw_wb_sub_board(x, body_y, pw, body_h, font)
+				"wb_tools":     _draw_wb_sub_tools(x, body_y, pw, body_h, font)
+				"wb_settings":  _draw_wb_sub_settings(x, body_y, pw, body_h, font)
+				"wb_actions":   _draw_wb_sub_actions(x, body_y, pw, body_h, font)
+				"wb_inspector": _draw_wb_sub_inspector(x, body_y, pw, body_h, font)
+
+		# Snap indicator during resize
+		if _wb_sub_resize_idx == si and sub["id"] != "wb_inspector":
+			var snap_h: float = _get_wb_preferred_height(sub["id"])
+			var snap_y: float = y + snap_h
+			var near_snap: bool = absf(sub["height"] - snap_h) < SUB_SNAP_DISTANCE
+			var snap_col := Color(0.9, 0.6, 0.2, 0.6) if near_snap else Color(0.9, 0.6, 0.2, 0.25)
+			var dx: float = 0.0
+			while dx < pw - 16:
+				_panel.draw_line(Vector2(x + dx, snap_y), Vector2(x + minf(dx + 6.0, pw - 16), snap_y), snap_col, 1.0)
+				dx += 10.0
+			if near_snap:
+				_panel.draw_string(font, Vector2(x + pw - 40, snap_y - 3), "snap", HORIZONTAL_ALIGNMENT_LEFT, -1, 7, snap_col)
+
+		if sub["id"] == "wb_inspector":
+			y += body_h + SUB_HEADER_H
+		else:
+			y += sub["height"]
+
+		if sub["id"] != "wb_inspector":
+			_panel.draw_line(Vector2(x, y - 1), Vector2(x + pw - 8, y - 1), Color(0.2, 0.25, 0.2, 0.4), 1.0)
+
+
+func _draw_wb_sub_header(x: float, y: float, pw: float, font: Font, sub: Dictionary) -> void:
+	var ctx_text: String = ""
+	var ctx_col := Color(0.6, 0.55, 0.4)
+	var wb := _get_whiteboard()
+	match sub["id"]:
+		"wb_board":
+			if wb:
+				ctx_text = wb.get_board_name()
+		"wb_tools":
+			if _wb_active_tool >= 0 and _wb_active_tool < WB_TOOLS.size():
+				ctx_text = WB_TOOLS[_wb_active_tool]["name"]
+				ctx_col = Color(0.3, 0.85, 0.9)
+		"wb_settings":
+			ctx_text = _wb_tool_color
+		"wb_inspector":
+			if wb:
+				var sel: Array = wb.get_selected_ids()
+				if not sel.is_empty():
+					ctx_text = "#%d" % [sel[0]]
+	# Delegate to the unified sub-header renderer (accent line, grip dots, etc.)
+	_draw_sub_header(x, y, pw, font, sub, Color(0.4, 0.75, 0.6), ctx_text, ctx_col)
+
+
+func _draw_wb_sub_board(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	var wb := _get_whiteboard()
+
+	# Name field
+	var name_text: String = _wb_name_text if _wb_name_focused else (wb.get_board_name() if wb else "untitled")
+	var name_bg: Color = Color(0.12, 0.12, 0.16) if _wb_name_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x + 4, y + 2, pw - 8, 18), name_bg)
+	var display: String = name_text
+	if _wb_name_focused and int(Time.get_ticks_msec() / 500) % 2 == 0:
+		display += "_"
+	if display.is_empty() and not _wb_name_focused:
+		display = "Board name..."
+		_panel.draw_string(font, Vector2(x + 8, y + 15), display, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 8, y + 15), display, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.8, 0.8, 0.8))
+
+	# Buttons row
+	var btn_y: float = y + 24
+	var btn_w: float = (pw - 20) / 4.0
+	var btn_labels: Array[String] = ["New", "Save", "Load", "Clear"]
+	var btn_colors: Array[Color] = [
+		Color(0.3, 0.7, 0.9),  # New: blue
+		Color(0.3, 0.85, 0.4),  # Save: green
+		Color(0.85, 0.7, 0.3),  # Load: gold
+		Color(0.85, 0.3, 0.3),  # Clear: red
+	]
+	for i in range(4):
+		var bx: float = x + 4 + i * (btn_w + 2)
+		var col: Color = btn_colors[i]
+		_panel.draw_rect(Rect2(bx, btn_y, btn_w, 18), col * Color(1, 1, 1, 0.12))
+		_panel.draw_rect(Rect2(bx, btn_y, btn_w, 18), col * Color(1, 1, 1, 0.5), false, 1.0)
+		_panel.draw_string(font, Vector2(bx + 4, btn_y + 13), btn_labels[i], HORIZONTAL_ALIGNMENT_CENTER, btn_w - 8, 9, col)
+
+	# File picker (if open)
+	if _wb_show_file_picker:
+		var fy: float = btn_y + 22
+		for fi in range(_wb_cached_file_list.size()):
+			var fname: String = _wb_cached_file_list[fi]
+			var is_hover: bool = fi == _wb_hover_file_idx
+			if is_hover:
+				_panel.draw_rect(Rect2(x + 4, fy, pw - 8, 16), Color(0.2, 0.3, 0.4, 0.5))
+			_panel.draw_string(font, Vector2(x + 8, fy + 12), fname, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.7, 0.75, 0.8))
+			fy += 16
+
+
+func _draw_wb_sub_tools(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	var btn_w: float = (pw - 12) * 0.5
+	var row_h: float = 20.0
+	for i in range(WB_TOOLS.size()):
+		var col_idx: int = i % 2
+		var row_idx: int = i / 2
+		var bx: float = x + 4 + col_idx * (btn_w + 4)
+		var by: float = y + 2 + row_idx * row_h
+		var is_active: bool = i == _wb_active_tool
+		var is_hover: bool = i == _wb_hover_tool_idx
+
+		var bg_col: Color
+		if is_active:
+			bg_col = Color(0.15, 0.3, 0.5, 0.8)
+		elif is_hover:
+			bg_col = Color(0.12, 0.18, 0.25, 0.6)
+		else:
+			bg_col = Color(0.08, 0.08, 0.12, 0.4)
+
+		_panel.draw_rect(Rect2(bx, by, btn_w, row_h - 2), bg_col)
+		if is_active:
+			_panel.draw_rect(Rect2(bx, by, 2, row_h - 2), Color(0.3, 0.7, 1.0), true)
+
+		var text_col: Color = Color(0.85, 0.9, 1.0) if is_active else Color(0.5, 0.55, 0.6)
+		var tool_name: String = WB_TOOLS[i]["name"]
+		_panel.draw_string(font, Vector2(bx + 6, by + 14), tool_name, HORIZONTAL_ALIGNMENT_LEFT, btn_w - 12, 9, text_col)
+
+
+func _draw_wb_sub_settings(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	# Color swatches (always shown)
+	_panel.draw_string(font, Vector2(x + 4, y + 12), "Color:", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.55))
+	var swatch_size: float = 14.0
+	var swatch_pad: float = 3.0
+	var sx: float = x + 44
+	var sy: float = y + 2
+	for i in range(WB_COLOR_SWATCHES.size()):
+		var swatch: Dictionary = WB_COLOR_SWATCHES[i]
+		var cx: float = sx + (i % 6) * (swatch_size + swatch_pad)
+		var cy: float = sy + (i / 6) * (swatch_size + swatch_pad)
+		var is_active: bool = swatch["name"] == _wb_tool_color
+		_panel.draw_rect(Rect2(cx, cy, swatch_size, swatch_size), swatch["color"])
+		if is_active:
+			_panel.draw_rect(Rect2(cx - 1, cy - 1, swatch_size + 2, swatch_size + 2), Color.WHITE, false, 2.0)
+
+	# Annotation input — shown when ANNOTATE tool active, or SELECT with a selection
+	var show_ann_input: bool = false
+	if _wb_active_tool == 1:  # ANNOTATE
+		show_ann_input = true
+	elif _wb_active_tool == 0:  # SELECT
+		var ann_wb := _get_whiteboard()
+		if ann_wb:
+			var ann_sel: Array = ann_wb.get_selected_ids()
+			show_ann_input = not ann_sel.is_empty()
+
+	if show_ann_input:
+		var ay: float = y + 38
+		var p_col := Color(0.3, 0.85, 0.9)  # [H] in cyan
+		_panel.draw_string(font, Vector2(x + 4, ay + 13), "[H]", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, p_col)
+		var field_bg: Color = Color(0.12, 0.14, 0.18) if _wb_annotate_focused else Color(0.07, 0.07, 0.1)
+		_panel.draw_rect(Rect2(x + 24, ay, pw - 28, 18), field_bg)
+		if _wb_annotate_focused:
+			_panel.draw_rect(Rect2(x + 24, ay, pw - 28, 18), Color(0.3, 0.5, 0.7, 0.5), false, 1.0)
+		var ann_text: String = _wb_annotate_text
+		if _wb_annotate_focused and int(Time.get_ticks_msec() / 500) % 2 == 0:
+			ann_text += "_"
+		if ann_text.is_empty() and not _wb_annotate_focused:
+			_panel.draw_string(font, Vector2(x + 28, ay + 13), "Add annotation...", HORIZONTAL_ALIGNMENT_LEFT, pw - 36, 9, Color(0.35, 0.35, 0.4))
+		else:
+			_panel.draw_string(font, Vector2(x + 28, ay + 13), ann_text, HORIZONTAL_ALIGNMENT_LEFT, pw - 36, 9, Color(0.8, 0.8, 0.85))
+
+
+func _draw_wb_sub_actions(x: float, y: float, pw: float, _h: float, font: Font) -> void:
+	var wb := _get_whiteboard()
+	var ay: float = y + 2
+	var btn_h: float = 18.0
+
+	# Action buttons based on context
+	var actions: Array[Dictionary] = []
+	var sel_ids: Array = wb.get_selected_ids() if wb else []
+
+	if not sel_ids.is_empty():
+		actions.append({"label": "Delete Selected", "cmd": "delete", "color": Color(1.0, 0.4, 0.4)})
+		actions.append({"label": "Deselect All", "cmd": "deselect", "color": Color(0.6, 0.6, 0.7)})
+		actions.append({"label": "Hide Selected", "cmd": "hide", "color": Color(0.5, 0.5, 0.6)})
+	actions.append({"label": "Show All", "cmd": "show_all", "color": Color(0.4, 0.7, 0.4)})
+	actions.append({"label": "Grid Toggle", "cmd": "grid", "color": Color(0.4, 0.6, 0.8)})
+
+	for i in range(actions.size()):
+		var act: Dictionary = actions[i]
+		var col: Color = act["color"]
+		var by: float = ay + i * (btn_h + 2)
+		_panel.draw_rect(Rect2(x + 4, by, pw - 8, btn_h), col * Color(1, 1, 1, 0.1))
+		_panel.draw_rect(Rect2(x + 4, by, pw - 8, btn_h), col * Color(1, 1, 1, 0.4), false, 1.0)
+		_panel.draw_string(font, Vector2(x + 10, by + 13), act["label"], HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, col)
+
+
+func _draw_wb_sub_inspector(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var wb := _get_whiteboard()
+	if not wb:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "No whiteboard", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+
+	var sel_ids: Array = wb.get_selected_ids()
+	if sel_ids.is_empty():
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "Nothing selected", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+
+		# Show component count summary
+		var comps: Array = wb.get_all_components()
+		if not comps.is_empty():
+			_panel.draw_string(font, Vector2(x + 4, y + 30), "%d components" % comps.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.35, 0.4, 0.45))
+		return
+
+	var comp: Dictionary = wb.get_component(sel_ids[0])
+	if comp.is_empty():
+		return
+
+	# Draw component properties
+	var iy: float = y + 2
+	var row_h: float = 16.0
+	var label_col := Color(0.5, 0.55, 0.6)
+	var val_col := Color(0.8, 0.85, 0.9)
+	var immutable_col := Color(0.4, 0.4, 0.45)
+
+	# ID and type (immutable)
+	_panel.draw_string(font, Vector2(x + 4, iy + 12), "id:", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, label_col)
+	_panel.draw_string(font, Vector2(x + pw * 0.3, iy + 12), "#%d" % comp["id"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9, immutable_col)
+	iy += row_h
+
+	_panel.draw_string(font, Vector2(x + 4, iy + 12), "type:", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, label_col)
+	_panel.draw_string(font, Vector2(x + pw * 0.3, iy + 12), str(comp["type"]), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, immutable_col)
+	iy += row_h
+
+	# Editable properties
+	var skip_keys := ["id", "type", "annotations", "show_annotations"]
+	for key in comp.keys():
+		if key in skip_keys:
+			continue
+		if iy - y > h - row_h:
+			break
+		var val_str: String = _wb_format_value(comp[key])
+		_panel.draw_string(font, Vector2(x + 4, iy + 12), key + ":", HORIZONTAL_ALIGNMENT_LEFT, pw * 0.3 - 8, 9, label_col)
+		_panel.draw_string(font, Vector2(x + pw * 0.3, iy + 12), val_str, HORIZONTAL_ALIGNMENT_LEFT, pw * 0.65, 9, val_col)
+		iy += row_h
+
+	# Annotations section
+	var anns: Array = comp.get("annotations", [])
+	if not anns.is_empty():
+		iy += 4
+		_panel.draw_string(font, Vector2(x + 4, iy + 12), "Annotations (%d):" % anns.size(), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.6, 0.55, 0.4))
+		iy += row_h
+		for ann in anns:
+			if iy - y > h - row_h:
+				break
+			var producer: String = ann.get("producer", "?")
+			var p_col: Color = Color(0.3, 0.85, 0.9) if producer == "H" else Color(1.0, 0.65, 0.2)
+			_panel.draw_string(font, Vector2(x + 8, iy + 12), "[%s]" % producer, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, p_col)
+			_panel.draw_string(font, Vector2(x + 30, iy + 12), ann.get("text", ""), HORIZONTAL_ALIGNMENT_LEFT, pw - 38, 9, Color(0.7, 0.7, 0.7))
+			iy += row_h
+
+
+func _wb_format_value(val: Variant) -> String:
+	if val is float:
+		return "%.1f" % val
+	if val is bool:
+		return "true" if val else "false"
+	if val is Array:
+		if val.size() > 4:
+			return "[%d items]" % val.size()
+		return str(val)
+	return str(val)
+
+
+# -- WB click handling ---------------------------------------------------------
+
+func _handle_wb_click(lx: float, my: float) -> void:
+	if not _wb_subsections_initialized:
+		_init_wb_subsections()
+	var y: float = 0.0
+	for i in range(_wb_subsections.size()):
+		var sub: Dictionary = _wb_subsections[i]
+		var header_end: float = y + SUB_HEADER_H
+
+		if my >= y and my < header_end:
+			var pw: float = _content_width
+			if lx < 16:
+				sub["collapsed"] = not sub["collapsed"]
+				_save_wb_layout()
+			elif lx > pw - 28 and i > 0:
+				var target_idx: int = i - 1
+				var now: float = Time.get_ticks_msec() / 1000.0
+				if _wb_grip_last_click_idx == target_idx and (now - _wb_grip_last_click_time) < 0.4:
+					var sub_above: Dictionary = _wb_subsections[target_idx]
+					var last_sub: Dictionary = _wb_subsections[_wb_subsections.size() - 1]
+					var preferred: float = _get_wb_preferred_height(sub_above["id"])
+					var delta: float = preferred - sub_above["height"]
+					sub_above["height"] = preferred
+					last_sub["height"] -= delta
+					_save_wb_layout()
+					_wb_grip_last_click_idx = -1
+					return
+				_wb_grip_last_click_idx = target_idx
+				_wb_grip_last_click_time = now
+				_wb_sub_resize_idx = target_idx
+				_wb_sub_resize_start_y = my
+				_wb_sub_resize_start_h = _wb_subsections[target_idx]["height"]
+				_wb_sub_resize_next_h = _wb_subsections[_wb_subsections.size() - 1]["height"]
+			return
+
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+
+		var body_y: float = header_end
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "wb_inspector":
+			body_end = maxf(body_end, 9999.0)
+
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			_handle_wb_subsection_click(sub["id"], lx, local_y, body_end - body_y)
+			return
+		y += sub["height"]
+
+
+func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _body_h: float) -> void:
+	# Tool & settings clicks work without a whiteboard; board/actions/inspector need one
+	if sub_id in ["wb_tools", "wb_settings"]:
+		_handle_wb_tool_settings_click(sub_id, lx, local_y)
+		return
+	var wb := _get_whiteboard()
+	if not wb:
+		return
+	var rcon: Node = get_node_or_null("/root/Rcon")
+	var pw: float = _content_width
+
+	match sub_id:
+		"wb_board":
+			# Name field click
+			if local_y < 20:
+				_wb_name_focused = true
+				_wb_name_text = wb.get_board_name()
+				return
+			_wb_name_focused = false
+			# Buttons row
+			if local_y >= 22 and local_y < 42:
+				var btn_w: float = (pw - 20) / 4.0
+				var btn_idx: int = int((lx - 4) / (btn_w + 2))
+				match btn_idx:
+					0:  # New
+						if rcon:
+							rcon._execute("wb new")
+					1:  # Save
+						if rcon:
+							rcon._execute("wb save")
+					2:  # Load
+						_wb_show_file_picker = not _wb_show_file_picker
+						if _wb_show_file_picker:
+							_wb_cached_file_list = wb.list_saved_files()
+					3:  # Clear
+						if rcon:
+							rcon._execute("wb clear")
+				return
+			# File picker click
+			if _wb_show_file_picker and local_y >= 44:
+				var fi: int = int((local_y - 44) / 16)
+				if fi >= 0 and fi < _wb_cached_file_list.size():
+					if rcon:
+						rcon._execute("wb load " + _wb_cached_file_list[fi])
+					_wb_show_file_picker = false
+
+		"wb_actions":
+			# Action button clicks
+			var sel_ids: Array = wb.get_selected_ids()
+			var actions: Array[String] = []
+			if not sel_ids.is_empty():
+				actions.append_array(["delete", "deselect", "hide"])
+			actions.append_array(["show_all", "grid"])
+
+			var btn_idx: int = int((local_y - 2) / 20)
+			if btn_idx >= 0 and btn_idx < actions.size():
+				match actions[btn_idx]:
+					"delete":
+						for id in sel_ids:
+							wb.delete_component(id)
+					"deselect":
+						wb.deselect_all()
+					"hide":
+						for id in sel_ids:
+							wb.set_component_property(id, "visible", false)
+						wb.deselect_all()
+					"show_all":
+						for c in wb.get_all_components():
+							wb.set_component_property(c["id"], "visible", true)
+					"grid":
+						wb.set_grid_visible(not wb.is_grid_visible())
+
+
+func _handle_wb_tool_settings_click(sub_id: String, lx: float, local_y: float) -> void:
+	## Handle tool selector and color swatch clicks — no whiteboard needed.
+	var pw: float = _content_width
+	match sub_id:
+		"wb_tools":
+			var btn_w: float = (pw - 12) * 0.5
+			var col_idx: int = 0 if lx < 4 + btn_w else 1
+			var row_idx: int = int((local_y - 2) / 20.0)
+			var tool_idx: int = row_idx * 2 + col_idx
+			if tool_idx >= 0 and tool_idx < WB_TOOLS.size():
+				_wb_active_tool = tool_idx
+				var tools := _wb_get_or_create_tools()
+				if tools:
+					tools.set_tool(tool_idx)
+		"wb_settings":
+			if local_y < 36:
+				var swatch_size: float = 14.0
+				var swatch_pad: float = 3.0
+				var rel_x: float = lx - 44
+				var rel_y: float = local_y - 2
+				if rel_x >= 0:
+					var col_i: int = int(rel_x / (swatch_size + swatch_pad))
+					var row_i: int = int(rel_y / (swatch_size + swatch_pad))
+					var idx: int = row_i * 6 + col_i
+					if idx >= 0 and idx < WB_COLOR_SWATCHES.size():
+						_wb_tool_color = WB_COLOR_SWATCHES[idx]["name"]
+						var tools := _wb_get_or_create_tools()
+						if tools:
+							tools.set_color(_wb_tool_color)
+						# When SELECT tool active, also change selected component's color
+						if _wb_active_tool == 0:
+							var sel_wb := _get_whiteboard()
+							if sel_wb:
+								var sel_ids: Array = sel_wb.get_selected_ids()
+								var hex_col: String = "#" + WB_COLOR_SWATCHES[idx]["color"].to_html(false)
+								for sid in sel_ids:
+									sel_wb.set_component_property(sid, "color", hex_col)
+			elif local_y >= 36:
+				# Annotation input field click
+				_wb_annotate_focused = true
+
+
+func _handle_wb_scroll(my: float, delta: int) -> void:
+	if not _wb_subsections_initialized:
+		return
+	var y: float = 0.0
+	for sub in _wb_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "wb_inspector":
+			body_end = maxf(body_end, 9999.0)
+		if my >= y and my < body_end:
+			if sub["id"] == "wb_inspector":
+				_wb_inspector_scroll = maxi(0, _wb_inspector_scroll + delta)
+			return
+		y += sub["height"]
+
+
+func _handle_wb_sub_resize_drag(my: float) -> void:
+	if _wb_sub_resize_idx < 0 or _wb_sub_resize_idx >= _wb_subsections.size():
+		return
+	var dy: float = my - _wb_sub_resize_start_y
+	var sub: Dictionary = _wb_subsections[_wb_sub_resize_idx]
+	var last_sub: Dictionary = _wb_subsections[_wb_subsections.size() - 1]
+	var min_h: float = WB_SUB_MIN.get(sub["id"], 30.0)
+	var last_min: float = WB_SUB_MIN.get(last_sub["id"], 30.0)
+	dy = clampf(dy, min_h - _wb_sub_resize_start_h, _wb_sub_resize_next_h - last_min)
+	sub["height"] = _wb_sub_resize_start_h + dy
+	last_sub["height"] = _wb_sub_resize_next_h - (sub["height"] - _wb_sub_resize_start_h)
+
+
+func _handle_wb_sub_resize_release() -> void:
+	if _wb_sub_resize_idx < 0 or _wb_sub_resize_idx >= _wb_subsections.size():
+		return
+	var sub: Dictionary = _wb_subsections[_wb_sub_resize_idx]
+	var last_sub: Dictionary = _wb_subsections[_wb_subsections.size() - 1]
+	var snapped: float = _snap_wb_height(sub["id"], sub["height"])
+	if snapped != sub["height"]:
+		var snap_delta: float = snapped - sub["height"]
+		sub["height"] = snapped
+		last_sub["height"] -= snap_delta
+	_wb_sub_resize_idx = -1
+	_save_wb_layout()
+
+
+func _handle_wb_text_input(event: InputEventKey) -> void:
+	if _wb_name_focused:
+		if event.keycode == KEY_BACKSPACE:
+			if _wb_name_text.length() > 0:
+				_wb_name_text = _wb_name_text.substr(0, _wb_name_text.length() - 1)
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_TAB:
+			_wb_name_focused = false
+			var wb := _get_whiteboard()
+			if wb:
+				wb.set_board_name(_wb_name_text)
+		elif event.keycode == KEY_ESCAPE:
+			_wb_name_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_wb_name_text += char(event.unicode)
+		return
+
+	if _wb_annotate_focused:
+		if event.keycode == KEY_BACKSPACE:
+			if _wb_annotate_text.length() > 0:
+				_wb_annotate_text = _wb_annotate_text.substr(0, _wb_annotate_text.length() - 1)
+		elif event.keycode == KEY_ENTER:
+			_wb_annotate_focused = false
+			# Submit annotation
+			var wb := _get_whiteboard()
+			if wb and not _wb_annotate_text.is_empty():
+				var sel: Array = wb.get_selected_ids()
+				if not sel.is_empty():
+					wb.annotate(sel[0], "H", _wb_annotate_text)
+			_wb_annotate_text = ""
+		elif event.keycode == KEY_ESCAPE:
+			_wb_annotate_focused = false
+			_wb_annotate_text = ""
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_wb_annotate_text += char(event.unicode)
+
+
+func _handle_wb_hover(my: float) -> void:
+	if not _wb_subsections_initialized:
+		return
+	_wb_hover_tool_idx = -1
+	_wb_hover_file_idx = -1
+	var y: float = 0.0
+	for sub in _wb_subsections:
+		if sub["collapsed"]:
+			y += SUB_HEADER_H
+			continue
+		var body_y: float = y + SUB_HEADER_H
+		var body_end: float = y + sub["height"]
+		if sub["id"] == "wb_inspector":
+			body_end = maxf(body_end, 9999.0)
+		if my >= body_y and my < body_end:
+			var local_y: float = my - body_y
+			match sub["id"]:
+				"wb_tools":
+					var pw: float = _content_width
+					var btn_w: float = (pw - 12) * 0.5
+					var col_idx: int = 0 if _last_hover_lx < 4 + btn_w else 1
+					var row_idx: int = int((local_y - 2) / 20.0)
+					var tool_idx: int = row_idx * 2 + col_idx
+					if tool_idx >= 0 and tool_idx < WB_TOOLS.size():
+						_wb_hover_tool_idx = tool_idx
+				"wb_board":
+					if _wb_show_file_picker and local_y >= 44:
+						_wb_hover_file_idx = int((local_y - 44) / 16)
+			return
+		y += sub["height"]

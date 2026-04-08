@@ -1,0 +1,28 @@
+{
+  "level_name": "whiteboard",
+  "version": 1.0,
+  "background": {
+    "color": [0.04, 0.04, 0.06, 1.0]
+  },
+  "camera": {
+    "fixed": true,
+    "position": [960.0, 540.0]
+  },
+  "cave_walls": {},
+  "floor": {
+    "color": [0.04, 0.04, 0.06, 0.0],
+    "pos": [960.0, 1200.0],
+    "width": 1920.0
+  },
+  "platforms": [],
+  "spawn_positions": [],
+  "spawn_zones": {},
+  "migration_patterns": [],
+  "splays": [],
+  "scenery": {},
+  "walls": {
+    "ceiling": -1000.0,
+    "left": -1000.0,
+    "right": 2920.0
+  }
+}

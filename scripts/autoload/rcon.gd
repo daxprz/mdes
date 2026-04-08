@@ -27,6 +27,9 @@ var _notify_dismissed_button: String = ""  # Set when dismissed, read by test ru
 var _notify_hover_idx: int = -1           # Which button is hovered (-1 = none)
 var _notify_mouse_pos: Vector2 = Vector2.ZERO
 
+# Whiteboard (lazy-initialized on first use)
+var _whiteboard: Node2D = null
+
 # Bounded-leap builder state (populated by `bleap` commands)
 var _bleap_defs: Array = []              # Accumulated leap defs from previous `bleap next` calls
 var _bleap_plat_a: Dictionary = {}       # {x, y, radius} — current def being built
@@ -198,6 +201,7 @@ func _execute(command: String) -> String:
   music [play|stop|off|score|scores|mml|intensity|tempo|layer|...] — music
   strudel <mini-notation>       — play Strudel pattern (or stop/cps/status/fx)
   musicdrawer (md)              — toggle music drawer (Ctrl+M)
+  wb [subcmd] ...               — whiteboard: collaborative debug drawing surface
   quit                          — quit game"""
 
 		"debug":
@@ -1329,6 +1333,9 @@ func _execute(command: String) -> String:
 						lines.append("  %s = %.2f (default %.2f)%s" % [k, cur, def, changed])
 				return "\n".join(lines)
 			return "ERR: no player found"
+
+		"wb":
+			return _cmd_wb(parts)
 
 		_:
 			return "ERR: unknown command '%s'. Try 'help'" % cmd
@@ -5018,3 +5025,591 @@ func _music_fx_status() -> String:
 	else:
 		lines.append("No active controls")
 	return "\n".join(lines)
+
+
+# ============================================================================
+# WHITEBOARD COMMANDS
+# ============================================================================
+
+func _get_or_create_whiteboard() -> Node2D:
+	if is_instance_valid(_whiteboard):
+		# Ensure it's in the scene tree (may have been orphaned by level change)
+		if not _whiteboard.is_inside_tree():
+			var scene := get_tree().current_scene
+			if scene:
+				scene.add_child(_whiteboard)
+		return _whiteboard
+	var Whiteboard := preload("res://scripts/ui/whiteboard.gd")
+	_whiteboard = Whiteboard.new()
+	_whiteboard.name = "Whiteboard"
+	var scene := get_tree().current_scene
+	if scene:
+		scene.add_child(_whiteboard)
+	return _whiteboard
+
+
+func _cmd_wb(parts: PackedStringArray) -> String:
+	if parts.size() < 2:
+		return """Whiteboard commands:
+  wb new [name]                         — new whiteboard
+  wb save [name]                        — save to file
+  wb load <name>                        — load from file
+  wb files                              — list saved files
+  wb clear                              — clear all components
+  wb level                              — load blank whiteboard level
+  wb open                               — open drawer on WHITEBOARD tab
+  wb close                              — close drawer
+  wb tool [name|index]                  — get/set active tool
+  wb grid [on|off]                      — toggle grid
+  wb list                               — list all components
+  wb inspect <id>                       — show component details
+  wb dump                               — dump whiteboard as JSON
+  wb point <x> <y> [opts]              — add point
+  wb line <x1> <y1> <x2> <y2> [opts]  — add line
+  wb rect <x> <y> <w> <h> [opts]      — add rectangle
+  wb circle <cx> <cy> <r> [opts]      — add circle
+  wb ellipse <cx> <cy> <rx> <ry> [opts] — add ellipse
+  wb polyline <x1> <y1> ... [opts]    — add polyline
+  wb poly <x1> <y1> ... [opts]        — add polygon
+  wb arrow <x1> <y1> <x2> <y2> [opts] — add arrow
+  wb vector <ox> <oy> <dx> <dy> [opts] — add vector
+  wb normal <ref_id> [opts]            — add normal to component
+  wb set <id> <key>=<val> ...           — set properties
+  wb move <id> <dx> <dy>                — translate component
+  wb delete <id>                        — delete component
+  wb show <id> / wb hide <id>           — toggle visibility
+  wb select <id> [id ...]               — select components
+  wb deselect                           — clear selection
+  wb selected                           — list selected IDs
+  wb annotate <id> <H|A> <text>        — add annotation
+  wb annotations <id>                   — list annotations
+  wb annotations clear <id>            — clear annotations
+  wb annotations show|hide <id>        — toggle callout
+  wb group <label> <id> [id ...]       — create/update group
+  wb ungroup <label>                    — remove group
+  wb groups                             — list groups
+Options: color=<name|#hex> label=<text> width=<float>"""
+
+	var wb := _get_or_create_whiteboard()
+	var sub: String = parts[1].to_lower()
+
+	match sub:
+		"new":
+			wb.clear_all()
+			var name: String = parts[2] if parts.size() > 2 else "untitled"
+			wb.set_board_name(name)
+			return "OK: new whiteboard '%s'" % name
+
+		"save":
+			var name: String = parts[2] if parts.size() > 2 else ""
+			return wb.save_to_file(name)
+
+		"load":
+			if parts.size() < 3:
+				return "ERR: usage: wb load <name>"
+			return wb.load_from_file(parts[2])
+
+		"files":
+			var files: Array[String] = wb.list_saved_files()
+			if files.is_empty():
+				return "No saved whiteboards"
+			return "Saved whiteboards:\n  " + "\n  ".join(PackedStringArray(files))
+
+		"clear":
+			wb.clear_all()
+			return "OK: cleared"
+
+		"level":
+			# Load the blank whiteboard level
+			var data: Dictionary = LevelConfig.load_level("whiteboard")
+			if data.is_empty():
+				return "ERR: whiteboard level not found"
+			var scene: Node = get_tree().current_scene
+			if scene and scene.has_method("_rebuild_from_config"):
+				scene._rebuild_from_config(data)
+				# Hide baked platforms
+				for pname in ["PlatLeft", "PlatRight", "PlatTopLeft", "PlatTopRight"]:
+					var plat: Node = scene.get_node_or_null(pname)
+					if plat:
+						plat.visible = false
+						plat.set_deferred("process_mode", Node.PROCESS_MODE_DISABLED)
+						for child in plat.get_children():
+							if child is CollisionShape2D:
+								child.set_deferred("disabled", true)
+				var ui_node: Node = scene.get_node_or_null("UI")
+				if ui_node:
+					ui_node.visible = false
+				# Ensure whiteboard is attached to the scene
+				if is_instance_valid(_whiteboard) and not _whiteboard.is_inside_tree():
+					scene.add_child(_whiteboard)
+				return "OK: whiteboard level loaded"
+			return "ERR: current scene doesn't support level loading"
+
+		"open":
+			# Open the debug drawer on the WHITEBOARD tab
+			var drawer: Node = get_node_or_null("/root/DebugDrawer")
+			if not drawer:
+				return "ERR: DebugDrawer not found"
+			if not drawer._active:
+				drawer.toggle()
+			drawer._current_section = drawer.Section.WHITEBOARD
+			drawer._save_drawer_state()
+			drawer._panel.queue_redraw()
+			return "OK: drawer opened on WHITEBOARD tab"
+
+		"close":
+			# Close the debug drawer
+			var drawer2: Node = get_node_or_null("/root/DebugDrawer")
+			if drawer2 and drawer2._active:
+				drawer2.toggle()
+			return "OK: drawer closed"
+
+		"tool":
+			# Set the active whiteboard tool: wb tool <name|index>
+			if parts.size() < 3:
+				var drawer3: Node = get_node_or_null("/root/DebugDrawer")
+				if drawer3:
+					return "Active tool: %s (#%d)" % [drawer3.WB_TOOLS[drawer3._wb_active_tool]["name"], drawer3._wb_active_tool]
+				return "ERR: DebugDrawer not found"
+			var drawer4: Node = get_node_or_null("/root/DebugDrawer")
+			if not drawer4:
+				return "ERR: DebugDrawer not found"
+			var tool_arg: String = parts[2].to_lower()
+			var tool_idx: int = -1
+			# Try by name first
+			for i in range(drawer4.WB_TOOLS.size()):
+				if drawer4.WB_TOOLS[i]["name"].to_lower() == tool_arg:
+					tool_idx = i
+					break
+			# Try by index
+			if tool_idx < 0 and tool_arg.is_valid_int():
+				tool_idx = tool_arg.to_int()
+			if tool_idx < 0 or tool_idx >= drawer4.WB_TOOLS.size():
+				var names: PackedStringArray = []
+				for t in drawer4.WB_TOOLS:
+					names.append(t["name"])
+				return "ERR: unknown tool '%s'. Available: %s" % [parts[2], ", ".join(names)]
+			drawer4._wb_active_tool = tool_idx
+			var tools_inst: RefCounted = drawer4._wb_get_or_create_tools()
+			if tools_inst:
+				tools_inst.set_tool(tool_idx)
+			drawer4._panel.queue_redraw()
+			return "OK: tool set to %s (#%d)" % [drawer4.WB_TOOLS[tool_idx]["name"], tool_idx]
+
+		"grid":
+			if parts.size() < 3:
+				wb.set_grid_visible(not wb.is_grid_visible())
+				return "OK: grid %s" % ("on" if wb.is_grid_visible() else "off")
+			var grid_arg: String = parts[2].to_lower()
+			if grid_arg == "on":
+				wb.set_grid_visible(true)
+				return "OK: grid on"
+			elif grid_arg == "off":
+				wb.set_grid_visible(false)
+				return "OK: grid off"
+			return "ERR: usage: wb grid [on|off]"
+
+		"list":
+			var comps: Array[Dictionary] = wb.get_all_components()
+			if comps.is_empty():
+				return "No components"
+			var lines: PackedStringArray = PackedStringArray()
+			for c in comps:
+				var label: String = c.get("label", "")
+				var sel: String = " *" if c.get("selected", false) else ""
+				var vis: String = "" if c.get("visible", true) else " [hidden]"
+				lines.append("  #%d %s %s%s%s" % [c["id"], c["type"], label, sel, vis])
+			return "Components (%d):\n" % comps.size() + "\n".join(lines)
+
+		"inspect":
+			if parts.size() < 3:
+				return "ERR: usage: wb inspect <id>"
+			var id: int = int(parts[2])
+			var c: Dictionary = wb.get_component(id)
+			if c.is_empty():
+				return "ERR: no component #%d" % id
+			return JSON.stringify(c, "  ")
+
+		"dump":
+			return JSON.stringify(wb.to_dict(), "  ")
+
+		# -- Component creation --
+		"point":
+			return _wb_create_point(wb, parts)
+		"line":
+			return _wb_create_line(wb, parts)
+		"rect":
+			return _wb_create_rect(wb, parts)
+		"circle":
+			return _wb_create_circle(wb, parts)
+		"ellipse":
+			return _wb_create_ellipse(wb, parts)
+		"polyline":
+			return _wb_create_polyline(wb, parts)
+		"poly":
+			return _wb_create_poly(wb, parts)
+		"arrow":
+			return _wb_create_arrow(wb, parts)
+		"vector":
+			return _wb_create_vector(wb, parts)
+		"normal":
+			return _wb_create_normal(wb, parts)
+
+		# -- Component modification --
+		"set":
+			return _wb_set(wb, parts)
+		"move":
+			if parts.size() < 5:
+				return "ERR: usage: wb move <id> <dx> <dy>"
+			var id: int = int(parts[2])
+			if wb.move_component(id, float(parts[3]), float(parts[4])):
+				return "OK: moved #%d by (%.1f, %.1f)" % [id, float(parts[3]), float(parts[4])]
+			return "ERR: no component #%d" % id
+
+		"delete":
+			if parts.size() < 3:
+				return "ERR: usage: wb delete <id>"
+			var id: int = int(parts[2])
+			if wb.delete_component(id):
+				return "OK: deleted #%d" % id
+			return "ERR: no component #%d" % id
+
+		"show":
+			if parts.size() < 3:
+				return "ERR: usage: wb show <id>"
+			var id: int = int(parts[2])
+			if wb.set_component_property(id, "visible", true):
+				return "OK: #%d visible" % id
+			return "ERR: no component #%d" % id
+
+		"hide":
+			if parts.size() < 3:
+				return "ERR: usage: wb hide <id>"
+			var id: int = int(parts[2])
+			if wb.set_component_property(id, "visible", false):
+				return "OK: #%d hidden" % id
+			return "ERR: no component #%d" % id
+
+		# -- Selection --
+		"select":
+			if parts.size() < 3:
+				return "ERR: usage: wb select <id> [id ...]"
+			for i in range(2, parts.size()):
+				wb.select_component(int(parts[i]))
+			return "OK: selected %d component(s)" % (parts.size() - 2)
+
+		"deselect":
+			wb.deselect_all()
+			return "OK: deselected all"
+
+		"selected":
+			var ids: Array[int] = wb.get_selected_ids()
+			if ids.is_empty():
+				return "No selection"
+			var strs: PackedStringArray = PackedStringArray()
+			for id in ids:
+				strs.append("#%d" % id)
+			return "Selected: " + " ".join(strs)
+
+		# -- Annotations --
+		"annotate":
+			if parts.size() < 5:
+				return "ERR: usage: wb annotate <id> <H|A> <text...>"
+			var id: int = int(parts[2])
+			var producer: String = parts[3].to_upper()
+			if producer not in ["H", "A"]:
+				return "ERR: producer must be H or A"
+			var text: String = " ".join(parts.slice(4))
+			if wb.annotate(id, producer, text):
+				return "OK: annotated #%d [%s]" % [id, producer]
+			return "ERR: no component #%d" % id
+
+		"annotations":
+			if parts.size() < 3:
+				return "ERR: usage: wb annotations <id> | wb annotations clear|show|hide <id>"
+			# Check for subcommand
+			if parts[2] in ["clear", "show", "hide"]:
+				if parts.size() < 4:
+					return "ERR: usage: wb annotations %s <id>" % parts[2]
+				var id: int = int(parts[3])
+				match parts[2]:
+					"clear":
+						if wb.clear_annotations(id):
+							return "OK: annotations cleared on #%d" % id
+						return "ERR: no component #%d" % id
+					"show":
+						if wb.set_component_property(id, "show_annotations", true):
+							return "OK: annotations visible on #%d" % id
+						return "ERR: no component #%d" % id
+					"hide":
+						if wb.set_component_property(id, "show_annotations", false):
+							return "OK: annotations hidden on #%d" % id
+						return "ERR: no component #%d" % id
+			else:
+				var id: int = int(parts[2])
+				var anns: Array = wb.get_annotations(id)
+				if anns.is_empty():
+					return "No annotations on #%d" % id
+				var lines: PackedStringArray = PackedStringArray()
+				for ann in anns:
+					lines.append("  [%s] %s" % [ann.get("producer", "?"), ann.get("text", "")])
+				return "Annotations on #%d:\n" % id + "\n".join(lines)
+
+		# -- Groups --
+		"group":
+			if parts.size() < 4:
+				return "ERR: usage: wb group <label> <id> [id ...]"
+			var label: String = parts[2]
+			var ids: Array[int] = []
+			for i in range(3, parts.size()):
+				ids.append(int(parts[i]))
+			wb.create_group(label, ids)
+			return "OK: group '%s' with %d components" % [label, ids.size()]
+
+		"ungroup":
+			if parts.size() < 3:
+				return "ERR: usage: wb ungroup <label>"
+			if wb.remove_group(parts[2]):
+				return "OK: removed group '%s'" % parts[2]
+			return "ERR: no group '%s'" % parts[2]
+
+		"groups":
+			var groups: Array[Dictionary] = wb.get_wb_groups()
+			if groups.is_empty():
+				return "No groups"
+			var lines: PackedStringArray = PackedStringArray()
+			for g in groups:
+				var id_strs: PackedStringArray = PackedStringArray()
+				for id in g.get("ids", []):
+					id_strs.append("#%d" % id)
+				lines.append("  '%s': %s" % [g["label"], " ".join(id_strs)])
+			return "Groups:\n" + "\n".join(lines)
+
+		_:
+			return "ERR: unknown wb subcommand '%s'. Try 'wb' for help" % sub
+	return "ERR: unhandled wb command"
+
+
+# -- Whiteboard creation helpers (parse opts from parts) --
+
+func _wb_parse_opts(parts: PackedStringArray, start: int) -> Dictionary:
+	## Parse key=value options from parts[start..]. Returns {color, label, width, ...}
+	var opts := {}
+	for i in range(start, parts.size()):
+		var arg: String = parts[i]
+		var eq: int = arg.find("=")
+		if eq < 0:
+			continue
+		var key: String = arg.substr(0, eq).to_lower()
+		var val: String = arg.substr(eq + 1)
+		match key:
+			"color":
+				opts["color"] = val
+			"label":
+				opts["label"] = val
+			"width":
+				opts["width"] = float(val)
+			"radius":
+				opts["radius"] = float(val)
+			"head_size":
+				opts["head_size"] = float(val)
+			"t":
+				opts["t"] = float(val)
+			"length":
+				opts["length"] = float(val)
+			"flipped":
+				opts["flipped"] = val.to_lower() in ["true", "1", "yes"]
+			"amplitude":
+				opts["amplitude"] = float(val)
+	return opts
+
+
+func _wb_get_color(opts: Dictionary) -> String:
+	return opts.get("color", "red")
+
+
+func _wb_get_label(opts: Dictionary) -> String:
+	return opts.get("label", "")
+
+
+func _wb_apply_opts(wb_node: Node2D, id: int, opts: Dictionary) -> void:
+	if opts.has("width"):
+		wb_node.set_component_property(id, "line_width", opts["width"])
+	if opts.has("radius"):
+		wb_node.set_component_property(id, "radius", opts["radius"])
+	if opts.has("head_size"):
+		wb_node.set_component_property(id, "head_size", opts["head_size"])
+
+
+func _wb_create_point(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb point <x> <y> [opts]
+	if parts.size() < 4:
+		return "ERR: usage: wb point <x> <y> [color=... label=...]"
+	var x: float = float(parts[2])
+	var y: float = float(parts[3])
+	var opts := _wb_parse_opts(parts, 4)
+	var id: int = wb_node.add_point(x, y, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d point at (%.0f, %.0f)" % [id, x, y]
+
+
+func _wb_create_line(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb line <x1> <y1> <x2> <y2> [opts]
+	if parts.size() < 6:
+		return "ERR: usage: wb line <x1> <y1> <x2> <y2> [opts]"
+	var x1: float = float(parts[2]); var y1: float = float(parts[3])
+	var x2: float = float(parts[4]); var y2: float = float(parts[5])
+	var opts := _wb_parse_opts(parts, 6)
+	var id: int = wb_node.add_line(x1, y1, x2, y2, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d line (%.0f,%.0f)→(%.0f,%.0f)" % [id, x1, y1, x2, y2]
+
+
+func _wb_create_rect(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb rect <x> <y> <w> <h> [opts]
+	if parts.size() < 6:
+		return "ERR: usage: wb rect <x> <y> <w> <h> [opts]"
+	var x: float = float(parts[2]); var y: float = float(parts[3])
+	var w: float = float(parts[4]); var h: float = float(parts[5])
+	var opts := _wb_parse_opts(parts, 6)
+	var id: int = wb_node.add_rect(x, y, w, h, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d rect at (%.0f,%.0f) size %.0fx%.0f" % [id, x, y, w, h]
+
+
+func _wb_create_circle(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb circle <cx> <cy> <r> [opts]
+	if parts.size() < 5:
+		return "ERR: usage: wb circle <cx> <cy> <r> [opts]"
+	var cx: float = float(parts[2]); var cy: float = float(parts[3])
+	var r: float = float(parts[4])
+	var opts := _wb_parse_opts(parts, 5)
+	var id: int = wb_node.add_circle(cx, cy, r, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d circle at (%.0f,%.0f) r=%.0f" % [id, cx, cy, r]
+
+
+func _wb_create_ellipse(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb ellipse <cx> <cy> <rx> <ry> [opts]
+	if parts.size() < 6:
+		return "ERR: usage: wb ellipse <cx> <cy> <rx> <ry> [opts]"
+	var cx: float = float(parts[2]); var cy: float = float(parts[3])
+	var rx: float = float(parts[4]); var ry: float = float(parts[5])
+	var opts := _wb_parse_opts(parts, 6)
+	var id: int = wb_node.add_ellipse(cx, cy, rx, ry, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d ellipse at (%.0f,%.0f) rx=%.0f ry=%.0f" % [id, cx, cy, rx, ry]
+
+
+func _wb_create_polyline(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb polyline <x1> <y1> <x2> <y2> ... [opts]
+	# Collect coordinate pairs until we hit a key=value arg
+	var points: Array = []
+	var opt_start: int = parts.size()
+	var i: int = 2
+	while i + 1 < parts.size():
+		if parts[i].find("=") >= 0:
+			opt_start = i
+			break
+		points.append([float(parts[i]), float(parts[i + 1])])
+		i += 2
+	if i < parts.size() and parts[i].find("=") >= 0:
+		opt_start = i
+	if points.size() < 2:
+		return "ERR: usage: wb polyline <x1> <y1> <x2> <y2> ... [opts] (need at least 2 points)"
+	var opts := _wb_parse_opts(parts, opt_start)
+	var id: int = wb_node.add_polyline(points, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d polyline with %d points" % [id, points.size()]
+
+
+func _wb_create_poly(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb poly <x1> <y1> <x2> <y2> ... [opts]
+	var points: Array = []
+	var opt_start: int = parts.size()
+	var i: int = 2
+	while i + 1 < parts.size():
+		if parts[i].find("=") >= 0:
+			opt_start = i
+			break
+		points.append([float(parts[i]), float(parts[i + 1])])
+		i += 2
+	if i < parts.size() and parts[i].find("=") >= 0:
+		opt_start = i
+	if points.size() < 3:
+		return "ERR: usage: wb poly <x1> <y1> ... (need at least 3 points)"
+	var opts := _wb_parse_opts(parts, opt_start)
+	var id: int = wb_node.add_poly(points, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d polygon with %d points" % [id, points.size()]
+
+
+func _wb_create_arrow(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb arrow <x1> <y1> <x2> <y2> [opts]
+	if parts.size() < 6:
+		return "ERR: usage: wb arrow <x1> <y1> <x2> <y2> [opts]"
+	var x1: float = float(parts[2]); var y1: float = float(parts[3])
+	var x2: float = float(parts[4]); var y2: float = float(parts[5])
+	var opts := _wb_parse_opts(parts, 6)
+	var id: int = wb_node.add_arrow(x1, y1, x2, y2, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d arrow (%.0f,%.0f)→(%.0f,%.0f)" % [id, x1, y1, x2, y2]
+
+
+func _wb_create_vector(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb vector <ox> <oy> <dx> <dy> [opts]
+	if parts.size() < 6:
+		return "ERR: usage: wb vector <ox> <oy> <dx> <dy> [opts]"
+	var ox: float = float(parts[2]); var oy: float = float(parts[3])
+	var dx: float = float(parts[4]); var dy: float = float(parts[5])
+	var opts := _wb_parse_opts(parts, 6)
+	var id: int = wb_node.add_vector(ox, oy, dx, dy, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d vector at (%.0f,%.0f) dir (%.1f,%.1f)" % [id, ox, oy, dx, dy]
+
+
+func _wb_create_normal(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb normal <ref_id> [opts: t=0.5 length=30 flipped=false color=...]
+	if parts.size() < 3:
+		return "ERR: usage: wb normal <ref_id> [t=... length=... flipped=... color=...]"
+	var ref_id: int = int(parts[2])
+	var opts := _wb_parse_opts(parts, 3)
+	var t: float = opts.get("t", 0.5)
+	var length: float = opts.get("length", 30.0)
+	var flipped: bool = opts.get("flipped", false)
+	var color: String = _wb_get_color(opts)
+	var id: int = wb_node.add_normal(ref_id, t, length, flipped, color)
+	if id < 0:
+		return "ERR: ref component #%d not found" % ref_id
+	return "OK: id=%d normal on #%d at t=%.2f" % [id, ref_id, t]
+
+
+func _wb_set(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb set <id> <key>=<val> [key=val ...]
+	if parts.size() < 4:
+		return "ERR: usage: wb set <id> <key>=<value> ..."
+	var id: int = int(parts[2])
+	var c: Dictionary = wb_node.get_component(id)
+	if c.is_empty():
+		return "ERR: no component #%d" % id
+	var changed: int = 0
+	for i in range(3, parts.size()):
+		var eq: int = parts[i].find("=")
+		if eq < 0:
+			continue
+		var key: String = parts[i].substr(0, eq)
+		var val_str: String = parts[i].substr(eq + 1)
+		if key in ["id", "type"]:
+			continue  # Immutable
+		# Type-aware value conversion
+		var val: Variant
+		match key:
+			"visible", "selected", "show_annotations", "flipped":
+				val = val_str.to_lower() in ["true", "1", "yes"]
+			"label", "color":
+				val = val_str
+			_:
+				val = float(val_str)
+		if wb_node.set_component_property(id, key, val):
+			changed += 1
+	return "OK: set %d properties on #%d" % [changed, id]

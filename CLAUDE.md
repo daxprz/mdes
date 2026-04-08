@@ -43,7 +43,9 @@ Do NOT use tumu when:
 | `scripts/autoload/debug_overlay.gd` | Debug aspect system |
 | `scripts/autoload/debug_aspects.gd` | Registered debug aspects |
 | `scripts/systems/test_runner.gd` | Test execution engine |
-| `scripts/ui/debug_drawer.gd` | Debug panel: debug aspects, test runner, config, level editor, blueprints |
+| `scripts/ui/debug_drawer.gd` | Debug panel: debug aspects, test runner, config, level editor, blueprints, whiteboard |
+| `scripts/ui/whiteboard.gd` | Collaborative whiteboard — data model, grid, component rendering, control points |
+| `scripts/ui/whiteboard_tools.gd` | Whiteboard tool state machine — click/drag/release, CP dragging |
 | `scripts/ui/level_editor.gd` | Level editor world-space overlay (handles, zones, splay edit) |
 | `scripts/ui/game_console.gd` | Bottom-slide console (backtick), respects drawer width |
 | `scripts/effects/procedural_tree.gd` | Configurable procedural tree (blueprint system) |
@@ -97,6 +99,8 @@ Do NOT use tumu when:
 | `bin/libgdsion.gdextension` | GDSiON software synthesizer GDExtension |
 | `docs/epics/EPIC_strudel_integration.md` | Strudel integration design — 5 EPICs, architecture, compatibility notes |
 | `scripts/ui/fps_overlay.gd` | Performance monitor — FPS graph, 19 metrics, auto-spike detection, entity census, section profiler display |
+| `docs/epics/EPIC_whiteboard.md` | Whiteboard system spec — architecture, data model, RCON commands, tool behaviors |
+| `docs/design/whiteboard_implementation.md` | Whiteboard implementation notes — gotchas, file guide, testing, extension guide |
 | `docs/perf/` | Performance documentation — monitor usage, profiler guide, spike investigation case study, Godot reference, known costs |
 
 ## Knowledge Contribution
