@@ -6,7 +6,8 @@ extends RefCounted
 
 enum Tool {
 	SELECT, ANNOTATE, POINT, LINE, POLYLINE, POLY,
-	RECT, CIRCLE, ELLIPSE, ARROW, VECTOR, NORMAL
+	RECT, CIRCLE, ELLIPSE, ARROW, VECTOR, NORMAL,
+	ARC, BEZIER
 }
 
 # -- State --
@@ -23,6 +24,12 @@ var _poly_points: Array = []        # For polyline/poly multi-click
 var _preview: Dictionary = {}       # Ghost component for preview rendering
 var _did_drag: bool = false         # True if mouse moved meaningfully during draw
 
+# Arc tool state (three-step: center → radius/start → sweep)
+var _arc_step: int = 0              # 0=idle, 1=center set, 2=radius set (waiting for angle)
+var _arc_center: Vector2 = Vector2.ZERO
+var _arc_radius: float = 0.0
+var _arc_start_angle: float = 0.0
+
 # Selection state
 var _drag_selected: bool = false    # True when drag-moving a selected component
 var _drag_id: int = -1
@@ -31,6 +38,10 @@ var _drag_id: int = -1
 var _cp_dragging: bool = false
 var _cp_comp_id: int = -1
 var _cp_key: String = ""
+
+# Snapping
+var snap_grid: bool = false
+var snap_components: bool = false
 
 const CP_HIT_RADIUS := 8.0
 const MIN_DRAG_DISTANCE := 3.0
@@ -50,6 +61,17 @@ func set_color(color_name: String) -> void:
 	_color = color_name
 
 
+func _snap(pos: Vector2) -> Vector2:
+	## Apply snapping if enabled. Grid snap first, then component snap.
+	if not _whiteboard:
+		return pos
+	if snap_grid:
+		pos = _whiteboard.snap_to_grid(pos)
+	if snap_components:
+		pos = _whiteboard.snap_to_components(pos)
+	return pos
+
+
 # ============================================================================
 # INPUT HANDLERS — called by debug_drawer when click is in world space
 # ============================================================================
@@ -57,6 +79,8 @@ func set_color(color_name: String) -> void:
 func handle_click(world_pos: Vector2) -> void:
 	if not _whiteboard:
 		return
+	# Apply snapping to all tools except SELECT (which needs raw pos for hit testing)
+	var snap_pos: Vector2 = world_pos if _active_tool == Tool.SELECT else _snap(world_pos)
 
 	match _active_tool:
 		Tool.SELECT:
@@ -64,42 +88,47 @@ func handle_click(world_pos: Vector2) -> void:
 		Tool.ANNOTATE:
 			_handle_annotate_click(world_pos)
 		Tool.POINT:
-			var new_id: int = _whiteboard.add_point(world_pos.x, world_pos.y, _color)
+			var new_id: int = _whiteboard.add_point(snap_pos.x, snap_pos.y, _color)
 			_select_new(new_id)
 		Tool.LINE, Tool.ARROW, Tool.RECT, Tool.CIRCLE, Tool.ELLIPSE, Tool.VECTOR:
 			if not _drawing:
 				_drawing = true
 				_did_drag = false
-				_start_pos = world_pos
-				_current_pos = world_pos
+				_start_pos = snap_pos
+				_current_pos = snap_pos
 			else:
 				# Second click finalization (two-click mode)
-				_finalize_two_step(world_pos)
+				_finalize_two_step(snap_pos)
 		Tool.POLYLINE, Tool.POLY:
-			_handle_poly_click(world_pos)
+			_handle_poly_click(snap_pos)
 		Tool.NORMAL:
 			_handle_normal_click(world_pos)
+		Tool.ARC:
+			_handle_arc_click(snap_pos)
+		Tool.BEZIER:
+			_handle_poly_click(snap_pos)  # Same multi-click pattern as polyline
 
 
 func handle_drag(world_pos: Vector2) -> void:
 	if not _whiteboard:
 		return
-	_current_pos = world_pos
+	var snap_pos: Vector2 = _snap(world_pos)
+	_current_pos = snap_pos
 
 	# Control point dragging takes priority
 	if _cp_dragging and _cp_comp_id >= 0:
-		_apply_cp_drag(world_pos)
+		_apply_cp_drag(snap_pos)
 		return
 
 	# Whole-component dragging (SELECT tool)
 	if _active_tool == Tool.SELECT and _drag_selected and _drag_id >= 0:
-		var delta: Vector2 = world_pos - _start_pos
+		var delta: Vector2 = world_pos - _start_pos  # Use raw pos for smooth dragging
 		_whiteboard.move_component(_drag_id, delta.x, delta.y)
 		_start_pos = world_pos
 		return
 
-	# Two-step tool: mark that we've actually dragged
-	if _drawing:
+	# Two-step tool / arc: mark that we've actually dragged
+	if _drawing or _arc_step == 1:
 		if world_pos.distance_to(_start_pos) > MIN_DRAG_DISTANCE:
 			_did_drag = true
 
@@ -109,6 +138,7 @@ func handle_drag(world_pos: Vector2) -> void:
 func handle_release(world_pos: Vector2) -> void:
 	if not _whiteboard:
 		return
+	var snap_pos: Vector2 = _snap(world_pos)
 
 	# Control point release
 	if _cp_dragging:
@@ -123,10 +153,20 @@ func handle_release(world_pos: Vector2) -> void:
 		_drag_id = -1
 		return
 
+	# Arc tool step 1: drag-release sets radius + start angle
+	if _active_tool == Tool.ARC and _arc_step == 1 and _did_drag:
+		if snap_pos.distance_to(_arc_center) > MIN_DRAG_DISTANCE:
+			_arc_radius = _arc_center.distance_to(snap_pos)
+			_arc_start_angle = (snap_pos - _arc_center).angle()
+			_arc_step = 2
+			_did_drag = false
+			_update_preview()
+			return
+
 	# Two-step tool: finalize on release if user actually dragged far enough
 	if _drawing and _did_drag:
-		if world_pos.distance_to(_start_pos) > MIN_DRAG_DISTANCE:
-			_finalize_two_step(world_pos)
+		if snap_pos.distance_to(_start_pos) > MIN_DRAG_DISTANCE:
+			_finalize_two_step(snap_pos)
 		else:
 			_did_drag = false  # Reset — keep _drawing true for two-click mode
 
@@ -134,9 +174,11 @@ func handle_release(world_pos: Vector2) -> void:
 func handle_double_click(_world_pos: Vector2) -> void:
 	if not _whiteboard:
 		return
-	# Finalize polyline/poly on double-click
+	# Finalize polyline/poly/bezier on double-click
 	if _active_tool in [Tool.POLYLINE, Tool.POLY] and _poly_points.size() >= 2:
 		_finish_poly()
+	elif _active_tool == Tool.BEZIER and _poly_points.size() >= 2:
+		_finish_bezier()
 
 
 func cancel() -> void:
@@ -149,12 +191,13 @@ func cancel() -> void:
 	_cp_dragging = false
 	_cp_comp_id = -1
 	_cp_key = ""
+	_arc_step = 0
 	if _whiteboard:
 		_whiteboard.queue_redraw()
 
 
 func is_drawing() -> bool:
-	return _drawing or not _poly_points.is_empty()
+	return _drawing or not _poly_points.is_empty() or _arc_step > 0
 
 
 func get_preview() -> Dictionary:
@@ -166,22 +209,27 @@ func get_preview() -> Dictionary:
 # ============================================================================
 
 func _handle_select_click(world_pos: Vector2) -> void:
-	# First check if clicking a control point of an already-selected component
+	# First check if clicking a control point of an already-selected, unlocked component
 	var cp_hit: Dictionary = _cp_hit_test(world_pos)
 	if not cp_hit.is_empty():
-		_cp_dragging = true
-		_cp_comp_id = cp_hit["comp_id"]
-		_cp_key = cp_hit["key"]
-		return
+		# Check if the component is locked
+		var cp_comp: Dictionary = _whiteboard.get_component(cp_hit["comp_id"])
+		if not cp_comp.get("locked", false):
+			_cp_dragging = true
+			_cp_comp_id = cp_hit["comp_id"]
+			_cp_key = cp_hit["key"]
+			return
 
 	# Otherwise, try to select a component
 	var hit_id: int = _hit_test(world_pos)
 	if hit_id >= 0:
 		_whiteboard.deselect_all()
 		_whiteboard.select_component(hit_id)
-		_drag_selected = true
-		_drag_id = hit_id
-		_start_pos = world_pos
+		var hit_comp: Dictionary = _whiteboard.get_component(hit_id)
+		if not hit_comp.get("locked", false):
+			_drag_selected = true
+			_drag_id = hit_id
+			_start_pos = world_pos
 	else:
 		_whiteboard.deselect_all()
 
@@ -220,6 +268,50 @@ func _handle_normal_click(world_pos: Vector2) -> void:
 	if best_id >= 0:
 		var new_id: int = _whiteboard.add_normal(best_id, best_t, 30.0, false, _color)
 		_select_new(new_id)
+
+
+func _handle_arc_click(world_pos: Vector2) -> void:
+	match _arc_step:
+		0:
+			# Step 1: set center
+			_arc_center = world_pos
+			_arc_step = 1
+			_start_pos = world_pos
+			_did_drag = false
+		1:
+			# Step 1 click-only (no drag): set P2 by click
+			var dist: float = _arc_center.distance_to(world_pos)
+			if dist > MIN_DRAG_DISTANCE:
+				_arc_radius = dist
+				_arc_start_angle = (world_pos - _arc_center).angle()
+				_arc_step = 2
+		2:
+			# Step 3: finalize sweep angle
+			var cursor_angle: float = (world_pos - _arc_center).angle()
+			var sweep: float = _shortest_angle_dist(_arc_start_angle, cursor_angle)
+			var new_id: int = _whiteboard.add_arc(_arc_center.x, _arc_center.y, _arc_radius, _arc_start_angle, sweep, _color)
+			_arc_step = 0
+			_preview.clear()
+			_select_new(new_id)
+
+
+func _shortest_angle_dist(from_angle: float, to_angle: float) -> float:
+	## Compute the shortest signed angular distance from from_angle to to_angle.
+	var diff: float = fmod(to_angle - from_angle + PI, TAU) - PI
+	return diff
+
+
+func _finish_bezier() -> void:
+	if _poly_points.size() < 2:
+		_poly_points.clear()
+		_drawing = false
+		return
+	var controls: Array = _whiteboard._auto_bezier_controls(_poly_points)
+	var new_id: int = _whiteboard.add_bezier(_poly_points.duplicate(), controls, _color)
+	_poly_points.clear()
+	_drawing = false
+	_preview.clear()
+	_select_new(new_id)
 
 
 func _select_new(id: int) -> void:
@@ -353,6 +445,45 @@ func _apply_cp_drag(world_pos: Vector2) -> void:
 				var endpoints: Array = _whiteboard._get_normal_endpoints(c)
 				if not endpoints.is_empty():
 					c["length"] = maxf(5.0, world_pos.distance_to(endpoints[0]))
+		"arc":
+			if _cp_key == "center":
+				c["cx"] = world_pos.x; c["cy"] = world_pos.y
+			elif _cp_key == "start":
+				# Dragging P2: change radius and start angle
+				var center := Vector2(c["cx"], c["cy"])
+				c["r"] = maxf(1.0, center.distance_to(world_pos))
+				c["start_angle"] = (world_pos - center).angle()
+			elif _cp_key == "end":
+				# Dragging end point: change sweep angle
+				var center := Vector2(c["cx"], c["cy"])
+				var cursor_angle: float = (world_pos - center).angle()
+				c["sweep_angle"] = _shortest_angle_dist(c["start_angle"], cursor_angle)
+		"bezier":
+			if _cp_key.begins_with("a"):
+				# Anchor point drag — move anchor and its control handles
+				var idx: int = _cp_key.substr(1).to_int()
+				var bpts: Array = c.get("points", [])
+				if idx >= 0 and idx < bpts.size():
+					var old_pos := Vector2(bpts[idx][0], bpts[idx][1])
+					var delta: Vector2 = world_pos - old_pos
+					bpts[idx] = [world_pos.x, world_pos.y]
+					# Move associated control handles
+					var ctrls: Array = c.get("controls", [])
+					# Handle out of this anchor (if not first, also handle in)
+					if idx > 0:
+						var in_idx: int = (idx - 1) * 2 + 1
+						if in_idx < ctrls.size():
+							ctrls[in_idx] = [ctrls[in_idx][0] + delta.x, ctrls[in_idx][1] + delta.y]
+					if idx < bpts.size() - 1:
+						var out_idx: int = idx * 2
+						if out_idx < ctrls.size():
+							ctrls[out_idx] = [ctrls[out_idx][0] + delta.x, ctrls[out_idx][1] + delta.y]
+			elif _cp_key.begins_with("c"):
+				# Control handle drag
+				var cidx: int = _cp_key.substr(1).to_int()
+				var ctrls: Array = c.get("controls", [])
+				if cidx >= 0 and cidx < ctrls.size():
+					ctrls[cidx] = [world_pos.x, world_pos.y]
 
 	_whiteboard.queue_redraw()
 
@@ -379,8 +510,13 @@ func _apply_rect_cp(c: Dictionary, world_pos: Vector2) -> void:
 # ============================================================================
 
 func _update_preview() -> void:
-	if not _drawing and _poly_points.is_empty():
+	if not _drawing and _poly_points.is_empty() and _arc_step == 0:
 		_preview.clear()
+		return
+
+	# Arc preview is handled separately
+	if _active_tool == Tool.ARC:
+		_update_arc_preview()
 		return
 
 	match _active_tool:
@@ -431,9 +567,42 @@ func _update_preview() -> void:
 			_preview = {"type": ptype, "points": pts, "color": _color,
 				"line_width": _line_width, "visible": true, "selected": false,
 				"id": -1, "label": "", "annotations": [], "show_annotations": false}
+		Tool.BEZIER:
+			var pts: Array = _poly_points.duplicate()
+			pts.append([_current_pos.x, _current_pos.y])
+			if pts.size() >= 2:
+				var ctrls: Array = _whiteboard._auto_bezier_controls(pts)
+				_preview = {"type": "bezier", "points": pts, "controls": ctrls, "color": _color,
+					"line_width": _line_width, "visible": true, "selected": false,
+					"id": -1, "label": "", "annotations": [], "show_annotations": false}
+			else:
+				_preview.clear()
 		_:
 			_preview.clear()
 
+	if _whiteboard:
+		_whiteboard.queue_redraw()
+
+
+func _update_arc_preview() -> void:
+	match _arc_step:
+		1:
+			# Show circle preview while dragging from center
+			_preview = {"type": "circle", "cx": _arc_center.x, "cy": _arc_center.y,
+				"r": _arc_center.distance_to(_current_pos), "color": _color,
+				"line_width": _line_width, "visible": true, "selected": false,
+				"id": -1, "label": "", "annotations": [], "show_annotations": false}
+		2:
+			# Show arc preview — sweep from start angle to current cursor angle
+			var cursor_angle: float = (_current_pos - _arc_center).angle()
+			var sweep: float = _shortest_angle_dist(_arc_start_angle, cursor_angle)
+			_preview = {"type": "arc", "cx": _arc_center.x, "cy": _arc_center.y,
+				"r": _arc_radius, "start_angle": _arc_start_angle, "sweep_angle": sweep,
+				"color": _color, "line_width": _line_width, "visible": true,
+				"selected": false, "id": -1, "label": "", "annotations": [],
+				"show_annotations": false}
+		_:
+			_preview.clear()
 	if _whiteboard:
 		_whiteboard.queue_redraw()
 
@@ -499,6 +668,24 @@ func _distance_to_component(c: Dictionary, pos: Vector2) -> float:
 					return _distance_to_segment(endpoints[0], endpoints[1], pos)
 			var centroid: Vector2 = _whiteboard._get_centroid(c)
 			return pos.distance_to(centroid)
+		"arc":
+			var ac := Vector2(c["cx"], c["cy"])
+			var ar: float = c["r"]
+			var sa: float = c["start_angle"]
+			var sw: float = c["sweep_angle"]
+			# Distance to arc — check if point angle is within sweep, then radial dist
+			var angle_to_pos: float = (pos - ac).angle()
+			var rel_angle: float = fmod(angle_to_pos - sa + TAU, TAU)
+			var sweep_norm: float = fmod(sw + TAU, TAU) if sw > 0 else fmod(-sw + TAU, TAU)
+			var check_angle: float = rel_angle if sw > 0 else fmod(TAU - rel_angle, TAU)
+			if check_angle <= sweep_norm:
+				return absf(pos.distance_to(ac) - ar)
+			# Outside sweep — distance to nearest endpoint
+			var p_start := ac + Vector2(cos(sa), sin(sa)) * ar
+			var p_end := ac + Vector2(cos(sa + sw), sin(sa + sw)) * ar
+			return minf(pos.distance_to(p_start), pos.distance_to(p_end))
+		"bezier":
+			return _distance_to_bezier(c, pos)
 	return 999.0
 
 
@@ -541,6 +728,35 @@ func _distance_to_polyline(points: Array, p: Vector2, closed: bool) -> float:
 		var b := Vector2(points[j][0], points[j][1])
 		var d: float = _distance_to_segment(a, b, p)
 		min_dist = minf(min_dist, d)
+	return min_dist
+
+
+func _distance_to_bezier(c: Dictionary, pos: Vector2) -> float:
+	## Distance from pos to the nearest point on a cubic bezier path.
+	var bpts: Array = c.get("points", [])
+	var ctrls: Array = c.get("controls", [])
+	if bpts.size() < 2:
+		return 999.0
+	var min_dist: float = 999.0
+	var n: int = bpts.size()
+	for seg_i in range(n - 1):
+		var ci_out: int = seg_i * 2
+		var ci_in: int = seg_i * 2 + 1
+		if ci_out >= ctrls.size() or ci_in >= ctrls.size():
+			break
+		var p0 := Vector2(bpts[seg_i][0], bpts[seg_i][1])
+		var p3 := Vector2(bpts[seg_i + 1][0], bpts[seg_i + 1][1])
+		var p1 := Vector2(ctrls[ci_out][0], ctrls[ci_out][1])
+		var p2 := Vector2(ctrls[ci_in][0], ctrls[ci_in][1])
+		# Sample the segment and find minimum distance
+		var prev: Vector2 = p0
+		for s in range(1, 17):  # 16 samples per segment for hit testing
+			var t: float = float(s) / 16.0
+			var it: float = 1.0 - t
+			var pt: Vector2 = it*it*it*p0 + 3.0*it*it*t*p1 + 3.0*it*t*t*p2 + t*t*t*p3
+			var d: float = _distance_to_segment(prev, pt, pos)
+			min_dist = minf(min_dist, d)
+			prev = pt
 	return min_dist
 
 

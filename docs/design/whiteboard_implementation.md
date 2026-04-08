@@ -73,44 +73,47 @@ The WHITEBOARD tab uses the same subsection framework as other tabs:
 
 ## File-by-File Guide
 
-### whiteboard.gd (~900 lines)
+### whiteboard.gd (~1100 lines)
 
 **Extends**: `Node2D` (renders in world space via `_draw()`)
 
 **Sections**:
-1. Constants (grid, colors, annotation, selection, control points)
+1. Constants (grid, colors, annotation, selection, control points, arc/bezier)
 2. State (`_components`, `_groups`, `_next_id`, `_grid_visible`, `_preview_component`)
 3. Named color lookup (16 colors for RCON-friendly names)
-4. Public API — Component Creation (`add_point`, `add_line`, etc.)
-5. Public API — Component Access & Modification (`get_component`, `set_component_property`, `move_component`, `delete_component`, selection)
+4. Public API — Component Creation (`add_point`, `add_line`, ..., `add_arc`, `add_bezier`)
+5. Public API — Component Access & Modification (with lock guards on `set_component_property` and `move_component`)
 6. Public API — Annotations (`annotate`, `get_annotations`, `clear_annotations`)
-7. Public API — Control Points (`get_control_points(c)` — returns `[{pos, key}, ...]`)
+7. Public API — Control Points (`get_control_points(c)` — returns `[{pos, key}, ...]` for all 12 types)
 8. Public API — Groups
 9. Public API — Management (`clear_all`, name, grid)
 10. Serialization (`to_dict`, `from_dict`, `save_to_file`, `load_from_file`)
-11. Drawing (`_draw`, `_draw_grid`, `_draw_component`, `_draw_control_points`, `_draw_group`, `_draw_annotations`)
-12. Helpers (`_make_base`, `_resolve_color`, `_parse_color`, `_get_centroid`, `_get_normal_endpoints`, `_sample_polyline`)
+11. Drawing (`_draw`, `_draw_grid`, `_draw_component`, `_draw_bezier`, `_draw_control_points`, `_draw_group`, `_draw_annotations`)
+12. Helpers (`_make_base`, `_resolve_color`, `_parse_color`, `_get_centroid`, `_get_normal_endpoints`, `_sample_polyline`, `snap_to_grid`, `snap_to_components`, `_auto_bezier_controls`)
 
 **Key method**: `_get_normal_endpoints(c)` — computes `[base_pos, tip_pos]` for a normal component. Used by `get_control_points()`, `_draw_normal()`, and control point dragging. Extracted from the old inline `_draw_normal` to avoid code duplication.
 
-### whiteboard_tools.gd (~530 lines)
+### whiteboard_tools.gd (~750 lines)
 
 **Extends**: `RefCounted` (owned by debug_drawer, not in scene tree)
 
 **Sections**:
-1. Tool enum and state variables
-2. Input handlers (`handle_click`, `handle_drag`, `handle_release`, `handle_double_click`, `cancel`)
-3. Tool-specific click handlers
-4. Control point hit testing & dragging (`_cp_hit_test`, `_apply_cp_drag`, `_apply_rect_cp`)
-5. Preview/ghost rendering (`_update_preview`)
-6. Hit testing geometry (`_hit_test`, `_distance_to_component`, `_distance_to_segment`, etc.)
-7. Nearest-point-on-component for normal placement
+1. Tool enum and state variables (including arc step state, snap flags)
+2. Snap helper (`_snap()` — applies grid + component snapping)
+3. Input handlers (`handle_click`, `handle_drag`, `handle_release`, `handle_double_click`, `cancel`)
+4. Tool-specific click handlers (including `_handle_arc_click`, `_finish_bezier`)
+5. Control point hit testing & dragging (`_cp_hit_test`, `_apply_cp_drag`, `_apply_rect_cp`)
+6. Preview/ghost rendering (`_update_preview`, `_update_arc_preview`)
+7. Hit testing geometry (`_hit_test`, `_distance_to_component`, `_distance_to_bezier`, etc.)
+8. Nearest-point-on-component for normal placement
 
 **Key state**:
 - `_drawing: bool` — true during two-step/multi-step operations
 - `_did_drag: bool` — true if mouse moved > 3px during a draw (enables drag-release finalization)
 - `_cp_dragging: bool` + `_cp_comp_id` + `_cp_key` — active control point drag
 - `_drag_selected: bool` + `_drag_id` — whole-component move via SELECT tool
+- `_arc_step: int` — 0=idle, 1=center set (dragging for radius), 2=radius set (waiting for sweep click)
+- `snap_grid: bool` + `snap_components: bool` — snapping flags (set by drawer)
 
 ### debug_drawer.gd (whiteboard additions, ~700 lines)
 
@@ -199,6 +202,54 @@ Take screenshots after RCON operations and inspect them:
 ```bash
 screencapture -x /tmp/wb_test.png
 ```
+
+## Arc Tool (Three-Step)
+
+The Arc tool is the most complex tool, using three steps:
+
+1. **CLICK** → set center (P1). `_arc_step = 1`
+2. **HOLD/DRAG** → preview circle from center. **RELEASE** → set P2, compute R and start_angle. `_arc_step = 2`
+   - Alternatively: **CLICK** again to set P2 by click (no drag).
+3. **MOVE** → preview arc sweeping from P2 to cursor angle. **CLICK** → finalize sweep_angle A.
+
+The sweep angle uses `_shortest_angle_dist()` to always take the minimum arc-distance path. This limits single arcs to ≤180°. For larger arcs, create the arc and then drag the end control point past 180°.
+
+**Control points**:
+- **center** (blue) → rehomes entire arc
+- **start** → changes R and start_angle simultaneously
+- **end** → changes sweep_angle
+
+## Bezier Tool (Multi-Click)
+
+Uses the same multi-click pattern as Polyline:
+1. Each click adds an anchor point
+2. Double-click finalizes
+3. Control handles are auto-generated using Catmull-Rom-style smooth tangents
+
+**Data model**: N anchor points + 2*(N-1) control points. For each segment between anchors[i] and anchors[i+1]:
+- `controls[2*i]` = handle out from anchor i
+- `controls[2*i+1]` = handle in to anchor i+1
+
+**Rendering**: Each segment is sampled as a cubic bezier at 32 points. When selected, thin dimmed lines show anchor-to-handle connections.
+
+**CP dragging**: Dragging an anchor also moves its associated control handles (preserving relative offset). Dragging a control handle moves only that handle.
+
+## Snapping
+
+Two independent snap modes, togglable via Actions pane or RCON:
+- **Snap Grid**: rounds coordinates to nearest minor grid point (20px)
+- **Snap Components**: snaps to nearest control point of any visible component within 12px
+
+Snapping is applied in `whiteboard_tools._snap()` before any tool processing. The SELECT tool uses raw positions for hit testing (snap is not applied to selection clicks).
+
+## Component Locking
+
+Components have a `locked: bool` property (default false). When locked:
+- `set_component_property()` rejects non-lock/select/visible edits
+- `move_component()` returns false
+- Control points are NOT rendered
+- SELECT tool allows selection (for inspection) but NOT dragging
+- Lock/unlock via Actions pane buttons or RCON `wb lock/unlock`
 
 ## Extension Guide
 

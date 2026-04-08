@@ -20,6 +20,8 @@ const DEFAULT_LINE_WIDTH := 2.0
 const DEFAULT_POINT_RADIUS := 4.0
 const DEFAULT_HEAD_SIZE := 12.0
 const DEFAULT_NORMAL_LENGTH := 30.0
+const DEFAULT_ARC_SEGMENTS := 48
+const BEZIER_SAMPLES := 32
 
 # -- Annotation rendering --
 const ANNOTATION_BG := Color(0.06, 0.06, 0.1, 0.85)
@@ -177,6 +179,60 @@ func add_normal(ref_id: int, t: float = 0.5, length: float = DEFAULT_NORMAL_LENG
 	return c["id"]
 
 
+func add_arc(cx: float, cy: float, r: float, start_angle: float, sweep_angle: float, color: String = DEFAULT_COLOR, label: String = "") -> int:
+	var c := _make_base("arc", color, label)
+	c["cx"] = cx; c["cy"] = cy; c["r"] = r
+	c["start_angle"] = start_angle
+	c["sweep_angle"] = sweep_angle
+	_components.append(c)
+	queue_redraw()
+	return c["id"]
+
+
+func add_bezier(points: Array, controls: Array, color: String = DEFAULT_COLOR, label: String = "") -> int:
+	## Create a cubic bezier path.
+	## points: [[x,y], ...] — N anchor points
+	## controls: [[x,y], ...] — 2*(N-1) control points [out0, in1, out1, in2, ...]
+	if points.size() < 2:
+		return -1
+	var expected_controls: int = 2 * (points.size() - 1)
+	if controls.size() != expected_controls:
+		# Auto-generate smooth controls if wrong count
+		controls = _auto_bezier_controls(points)
+	var c := _make_base("bezier", color, label)
+	c["points"] = points
+	c["controls"] = controls
+	_components.append(c)
+	queue_redraw()
+	return c["id"]
+
+
+func _auto_bezier_controls(points: Array) -> Array:
+	## Generate smooth Catmull-Rom-style control handles for a bezier path.
+	var n: int = points.size()
+	var controls: Array = []
+	for i in range(n - 1):
+		var p0 := Vector2(points[i][0], points[i][1])
+		var p1 := Vector2(points[i + 1][0], points[i + 1][1])
+		# Tangent at start anchor
+		var tan_out: Vector2
+		if i > 0:
+			var pp := Vector2(points[i - 1][0], points[i - 1][1])
+			tan_out = (p1 - pp).normalized() * p0.distance_to(p1) * 0.3
+		else:
+			tan_out = (p1 - p0) * 0.3
+		# Tangent at end anchor
+		var tan_in: Vector2
+		if i + 2 < n:
+			var pn := Vector2(points[i + 2][0], points[i + 2][1])
+			tan_in = (p0 - pn).normalized() * p0.distance_to(p1) * 0.3
+		else:
+			tan_in = (p0 - p1) * 0.3
+		controls.append([p0.x + tan_out.x, p0.y + tan_out.y])
+		controls.append([p1.x + tan_in.x, p1.y + tan_in.y])
+	return controls
+
+
 # ============================================================================
 # PUBLIC API — Component Access & Modification
 # ============================================================================
@@ -194,6 +250,9 @@ func set_component_property(id: int, key: String, value: Variant) -> bool:
 		return false
 	if key == "id" or key == "type":
 		return false  # Immutable
+	# Allow toggling lock itself, but block other edits on locked components
+	if key != "locked" and key != "selected" and key != "visible" and c.get("locked", false):
+		return false
 	c[key] = value
 	queue_redraw()
 	return true
@@ -202,6 +261,8 @@ func set_component_property(id: int, key: String, value: Variant) -> bool:
 func move_component(id: int, dx: float, dy: float) -> bool:
 	var c := get_component(id)
 	if c.is_empty():
+		return false
+	if c.get("locked", false):
 		return false
 	match c["type"]:
 		"point":
@@ -221,6 +282,15 @@ func move_component(id: int, dx: float, dy: float) -> bool:
 				pts[i] = [pts[i][0] + dx, pts[i][1] + dy]
 		"vector":
 			c["ox"] += dx; c["oy"] += dy
+		"arc":
+			c["cx"] += dx; c["cy"] += dy
+		"bezier":
+			var pts: Array = c["points"]
+			for i in range(pts.size()):
+				pts[i] = [pts[i][0] + dx, pts[i][1] + dy]
+			var ctrls: Array = c["controls"]
+			for i in range(ctrls.size()):
+				ctrls[i] = [ctrls[i][0] + dx, ctrls[i][1] + dy]
 		"normal":
 			pass  # Normals are relative to ref — can't move directly
 	queue_redraw()
@@ -335,6 +405,19 @@ func get_control_points(c: Dictionary) -> Array:
 			if endpoints.size() >= 2:
 				pts.append({"pos": endpoints[0], "key": "base"})
 				pts.append({"pos": endpoints[1], "key": "tip"})
+		"arc":
+			var acx: float = c["cx"]; var acy: float = c["cy"]; var ar: float = c["r"]
+			var sa: float = c["start_angle"]; var sw: float = c["sweep_angle"]
+			pts.append({"pos": Vector2(acx, acy), "key": "center"})
+			pts.append({"pos": Vector2(acx + ar * cos(sa), acy + ar * sin(sa)), "key": "start"})
+			pts.append({"pos": Vector2(acx + ar * cos(sa + sw), acy + ar * sin(sa + sw)), "key": "end"})
+		"bezier":
+			var bpts: Array = c.get("points", [])
+			for i in range(bpts.size()):
+				pts.append({"pos": Vector2(bpts[i][0], bpts[i][1]), "key": "a%d" % i})
+			var ctrls: Array = c.get("controls", [])
+			for i in range(ctrls.size()):
+				pts.append({"pos": Vector2(ctrls[i][0], ctrls[i][1]), "key": "c%d" % i})
 	return pts
 
 
@@ -515,9 +598,9 @@ func _draw() -> void:
 		if c.get("show_annotations", true) and not c.get("annotations", []).is_empty():
 			_draw_annotations(c)
 
-	# Draw control points for selected components (on top of everything)
+	# Draw control points for selected, unlocked components (on top of everything)
 	for c in _components:
-		if c.get("selected", false) and c.get("visible", true):
+		if c.get("selected", false) and c.get("visible", true) and not c.get("locked", false):
 			_draw_control_points(c)
 
 
@@ -664,6 +747,28 @@ func _draw_component(c: Dictionary) -> void:
 		"normal":
 			_draw_normal(c, col, lw, offset)
 
+		"arc":
+			var ac := Vector2(c["cx"], c["cy"]) + offset
+			var ar: float = c["r"]
+			var sa: float = c["start_angle"]
+			var sw: float = c["sweep_angle"]
+			draw_arc(ac, ar, sa, sa + sw, DEFAULT_ARC_SEGMENTS, col, lw)
+			# Draw small tick marks at start and end
+			var start_p := ac + Vector2(cos(sa), sin(sa)) * ar
+			var end_p := ac + Vector2(cos(sa + sw), sin(sa + sw)) * ar
+			var tick: float = 6.0
+			var sdir := Vector2(cos(sa), sin(sa))
+			var edir := Vector2(cos(sa + sw), sin(sa + sw))
+			draw_line(start_p - sdir * tick, start_p + sdir * tick, col, lw)
+			draw_line(end_p - edir * tick, end_p + edir * tick, col, lw)
+			if not c.get("label", "").is_empty():
+				var mid_angle: float = sa + sw * 0.5
+				var label_p := ac + Vector2(cos(mid_angle), sin(mid_angle)) * (ar + 12)
+				draw_string(_font, label_p, c["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+
+		"bezier":
+			_draw_bezier(c, col, lw, offset)
+
 
 func _draw_arrow(from: Vector2, to: Vector2, col: Color, lw: float, head_size: float) -> void:
 	draw_line(from, to, col, lw)
@@ -762,6 +867,47 @@ func _draw_normal(c: Dictionary, col: Color, lw: float, offset: Vector2) -> void
 	draw_line(base - tick_dir * 4, base + tick_dir * 4, col, lw)
 
 
+func _draw_bezier(c: Dictionary, col: Color, lw: float, offset: Vector2) -> void:
+	var bpts: Array = c.get("points", [])
+	var ctrls: Array = c.get("controls", [])
+	if bpts.size() < 2:
+		return
+	var n: int = bpts.size()
+	for seg_i in range(n - 1):
+		var cp_out_idx: int = seg_i * 2
+		var cp_in_idx: int = seg_i * 2 + 1
+		if cp_out_idx >= ctrls.size() or cp_in_idx >= ctrls.size():
+			break
+		var p0 := Vector2(bpts[seg_i][0], bpts[seg_i][1]) + offset
+		var p3 := Vector2(bpts[seg_i + 1][0], bpts[seg_i + 1][1]) + offset
+		var p1 := Vector2(ctrls[cp_out_idx][0], ctrls[cp_out_idx][1]) + offset
+		var p2 := Vector2(ctrls[cp_in_idx][0], ctrls[cp_in_idx][1]) + offset
+		# Sample cubic bezier
+		var prev: Vector2 = p0
+		for s in range(1, BEZIER_SAMPLES + 1):
+			var t: float = float(s) / float(BEZIER_SAMPLES)
+			var it: float = 1.0 - t
+			var pt: Vector2 = it * it * it * p0 + 3.0 * it * it * t * p1 + 3.0 * it * t * t * p2 + t * t * t * p3
+			draw_line(prev, pt, col, lw)
+			prev = pt
+	# Draw control handle lines (thin, dimmed) when selected
+	if c.get("selected", false):
+		var handle_col := col * Color(1, 1, 1, 0.3)
+		for seg_i in range(n - 1):
+			var cp_out_idx: int = seg_i * 2
+			var cp_in_idx: int = seg_i * 2 + 1
+			if cp_out_idx >= ctrls.size() or cp_in_idx >= ctrls.size():
+				break
+			var anchor_start := Vector2(bpts[seg_i][0], bpts[seg_i][1]) + offset
+			var anchor_end := Vector2(bpts[seg_i + 1][0], bpts[seg_i + 1][1]) + offset
+			var ctrl_out := Vector2(ctrls[cp_out_idx][0], ctrls[cp_out_idx][1]) + offset
+			var ctrl_in := Vector2(ctrls[cp_in_idx][0], ctrls[cp_in_idx][1]) + offset
+			draw_line(anchor_start, ctrl_out, handle_col, 1.0)
+			draw_line(anchor_end, ctrl_in, handle_col, 1.0)
+	if not c.get("label", "").is_empty() and bpts.size() > 0:
+		draw_string(_font, Vector2(bpts[0][0] + 4, bpts[0][1] - 8) + offset, c["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, 10, col)
+
+
 func _draw_control_points(c: Dictionary) -> void:
 	## Draw edit handles (small squares) at each control point of a selected component.
 	var offset: Vector2 = -global_position
@@ -769,8 +915,9 @@ func _draw_control_points(c: Dictionary) -> void:
 	for cp in cps:
 		var p: Vector2 = cp["pos"] + offset
 		var key: String = cp["key"]
-		# Use blue for center/origin handles, white for edges/endpoints
-		var fill: Color = CP_CENTER_FILL if key in ["center", "origin", "pos"] else CP_FILL
+		# Use blue for center/origin/anchor handles, white for edges/endpoints/controls
+		var is_center: bool = key in ["center", "origin", "pos"] or key.begins_with("a")
+		var fill: Color = CP_CENTER_FILL if is_center else CP_FILL
 		draw_rect(Rect2(p.x - CP_SIZE, p.y - CP_SIZE, CP_SIZE * 2, CP_SIZE * 2), CP_OUTLINE, true)
 		draw_rect(Rect2(p.x - CP_SIZE + 1, p.y - CP_SIZE + 1, CP_SIZE * 2 - 2, CP_SIZE * 2 - 2), fill, true)
 
@@ -853,6 +1000,7 @@ func _make_base(type: String, color: String, label: String) -> Dictionary:
 		"label": label,
 		"visible": true,
 		"selected": false,
+		"locked": false,
 		"line_width": DEFAULT_LINE_WIDTH,
 		"annotations": [],
 		"show_annotations": true,
@@ -906,7 +1054,38 @@ func _get_centroid(c: Dictionary) -> Vector2:
 			var ref := get_component(c.get("ref_id", -1))
 			if not ref.is_empty():
 				return _get_centroid(ref)
+		"arc":
+			var mid_a: float = c["start_angle"] + c["sweep_angle"] * 0.5
+			return Vector2(c["cx"] + cos(mid_a) * c["r"], c["cy"] + sin(mid_a) * c["r"])
+		"bezier":
+			var bpts: Array = c.get("points", [])
+			if not bpts.is_empty():
+				var sum := Vector2.ZERO
+				for p in bpts:
+					sum += Vector2(p[0], p[1])
+				return sum / bpts.size()
 	return Vector2.ZERO
+
+
+func snap_to_grid(pos: Vector2) -> Vector2:
+	## Snap a position to the nearest minor grid intersection.
+	return Vector2(roundf(pos.x / GRID_MINOR) * GRID_MINOR, roundf(pos.y / GRID_MINOR) * GRID_MINOR)
+
+
+func snap_to_components(pos: Vector2, exclude_ids: Array = [], radius: float = 12.0) -> Vector2:
+	## Snap to the nearest control point or notable position on existing components.
+	var best_pos: Vector2 = pos
+	var best_dist: float = radius
+	for c in _components:
+		if not c.get("visible", true) or c["id"] in exclude_ids:
+			continue
+		var cps: Array = get_control_points(c)
+		for cp in cps:
+			var d: float = pos.distance_to(cp["pos"])
+			if d < best_dist:
+				best_dist = d
+				best_pos = cp["pos"]
+	return best_pos
 
 
 func _points_to_packed(points: Array, offset: Vector2) -> PackedVector2Array:

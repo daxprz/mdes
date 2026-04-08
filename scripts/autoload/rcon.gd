@@ -5074,6 +5074,11 @@ func _cmd_wb(parts: PackedStringArray) -> String:
   wb arrow <x1> <y1> <x2> <y2> [opts] — add arrow
   wb vector <ox> <oy> <dx> <dy> [opts] — add vector
   wb normal <ref_id> [opts]            — add normal to component
+  wb arc <cx> <cy> <r> <start> <sweep> [opts] — add arc
+  wb bezier <x1> <y1> <x2> <y2> ... [opts] — add bezier curve
+  wb lock <id> [id ...]                — lock components
+  wb unlock <id> [id ...]              — unlock components
+  wb snap [grid|comp] [on|off]         — toggle snapping
   wb set <id> <key>=<val> ...           — set properties
   wb move <id> <dx> <dy>                — translate component
   wb delete <id>                        — delete component
@@ -5254,6 +5259,33 @@ Options: color=<name|#hex> label=<text> width=<float>"""
 			return _wb_create_vector(wb, parts)
 		"normal":
 			return _wb_create_normal(wb, parts)
+		"arc":
+			return _wb_create_arc(wb, parts)
+		"bezier":
+			return _wb_create_bezier(wb, parts)
+
+		# -- Lock/Unlock --
+		"lock":
+			if parts.size() < 3:
+				return "ERR: usage: wb lock <id> [id ...]"
+			var count: int = 0
+			for i in range(2, parts.size()):
+				if wb.set_component_property(int(parts[i]), "locked", true):
+					count += 1
+			return "OK: locked %d component(s)" % count
+
+		"unlock":
+			if parts.size() < 3:
+				return "ERR: usage: wb unlock <id> [id ...]"
+			var count: int = 0
+			for i in range(2, parts.size()):
+				if wb.set_component_property(int(parts[i]), "locked", false):
+					count += 1
+			return "OK: unlocked %d component(s)" % count
+
+		# -- Snapping --
+		"snap":
+			return _wb_snap_cmd(parts)
 
 		# -- Component modification --
 		"set":
@@ -5262,9 +5294,14 @@ Options: color=<name|#hex> label=<text> width=<float>"""
 			if parts.size() < 5:
 				return "ERR: usage: wb move <id> <dx> <dy>"
 			var id: int = int(parts[2])
+			var mc: Dictionary = wb.get_component(id)
+			if mc.is_empty():
+				return "ERR: no component #%d" % id
+			if mc.get("locked", false):
+				return "ERR: #%d is locked" % id
 			if wb.move_component(id, float(parts[3]), float(parts[4])):
 				return "OK: moved #%d by (%.1f, %.1f)" % [id, float(parts[3]), float(parts[4])]
-			return "ERR: no component #%d" % id
+			return "ERR: could not move #%d" % id
 
 		"delete":
 			if parts.size() < 3:
@@ -5421,6 +5458,12 @@ func _wb_parse_opts(parts: PackedStringArray, start: int) -> Dictionary:
 				opts["flipped"] = val.to_lower() in ["true", "1", "yes"]
 			"amplitude":
 				opts["amplitude"] = float(val)
+			"locked":
+				opts["locked"] = val.to_lower() in ["true", "1", "yes"]
+			"start_angle", "start":
+				opts["start_angle"] = deg_to_rad(float(val))
+			"sweep_angle", "sweep":
+				opts["sweep_angle"] = deg_to_rad(float(val))
 	return opts
 
 
@@ -5582,6 +5625,79 @@ func _wb_create_normal(wb_node: Node2D, parts: PackedStringArray) -> String:
 	if id < 0:
 		return "ERR: ref component #%d not found" % ref_id
 	return "OK: id=%d normal on #%d at t=%.2f" % [id, ref_id, t]
+
+
+func _wb_create_arc(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb arc <cx> <cy> <r> <start_deg> <sweep_deg> [opts]
+	if parts.size() < 7:
+		return "ERR: usage: wb arc <cx> <cy> <r> <start_deg> <sweep_deg> [color=... label=...]"
+	var cx: float = float(parts[2])
+	var cy: float = float(parts[3])
+	var r: float = float(parts[4])
+	var start_deg: float = float(parts[5])
+	var sweep_deg: float = float(parts[6])
+	var opts := _wb_parse_opts(parts, 7)
+	var id: int = wb_node.add_arc(cx, cy, r, deg_to_rad(start_deg), deg_to_rad(sweep_deg), _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d arc at (%.0f,%.0f) r=%.0f start=%.0f° sweep=%.0f°" % [id, cx, cy, r, start_deg, sweep_deg]
+
+
+func _wb_create_bezier(wb_node: Node2D, parts: PackedStringArray) -> String:
+	# wb bezier <x1> <y1> <x2> <y2> ... [opts]
+	# Needs at least 2 points (4 coordinate values)
+	var coords: Array[float] = []
+	var opts_start: int = parts.size()
+	for i in range(2, parts.size()):
+		if parts[i].contains("="):
+			opts_start = i
+			break
+		if parts[i].is_valid_float():
+			coords.append(float(parts[i]))
+	if coords.size() < 4 or coords.size() % 2 != 0:
+		return "ERR: usage: wb bezier <x1> <y1> <x2> <y2> ... [color=... label=...]"
+	var points: Array = []
+	for i in range(0, coords.size(), 2):
+		points.append([coords[i], coords[i + 1]])
+	var opts := _wb_parse_opts(parts, opts_start)
+	var controls: Array = wb_node._auto_bezier_controls(points)
+	var id: int = wb_node.add_bezier(points, controls, _wb_get_color(opts), _wb_get_label(opts))
+	_wb_apply_opts(wb_node, id, opts)
+	return "OK: id=%d bezier with %d anchors" % [id, points.size()]
+
+
+func _wb_snap_cmd(parts: PackedStringArray) -> String:
+	# wb snap [grid|comp] [on|off]
+	var drawer: Node = get_node_or_null("/root/DebugDrawer")
+	if not drawer:
+		return "ERR: DebugDrawer not found"
+	if parts.size() < 3:
+		return "Snap: grid=%s comp=%s" % [
+			"ON" if drawer._wb_snap_grid else "OFF",
+			"ON" if drawer._wb_snap_components else "OFF",
+		]
+	var target: String = parts[2].to_lower()
+	var enable: bool = true
+	if parts.size() >= 4:
+		enable = parts[3].to_lower() in ["on", "true", "1"]
+	else:
+		# Toggle
+		if target == "grid":
+			enable = not drawer._wb_snap_grid
+		elif target in ["comp", "components"]:
+			enable = not drawer._wb_snap_components
+	match target:
+		"grid":
+			drawer._wb_snap_grid = enable
+			if drawer._wb_tools_instance:
+				drawer._wb_tools_instance.snap_grid = enable
+			return "OK: snap grid %s" % ("ON" if enable else "OFF")
+		"comp", "components":
+			drawer._wb_snap_components = enable
+			if drawer._wb_tools_instance:
+				drawer._wb_tools_instance.snap_components = enable
+			return "OK: snap components %s" % ("ON" if enable else "OFF")
+		_:
+			return "ERR: usage: wb snap [grid|comp] [on|off]"
 
 
 func _wb_set(wb_node: Node2D, parts: PackedStringArray) -> String:

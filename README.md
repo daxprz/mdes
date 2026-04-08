@@ -203,6 +203,16 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.78
+**Arc, Bezier, snapping, and component locking**
+- **Arc tool**: three-step creation (center → drag-release for radius/start → click for sweep angle), CPs for center/start/end, RCON `wb arc <cx> <cy> <r> <start°> <sweep°>`
+- **Bezier tool**: multi-click anchor placement with auto-smooth Catmull-Rom controls, double-click to finalize, per-anchor and per-handle control points, RCON `wb bezier <x1> <y1> ...`
+- **Grid snapping**: toggle via Actions pane or `wb snap grid on` — rounds all tool coordinates to nearest 20px grid point
+- **Component snapping**: toggle via Actions pane or `wb snap comp on` — snaps to nearest control point of any visible component within 12px
+- **Component locking**: `locked` property blocks modification, movement, and CP rendering; locked components can still be selected for inspection; RCON `wb lock/unlock <id>`
+- **Lock/Unlock buttons**: Actions pane shows Lock/Unlock Selected when components are selected
+- **14 tools**: Arc (#12) and Bezier (#13) added to tool selector grid
+
 ### v0.10.77
 **Debug digital whiteboard — collaborative diagramming for humans and AIs**
 - **Whiteboard system**: new `whiteboard.gd` (~900 lines) — data model, grid rendering, 10 component types (point, line, rect, circle, ellipse, arrow, vector, polyline, poly, normal), selection with pulsing glow, annotation callouts with `[H]`/`[A]` producer tags

@@ -83,6 +83,8 @@ var _wb_tools_instance: RefCounted = null  # WhiteboardTools
 var _wb_world_dragging: bool = false       # True during world-space drag
 var _wb_last_click_time: float = 0.0       # For double-click detection
 var _wb_last_click_pos: Vector2 = Vector2.ZERO
+var _wb_snap_grid: bool = false            # Snap to grid points
+var _wb_snap_components: bool = false      # Snap to component CPs
 const WB_DOUBLE_CLICK_MS := 350.0
 const WB_DOUBLE_CLICK_DIST := 10.0
 
@@ -107,6 +109,8 @@ const WB_TOOLS: Array[Dictionary] = [
 	{"name": "Arrow",     "icon": ">"},
 	{"name": "Vector",    "icon": "V"},
 	{"name": "Normal",    "icon": "N"},
+	{"name": "Arc",       "icon": "("},
+	{"name": "Bezier",    "icon": "B"},
 ]
 
 const WB_COLOR_SWATCHES: Array[Dictionary] = [
@@ -7332,6 +7336,8 @@ func _wb_get_or_create_tools() -> RefCounted:
 	_wb_tools_instance.setup(wb)
 	_wb_tools_instance.set_tool(_wb_active_tool)
 	_wb_tools_instance.set_color(_wb_tool_color)
+	_wb_tools_instance.snap_grid = _wb_snap_grid
+	_wb_tools_instance.snap_components = _wb_snap_components
 	return _wb_tools_instance
 
 
@@ -7639,8 +7645,29 @@ func _draw_wb_sub_actions(x: float, y: float, pw: float, _h: float, font: Font) 
 		actions.append({"label": "Delete Selected", "cmd": "delete", "color": Color(1.0, 0.4, 0.4)})
 		actions.append({"label": "Deselect All", "cmd": "deselect", "color": Color(0.6, 0.6, 0.7)})
 		actions.append({"label": "Hide Selected", "cmd": "hide", "color": Color(0.5, 0.5, 0.6)})
+		# Lock/unlock — check if any selected are locked
+		var any_locked: bool = false
+		var any_unlocked: bool = false
+		if wb:
+			for sid in sel_ids:
+				var sc: Dictionary = wb.get_component(sid)
+				if sc.get("locked", false):
+					any_locked = true
+				else:
+					any_unlocked = true
+		if any_unlocked:
+			actions.append({"label": "Lock Selected", "cmd": "lock", "color": Color(0.8, 0.6, 0.2)})
+		if any_locked:
+			actions.append({"label": "Unlock Selected", "cmd": "unlock", "color": Color(0.4, 0.7, 0.3)})
 	actions.append({"label": "Show All", "cmd": "show_all", "color": Color(0.4, 0.7, 0.4)})
 	actions.append({"label": "Grid Toggle", "cmd": "grid", "color": Color(0.4, 0.6, 0.8)})
+	# Snap toggles
+	var snap_g_label: String = "Snap Grid: ON" if _wb_snap_grid else "Snap Grid: OFF"
+	var snap_g_col: Color = Color(0.3, 0.8, 0.8) if _wb_snap_grid else Color(0.4, 0.5, 0.55)
+	actions.append({"label": snap_g_label, "cmd": "snap_grid", "color": snap_g_col})
+	var snap_c_label: String = "Snap Comp: ON" if _wb_snap_components else "Snap Comp: OFF"
+	var snap_c_col: Color = Color(0.3, 0.8, 0.8) if _wb_snap_components else Color(0.4, 0.5, 0.55)
+	actions.append({"label": snap_c_label, "cmd": "snap_comp", "color": snap_c_col})
 
 	for i in range(actions.size()):
 		var act: Dictionary = actions[i]
@@ -7826,12 +7853,24 @@ func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _bod
 					_wb_show_file_picker = false
 
 		"wb_actions":
-			# Action button clicks
+			# Action button clicks — rebuild action list to match drawing order
 			var sel_ids: Array = wb.get_selected_ids()
 			var actions: Array[String] = []
 			if not sel_ids.is_empty():
 				actions.append_array(["delete", "deselect", "hide"])
-			actions.append_array(["show_all", "grid"])
+				var any_unlocked: bool = false
+				var any_locked: bool = false
+				for sid in sel_ids:
+					var sc: Dictionary = wb.get_component(sid)
+					if sc.get("locked", false):
+						any_locked = true
+					else:
+						any_unlocked = true
+				if any_unlocked:
+					actions.append("lock")
+				if any_locked:
+					actions.append("unlock")
+			actions.append_array(["show_all", "grid", "snap_grid", "snap_comp"])
 
 			var btn_idx: int = int((local_y - 2) / 20)
 			if btn_idx >= 0 and btn_idx < actions.size():
@@ -7845,11 +7884,25 @@ func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _bod
 						for id in sel_ids:
 							wb.set_component_property(id, "visible", false)
 						wb.deselect_all()
+					"lock":
+						for id in sel_ids:
+							wb.set_component_property(id, "locked", true)
+					"unlock":
+						for id in sel_ids:
+							wb.set_component_property(id, "locked", false)
 					"show_all":
 						for c in wb.get_all_components():
 							wb.set_component_property(c["id"], "visible", true)
 					"grid":
 						wb.set_grid_visible(not wb.is_grid_visible())
+					"snap_grid":
+						_wb_snap_grid = not _wb_snap_grid
+						if _wb_tools_instance:
+							_wb_tools_instance.snap_grid = _wb_snap_grid
+					"snap_comp":
+						_wb_snap_components = not _wb_snap_components
+						if _wb_tools_instance:
+							_wb_tools_instance.snap_components = _wb_snap_components
 
 
 func _handle_wb_tool_settings_click(sub_id: String, lx: float, local_y: float) -> void:

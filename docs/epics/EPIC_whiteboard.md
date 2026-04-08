@@ -12,7 +12,8 @@ A collaborative workspace where humans and AIs can diagram, annotate, and commun
 | Phase 2 | COMPLETE | RCON commands — full CRUD for AI interaction |
 | Phase 3 | COMPLETE | Debug drawer tab — panel UI with Board/Tools/Settings/Actions/Inspector |
 | Phase 4 | COMPLETE | World-space tools — mouse interaction for drawing, selection, editing |
-| Phase 5 | IN PROGRESS | Polish — annotations, selection glow, group visuals |
+| Phase 5 | COMPLETE | Polish — annotations, selection glow, group visuals |
+| Phase 6 | COMPLETE | Arc, Bezier tools, grid/component snapping, component locking |
 
 ## Architecture
 
@@ -46,11 +47,12 @@ All components share a common base:
 ```gdscript
 {
   "id": int,              # Auto-incremented
-  "type": String,         # point|rect|circle|ellipse|line|polyline|poly|arrow|vector|normal
+  "type": String,         # point|rect|circle|ellipse|line|polyline|poly|arrow|vector|normal|arc|bezier
   "color": String,        # "#rrggbb" or "#rrggbbaa"
   "label": String,        # Optional display label
   "visible": bool,        # true by default
   "selected": bool,       # false by default
+  "locked": bool,         # false by default — blocks modification/CP rendering when true
   "line_width": float,    # 2.0 default
   "annotations": Array,   # [{"producer": "H"|"A", "text": "..."}]
   "show_annotations": bool, # true by default
@@ -71,6 +73,8 @@ Type-specific fields:
 | `arrow` | `x1`, `y1`, `x2`, `y2`, `head_size` (12 default) |
 | `vector` | `ox`, `oy`, `dx`, `dy` (origin + direction) |
 | `normal` | `ref_id`, `t` (0..1 along ref), `length` (30 default), `flipped` (bool) |
+| `arc` | `cx`, `cy`, `r`, `start_angle` (radians), `sweep_angle` (radians) |
+| `bezier` | `points: [[x,y], ...]` (N anchors), `controls: [[x,y], ...]` (2*(N-1) control handles) |
 
 ### Group (Dictionary)
 
@@ -104,6 +108,8 @@ Every selected component shows draggable control point handles (small squares). 
 | `polyline`, `poly` | `p0`, `p1`, `p2`... — each vertex |
 | `vector` | `origin` (blue), `tip` — dragging tip changes dx/dy |
 | `normal` | `base` (moves t parameter along ref), `tip` (changes length) |
+| `arc` | `center` (blue, rehomes entire arc), `start` (changes r and start_angle), `end` (changes sweep_angle) |
+| `bezier` | `a0`, `a1`... (blue, anchor points — move with handles), `c0`, `c1`... (white, control handles) |
 
 Center/origin handles render in blue (`CP_CENTER_FILL`). Edge/endpoint handles render in white (`CP_FILL`).
 
@@ -112,7 +118,7 @@ CP hit radius: 8px. CP rendering size: 5px squares with black outline + colored 
 ## Tool State Machine
 
 ```
-enum Tool { SELECT, ANNOTATE, POINT, LINE, POLYLINE, POLY, RECT, CIRCLE, ELLIPSE, ARROW, VECTOR, NORMAL }
+enum Tool { SELECT, ANNOTATE, POINT, LINE, POLYLINE, POLY, RECT, CIRCLE, ELLIPSE, ARROW, VECTOR, NORMAL, ARC, BEZIER }
 ```
 
 ### Tool Behaviors
@@ -164,6 +170,15 @@ wb poly <x1> <y1> <x2> <y2> ... [color=...] [label=...]
 wb arrow <x1> <y1> <x2> <y2> [color=...] [label=...]
 wb vector <ox> <oy> <dx> <dy> [color=...] [label=...]
 wb normal <ref_id> [t=0.5] [length=30] [flipped=false] [color=...]
+wb arc <cx> <cy> <r> <start_deg> <sweep_deg> [color=...] [label=...]
+wb bezier <x1> <y1> <x2> <y2> ... [color=...] [label=...]
+
+# Locking
+wb lock <id> [id ...]                     — Lock components (blocks modification/CPs)
+wb unlock <id> [id ...]                   — Unlock components
+
+# Snapping
+wb snap [grid|comp] [on|off]              — Toggle grid/component snapping
 
 # Component modification
 wb set <id> <key>=<value> ...              — Set properties
