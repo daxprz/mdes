@@ -354,8 +354,8 @@ func _setup_splays_from_config(splays_config: Array) -> void:
 			splay_data["_creature_ref"] = result["creatures"][0]
 
 
-var _title_music_dark_playing: bool = false  # Track whether dark theme is active
-var _title_music_loaded: bool = false       # Composition loaded once, reused
+var _title_music_battle_playing: bool = false  # Track whether battle theme is active
+var _title_music_loaded: bool = false          # Composition loaded once, reused
 
 func _setup_title_music(splays_config: Array) -> void:
 	# Multi-layer strudel patterns require note mode (per-Track dispatch)
@@ -367,10 +367,10 @@ func _setup_title_music(splays_config: Array) -> void:
 		_title_music_loaded = true
 
 	# Play from the default movement ("light") — each Track is independent
-	_title_music_dark_playing = false
+	_title_music_battle_playing = false
 	MusicManager.play_composition()
 
-	# Connect to every splay creature's woke signal to trigger dark music,
+	# Connect to every splay creature's woke signal to trigger battle music,
 	# and died signal to return to light music
 	for splay_data in splays_config:
 		var creature: Node = splay_data.get("_creature_ref")
@@ -383,17 +383,17 @@ func _setup_title_music(splays_config: Array) -> void:
 
 
 func _on_monster_woke() -> void:
-	if _title_music_dark_playing:
+	if _title_music_battle_playing:
 		return
-	_title_music_dark_playing = true
-	# Bridge (1 cycle) → dark movement (loop)
-	MusicManager.composition_transition_to("dark")
+	_title_music_battle_playing = true
+	# Bridge (1 cycle) → battle movement (loop)
+	MusicManager.composition_transition_to("battle")
 
 
 func _on_monster_died(_global_pos: Vector2) -> void:
-	if not _title_music_dark_playing:
+	if not _title_music_battle_playing:
 		return
-	_title_music_dark_playing = false
+	_title_music_battle_playing = false
 	# Bridge (1 cycle) → light movement (loop)
 	MusicManager.composition_transition_to("light")
 
@@ -689,7 +689,7 @@ func _deferred_rebuild() -> void:
 	_setup_splays_from_config(config.get("splays", []))
 
 	# Restart title music on level reload
-	_title_music_dark_playing = false
+	_title_music_battle_playing = false
 	_setup_title_music(config.get("splays", []))
 
 

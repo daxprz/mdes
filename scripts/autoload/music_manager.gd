@@ -141,6 +141,16 @@ var _record: MusicRecord = null
 var _bar_scheduler: BarScheduler = null
 var _last_bar_section_id: String = ""
 
+# -- CPS Ramp State -----------------------------------------------------------
+
+var _cps_ramp_active: bool = false
+var _cps_ramp_from: float = 0.0
+var _cps_ramp_to: float = 0.0
+var _cps_ramp_duration: float = 0.0   ## Total wall-clock seconds
+var _cps_ramp_elapsed: float = 0.0    ## Seconds into the ramp
+var _cps_ramp_ease: int = 0           ## 0=linear, 1=ease-in, 2=ease-out, 3=ease-in-out
+var _cps_overridden: bool = false     ## True when CPS was set by ramp/user — bar handler won't reset
+
 # -- Layer State ---------------------------------------------------------------
 
 class LayerState:
@@ -337,6 +347,11 @@ func _setup_layers() -> void:
 var _fx_reconcile_timer: float = 0.0  ## Throttle reconciliation checks
 
 func _process(delta: float) -> void:
+	# CPS ramp: smooth tempo interpolation (runs even when paused so ramp
+	# continues after resume — stop cancels via strudel_stop)
+	if _cps_ramp_active:
+		_process_cps_ramp(delta)
+
 	# Advance Strudel clock regardless of MML layer state
 	if _strudel_playing and _cyclist != null:
 		_strudel_time += delta
@@ -1538,6 +1553,8 @@ func play_composition(comp: MusicComposition = null) -> void:
 	_record = MusicRecord.new()
 	_record.composition = _composition
 	_last_bar_section_id = ""
+	_cps_overridden = false
+	_cps_ramp_active = false
 
 	# Build initial cue — start with default movement
 	var movement: MusicMovement = _composition.get_default_movement()
@@ -1584,23 +1601,30 @@ func play_composition(comp: MusicComposition = null) -> void:
 		_composition.id, movement.id, movement.tracks.size(), movement.cps])
 
 
-func composition_transition_to(movement_id: String) -> void:
+func composition_transition_to(movement_id: String) -> String:
 	## Transition to a different movement, using a bridge if one exists.
 	## Current bar plays to completion, then bridge → target.
+	## Returns status string for RCON feedback.
 	if not _composition or not _record or not _bar_scheduler:
-		return
+		return "ERR: no composition loaded"
 
 	var current_movement_id: String = ""
 	if _record.current_bar and _record.current_bar.movement:
 		current_movement_id = _record.current_bar.movement.id
 
+	# Reject self-transitions — no point transitioning to what's already playing
+	if current_movement_id == movement_id and not composition_is_in_transition():
+		return "SKIP: already playing '%s'" % movement_id
+
 	# Find bridge between current and target
 	var bridge: MusicBridge = _composition.get_bridge_between(current_movement_id, movement_id)
 	_bar_scheduler.transition_to(movement_id, bridge)
 
-	print("COMPOSITION: transition '%s' → '%s' %s" % [
+	var msg: String = "COMPOSITION: transition '%s' → '%s' %s" % [
 		current_movement_id, movement_id,
-		"via '%s'" % bridge.id if bridge else "(direct)"])
+		"via '%s'" % bridge.id if bridge else "(direct)"]
+	print(msg)
+	return "OK: transition to '%s' requested" % movement_id
 
 
 func _on_composition_bar_started(bar: MusicBar) -> void:
@@ -1613,17 +1637,24 @@ func _on_composition_bar_started(bar: MusicBar) -> void:
 	_apply_bar_to_playback(bar)
 	_load_drawer_from_bar(bar)
 
-	# Update CPS if the new bar has a different tempo
+	# Update CPS if the new bar has a different tempo.
+	# Skip if CPS has been overridden by user/ramp — the override persists until
+	# a section change (bridge/movement transition) or explicit reset.
 	var bar_cps: float = bar.get_cps()
 	if bar_cps > 0 and absf(bar_cps - _cyclist.cps) > 0.001:
-		strudel_set_cps(bar_cps)
+		if _cps_overridden and not section_changed:
+			pass  # User/ramp owns CPS — don't reset to bar default
+		else:
+			if section_changed:
+				_cps_overridden = false  # Section change clears override
+			strudel_set_cps(bar_cps)
 
-	# Only clear pending notes on actual section transitions (entering a bridge
-	# or different movement).  Within the same looping movement, boundary notes
-	# must survive in the deferred queue so the trigger can fire them at their
-	# scheduled wall-clock time.
+	# On section transitions, kill all sounding notes and clear the queue.
+	# SiON note_on() notes ring for their full duration — just clearing the
+	# pending queue isn't enough. Silence all active notes to prevent bleed.
+	# Within the same looping movement, per-note note_off in trigger handles it.
 	if section_changed and _sion_trigger:
-		_sion_trigger.clear_pending()
+		_sion_trigger.silence_all()
 
 
 func _apply_bar_to_playback(bar: MusicBar) -> void:
@@ -1731,7 +1762,11 @@ func composition_is_transition_queued() -> bool:
 	return _bar_scheduler.is_transition_queued()
 
 
-func strudel_set_cps(cps: float) -> void:
+func strudel_set_cps(cps: float, user_override: bool = false) -> void:
+	# Cancel any active ramp — explicit CPS set overrides smooth ramp
+	_cps_ramp_active = false
+	if user_override:
+		_cps_overridden = true
 	if _cyclist:
 		_cyclist.set_cps(cps)
 		# In batch mode, change the driver's BPM live — no recompile needed.
@@ -1742,6 +1777,80 @@ func strudel_set_cps(cps: float) -> void:
 	# Keep drawer's CPS in sync so strudel begin/end blocks use the correct tempo
 	if MusicDrawer:
 		MusicDrawer._cps = cps
+
+
+func strudel_ramp_cps(target_cps: float, duration_seconds: float, ease_mode: int = 0) -> void:
+	## Smoothly ramp CPS from current value to target_cps over duration_seconds.
+	## ease_mode: 0=linear, 1=ease-in (slow start), 2=ease-out (slow end),
+	##            3=ease-in-out (slow both ends)
+	if not _cyclist or duration_seconds <= 0.0:
+		# Instant jump for zero/negative duration
+		strudel_set_cps(target_cps)
+		return
+	_cps_ramp_from = _cyclist.cps
+	_cps_ramp_to = target_cps
+	_cps_ramp_duration = duration_seconds
+	_cps_ramp_elapsed = 0.0
+	_cps_ramp_ease = clampi(ease_mode, 0, 3)
+	_cps_ramp_active = true
+	_cps_overridden = true
+	DebugOverlay.log("music/cps_ramp", null,
+		"CPS RAMP: %.3f → %.3f over %.1fs (ease=%d)" % [
+			_cps_ramp_from, _cps_ramp_to, duration_seconds, ease_mode])
+
+
+func strudel_ramp_cps_bars(target_cps: float, bars: int, ease_mode: int = 0) -> void:
+	## Convenience: ramp CPS over approximately N bars at current tempo.
+	## Since bar duration changes as CPS changes, this estimates using the
+	## average of start and target CPS for the duration calculation.
+	if not _cyclist or bars <= 0:
+		strudel_set_cps(target_cps)
+		return
+	var avg_cps: float = (_cyclist.cps + target_cps) / 2.0
+	var seconds_per_bar: float = 1.0 / avg_cps if avg_cps > 0.0 else 2.0
+	strudel_ramp_cps(target_cps, seconds_per_bar * bars, ease_mode)
+
+
+func strudel_cancel_cps_ramp() -> void:
+	## Cancel any active CPS ramp, leaving CPS at its current value.
+	_cps_ramp_active = false
+
+
+func strudel_is_cps_ramping() -> bool:
+	return _cps_ramp_active
+
+
+func _process_cps_ramp(delta: float) -> void:
+	## Advance the CPS ramp by delta seconds. Called from _process().
+	_cps_ramp_elapsed += delta
+	var t: float = clampf(_cps_ramp_elapsed / _cps_ramp_duration, 0.0, 1.0)
+
+	# Apply easing curve
+	match _cps_ramp_ease:
+		1:  # ease-in (quadratic)
+			t = t * t
+		2:  # ease-out (quadratic)
+			t = 1.0 - (1.0 - t) * (1.0 - t)
+		3:  # ease-in-out (smoothstep)
+			t = t * t * (3.0 - 2.0 * t)
+		# 0 = linear, no transform
+
+	var new_cps: float = lerpf(_cps_ramp_from, _cps_ramp_to, t)
+
+	# Apply without cancelling the ramp (strudel_set_cps cancels it)
+	if _cyclist:
+		_cyclist.set_cps(new_cps)
+		if _sion_trigger and _sion_trigger.batch_mode and driver:
+			var new_bpm: int = maxi(30, int(240.0 * new_cps))
+			driver.call("set_bpm", new_bpm)
+	if MusicDrawer:
+		MusicDrawer._cps = new_cps
+
+	# Check completion
+	if _cps_ramp_elapsed >= _cps_ramp_duration:
+		_cps_ramp_active = false
+		DebugOverlay.log("music/cps_ramp", null,
+			"CPS RAMP: complete at %.3f" % _cps_ramp_to)
 
 
 func play_score(score_name: String) -> String:

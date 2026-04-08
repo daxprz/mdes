@@ -138,6 +138,7 @@ func _register_all() -> void:
 	r.call("music/beats", "Beat and timer tick events (verbose)")
 	r.call("music/events", "Game event hooks triggering intensity changes")
 	r.call("music/effects", "Audio bus effects: lpf, hpf, reverb, delay, distortion, pan")
+	r.call("music/cps_ramp", "CPS ramp: start, progress, completion, cancel events")
 
 	# -- Samples --
 	r.call("music/samples", "Sample library: load, play, pool, cache, drum kit synthesis")

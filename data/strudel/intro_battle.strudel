@@ -1,0 +1,11 @@
+// Battle — fast percussive drive, C minor
+setcps(0.85)
+
+stack(
+  sub: note("[c2 ~ g1 c2]").s("sine").gain(0.09).legato(0.1),
+  pad: note("<[c3,eb3,g3] [ab2,c3,eb3] [bb2,d3,f3] [c3,eb3,g3]>").s("sine").gain(0.04).legato(1.2),
+  mid: note("<~ [eb4,g4] ~ ~>").s("sine").gain(0.02).legato(0.8),
+  sparkle: note("~ ~ ~ ~").s("sine").gain(0.0),
+  shimmer: note("~ ~ ~ ~").s("sine").gain(0.0),
+  pulse: note("[~ g2 ~ g2]").s("sine").gain(0.05).legato(0.1)
+)

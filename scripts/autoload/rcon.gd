@@ -1143,11 +1143,19 @@ func _execute(command: String) -> String:
 				"transition", "trans":
 					if parts.size() < 3:
 						return "Usage: composition transition <movement_id>"
-					MusicManager.composition_transition_to(parts[2])
-					return "OK: transition to '%s' requested" % parts[2]
+					return MusicManager.composition_transition_to(parts[2])
 				"reset":
 					MusicManager.play_composition()
 					return "OK: composition reset to beginning"
+				"reload":
+					var comp_id: String = MusicManager.get_composition().id if MusicManager.get_composition() else "title_screen"
+					if parts.size() >= 3:
+						comp_id = parts[2]
+					var err: String = MusicManager.load_composition(comp_id)
+					if err.begins_with("ERR"):
+						return err
+					MusicManager.play_composition()
+					return "OK: reloaded and playing '%s'" % comp_id
 				"status":
 					var comp2: MusicComposition = MusicManager.get_composition()
 					if not comp2:
@@ -2222,9 +2230,27 @@ func _cmd_strudel(parts: PackedStringArray, command: String = "") -> String:
 			return "ERR: sample library not initialized"
 		"cps":
 			if parts.size() < 3:
-				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
-			MusicManager.strudel_set_cps(float(parts[2]))
-			return "OK: cps → %.2f" % float(parts[2])
+				var ramping: String = " (ramping)" if MusicManager.strudel_is_cps_ramping() else ""
+				return "cps: %.3f%s" % [MusicManager._cyclist.cps if MusicManager._cyclist else 0.0, ramping]
+			if parts[2] == "ramp":
+				# strudel cps ramp <target> <duration> [ease]
+				if parts.size() < 5:
+					return "Usage: strudel cps ramp <target_cps> <duration_sec> [linear|in|out|inout]"
+				var target: float = float(parts[3])
+				var dur: float = float(parts[4])
+				var ease_mode: int = 0
+				if parts.size() > 5:
+					match parts[5]:
+						"in": ease_mode = 1
+						"out": ease_mode = 2
+						"inout": ease_mode = 3
+				MusicManager.strudel_ramp_cps(target, dur, ease_mode)
+				return "OK: ramping cps → %.3f over %.1fs" % [target, dur]
+			if parts[2] == "cancel":
+				MusicManager.strudel_cancel_cps_ramp()
+				return "OK: ramp cancelled at cps=%.3f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
+			MusicManager.strudel_set_cps(float(parts[2]), true)
+			return "OK: cps → %.3f" % float(parts[2])
 		"highlights":
 			# Highlight beat tracking for visual tests.
 			# strudel highlights on        — start tracking (clears previous)
@@ -2810,9 +2836,26 @@ func _cmd_music(parts: PackedStringArray, command: String = "") -> String:
 			return "OK: playing pattern (%d notes, cps=%.2f)" % [notes.size(), MusicManager._cyclist.cps if MusicManager._cyclist else 0.0]
 		"cps":
 			if parts.size() < 3:
-				return "cps: %.2f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
-			MusicManager.strudel_set_cps(float(parts[2]))
-			return "OK: cps → %.2f" % float(parts[2])
+				var ramping2: String = " (ramping)" if MusicManager.strudel_is_cps_ramping() else ""
+				return "cps: %.3f%s" % [MusicManager._cyclist.cps if MusicManager._cyclist else 0.0, ramping2]
+			if parts[2] == "ramp":
+				if parts.size() < 5:
+					return "Usage: music cps ramp <target_cps> <duration_sec> [linear|in|out|inout]"
+				var target2: float = float(parts[3])
+				var dur2: float = float(parts[4])
+				var ease2: int = 0
+				if parts.size() > 5:
+					match parts[5]:
+						"in": ease2 = 1
+						"out": ease2 = 2
+						"inout": ease2 = 3
+				MusicManager.strudel_ramp_cps(target2, dur2, ease2)
+				return "OK: ramping cps → %.3f over %.1fs" % [target2, dur2]
+			if parts[2] == "cancel":
+				MusicManager.strudel_cancel_cps_ramp()
+				return "OK: ramp cancelled at cps=%.3f" % (MusicManager._cyclist.cps if MusicManager._cyclist else 0.0)
+			MusicManager.strudel_set_cps(float(parts[2]), true)
+			return "OK: cps → %.3f" % float(parts[2])
 		"strudel", "s":
 			# Play a mini-notation string via Strudel engine
 			# music strudel c4 e4 [g4 g4] c5

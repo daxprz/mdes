@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.75
+**CPS ramping, battle movement, legato/note-off fixes**
+- **CPS ramping**: smooth tempo interpolation from current to target over wall-clock seconds, with linear/ease-in/ease-out/smoothstep easing (`strudel cps ramp <target> <dur> [ease]`)
+- **Battle movement**: new "battle" theme for title_screen composition (CPS 0.85, percussive C minor), triggered on monster release from splay; defeat returns to "light"
+- **All-to-all transitions**: 6 bridges connecting light↔dark↔battle; MusicDrawer shows buttons to all available targets
+- **Legato/clip fix**: notes now respect `.legato()` duration — previously all notes were 1 tick (~infinite in SiON), causing unbounded layering
+- **Note-off cleanup**: `note_off` called before every `note_on` to prevent stacking; `silence_all()` kills all 128 pitches on section transitions
+- **Self-transition guard**: `composition_transition_to()` rejects transitions to the already-playing movement, preventing crashes from rapid/duplicate requests
+- **`comp reload`**: RCON command to re-read composition JSON + strudel files from disk without restarting Godot
+- **Debug aspect**: `music/cps_ramp` for tempo interpolation diagnostics
+
 ### v0.10.74
 **Composition reset button**
 - **Reset button**: `|<` button in MusicDrawer toolbar resets the composition to its beginning (default movement, bar 0)

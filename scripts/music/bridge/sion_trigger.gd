@@ -10,7 +10,7 @@ var driver: Variant = null     ## SiONDriver (dynamic to avoid parse-time dep)
 var presets: Variant = null     ## SiONVoicePresetUtil
 var _voices: Dictionary = {}   ## name -> SiONVoice
 var batch_cycle_count: int = 1 ## Actual cycles in current batch WAV (set by start_batch_from_tracks)
-var _active_notes: Dictionary = {} ## track_id -> scheduled_off_time
+var _active_notes: Dictionary = {} ## voice_name -> Array[int] of active note numbers
 
 ## Sample library for drum/percussion playback (PCM-synthesized + external .wav)
 var _sample_library: SampleLibrary = null
@@ -276,12 +276,18 @@ func trigger(hap: StrudelHap, deadline: float, duration: float, cps: float, targ
 		return
 
 	var voice: Variant = _resolve_voice(hap.value)
-	var length_sec: float = maxf(duration, 0.02)
+
+	# Apply legato (stored as "clip" in hap value) to note duration.
+	# Without this, all notes get their raw hap span which is often tiny.
+	var legato: float = 1.0
+	if hap.value is Dictionary and hap.value.has("clip"):
+		legato = float(hap.value["clip"])
+	var length_sec: float = maxf(duration * legato, 0.02)
 
 	# SiON note_on length is in 64th-note ticks at the driver's current BPM.
 	# (Empirically verified: 8 ticks at 60 BPM = 514ms ≈ 64ms/tick = 64th note)
 	var bpm: float = maxf(cps * 120.0, 30.0)
-	var length_ticks: float = maxf(1.0, length_sec * bpm * 16.0 / 60.0)
+	var length_ticks: float = maxf(2.0, length_sec * bpm * 16.0 / 60.0)
 
 	# Compute wall-clock emit time from the absolute target_time.
 	# deadline = target_time - phase (clock's virtual tick time, NOT wall-clock now).
@@ -328,6 +334,15 @@ func process() -> void:
 func clear_pending() -> void:
 	## Clear the deferred note queue (called on stop/pattern change).
 	_pending_notes.clear()
+
+
+func silence_all() -> void:
+	## Kill all currently sounding notes by sending note_off for the full range.
+	## Called on section transitions to prevent note bleed across movements.
+	if driver:
+		for n in range(128):
+			driver.call("note_off", n)
+	clear_pending()
 
 
 # ==============================================================================
@@ -735,6 +750,9 @@ func _do_emit(note_num: int, voice: Variant, length_ticks: float,
 					final_voice.call("set_envelope", ar, dr, sr, rr, sl, 0)
 
 		if final_voice != null:
+			# Kill any previous instance of this pitch to prevent stacking.
+			# SiON note_on doesn't auto-cut previous notes on the same pitch.
+			driver.call("note_off", note_num)
 			var track: Variant = driver.call("note_on", note_num, final_voice, length_ticks)
 			# Apply per-note velocity from the hap's gain/velocity value.
 			# SiON velocity range: 0-256 (256 = full volume).

@@ -83,8 +83,8 @@ const ACTION_AREA_HEIGHT := 28.0   # Height of the composition action area
 const MOVEMENT_COLORS: Array[Color] = [
 	Color(0.35, 0.55, 0.85),   # warm blue (e.g. "light")
 	Color(0.45, 0.25, 0.65),   # deep purple (e.g. "dark")
+	Color(0.8, 0.35, 0.25),    # fiery red-orange (e.g. "battle")
 	Color(0.25, 0.7, 0.5),     # teal
-	Color(0.7, 0.35, 0.35),    # muted red
 	Color(0.6, 0.55, 0.3),     # olive
 ]
 const BRIDGE_COLOR := Color(0.85, 0.6, 0.2)       # orange/amber
@@ -552,7 +552,7 @@ var _btn_next: Rect2 = Rect2()
 var _scrub_rect: Rect2 = Rect2()
 var _scrub_dragging: bool = false
 var _btn_reset: Rect2 = Rect2()
-var _btn_transition: Rect2 = Rect2()
+var _btn_transitions: Array = []  # Array of {rect: Rect2, target_id: String}
 
 # Per-line pattern state (set on eval, used for per-line pianoroll)
 var _line_patterns: Array = []   # Array[StrudelPattern or null] — one per line
@@ -673,8 +673,7 @@ func _input(event: InputEvent) -> void:
 				_on_reset_button_pressed()
 				get_viewport().set_input_as_handled()
 				return
-			elif _btn_transition.size != Vector2.ZERO and _btn_transition.has_point(event.position):
-				_on_transition_button_pressed()
+			elif _check_transition_click(event.position):
 				get_viewport().set_input_as_handled()
 				return
 			elif _scrub_rect.has_point(event.position):
@@ -1777,16 +1776,22 @@ func _on_reset_button_pressed() -> void:
 		MusicManager.play_composition()
 
 
-func _on_transition_button_pressed() -> void:
-	## Handle click on the composition transition button.
-	## Triggers a transition to the first available target movement.
-	## If already queued, clicking again does nothing.
+func _check_transition_click(pos: Vector2) -> bool:
+	## Check if pos hits any transition button. Returns true if handled.
+	for btn_info in _btn_transitions:
+		if btn_info.rect.has_point(pos):
+			_on_transition_button_pressed(btn_info.target_id)
+			return true
+	return false
+
+
+func _on_transition_button_pressed(target_id: String) -> void:
+	## Handle click on a composition transition button.
+	## Triggers a transition to the specified target movement.
 	if MusicManager.composition_is_transition_queued():
 		return
-	var transitions: Array = MusicManager.composition_get_available_transitions()
-	if transitions.is_empty():
+	if MusicManager.composition_is_in_transition():
 		return
-	var target_id: String = transitions[0]["target_id"]
 	MusicManager.composition_transition_to(target_id)
 
 
@@ -2269,11 +2274,11 @@ func _draw_record_strip(x: float, y: float, w: float, h: float, font: Font) -> v
 
 func _draw_action_area(x: float, y: float, w: float, h: float, font: Font) -> void:
 	## Draw composition action buttons below the editor lines.
-	## Shows a Transition button with state: active, disabled, or queued.
+	## Shows one button per available transition target, with disabled/queued states.
 	var comp: MusicComposition = MusicManager.get_composition()
 	var record: MusicRecord = MusicManager.get_record()
 	if not comp or not record or not record.current_bar:
-		_btn_transition = Rect2()
+		_btn_transitions = []
 		return
 
 	# Separator line
@@ -2284,40 +2289,49 @@ func _draw_action_area(x: float, y: float, w: float, h: float, font: Font) -> vo
 	var is_queued: bool = MusicManager.composition_is_transition_queued()
 
 	if transitions.is_empty() and not in_transition and not is_queued:
-		_btn_transition = Rect2()
+		_btn_transitions = []
 		return
 
-	# Transition button
-	var btn_w: float = 100.0
 	var btn_h: float = 20.0
-	var btn_x: float = x + 8.0
 	var btn_y: float = y + (h - btn_h) / 2.0
+	var btn_x: float = x + 8.0
+	var btn_spacing: float = 6.0
+	_btn_transitions = []
 
-	var btn_color: Color
-	var btn_text: String
-	var btn_text_color: Color
-
-	if is_queued:
-		btn_color = Color(0.15, 0.13, 0.08)
-		btn_text = "Queued"
-		btn_text_color = Color(0.85, 0.7, 0.3)
-	elif in_transition:
-		btn_color = Color(0.08, 0.08, 0.1)
-		btn_text = "Transition"
-		btn_text_color = Color(0.35, 0.35, 0.4)
+	if is_queued or in_transition:
+		# Show a single status indicator when transitioning or queued
+		var btn_w: float = 100.0
+		var btn_color: Color
+		var btn_text: String
+		var btn_text_color: Color
+		if is_queued:
+			btn_color = Color(0.15, 0.13, 0.08)
+			btn_text = "Queued"
+			btn_text_color = Color(0.85, 0.7, 0.3)
+		else:
+			btn_color = Color(0.08, 0.08, 0.1)
+			btn_text = "Transition"
+			btn_text_color = Color(0.35, 0.35, 0.4)
+		var rect: Rect2 = Rect2(btn_x, btn_y, btn_w, btn_h)
+		_panel.draw_rect(rect, btn_color)
+		_panel.draw_rect(rect, Color(btn_text_color.r, btn_text_color.g, btn_text_color.b, 0.3), false, 1.0)
+		_panel.draw_string(font, Vector2(btn_x + 8, btn_y + 14), btn_text,
+			HORIZONTAL_ALIGNMENT_LEFT, btn_w - 16, 11, btn_text_color)
 	else:
-		var target_name: String = ""
-		if not transitions.is_empty():
-			target_name = transitions[0]["target_id"]
-		btn_text = "-> %s" % target_name if not target_name.is_empty() else "Transition"
-		btn_color = Color(0.15, 0.18, 0.25)
-		btn_text_color = Color(0.7, 0.85, 1.0)
-
-	_btn_transition = Rect2(btn_x, btn_y, btn_w, btn_h)
-	_panel.draw_rect(_btn_transition, btn_color)
-	_panel.draw_rect(_btn_transition, Color(btn_text_color.r, btn_text_color.g, btn_text_color.b, 0.3), false, 1.0)
-	_panel.draw_string(font, Vector2(btn_x + 8, btn_y + 14), btn_text,
-		HORIZONTAL_ALIGNMENT_LEFT, btn_w - 16, 11, btn_text_color)
+		# Draw one button per available transition target
+		for trans in transitions:
+			var target_id: String = trans["target_id"]
+			var btn_text: String = "-> %s" % target_id
+			var btn_w: float = maxf(font.get_string_size(btn_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 20, 70.0)
+			var btn_color: Color = Color(0.15, 0.18, 0.25)
+			var btn_text_color: Color = Color(0.7, 0.85, 1.0)
+			var rect: Rect2 = Rect2(btn_x, btn_y, btn_w, btn_h)
+			_btn_transitions.append({rect = rect, target_id = target_id})
+			_panel.draw_rect(rect, btn_color)
+			_panel.draw_rect(rect, Color(btn_text_color.r, btn_text_color.g, btn_text_color.b, 0.3), false, 1.0)
+			_panel.draw_string(font, Vector2(btn_x + 8, btn_y + 14), btn_text,
+				HORIZONTAL_ALIGNMENT_LEFT, btn_w - 16, 11, btn_text_color)
+			btn_x += btn_w + btn_spacing
 
 	# Current section label on the right
 	var section_label: String = ""

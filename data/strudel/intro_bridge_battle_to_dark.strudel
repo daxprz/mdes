@@ -1,0 +1,11 @@
+// Bridge: Battle → Dark — one cycle, settling from tension into brooding minor
+setcps(0.25)
+
+stack(
+  sub: note("[c2 g1 eb2 c2]").s("sine").gain(0.11).legato(1.1),
+  pad: note("[[c3,eb3,g3] [c3,eb3,ab3] [c3,eb3,ab3] [c3,eb3,g3]]").s("sine").gain(0.07).legato(1.0),
+  mid: note("[[eb4,g4] [eb4,ab4] [eb4,ab4] [eb4,g4]]").s("sine").gain(0.04).legato(0.8),
+  sparkle: note("g5 eb5 c5 eb5 ab5 eb5 c5 g4").fast(2).s("sine").gain(0.02).legato(0.2),
+  shimmer: note("g5 ~ eb6 ~ ab5 ~ eb5 ~").s("sine").gain(0.015).legato(0.15),
+  pulse: note("c3 ~ ~ eb2 c2 ~ ~ g2").s("sine").gain(0.04).legato(0.15)
+)

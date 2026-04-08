@@ -2,12 +2,17 @@
   "id": "title_screen",
   "default_movement": "light",
   "movements": [
-    {"id": "light", "file": "intro_light", "bars": -1},
-    {"id": "dark",  "file": "intro_dark",  "bars": -1}
+    {"id": "light",  "file": "intro_light",  "bars": -1},
+    {"id": "dark",   "file": "intro_dark",   "bars": -1},
+    {"id": "battle", "file": "intro_battle", "bars": -1}
   ],
   "bridges": [
-    {"id": "bridge_to_dark",  "file": "intro_bridge_to_dark",  "bars": 1, "from": "light", "to": "dark"},
-    {"id": "bridge_to_light", "file": "intro_bridge_to_light", "bars": 1, "from": "dark",  "to": "light"}
+    {"id": "bridge_light_to_dark",    "file": "intro_bridge_to_dark",          "bars": 1, "from": "light",  "to": "dark"},
+    {"id": "bridge_dark_to_light",    "file": "intro_bridge_to_light",         "bars": 1, "from": "dark",   "to": "light"},
+    {"id": "bridge_light_to_battle",  "file": "intro_bridge_to_battle",        "bars": 1, "from": "light",  "to": "battle"},
+    {"id": "bridge_battle_to_light",  "file": "intro_bridge_from_battle",      "bars": 1, "from": "battle", "to": "light"},
+    {"id": "bridge_dark_to_battle",   "file": "intro_bridge_dark_to_battle",   "bars": 1, "from": "dark",   "to": "battle"},
+    {"id": "bridge_battle_to_dark",   "file": "intro_bridge_battle_to_dark",   "bars": 1, "from": "battle", "to": "dark"}
   ],
   "turnarounds": []
 }

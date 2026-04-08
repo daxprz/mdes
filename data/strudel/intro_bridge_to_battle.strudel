@@ -1,0 +1,11 @@
+// Bridge: Light → Battle — one cycle, building tension into minor
+setcps(0.30)
+
+stack(
+  sub: note("[c2 c2 g2 c2]").s("sine").gain(0.13).legato(1.0),
+  pad: note("[[c3,e3,g3] [c3,eb3,g3] [c3,eb3,g3] [c3,eb3,g3]]").s("sine").gain(0.08).legato(1.0),
+  mid: note("[[e4,g4] [eb4,g4] [eb4,g4] [eb4,g4]]").s("sine").gain(0.045).legato(0.8),
+  sparkle: note("e5 g5 c6 eb6 g6 eb6 c6 g5").fast(2).s("sine").gain(0.025).legato(0.2),
+  shimmer: note("e6 ~ eb6 ~ g5 ~ c6 ~").s("sine").gain(0.018).legato(0.15),
+  pulse: note("c2 ~ g2 ~ c3 ~ g2 c3").s("sine").gain(0.05).legato(0.15)
+)
