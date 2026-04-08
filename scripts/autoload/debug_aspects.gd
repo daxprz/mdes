@@ -130,7 +130,8 @@ func _register_all() -> void:
 	r.call("effects/active", "Currently active effects overlay per entity")
 
 	# -- Performance --
-	r.call("perf/fps", "FPS counter and rolling graph overlay")
+	r.call("perf/fps", "FPS counter, metrics overlay, and lag spike detector (click to expand)")
+	r.call("perf/snapshot_log", "Log perf snapshots to stdout (auto-spike and manual)")
 
 	# -- Music --
 	r.call("music/status", "Music system state changes (play, stop, driver init)")

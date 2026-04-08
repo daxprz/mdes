@@ -491,6 +491,22 @@ func _execute(command: String) -> String:
 		"fps":
 			return "fps=%.0f" % Engine.get_frames_per_second()
 
+		"perf":
+			# Performance monitor commands
+			if parts.size() < 2:
+				return FPSOverlay.get_status_text()
+			match parts[1]:
+				"snapshot", "snap":
+					return FPSOverlay.trigger_snapshot()
+				"compact":
+					return FPSOverlay.set_mode("compact")
+				"expanded", "expand":
+					return FPSOverlay.set_mode("expanded")
+				"reset":
+					return FPSOverlay.reset_spikes()
+				_:
+					return "Usage: perf [snapshot|compact|expanded|reset]"
+
 		"ik":
 			for e in get_tree().get_nodes_in_group("enemies"):
 				if "_ik_score" in e:

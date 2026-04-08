@@ -371,10 +371,10 @@ const LEAP_COOLDOWN := 2.0     # Seconds between leaps (aggressive)
 const LEAP_BODY_RADIUS := 55.0    # Half-size of body for clearance checks (spine + legs + head)
 const LEAP_STRIKE_REACH := 80.0   # How far the creature can reach to strike from its center
 const LEAP_ARRIVAL_SAMPLES := 8   # Number of arrival angles to test around target
-const LEAP_FLIGHT_TIMES := 7      # Number of flight durations to try per arrival point
+const LEAP_FLIGHT_TIMES := 5      # Number of flight durations to try per arrival point (was 7, reduced for perf)
 const LEAP_FLIGHT_TIME_MIN := 0.25 # Shortest flight time to test
 const LEAP_FLIGHT_TIME_MAX := 1.6 # Longest flight time to test (higher arcs clear platform corners)
-const LEAP_ARC_STEPS := 40        # Simulation steps per arc (covers ~1.2s flight at 0.03s dt)
+const LEAP_ARC_STEPS := 32        # Simulation steps per arc (was 40, reduced for perf)
 const LEAP_PLAN_GRAVITY := 600.0  # Gravity for arc simulation
 const LEAP_ARC_DT := 0.03         # Simulation timestep (small enough to catch thin platforms)
 
@@ -511,6 +511,28 @@ func set_controller(ctrl: RefCounted) -> void:
 
 func is_player_controlled() -> bool:
 	return _controller != null and _controller.is_player()
+
+# -- Section profiler (perf snapshot reads these) ----------------------------
+## Per-section timing for the last physics frame. Written by _physics_process,
+## read by FPSOverlay snapshot. Keys = section name, values = usec.
+var _perf_sections: Dictionary = {}
+## Total physics_process time (usec) for the last frame
+var _perf_total_usec: float = 0.0
+## Rolling worst-case per section (reset on snapshot read)
+var _perf_peak_sections: Dictionary = {}
+var _perf_peak_total: float = 0.0
+
+func _perf_start() -> int:
+	return Time.get_ticks_usec()
+
+func _perf_mark(label: String, start: int) -> int:
+	var now: int = Time.get_ticks_usec()
+	var elapsed: float = float(now - start)
+	_perf_sections[label] = elapsed
+	var prev_peak: float = _perf_peak_sections.get(label, 0.0)
+	if elapsed > prev_peak:
+		_perf_peak_sections[label] = elapsed
+	return now
 
 var _state = State.PATROL  # State enum — untyped to avoid Godot 4.6 reload parse errors
 var _posture = Posture.QUADRUPED  # Posture enum — untyped for same reason
@@ -1097,6 +1119,13 @@ func _input(event: InputEvent) -> void:
 # -- Physics -------------------------------------------------------------------
 
 func _physics_process(delta: float) -> void:
+	# Clamp delta to prevent physics explosion on spike frames.
+	# A 400ms frame would cause gravity, foot forces, and gait to overshoot wildly.
+	# Cap at 2× normal physics step (33ms) — still allows some catch-up but won't
+	# send legs flying across the screen.
+	delta = minf(delta, 0.033)
+	var _t0: int = _perf_start()
+	var _t: int = _t0
 	if _dead:
 		if is_player_controlled():
 			# Player-controlled ghost: allow minimal floating movement + revive check
@@ -1232,12 +1261,16 @@ func _physics_process(delta: float) -> void:
 		# AWAKE + ON FLOOR: fall through to normal AI below,
 		# chain constraints applied after move_and_slide
 
+	_t = _perf_mark("chain_logic", _t)
+
 	# -- Movement blending (facing, speed, landing recovery) --
 	_update_movement_blend(delta)
 
 	# Gravity (skip during airborne leap — handled by leap physics)
 	if _state != State.ATTACK_LEAP_AIRBORNE:
 		velocity.y += cfg("gravity", GRAVITY) * delta
+
+	_t = _perf_mark("movement_blend", _t)
 
 	# Controller update (sets _want_direction, _target_move_speed, triggers attacks)
 	_want_direction = 0.0
@@ -1285,6 +1318,8 @@ func _physics_process(delta: float) -> void:
 			State.CHAIN_DAZE:
 				_do_chain_daze(delta)
 
+	_t = _perf_mark("ai_state", _t)
+
 	# Ball mode handles its own physics entirely — skip everything else
 	if _state == State.BALL:
 		_do_ball(delta)
@@ -1303,6 +1338,7 @@ func _physics_process(delta: float) -> void:
 	# Async graph building (2 pairs per frame)
 	if _precog_graph_building:
 		_precog_build_graph_tick()
+	_t = _perf_mark("precog_tick", _t)
 
 	var in_grab: bool = (_state == State.ATTACK_GRAB)
 
@@ -1310,6 +1346,7 @@ func _physics_process(delta: float) -> void:
 		_update_leap_collision(delta)
 	elif not in_precog and not in_grab:
 		_update_foot_push(delta)
+	_t = _perf_mark("foot_push", _t)
 
 	if in_grab:
 		# During grab: FREEZE body position. Don't let move_and_slide shift us.
@@ -1321,7 +1358,10 @@ func _physics_process(delta: float) -> void:
 		# During chain daze, DO apply constraints (monster is falling back).
 		if _chained and (not in_leap_flight or in_chain_daze):
 			_apply_chain_constraints()
+		_t = _perf_mark("chain_clamp", _t)
 		move_and_slide()
+
+	_t = _perf_mark("move_slide", _t)
 
 	if in_leap_flight:
 		_update_leap_pose(delta)
@@ -1334,6 +1374,8 @@ func _physics_process(delta: float) -> void:
 		_update_gait(delta)
 		_solve_pose(delta)
 	# Precognition pose is handled inside _do_precognition → _apply_curl_pose
+
+	_t = _perf_mark("pose_solve", _t)
 
 	# ALWAYS enforce rigid distances — even during leap/grab/precog
 	_enforce_spine_rigid()
@@ -1406,6 +1448,8 @@ func _physics_process(delta: float) -> void:
 			_body_collision.position = Vector2(_spine[1].x, -sc(14.0))
 		_constrain_skeleton_to_world()
 
+	_t = _perf_mark("rigidity", _t)
+
 	_update_hitbox_positions()
 	_accumulate_attach_forces()
 	_apply_attach_forces(delta)
@@ -1417,6 +1461,10 @@ func _physics_process(delta: float) -> void:
 	if Engine.get_frames_drawn() % 10 == 5:
 		PlayerHUD.check_auto_dump_triggers(self)
 
+	_t = _perf_mark("hitbox_fx", _t)
+	_perf_total_usec = float(Time.get_ticks_usec() - _t0)
+	if _perf_total_usec > _perf_peak_total:
+		_perf_peak_total = _perf_total_usec
 	queue_redraw()
 
 
@@ -3586,25 +3634,40 @@ func _precache_platforms() -> void:
 
 
 var _precog_graph_building: bool = false
+var _precog_build_frames: int = 0
 
 func _precog_build_graph_tick() -> void:
-	## Build 2 edges per frame to avoid stutter.
+	## Build edges with a time budget to prevent FPS spikes.
+	## Each pair evaluates launch points × landing samples × flight times,
+	## with physics shape queries per arc — this is VERY expensive.
+	## Budget: 2ms max per frame (vs the old 5-pairs-per-frame which could take 400ms).
 	if not _precog_graph_building:
 		return
 	var n: int = _precog_platforms.size()
+	if n < 2:
+		# Need at least 2 platforms to form an edge
+		_precog_graph_building = false
+		return
+	var budget_usec: int = 2000  # 2ms time budget
+	var tick_start: int = Time.get_ticks_usec()
 	var pairs_this_frame: int = 0
-	while pairs_this_frame < 5:
+	while true:
 		if _precog_process_i >= n:
 			_precog_graph_building = false
-			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH READY: %d edges", [_precog_edges.size()])
+			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH READY: %d edges in %d frames", [_precog_edges.size(), _precog_build_frames])
 			return
+		if _precog_process_j >= n:
+			_precog_process_i += 1
+			_precog_process_j = 0
+			continue
+		# Check time budget BEFORE starting next pair (each pair can take 50-100ms)
+		if pairs_this_frame > 0 and (Time.get_ticks_usec() - tick_start) > budget_usec:
+			break
 		if _precog_process_i != _precog_process_j:
 			_precog_build_one_edge(_precog_process_i, _precog_process_j)
 			pairs_this_frame += 1
 		_precog_process_j += 1
-		if _precog_process_j >= n:
-			_precog_process_i += 1
-			_precog_process_j = 0
+	_precog_build_frames += 1
 
 
 var _precog_cooldown: float = 0.0  # Prevent precog spam
@@ -3632,6 +3695,7 @@ func _start_precognition() -> void:
 	_precog_has_waypoint = false
 	_precog_process_i = 0
 	_precog_process_j = 1
+	_precog_build_frames = 0
 	_time_since_strike_range = 0.0
 	velocity.x = 0
 
@@ -3894,9 +3958,9 @@ func _precog_build_graph_step() -> void:
 func _precog_build_one_edge(pi: int, pj: int) -> void:
 	## Test one pair of platforms for leap connectivity.
 	var n: int = _precog_platforms.size()
-	if true:
-		var plat_from: Dictionary = _precog_platforms[_precog_process_i]
-		var plat_to: Dictionary = _precog_platforms[_precog_process_j]
+	if pi < n and pj < n:
+		var plat_from: Dictionary = _precog_platforms[pi]
+		var plat_to: Dictionary = _precog_platforms[pj]
 
 		# Chain barrier: skip edges where the destination platform center is
 		# outside chain reach. Launch points on the source platform are filtered
@@ -4120,8 +4184,8 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 
 	var landing_y: float = plat_y - 5.0
 	# Sample landing points: evenly spaced + precise edge points
-	var sample_count: int = maxi(3, int((plat_max_x - plat_min_x) / cfg("precog_grid_spacing", PRECOG_GRID_SPACING)) + 1)
-	sample_count = mini(sample_count, 5)
+	var sample_count: int = maxi(2, int((plat_max_x - plat_min_x) / cfg("precog_grid_spacing", PRECOG_GRID_SPACING)) + 1)
+	sample_count = mini(sample_count, 4)  # Was 5 — slightly fewer to reduce raycast load
 	# Add edge landing points (just inside each edge with body clearance)
 	var edge_landings: Array[float] = [
 		plat_min_x + effective_radius + 5,
@@ -4561,7 +4625,7 @@ func _check_arc_body_clearance(arc: PackedVector2Array, radius: float,
 	# Inset from platform edges — only reduce radius when well inside the platform
 	var edge_margin: float = radius * 0.8  # 80% of body radius as edge buffer
 
-	for i in range(4, arc.size() - 4, 2):
+	for i in range(3, arc.size() - 3, 3):  # Step 3 (was 2) — fewer shape queries per arc
 		var pt: Vector2 = arc[i]
 		# Skip if still near launch platform height
 		if pt.y > launch_y - radius - 20:
@@ -5947,9 +6011,13 @@ func _die() -> void:
 		DebugOverlay.log("monster/state", self, "PLAYER MONSTER DIED: now ghost, awaiting revive")
 	else:
 		# AI monster: collapse and fade out
+		set_physics_process(false)
 		var tween := create_tween()
 		tween.tween_property(self, "modulate:a", 0.0, 1.0)
-		tween.tween_callback(queue_free)
+		tween.tween_callback(func() -> void:
+			visible = false
+			queue_free()
+		)
 
 
 func _handle_ghost_movement(delta: float) -> void:

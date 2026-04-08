@@ -554,7 +554,11 @@ func clear_all_splays() -> int:
 	for instance in _splay_instances.duplicate():
 		for t in instance["tethers"]:
 			if is_instance_valid(t):
-				t.queue_free()
+				if not t._severed:
+					t.sever()
+				else:
+					t.hide()
+					t.queue_free()
 		for c in instance["creatures"]:
 			if is_instance_valid(c):
 				c.queue_free()

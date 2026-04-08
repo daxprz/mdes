@@ -458,9 +458,14 @@ func sever() -> void:
 		if not anchor.get("is_wall", false) and is_instance_valid(anchor.get("body")) and ap != "":
 			if anchor["body"].has_method("detach_item"):
 				anchor["body"].detach_item(ap, self)
-	var tween: Tween = create_tween()
-	tween.tween_property(self, "modulate:a", 0.0, 0.3)
-	tween.tween_callback(queue_free)
+	# Hide and stop processing immediately, then defer free.
+	# Hiding removes us from the renderer's canvas batch list.
+	hide()
+	if _glow_node and is_instance_valid(_glow_node):
+		_glow_node.hide()
+	set_physics_process(false)
+	set_process(false)
+	queue_free()
 
 
 func get_tension() -> float:
@@ -473,7 +478,7 @@ func get_tension() -> float:
 
 
 func _draw() -> void:
-	if _points.size() < 2:
+	if _severed or _points.size() < 2:
 		return
 	# Manage selection glow node — renders behind chain (z_index = -1)
 	var is_selected: bool = DebugOverlay.global_enabled and \

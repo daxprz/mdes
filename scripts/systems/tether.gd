@@ -188,9 +188,12 @@ func sever() -> void:
 			if anchor["body"].has_method("detach_item"):
 				anchor["body"].detach_item(ap, self)
 
-	var tween := create_tween()
-	tween.tween_property(self, "modulate:a", 0.0, 0.3)
-	tween.tween_callback(queue_free)
+	# Hide and stop processing immediately, then defer free.
+	# Hiding removes us from the renderer's canvas batch list.
+	hide()
+	set_physics_process(false)
+	set_process(false)
+	queue_free()
 
 
 func get_tension() -> float:
@@ -223,7 +226,7 @@ func _get_creature_scale(anchor: Dictionary) -> float:
 
 
 func _draw() -> void:
-	if _rope_points.size() < 2:
+	if _severed or _rope_points.size() < 2:
 		return
 
 	# Rope thickness scales with creature size

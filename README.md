@@ -203,6 +203,18 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.76
+**Performance monitor, precog optimization, renderer switch, defensive freeing**
+- **Performance monitor**: FPS overlay upgraded to full perf monitor — 19 Godot Performance metrics, auto-spike detection (cooldown-protected), spacebar snapshot with entity census, monster section profiler, pool stats, music status
+- **Precog graph builder optimization**: time-budgeted to 2ms/frame (was uncapped 5-pairs/frame causing 340-450ms spikes); reduced flight times (7→5), arc steps (40→32), landing samples (5→4) — peak dropped from 450ms to ~45ms while maintaining all leap test accuracy
+- **Delta clamp**: monster `_physics_process` clamps delta to 33ms, preventing wild leg/body overshoot during any remaining frame spikes
+- **Forward+ renderer**: switched from `gl_compatibility` to `forward_plus` to avoid GLES3 batch boundary crash (Godot #117602) when freeing nodes during `_draw()`
+- **Defensive node freeing**: chain, tether, and splay_manager now `hide()` + disable processing before `queue_free()` — removes nodes from renderer batch list before RID invalidation
+- **Monster section profiler**: 10 sub-section timing probes in `_physics_process` (chain_logic, movement_blend, ai_state, precog_tick, foot_push, chain_clamp, move_slide, pose_solve, rigidity, hitbox_fx)
+- **Precog bounds fix**: `_precog_build_one_edge()` now uses passed parameters instead of global indices; single-platform case handled without crash
+- **RCON `perf`**: snapshot/compact/expanded/reset commands for performance monitor
+- **Leaping suite**: 5/5 pass; **Combat suite**: 14/14 pass
+
 ### v0.10.75
 **CPS ramping, battle movement, legato/note-off fixes**
 - **CPS ramping**: smooth tempo interpolation from current to target over wall-clock seconds, with linear/ease-in/ease-out/smoothstep easing (`strudel cps ramp <target> <dur> [ease]`)
