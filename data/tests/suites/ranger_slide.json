@@ -1,0 +1,10 @@
+{
+  "name": "ranger_slide",
+  "description": "Ranger swing-slide-jump mechanic: floor, wall, hill, and rope-taut scenarios from the whiteboard diagram.",
+  "tests": [
+    "ranger_slide_floor",
+    "ranger_slide_wall",
+    "ranger_slide_hill",
+    "ranger_slide_taut"
+  ]
+}

@@ -145,6 +145,67 @@ class ModifierProvider:
 		return "ModifierProvider(%s, %d mods)" % [_name, _modifiers.size()]
 
 
+## RampModifierProvider: modifier values lerp from start to end over a duration.
+## After duration, values stay at end_val. Useful for charge-up effects.
+##
+## Usage:
+##   var charge = MCP.RampModifierProvider.new({
+##       "slide_boost": ["multiply", 1.0, 1.5]  # [op, start_val, end_val]
+##   }, 2.0, "slide_charge")
+##   player.push_config(charge)
+##   # At t=0s: slide_boost *= 1.0 | t=1s: *= 1.25 | t=2s: *= 1.5
+class RampModifierProvider:
+	var _modifiers: Dictionary = {}  # key -> [operation, start_val, end_val]
+	var _name: String = ""
+	var _duration: float = 1.0
+	var _start_time: float = 0.0
+	var _frozen: bool = false
+	var _frozen_progress: float = 0.0
+
+	func _init(modifiers: Dictionary = {}, duration: float = 1.0, provider_name: String = "ramp") -> void:
+		_modifiers = modifiers
+		_duration = maxf(duration, 0.001)
+		_name = provider_name
+		_start_time = Time.get_ticks_msec() / 1000.0
+
+	func get_value(_key: String) -> Variant:
+		return null  # Modifiers don't participate in base value lookup
+
+	func get_modifier(key: String) -> Variant:
+		if not _modifiers.has(key):
+			return null
+		var mod: Array = _modifiers[key]
+		var t: float = get_progress()
+		var lerped: float = lerpf(float(mod[1]), float(mod[2]), t)
+		return [mod[0], lerped]
+
+	func has_modifier(key: String) -> bool:
+		return _modifiers.has(key)
+
+	func get_progress() -> float:
+		if _frozen:
+			return _frozen_progress
+		var elapsed: float = Time.get_ticks_msec() / 1000.0 - _start_time
+		return clampf(elapsed / _duration, 0.0, 1.0)
+
+	func reset() -> void:
+		_start_time = Time.get_ticks_msec() / 1000.0
+		_frozen = false
+
+	func freeze() -> void:
+		_frozen_progress = get_progress()
+		_frozen = true
+
+	func is_expired() -> bool:
+		return false
+
+	func is_modifier() -> bool:
+		return true
+
+	func _to_string() -> String:
+		return "RampModifierProvider(%s, %.0f%% of %.1fs)" % [_name, get_progress() * 100.0, _duration]
+
+
 ## Apply all modifier providers in a config stack to a base value.
 ## Call this after resolving the base value from DictProviders.
 static func apply_modifiers(config_stack: Array, key: String, base_val: float) -> float:

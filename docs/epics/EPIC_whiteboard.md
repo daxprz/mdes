@@ -21,10 +21,10 @@ A collaborative workspace where humans and AIs can diagram, annotate, and commun
 
 | File | Purpose | Lines |
 |------|---------|-------|
-| `scripts/ui/whiteboard.gd` | Data model + renderer (Node2D). Grid, components, groups, annotations, serialization, selection, control points | ~900 |
-| `scripts/ui/whiteboard_tools.gd` | Tool state machine (RefCounted). Click/drag/release for Select, Line, Poly, etc. Control point dragging | ~530 |
-| `scripts/ui/debug_drawer.gd` | WHITEBOARD section (6th tab). Subsections: Board, Tools, Settings, Actions, Inspector | +700 lines added |
-| `scripts/autoload/rcon.gd` | `wb` command family — full CRUD for AI interaction, drawer/tool control | +300 lines added |
+| `scripts/ui/whiteboard.gd` | Data model + renderer (Node2D). Grid, 12 component types, groups, annotations, serialization, selection, control points, snapping helpers | ~1100 |
+| `scripts/ui/whiteboard_tools.gd` | Tool state machine (RefCounted). 14 tools including arc (3-step) and bezier (multi-click). Click/drag/release, CP dragging, snapping, lock guards | ~750 |
+| `scripts/ui/debug_drawer.gd` | WHITEBOARD section (6th tab). Subsections: Board, Tools, Settings, Actions, Inspector. Snap/lock UI | +800 lines added |
+| `scripts/autoload/rcon.gd` | `wb` command family — full CRUD, arc/bezier creation, snap/lock commands, drawer/tool control | +400 lines added |
 | `levels/whiteboard.json` | Blank dark level config for pure whiteboard use | ~20 |
 | `data/whiteboards/` | Saved whiteboard JSON files | directory |
 
@@ -134,6 +134,8 @@ enum Tool { SELECT, ANNOTATE, POINT, LINE, POLYLINE, POLY, RECT, CIRCLE, ELLIPSE
 | ELLIPSE | Start two-step (center→corner) | Preview ghost | Finalize if dragged > 3px | — |
 | VECTOR | Start two-step (origin→tip) | Preview ghost | Finalize if dragged > 3px | — |
 | POLYLINE, POLY | Each click adds a point | Preview from last point to cursor | — | Finalize |
+| ARC | **Three-step**: 1) Click sets center, 2) Drag-release sets radius + start angle, 3) Click finalizes sweep angle | Step 1→2: preview circle from center. Step 2→3: preview arc sweeping from start to cursor | Step 1→2: if dragged > 3px, set radius and start from drag vector | — |
+| BEZIER | Each click adds an anchor point (like POLYLINE) | — | — | Finalize — auto-generates smooth control handles via Catmull-Rom tangents |
 
 **Dual creation modes**: Two-step tools support BOTH:
 - **Drag-release**: click-hold-drag-release creates the shape in one gesture
@@ -218,9 +220,9 @@ The 6th tab in the debug drawer icon bar. Uses teal-green accent color `Color(0.
 | ID | Title | Content |
 |----|-------|---------|
 | `wb_board` | Board | Name text field, **New** / **Save** / **Load** / **Clear** buttons, file picker |
-| `wb_tools` | Tools | 2-column grid of 12 tool buttons. Active tool highlighted blue with left accent bar |
+| `wb_tools` | Tools | 2-column grid of 14 tool buttons (Select, Annotate, Point, Line, PolyLine, Poly, Rect, Circle, Ellipse, Arrow, Vector, Normal, Arc, Bezier). Active tool highlighted blue with left accent bar |
 | `wb_settings` | Settings | Color swatches (12 colors, 2 rows). Annotation input field (shown when ANNOTATE tool active or SELECT with selection) |
-| `wb_actions` | Actions | Context buttons: Delete Selected, Deselect All, Hide Selected, Show All, Grid Toggle |
+| `wb_actions` | Actions | Context buttons: Delete Selected, Deselect All, Hide Selected, Show All, Grid Toggle, **Lock / Unlock** (when selected), **Snap Grid** toggle, **Snap Components** toggle |
 | `wb_inspector` | Inspector | Selected component properties (id, type, coords, etc). Annotation list with `[H]`/`[A]` tags |
 
 ### Settings Pane Behavior
@@ -286,9 +288,80 @@ Small squares drawn on top of everything for selected components:
 
 `levels/whiteboard.json` — dark background, camera fixed at (960, 540), floor transparent and off-screen, distant walls.
 
+## Snapping
+
+Two independent snap modes, togglable via Actions subsection buttons or RCON (`wb snap`):
+
+| Mode | Behavior |
+|------|----------|
+| **Snap Grid** | Rounds coordinates to nearest minor grid point (20px) |
+| **Snap Components** | Snaps to the nearest control point of any visible component within 12px |
+
+Snapping is applied in `whiteboard_tools._snap()` before any tool processing. Both modes can be active simultaneously — grid snap applies first, then component snap overrides if a CP is within range.
+
+The **SELECT tool bypasses snapping** for hit testing — click positions are used raw so you can select components at any position. Snapping only applies when creating or drawing components.
+
+State is stored in `whiteboard_tools.snap_grid` and `whiteboard_tools.snap_components`, synced from the debug drawer toggles.
+
+## Component Locking
+
+Any component can be locked (`locked: true`) to prevent accidental modification. Locked components:
+
+- **Cannot be modified** — `set_component_property()` rejects edits (except `locked`, `selected`, `visible`)
+- **Cannot be moved** — `move_component()` returns false
+- **Do not render control points** — even when selected
+- **Can be selected** — for inspection purposes (view properties in Inspector)
+- **Cannot be dragged** — SELECT tool allows click-to-select but blocks drag-to-move
+
+Lock/unlock via:
+- **Actions subsection**: Lock / Unlock buttons appear when a component is selected
+- **RCON**: `wb lock <id> [id ...]` / `wb unlock <id> [id ...]`
+- **Property**: `wb set <id> locked=true`
+
+## Arc Tool (Three-Step)
+
+The Arc tool uses a three-step creation workflow:
+
+1. **Click** → set center (P1). `_arc_step = 1`
+2. **Hold/Drag** → preview circle from center. **Release** → set P2, compute R (radius) and start_angle from drag vector. `_arc_step = 2`
+   - Alternative: click again to set P2 by click (no drag)
+3. **Move** → preview arc sweeping from P2 to cursor angle. **Click** → finalize sweep_angle
+
+The sweep angle uses `_shortest_angle_dist()` (`fmod(to - from + PI, TAU) - PI`) to always take the minimum arc-distance path. This limits single arcs to ≤180° on creation. For larger arcs, create the arc and then drag the end control point past 180°.
+
+**Post-creation control points:**
+- **center** (blue) — rehomes entire arc
+- **start** — changes R and start_angle simultaneously
+- **end** — changes sweep_angle
+
+**RCON creation:** `wb arc <cx> <cy> <r> <start_deg> <sweep_deg>` — angles in degrees, converted to radians internally.
+
+## Bezier Tool (Multi-Click)
+
+Uses the same multi-click pattern as Polyline:
+1. Each click adds an anchor point
+2. Double-click finalizes
+3. Control handles are auto-generated using Catmull-Rom-style smooth tangents (`_auto_bezier_controls()`)
+
+**Data model:** N anchor `points` + 2×(N-1) `controls`. For each segment between anchors[i] and anchors[i+1]:
+- `controls[2*i]` = handle out from anchor i
+- `controls[2*i+1]` = handle in to anchor i+1
+
+**Rendering:** Each segment is sampled as a cubic bezier at 32 points. When selected, thin dimmed lines show anchor-to-handle connections.
+
+**Control point dragging:**
+- Dragging an **anchor** also moves its associated control handles (preserving relative offset)
+- Dragging a **control handle** moves only that handle
+
+**RCON creation:** `wb bezier <x1> <y1> <x2> <y2> ...` — provide anchor coordinates (minimum 2 points), controls are auto-generated.
+
 ## Known Issues / TODO
 
 - [ ] GUI automated testing is unreliable with CGEvents on macOS fullscreen — use RCON commands (`wb open`, `wb tool`) for programmatic testing
 - [ ] Dynamic dispatch from `_get_whiteboard()` returns `Node2D`, so methods return untyped Arrays — use `var sel: Array = wb.get_selected_ids()` (no type annotation) to avoid runtime errors
 - [ ] Subsection resize persistence works via `user://whiteboard_layout.json`
 - [ ] Group bounding box rendering is basic (min/max centroid + padding) — could be improved with actual shape bounds
+
+## See Also
+
+- **`docs/design/whiteboard_implementation.md`** — Technical implementation notes: file-by-file guide, critical gotchas (autoload naming, Retina coordinates, dynamic dispatch), arc/bezier/snap/lock detailed internals, testing strategy, extension guide

@@ -1,0 +1,59 @@
+{
+  "name": "ranger_slide_wall",
+  "description": "Ranger swing-slide on wall. Matches WB diagram S4 (L=640). Ranger at (460,500) grapples to ceiling, swings right into wall at x=1400, Circle to slide UP, release to boost LEFT.",
+  "debug": {
+    "log": ["player/slide"],
+    "on": ["player/slide", "player/jump_tracers", "player/velocity_arrows"]
+  },
+  "script": [
+    "var inspect default=0",
+    "level ranger_slide_test",
+    "wait 0.5",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+
+    "# --- Exact WB geometry: S4 at (460, 500), hook at (960,100), L=640 ---",
+    "# This rope reaches the wall at x=1400 (wall_y=564.8)",
+    "ai_spawn 460 490 class=ranged name=Ranger",
+    "wait 0.5",
+
+    "announce S4: Grapple to ceiling (aim 0.781, -0.625)",
+
+    "# Grapple aimed at ceiling — direction from (460,500) toward (960,100)",
+    "ai_cmd grapple 0.6 0.781 -0.625",
+    "wait 1.2",
+
+    "# Swing RIGHT hard — need enough momentum to reach the wall",
+    "announce Swinging right — building momentum toward wall",
+    "ai_cmd right 4.0",
+    "wait 4.0",
+
+    "# At the right side of the swing, ranger approaches the wall.",
+    "# The velocity is upward+right (WB yellow vector at wall).",
+    "# Circle to slide UP the wall.",
+    "announce Approaching wall — Circle to SLIDE UP",
+    "ai_hold interact on",
+    "wait 0.2",
+
+    "# Sliding UP the wall. Gravity has 100% effect (vertical surface).",
+    "# The slide decelerates as gravity pulls down.",
+    "announce SLIDING UP wall — gravity=100% on vertical — charge building",
+    "wait 1.2",
+
+    "# Release Circle — boost launch LEFT off wall",
+    "announce Release Circle — BOOST LAUNCH LEFT off wall",
+    "ai_hold interact off",
+    "wait 0.5",
+
+    "ai_cmd none 3.0",
+    "wait 3.0",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"Did ranger slide UP wall and boost-launch LEFT?\" [\"YES\",\"NO\",\"PARTIAL\"] {inspect} blocking"
+  ]
+}

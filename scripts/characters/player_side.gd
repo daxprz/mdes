@@ -330,7 +330,7 @@ const GRAPPLE_TUG_DAMAGE := 0
 const PLAYER_MASS := 70.0
 
 enum GrappleState { IDLE, WINDUP, THROWN, CONNECTED, SWINGING, TUG, RETRACTING,
-					 TETHER_WINDUP, TETHER_THROWN }
+					 TETHER_WINDUP, TETHER_THROWN, SLIDE, SLIDE_FREE }
 var _grapple_state: GrappleState = GrappleState.IDLE
 var _grapple_hold_time: float = 0.0
 var _grapple_angle: float = 0.0  # Current windup angle
@@ -351,6 +351,11 @@ var _grapple_rope_slack: bool = false  # True when player is closer than rope le
 var _grapple_pulling: bool = false  # True after first L1 press (pulling toward anchor, still connected)
 var _grapple_launch_immunity: float = 0.0  # Seconds where _handle_movement won't override velocity
 var _grapple_swing_drove_velocity: bool = false  # True when pendulum set velocity this frame (skip _handle_movement)
+
+# Swing-slide state (Ranger: swing into terrain → slide → jump)
+var _slide_velocity: Vector2 = Vector2.ZERO      # Current slide direction + speed
+var _slide_surface_normal: Vector2 = Vector2.UP   # Normal of the surface being slid on
+var _slide_surface_tangent: Vector2 = Vector2.RIGHT # Tangent direction of slide
 
 # Tether system (dual-grapple)
 const TETHER_MAX_COUNT := 5
@@ -508,13 +513,22 @@ func ai_queue_cmd(actions: Array, duration: float, aim: Vector2 = Vector2.ZERO) 
 	_ai_queue.append(cmd)
 
 
+var _ai_holds_new: Dictionary = {}  # Holds that are new THIS frame (for just_pressed)
+
 func ai_set_hold(action: String, held: bool) -> void:
 	## Set a persistent button hold. Independent of the command queue.
 	## Stays active until explicitly released via ai_set_hold(action, false).
 	if held:
+		if not _ai_holds.has(action):
+			_ai_holds_new[action] = true  # Mark as new for just_pressed trigger
 		_ai_holds[action] = true
 	else:
 		_ai_holds.erase(action)
+		# Clear the action from controller state so pressed() returns false
+		if action in ["l2", "r2"]:
+			_ai_triggers[action] = false
+		else:
+			_controller_actions[action] = false
 
 
 func ai_clear() -> void:
@@ -522,6 +536,7 @@ func ai_clear() -> void:
 	_ai_current_cmd = {}
 	_ai_cmd_timer = 0.0
 	_ai_holds.clear()
+	_ai_holds_new.clear()
 
 
 func _ai_tick() -> void:
@@ -540,6 +555,10 @@ func _ai_tick() -> void:
 			_ai_triggers["r2"] = true
 		else:
 			_controller_actions[hold_action] = true
+			# Trigger just_pressed on the first frame a hold is set
+			if _ai_holds_new.has(hold_action):
+				_controller_just_pressed[hold_action] = true
+	_ai_holds_new.clear()
 
 	# Layer 2: Advance queued command (if any)
 	if _ai_current_cmd.is_empty():
@@ -1766,6 +1785,8 @@ func _animate_blood_drop(blood: ColorRect, vel: Vector2) -> void:
 func _handle_ranger_grapple() -> void:
 	if _ranger_class:
 		_ranger_class._handle_ranger_grapple()
+	elif _grapple_state != GrappleState.IDLE:
+		DebugOverlay.log("player/slide", self, "WARN: grapple state=%d but no _ranger_class!" % _grapple_state)
 
 func _draw_grapple() -> void:
 	if _ranger_class:
@@ -2062,6 +2083,7 @@ func _handle_special() -> void:
 		return
 	if not _is_device_action_just_pressed("special"):
 		return
+	# Special (Triangle) is fine during all states — no conflict with slide (Circle/interact)
 
 	# Apply special cooldown reduction from skill level
 	var cooldown_reduction: float = PlayerManager.get_skill_level_for(player_index, "special") * 0.02
@@ -2114,6 +2136,18 @@ func _update_controller_led() -> void:
 	# Use call() to avoid parse error if set_joy_light doesn't exist in this build
 	if Input.has_method("set_joy_light"):
 		Input.call("set_joy_light", device_id, led_color)
+func _draw_debug_arrow(from: Vector2, to: Vector2, col: Color, width: float) -> void:
+	## Draw a line with an arrowhead at the end.
+	draw_line(from, to, col, width)
+	var dir: Vector2 = (to - from).normalized()
+	if dir.length_squared() < 0.001:
+		return
+	var perp: Vector2 = Vector2(-dir.y, dir.x)
+	var head_size: float = 6.0
+	draw_line(to, to - dir * head_size + perp * head_size * 0.5, col, width * 0.8)
+	draw_line(to, to - dir * head_size - perp * head_size * 0.5, col, width * 0.8)
+
+
 func _draw_hud_popup_indicator() -> void:
 	## Draw color-matched starburst aura around player when HUD popup is active
 	if not PlayerHUD:
@@ -2204,6 +2238,80 @@ func _draw_debug() -> void:
 			draw_string(ThemeDB.fallback_font, tpos + Vector2(5, -10),
 				"v:%d +j:%d = %d" % [int(pre.length()), int(imp.length()), int(post.length())],
 				HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 1.0, 1.0, 0.7 * fade))
+
+	# Slide debug visuals — impact radius during swing, decomposition during slide
+	if DebugOverlay.should_draw("player/slide", self):
+		var scale_f: float = 0.15
+		if _grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED,
+							  GrappleState.TETHER_WINDUP, GrappleState.TETHER_THROWN]:
+			# Show impact detection radius as a dashed circle
+			var r: float = 48.0  # SLIDE_IMPACT_RADIUS
+			var segments: int = 16
+			for si in range(segments):
+				if si % 2 == 0:
+					var a1: float = float(si) / float(segments) * TAU
+					var a2: float = float(si + 1) / float(segments) * TAU
+					draw_line(Vector2(cos(a1) * r, sin(a1) * r),
+							  Vector2(cos(a2) * r, sin(a2) * r),
+							  Color(1.0, 0.8, 0.2, 0.3), 1.0)
+			if velocity.length() > 10:
+				var probe_dir: Vector2 = velocity.normalized() * r
+				draw_line(Vector2.ZERO, probe_dir, Color(1.0, 0.8, 0.2, 0.2), 1.0)
+
+		if _grapple_state in [GrappleState.SLIDE, GrappleState.SLIDE_FREE]:
+			# -- Charge ring (gameplay visual) --
+			var charge_pct: float = 0.0
+			var ranger_cls = get_node_or_null("ClassComponent")
+			if ranger_cls and "_slide_charge_mod" in ranger_cls and ranger_cls._slide_charge_mod:
+				charge_pct = ranger_cls._slide_charge_mod.get_progress()
+			var ring_r: float = 20.0
+			var ring_sweep: float = charge_pct * TAU
+			var ring_col: Color = Color(1.0, 1.0, 0.2).lerp(Color(1.0, 0.5, 0.1), charge_pct)
+			if charge_pct >= 0.95:
+				ring_col = Color(1.0, 1.0, 1.0)  # White-hot at max
+			var ring_width: float = lerpf(2.0, 4.0, charge_pct)
+			if ring_sweep > 0.05:
+				draw_arc(Vector2.ZERO, ring_r, -PI * 0.5, -PI * 0.5 + ring_sweep, 24, ring_col, ring_width)
+
+			# -- Surface contact indicator --
+			var on_surf: bool = true
+			if ranger_cls and "_slide_on_surface" in ranger_cls:
+				on_surf = ranger_cls._slide_on_surface
+			if not on_surf:
+				# Off surface: red X
+				draw_line(Vector2(-6, -6), Vector2(6, 6), Color(1.0, 0.2, 0.2, 0.6), 2.0)
+				draw_line(Vector2(6, -6), Vector2(-6, 6), Color(1.0, 0.2, 0.2, 0.6), 2.0)
+
+			# -- Debug vectors --
+			# YELLOW: full slide velocity
+			var vel_end: Vector2 = _slide_velocity * scale_f
+			if vel_end.length() > 3:
+				_draw_debug_arrow(Vector2.ZERO, vel_end, Color(1.0, 1.0, 0.2, 0.8), 2.5)
+			# GREEN: surface normal (constant size)
+			var norm_end: Vector2 = _slide_surface_normal * 40.0
+			_draw_debug_arrow(Vector2.ZERO, norm_end, Color(0.2, 1.0, 0.2, 0.7), 2.0)
+			# BLUE: surface-parallel velocity
+			var par_end: Vector2 = _slide_surface_tangent * _slide_velocity.length() * scale_f
+			if par_end.length() > 3:
+				_draw_debug_arrow(Vector2.ZERO, par_end, Color(0.3, 0.5, 1.0, 0.7), 2.0)
+			# RED: predicted launch with current charge multiplier
+			var charge_mult: float = cfg("ranger_slide_charge_mult", 1.0)
+			var predicted_launch: Vector2 = _slide_velocity * charge_mult
+			var pred_end: Vector2 = predicted_launch * scale_f
+			if pred_end.length() > 3:
+				_draw_debug_arrow(Vector2.ZERO, pred_end, Color(1.0, 0.3, 0.2, 0.6), 2.0)
+			# Surface line (white, thin)
+			var surf_line: Vector2 = _slide_surface_tangent * 60.0
+			draw_line(-surf_line, surf_line, Color(1.0, 1.0, 1.0, 0.15), 1.0)
+			# Speed + charge label
+			var state_str: String = "FREE" if _grapple_state == GrappleState.SLIDE_FREE else "ROPE"
+			var surf_str: String = "SURFACE" if on_surf else "AIRBORNE"
+			draw_string(ThemeDB.fallback_font, Vector2(5, -28),
+				"slide: %.0f px/s  ×%.2f  %s %s" % [_slide_velocity.length(), charge_mult, state_str, surf_str],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(1.0, 1.0, 0.5, 0.8))
+			draw_string(ThemeDB.fallback_font, Vector2(5, -18),
+				"charge: %.0f%%  gravity_component: %.1f" % [charge_pct * 100.0, _slide_surface_tangent.dot(Vector2.DOWN)],
+				HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.5, 0.7))
 
 	# Current velocity arrow (green) + predicted jump arrow (red)
 	if DebugOverlay.should_draw("player/velocity_arrows", self):

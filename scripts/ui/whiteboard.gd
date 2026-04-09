@@ -45,40 +45,50 @@ const CP_FILL := Color(1.0, 1.0, 1.0, 0.9)
 const CP_OUTLINE := Color(0.0, 0.0, 0.0, 0.8)
 const CP_CENTER_FILL := Color(0.3, 0.7, 1.0, 0.9)  # Blue for center/origin handles
 
+# -- Selection rectangle --
+const SELECTION_RECT_FILL := Color(0.3, 0.5, 1.0, 0.08)
+const SELECTION_RECT_BORDER := Color(0.3, 0.5, 1.0, 0.4)
+
 # -- State --
 var _name: String = "untitled"
 var _components: Array[Dictionary] = []
-var _groups: Array[Dictionary] = []
 var _next_id: int = 1
 var _grid_visible: bool = true
 var _font: Font = null
 var _preview_component: Dictionary = {}  # Ghost component from tools (rendered semi-transparent)
+var _selection_rect: Rect2 = Rect2()     # Current multi-select rectangle (for rendering)
+var _lasso_points: PackedVector2Array = PackedVector2Array()  # Lasso polygon (world coords)
+var _cursor_indicator: Dictionary = {}   # {pos: Vector2, type: "add"|"remove"} for +/- cursor
+
+# -- Layers --
+var _layers: Array[Dictionary] = []
+var _next_layer_id: int = 1
+var _next_group_id: int = 1
+var _active_layer_id: int = -1  # ID of the active layer (new components go here)
 
 
 # -- Named color lookup (RCON-friendly names) --
 const NAMED_COLORS := {
-	"red": "#ff4444",
-	"green": "#44ff44",
-	"blue": "#4488ff",
-	"yellow": "#ffff44",
-	"orange": "#ff8844",
-	"purple": "#aa44ff",
-	"cyan": "#44ffff",
-	"magenta": "#ff44ff",
-	"white": "#ffffff",
-	"black": "#000000",
-	"gray": "#888888",
-	"grey": "#888888",
-	"pink": "#ff88aa",
-	"lime": "#88ff44",
-	"gold": "#ffcc44",
-	"brown": "#884422",
+	# Vivid spectrum
+	"red": "#ff4444", "orange": "#ff8844", "gold": "#ffcc44",
+	"yellow": "#ffff44", "lime": "#88ff44", "green": "#44ff44",
+	"cyan": "#44ffff", "blue": "#4488ff", "purple": "#aa44ff",
+	"magenta": "#ff44ff", "pink": "#ff88aa", "white": "#ffffff",
+	# Earth tones
+	"maroon": "#661a1e", "brown": "#8c5429", "tan": "#d1ad75",
+	"olive": "#808033", "teal": "#338080", "navy": "#212259",
+	# Greys
+	"charcoal": "#2e2e33", "dark_grey": "#4d4d4d", "slate": "#66667f",
+	"steel": "#738ca6", "grey": "#808080", "gray": "#808080",
+	"light_grey": "#bfbfbf", "black": "#000000",
 }
 
 
 func _ready() -> void:
 	z_index = 100  # Above game content, below debug overlays (4096)
 	_font = ThemeDB.fallback_font
+	if _layers.is_empty():
+		_ensure_default_layer()
 
 
 # ============================================================================
@@ -90,7 +100,18 @@ func add_point(x: float, y: float, color: String = DEFAULT_COLOR, label: String 
 	c["x"] = x
 	c["y"] = y
 	c["radius"] = DEFAULT_POINT_RADIUS
-	_components.append(c)
+	_register_component(c)
+	queue_redraw()
+	return c["id"]
+
+
+func add_text(x: float, y: float, text: String = "", font_size: int = 14, color: String = DEFAULT_COLOR) -> int:
+	var c := _make_base("text", color, "")
+	c["x"] = x
+	c["y"] = y
+	c["text"] = text
+	c["font_size"] = font_size
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -99,7 +120,7 @@ func add_line(x1: float, y1: float, x2: float, y2: float, color: String = DEFAUL
 	var c := _make_base("line", color, label)
 	c["x1"] = x1; c["y1"] = y1
 	c["x2"] = x2; c["y2"] = y2
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -108,7 +129,7 @@ func add_rect(x: float, y: float, w: float, h: float, color: String = DEFAULT_CO
 	var c := _make_base("rect", color, label)
 	c["x"] = x; c["y"] = y
 	c["w"] = w; c["h"] = h
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -116,7 +137,7 @@ func add_rect(x: float, y: float, w: float, h: float, color: String = DEFAULT_CO
 func add_circle(cx: float, cy: float, r: float, color: String = DEFAULT_COLOR, label: String = "") -> int:
 	var c := _make_base("circle", color, label)
 	c["cx"] = cx; c["cy"] = cy; c["r"] = r
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -125,7 +146,7 @@ func add_ellipse(cx: float, cy: float, rx: float, ry: float, color: String = DEF
 	var c := _make_base("ellipse", color, label)
 	c["cx"] = cx; c["cy"] = cy
 	c["rx"] = rx; c["ry"] = ry
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -133,7 +154,7 @@ func add_ellipse(cx: float, cy: float, rx: float, ry: float, color: String = DEF
 func add_polyline(points: Array, color: String = DEFAULT_COLOR, label: String = "") -> int:
 	var c := _make_base("polyline", color, label)
 	c["points"] = points
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -141,7 +162,7 @@ func add_polyline(points: Array, color: String = DEFAULT_COLOR, label: String = 
 func add_poly(points: Array, color: String = DEFAULT_COLOR, label: String = "") -> int:
 	var c := _make_base("poly", color, label)
 	c["points"] = points
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -151,7 +172,7 @@ func add_arrow(x1: float, y1: float, x2: float, y2: float, color: String = DEFAU
 	c["x1"] = x1; c["y1"] = y1
 	c["x2"] = x2; c["y2"] = y2
 	c["head_size"] = DEFAULT_HEAD_SIZE
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -160,7 +181,7 @@ func add_vector(ox: float, oy: float, dx: float, dy: float, color: String = DEFA
 	var c := _make_base("vector", color, label)
 	c["ox"] = ox; c["oy"] = oy
 	c["dx"] = dx; c["dy"] = dy
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -174,7 +195,7 @@ func add_normal(ref_id: int, t: float = 0.5, length: float = DEFAULT_NORMAL_LENG
 	c["t"] = clampf(t, 0.0, 1.0)
 	c["length"] = length
 	c["flipped"] = flipped
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -184,7 +205,7 @@ func add_arc(cx: float, cy: float, r: float, start_angle: float, sweep_angle: fl
 	c["cx"] = cx; c["cy"] = cy; c["r"] = r
 	c["start_angle"] = start_angle
 	c["sweep_angle"] = sweep_angle
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -202,7 +223,7 @@ func add_bezier(points: Array, controls: Array, color: String = DEFAULT_COLOR, l
 	var c := _make_base("bezier", color, label)
 	c["points"] = points
 	c["controls"] = controls
-	_components.append(c)
+	_register_component(c)
 	queue_redraw()
 	return c["id"]
 
@@ -253,6 +274,8 @@ func set_component_property(id: int, key: String, value: Variant) -> bool:
 	# Allow toggling lock itself, but block other edits on locked components
 	if key != "locked" and key != "selected" and key != "visible" and c.get("locked", false):
 		return false
+	if key == "color" and value is String:
+		value = _resolve_color(value)
 	c[key] = value
 	queue_redraw()
 	return true
@@ -301,12 +324,28 @@ func delete_component(id: int) -> bool:
 	for i in range(_components.size()):
 		if _components[i]["id"] == id:
 			_components.remove_at(i)
-			# Remove from any groups
-			for g in _groups:
-				g["ids"].erase(id)
+			# Remove from layers and groups
+			_unregister_component_id(id)
 			queue_redraw()
 			return true
 	return false
+
+
+func delete_selected() -> int:
+	## Delete all selected components. Returns count deleted.
+	var sel_ids: Array[int] = get_selected_ids()
+	for sid in sel_ids:
+		delete_component(sid)
+	return sel_ids.size()
+
+
+func deselect_component(id: int) -> bool:
+	var c := get_component(id)
+	if c.is_empty():
+		return false
+	c["selected"] = false
+	queue_redraw()
+	return true
 
 
 func select_component(id: int) -> bool:
@@ -400,11 +439,20 @@ func get_control_points(c: Dictionary) -> Array:
 		"vector":
 			pts.append({"pos": Vector2(c["ox"], c["oy"]), "key": "origin"})
 			pts.append({"pos": Vector2(c["ox"] + c["dx"], c["oy"] + c["dy"]), "key": "tip"})
+		"text":
+			pts.append({"pos": Vector2(c["x"], c["y"]), "key": "pos"})
+			var fsize: int = c.get("font_size", 14)
+			pts.append({"pos": Vector2(c["x"] - 14, c["y"] + fsize * 0.5), "key": "size"})
 		"normal":
 			var endpoints: Array = _get_normal_endpoints(c)
 			if endpoints.size() >= 2:
 				pts.append({"pos": endpoints[0], "key": "base"})
 				pts.append({"pos": endpoints[1], "key": "tip"})
+				# Flip control: offset perpendicular from midpoint
+				var mid: Vector2 = (endpoints[0] + endpoints[1]) * 0.5
+				var ndir: Vector2 = (endpoints[1] - endpoints[0]).normalized()
+				var perp: Vector2 = Vector2(-ndir.y, ndir.x)
+				pts.append({"pos": mid + perp * 12.0, "key": "flip"})
 		"arc":
 			var acx: float = c["cx"]; var acy: float = c["cy"]; var ar: float = c["r"]
 			var sa: float = c["start_angle"]; var sw: float = c["sweep_angle"]
@@ -422,32 +470,52 @@ func get_control_points(c: Dictionary) -> Array:
 
 
 # ============================================================================
-# PUBLIC API — Groups
+# PUBLIC API — Groups (legacy compatibility wrappers)
 # ============================================================================
 
-func create_group(label: String, ids: Array[int], color: String = "#888888") -> void:
-	# Update existing group or create new
-	for g in _groups:
-		if g["label"] == label:
-			g["ids"] = ids
-			g["color"] = color
-			queue_redraw()
-			return
-	_groups.append({"label": label, "ids": ids, "color": color})
-	queue_redraw()
+func create_group_by_name(label: String, ids: Array[int], color: String = "#888888") -> void:
+	## Legacy RCON wrapper: create or update a group by name on the active layer.
+	# Check if a group with this name already exists
+	for layer in _layers:
+		for group in layer["groups"]:
+			if group["name"] == label:
+				# Update: replace component IDs
+				for old_cid in group["component_ids"]:
+					var comp := get_component(int(old_cid))
+					if not comp.is_empty():
+						comp["group_id"] = -1
+						layer["component_ids"].append(int(old_cid))
+				group["component_ids"].clear()
+				group["color"] = _resolve_color(color)
+				for cid in ids:
+					_remove_from_group(cid)
+					layer["component_ids"].erase(cid)
+					group["component_ids"].append(cid)
+					var comp := get_component(cid)
+					if not comp.is_empty():
+						comp["group_id"] = group["id"]
+				queue_redraw()
+				return
+	# Create new group
+	create_group(label, ids, _active_layer_id, color)
 
 
-func remove_group(label: String) -> bool:
-	for i in range(_groups.size()):
-		if _groups[i]["label"] == label:
-			_groups.remove_at(i)
-			queue_redraw()
-			return true
+func remove_group_by_name(label: String) -> bool:
+	## Legacy RCON wrapper: remove a group by name.
+	for layer in _layers:
+		for gi in range(layer["groups"].size()):
+			if layer["groups"][gi]["name"] == label:
+				return remove_group(layer["groups"][gi]["id"])
 	return false
 
 
 func get_wb_groups() -> Array[Dictionary]:
-	return _groups
+	## Return all groups across all layers (for RCON listing).
+	var result: Array[Dictionary] = []
+	for layer in _layers:
+		for group in layer["groups"]:
+			result.append(group)
+	return result
 
 
 # ============================================================================
@@ -456,8 +524,12 @@ func get_wb_groups() -> Array[Dictionary]:
 
 func clear_all() -> void:
 	_components.clear()
-	_groups.clear()
+	_layers.clear()
 	_next_id = 1
+	_next_layer_id = 1
+	_next_group_id = 1
+	_selection_rect = Rect2()
+	_ensure_default_layer()
 	queue_redraw()
 
 
@@ -479,16 +551,492 @@ func is_grid_visible() -> bool:
 
 
 # ============================================================================
+# PUBLIC API — Layers
+# ============================================================================
+
+func _ensure_default_layer() -> void:
+	## Create Layer1 if no layers exist.
+	if _layers.is_empty():
+		var lid: int = _next_layer_id
+		_next_layer_id += 1
+		_layers.append({
+			"id": lid,
+			"name": "Layer1",
+			"visible": true,
+			"locked": false,
+			"groups": [],
+			"component_ids": [],
+		})
+		_active_layer_id = lid
+
+
+func add_layer(layer_name: String = "") -> int:
+	## Add a new layer at the top (index 0). Returns layer ID.
+	var lid: int = _next_layer_id
+	_next_layer_id += 1
+	if layer_name.is_empty():
+		layer_name = "Layer%d" % lid
+	var layer := {
+		"id": lid,
+		"name": layer_name,
+		"visible": true,
+		"locked": false,
+		"groups": [],
+		"component_ids": [],
+	}
+	_layers.insert(0, layer)  # Top of stack
+	_active_layer_id = lid
+	queue_redraw()
+	return lid
+
+
+func remove_layer(layer_id: int) -> bool:
+	## Remove a layer and all its components. Cannot remove the last layer.
+	if _layers.size() <= 1:
+		return false
+	for i in range(_layers.size()):
+		if _layers[i]["id"] == layer_id:
+			var layer: Dictionary = _layers[i]
+			# Delete all components on this layer
+			var all_ids: Array[int] = []
+			for gid in _get_layer_all_component_ids(layer):
+				all_ids.append(gid)
+			for cid in all_ids:
+				for ci in range(_components.size()):
+					if _components[ci]["id"] == cid:
+						_components.remove_at(ci)
+						break
+			_layers.remove_at(i)
+			if _active_layer_id == layer_id:
+				_active_layer_id = _layers[0]["id"]
+			queue_redraw()
+			return true
+	return false
+
+
+func get_layer(layer_id: int) -> Dictionary:
+	for layer in _layers:
+		if layer["id"] == layer_id:
+			return layer
+	return {}
+
+
+func get_layers() -> Array[Dictionary]:
+	return _layers
+
+
+func rename_layer(layer_id: int, new_name: String) -> bool:
+	var layer := get_layer(layer_id)
+	if layer.is_empty():
+		return false
+	layer["name"] = new_name
+	return true
+
+
+func set_layer_visible(layer_id: int, v: bool) -> bool:
+	var layer := get_layer(layer_id)
+	if layer.is_empty():
+		return false
+	layer["visible"] = v
+	queue_redraw()
+	return true
+
+
+func set_layer_locked(layer_id: int, v: bool) -> bool:
+	var layer := get_layer(layer_id)
+	if layer.is_empty():
+		return false
+	layer["locked"] = v
+	queue_redraw()
+	return true
+
+
+func move_layer(layer_id: int, direction: int) -> bool:
+	## Move layer up (-1) or down (1) in the stack. Top=index 0.
+	for i in range(_layers.size()):
+		if _layers[i]["id"] == layer_id:
+			var new_idx: int = i + direction
+			if new_idx < 0 or new_idx >= _layers.size():
+				return false
+			var tmp: Dictionary = _layers[i]
+			_layers[i] = _layers[new_idx]
+			_layers[new_idx] = tmp
+			queue_redraw()
+			return true
+	return false
+
+
+func set_active_layer(layer_id: int) -> bool:
+	var layer := get_layer(layer_id)
+	if layer.is_empty():
+		return false
+	_active_layer_id = layer_id
+	return true
+
+
+func get_active_layer_id() -> int:
+	return _active_layer_id
+
+
+# ============================================================================
+# PUBLIC API — Groups (within layers)
+# ============================================================================
+
+func create_group(group_name: String, comp_ids: Array, layer_id: int = -1, color: String = "#888888") -> int:
+	## Create a group on the specified layer (or active layer). Returns group ID.
+	## Components are moved from ungrouped to this group within the same layer.
+	if layer_id < 0:
+		layer_id = _active_layer_id
+	var layer := get_layer(layer_id)
+	if layer.is_empty():
+		return -1
+	var gid: int = _next_group_id
+	_next_group_id += 1
+	if group_name.is_empty():
+		group_name = "Group%d" % gid
+	var group := {
+		"id": gid,
+		"name": group_name,
+		"visible": true,
+		"locked": false,
+		"component_ids": [],
+		"color": _resolve_color(color),
+	}
+	for cid in comp_ids:
+		var comp_id: int = int(cid)
+		# Remove from any existing group
+		_remove_from_group(comp_id)
+		# Ensure component is on this layer
+		assign_to_layer(comp_id, layer_id)
+		# Remove from layer's ungrouped list
+		layer["component_ids"].erase(comp_id)
+		group["component_ids"].append(comp_id)
+		var comp := get_component(comp_id)
+		if not comp.is_empty():
+			comp["group_id"] = gid
+	layer["groups"].append(group)
+	queue_redraw()
+	return gid
+
+
+func remove_group(group_id: int) -> bool:
+	## Remove a group — components stay on the layer, ungrouped.
+	for layer in _layers:
+		for gi in range(layer["groups"].size()):
+			if layer["groups"][gi]["id"] == group_id:
+				var group: Dictionary = layer["groups"][gi]
+				# Move components back to layer ungrouped list
+				for cid in group["component_ids"]:
+					layer["component_ids"].append(int(cid))
+					var comp := get_component(int(cid))
+					if not comp.is_empty():
+						comp["group_id"] = -1
+				layer["groups"].remove_at(gi)
+				queue_redraw()
+				return true
+	return false
+
+
+func get_group(group_id: int) -> Dictionary:
+	for layer in _layers:
+		for group in layer["groups"]:
+			if group["id"] == group_id:
+				return group
+	return {}
+
+
+func get_group_layer(group_id: int) -> Dictionary:
+	## Find the layer that contains a group.
+	for layer in _layers:
+		for group in layer["groups"]:
+			if group["id"] == group_id:
+				return layer
+	return {}
+
+
+func set_group_visible(group_id: int, v: bool) -> bool:
+	var group := get_group(group_id)
+	if group.is_empty():
+		return false
+	group["visible"] = v
+	queue_redraw()
+	return true
+
+
+func set_group_locked(group_id: int, v: bool) -> bool:
+	var group := get_group(group_id)
+	if group.is_empty():
+		return false
+	group["locked"] = v
+	queue_redraw()
+	return true
+
+
+func rename_group(group_id: int, new_name: String) -> bool:
+	var group := get_group(group_id)
+	if group.is_empty():
+		return false
+	group["name"] = new_name
+	return true
+
+
+# ============================================================================
+# PUBLIC API — Layer/Group Assignment
+# ============================================================================
+
+func assign_to_layer(comp_id: int, layer_id: int) -> bool:
+	## Move a component to a different layer (ungrouped). Returns true if moved.
+	var comp := get_component(comp_id)
+	if comp.is_empty():
+		return false
+	var target_layer := get_layer(layer_id)
+	if target_layer.is_empty():
+		return false
+	# Remove from current layer/group
+	_unregister_component_id(comp_id)
+	# Add to target layer ungrouped
+	comp["layer_id"] = layer_id
+	comp["group_id"] = -1
+	target_layer["component_ids"].append(comp_id)
+	return true
+
+
+func assign_to_group(comp_id: int, group_id: int) -> bool:
+	## Move a component into a group. Returns true if moved.
+	var comp := get_component(comp_id)
+	if comp.is_empty():
+		return false
+	var group := get_group(group_id)
+	if group.is_empty():
+		return false
+	var layer := get_group_layer(group_id)
+	if layer.is_empty():
+		return false
+	# Remove from current position
+	_unregister_component_id(comp_id)
+	# Add to group
+	comp["layer_id"] = layer["id"]
+	comp["group_id"] = group_id
+	group["component_ids"].append(comp_id)
+	return true
+
+
+func ungroup_component(comp_id: int) -> bool:
+	## Remove a component from its group, keeping it on the same layer.
+	var comp := get_component(comp_id)
+	if comp.is_empty():
+		return false
+	var gid: int = int(comp.get("group_id", -1))
+	if gid < 0:
+		return false
+	var group := get_group(gid)
+	if group.is_empty():
+		return false
+	var layer := get_group_layer(gid)
+	if layer.is_empty():
+		return false
+	group["component_ids"].erase(comp_id)
+	layer["component_ids"].append(comp_id)
+	comp["group_id"] = -1
+	return true
+
+
+# ============================================================================
+# PUBLIC API — Effective State (cascading visibility/lock)
+# ============================================================================
+
+func is_effectively_visible(c: Dictionary) -> bool:
+	## Check if component is visible considering layer and group visibility.
+	if not c.get("visible", true):
+		return false
+	var lid: int = int(c.get("layer_id", -1))
+	if lid >= 0:
+		var layer := get_layer(lid)
+		if not layer.is_empty() and not layer.get("visible", true):
+			return false
+	var gid: int = int(c.get("group_id", -1))
+	if gid >= 0:
+		var group := get_group(gid)
+		if not group.is_empty() and not group.get("visible", true):
+			return false
+	return true
+
+
+func is_effectively_locked(c: Dictionary) -> bool:
+	## Check if component is locked considering layer and group lock.
+	if c.get("locked", false):
+		return true
+	var lid: int = int(c.get("layer_id", -1))
+	if lid >= 0:
+		var layer := get_layer(lid)
+		if not layer.is_empty() and layer.get("locked", false):
+			return true
+	var gid: int = int(c.get("group_id", -1))
+	if gid >= 0:
+		var group := get_group(gid)
+		if not group.is_empty() and group.get("locked", false):
+			return true
+	return false
+
+
+func move_selected(dx: float, dy: float) -> int:
+	## Move all selected, effectively-unlocked components. Returns count moved.
+	var moved: int = 0
+	for c in _components:
+		if c.get("selected", false) and not is_effectively_locked(c):
+			move_component(c["id"], dx, dy)
+			moved += 1
+	return moved
+
+
+func get_bounding_rect(c: Dictionary) -> Rect2:
+	## Get the axis-aligned bounding rect of a component's RENDERED shape.
+	## Uses actual visual geometry, not edit control points.
+	var min_p := Vector2(INF, INF)
+	var max_p := Vector2(-INF, -INF)
+
+	match c["type"]:
+		"point":
+			var r: float = c.get("radius", DEFAULT_POINT_RADIUS)
+			var p := Vector2(c["x"], c["y"])
+			min_p = p - Vector2(r, r)
+			max_p = p + Vector2(r, r)
+		"line":
+			min_p = Vector2(minf(c["x1"], c["x2"]), minf(c["y1"], c["y2"]))
+			max_p = Vector2(maxf(c["x1"], c["x2"]), maxf(c["y1"], c["y2"]))
+		"arrow":
+			var hs: float = c.get("head_size", 12.0)
+			min_p = Vector2(minf(c["x1"], c["x2"]) - hs, minf(c["y1"], c["y2"]) - hs)
+			max_p = Vector2(maxf(c["x1"], c["x2"]) + hs, maxf(c["y1"], c["y2"]) + hs)
+		"rect":
+			min_p = Vector2(c["x"], c["y"])
+			max_p = Vector2(c["x"] + c["w"], c["y"] + c["h"])
+		"circle":
+			var r: float = c["r"]
+			min_p = Vector2(c["cx"] - r, c["cy"] - r)
+			max_p = Vector2(c["cx"] + r, c["cy"] + r)
+		"ellipse":
+			min_p = Vector2(c["cx"] - c["rx"], c["cy"] - c["ry"])
+			max_p = Vector2(c["cx"] + c["rx"], c["cy"] + c["ry"])
+		"polyline", "poly":
+			for pt in c.get("points", []):
+				min_p.x = minf(min_p.x, pt[0]); min_p.y = minf(min_p.y, pt[1])
+				max_p.x = maxf(max_p.x, pt[0]); max_p.y = maxf(max_p.y, pt[1])
+		"vector":
+			var o := Vector2(c["ox"], c["oy"])
+			var t := Vector2(c["ox"] + c["dx"], c["oy"] + c["dy"])
+			min_p = Vector2(minf(o.x, t.x), minf(o.y, t.y))
+			max_p = Vector2(maxf(o.x, t.x), maxf(o.y, t.y))
+		"normal":
+			var eps: Array = _get_normal_endpoints(c)
+			if eps.size() >= 2:
+				min_p = Vector2(minf(eps[0].x, eps[1].x), minf(eps[0].y, eps[1].y))
+				max_p = Vector2(maxf(eps[0].x, eps[1].x), maxf(eps[0].y, eps[1].y))
+		"arc":
+			# Sample the arc to find rendered bounds
+			var cx: float = c["cx"]; var cy: float = c["cy"]; var r: float = c["r"]
+			var sa: float = c["start_angle"]; var sw: float = c["sweep_angle"]
+			for i in range(DEFAULT_ARC_SEGMENTS + 1):
+				var t: float = float(i) / float(DEFAULT_ARC_SEGMENTS)
+				var a: float = sa + sw * t
+				var px: float = cx + r * cos(a)
+				var py: float = cy + r * sin(a)
+				min_p.x = minf(min_p.x, px); min_p.y = minf(min_p.y, py)
+				max_p.x = maxf(max_p.x, px); max_p.y = maxf(max_p.y, py)
+		"bezier":
+			var bpts: Array = c.get("points", [])
+			var ctrls: Array = c.get("controls", [])
+			for seg_i in range(bpts.size() - 1):
+				var co: int = seg_i * 2; var ci: int = seg_i * 2 + 1
+				if co >= ctrls.size() or ci >= ctrls.size():
+					break
+				var p0 := Vector2(bpts[seg_i][0], bpts[seg_i][1])
+				var p3 := Vector2(bpts[seg_i + 1][0], bpts[seg_i + 1][1])
+				var p1 := Vector2(ctrls[co][0], ctrls[co][1])
+				var p2 := Vector2(ctrls[ci][0], ctrls[ci][1])
+				for s in range(BEZIER_SAMPLES + 1):
+					var t: float = float(s) / float(BEZIER_SAMPLES)
+					var it: float = 1.0 - t
+					var pt: Vector2 = it*it*it*p0 + 3.0*it*it*t*p1 + 3.0*it*t*t*p2 + t*t*t*p3
+					min_p.x = minf(min_p.x, pt.x); min_p.y = minf(min_p.y, pt.y)
+					max_p.x = maxf(max_p.x, pt.x); max_p.y = maxf(max_p.y, pt.y)
+		"text":
+			var pos := Vector2(c["x"], c["y"])
+			var fsize: int = c.get("font_size", 14)
+			var text_str: String = c.get("text", "")
+			var tw: float = maxf(text_str.length() * fsize * 0.6, 10.0)
+			min_p = pos
+			max_p = Vector2(pos.x + tw, pos.y + fsize)
+		_:
+			# Fallback to control points
+			var cps: Array = get_control_points(c)
+			for cp in cps:
+				var p: Vector2 = cp["pos"]
+				min_p.x = minf(min_p.x, p.x); min_p.y = minf(min_p.y, p.y)
+				max_p.x = maxf(max_p.x, p.x); max_p.y = maxf(max_p.y, p.y)
+
+	if min_p.x == INF:
+		return Rect2()
+	return Rect2(min_p, max_p - min_p)
+
+
+# ============================================================================
+# INTERNAL — Layer/Group helpers
+# ============================================================================
+
+func _register_component(c: Dictionary) -> void:
+	## Append component to _components and add to active layer's ungrouped list.
+	_components.append(c)
+	var layer := get_layer(_active_layer_id)
+	if not layer.is_empty():
+		layer["component_ids"].append(c["id"])
+
+
+func _unregister_component_id(comp_id: int) -> void:
+	## Remove a component ID from all layer/group references.
+	for layer in _layers:
+		layer["component_ids"].erase(comp_id)
+		for group in layer["groups"]:
+			group["component_ids"].erase(comp_id)
+
+
+func _remove_from_group(comp_id: int) -> void:
+	## Remove a component from its current group (if any).
+	for layer in _layers:
+		for group in layer["groups"]:
+			if group["component_ids"].has(comp_id):
+				group["component_ids"].erase(comp_id)
+				var comp := get_component(comp_id)
+				if not comp.is_empty():
+					comp["group_id"] = -1
+				return
+
+
+func _get_layer_all_component_ids(layer: Dictionary) -> Array[int]:
+	## Get all component IDs on a layer (ungrouped + grouped).
+	var ids: Array[int] = []
+	for cid in layer.get("component_ids", []):
+		ids.append(int(cid))
+	for group in layer.get("groups", []):
+		for cid in group.get("component_ids", []):
+			ids.append(int(cid))
+	return ids
+
+
+# ============================================================================
 # SERIALIZATION
 # ============================================================================
 
 func to_dict() -> Dictionary:
 	return {
 		"name": _name,
-		"version": 1,
+		"version": 2,
 		"next_id": _next_id,
+		"next_layer_id": _next_layer_id,
+		"next_group_id": _next_group_id,
+		"active_layer_id": _active_layer_id,
 		"components": _components.duplicate(true),
-		"groups": _groups.duplicate(true),
+		"layers": _layers.duplicate(true),
 	}
 
 
@@ -498,9 +1046,53 @@ func from_dict(data: Dictionary) -> void:
 	_components.clear()
 	for c in data.get("components", []):
 		_components.append(c)
-	_groups.clear()
-	for g in data.get("groups", []):
-		_groups.append(g)
+
+	var ver: int = int(data.get("version", 1))
+	if ver >= 2 and data.has("layers"):
+		# Version 2+ — load layers directly
+		_layers.clear()
+		for layer_data in data.get("layers", []):
+			_layers.append(layer_data)
+		_next_layer_id = int(data.get("next_layer_id", 1))
+		_next_group_id = int(data.get("next_group_id", 1))
+		_active_layer_id = int(data.get("active_layer_id", -1))
+		if _layers.is_empty():
+			_ensure_default_layer()
+		elif _active_layer_id < 0:
+			_active_layer_id = _layers[0]["id"]
+	else:
+		# Version 1 — migrate: create Layer1 with all components
+		_layers.clear()
+		_next_layer_id = 1
+		_next_group_id = 1
+		_ensure_default_layer()
+		var layer: Dictionary = _layers[0]
+		for c in _components:
+			c["layer_id"] = layer["id"]
+			c["group_id"] = -1
+			if not layer["component_ids"].has(int(c["id"])):
+				layer["component_ids"].append(int(c["id"]))
+		# Migrate old groups into layer groups
+		for old_g in data.get("groups", []):
+			var gid: int = _next_group_id
+			_next_group_id += 1
+			var group := {
+				"id": gid,
+				"name": str(old_g.get("label", "Group%d" % gid)),
+				"visible": true,
+				"locked": false,
+				"component_ids": [],
+				"color": str(old_g.get("color", "#888888")),
+			}
+			for cid in old_g.get("ids", []):
+				var comp_id: int = int(cid)
+				group["component_ids"].append(comp_id)
+				layer["component_ids"].erase(comp_id)
+				# Update component's group_id
+				var comp := get_component(comp_id)
+				if not comp.is_empty():
+					comp["group_id"] = gid
+			layer["groups"].append(group)
 	queue_redraw()
 
 
@@ -541,7 +1133,7 @@ func load_from_file(filename: String) -> String:
 	if not parsed is Dictionary:
 		return "ERR: invalid JSON in " + fname
 	from_dict(parsed)
-	return "OK: loaded '%s' (%d components, %d groups)" % [_name, _components.size(), _groups.size()]
+	return "OK: loaded '%s' (%d components, %d layers)" % [_name, _components.size(), _layers.size()]
 
 
 func list_saved_files() -> Array[String]:
@@ -572,15 +1164,33 @@ func _draw() -> void:
 	if _grid_visible:
 		_draw_grid()
 
-	# Draw group bounding boxes (behind components)
-	for g in _groups:
-		_draw_group(g)
-
-	# Draw components
-	for c in _components:
-		if not c.get("visible", true):
+	# Render layers bottom-to-top (last in array = bottom, first = top)
+	for layer_idx in range(_layers.size() - 1, -1, -1):
+		var layer: Dictionary = _layers[layer_idx]
+		if not layer.get("visible", true):
 			continue
-		_draw_component(c)
+
+		# Draw group bounding boxes for this layer
+		for group in layer.get("groups", []):
+			if group.get("visible", true):
+				_draw_group_box(group)
+
+		# Draw ungrouped components on this layer
+		for cid in layer.get("component_ids", []):
+			var c := get_component(int(cid))
+			if c.is_empty() or not is_effectively_visible(c):
+				continue
+			_draw_component(c)
+
+		# Draw grouped components
+		for group in layer.get("groups", []):
+			if not group.get("visible", true):
+				continue
+			for cid in group.get("component_ids", []):
+				var c := get_component(int(cid))
+				if c.is_empty() or not is_effectively_visible(c):
+					continue
+				_draw_component(c)
 
 	# Draw preview/ghost component from tools (semi-transparent via alpha-dimmed color)
 	if not _preview_component.is_empty() and _preview_component.get("visible", true):
@@ -590,17 +1200,53 @@ func _draw() -> void:
 		parsed.a = 0.45
 		ghost["color"] = "#" + parsed.to_html(true)
 		_draw_component(ghost)
+		# Draw control points on the preview for visual feedback
+		_draw_preview_control_points(ghost)
 
-	# Draw annotations on top
+	# Draw annotations on top (all visible components)
 	for c in _components:
-		if not c.get("visible", true):
+		if not is_effectively_visible(c):
 			continue
 		if c.get("show_annotations", true) and not c.get("annotations", []).is_empty():
 			_draw_annotations(c)
 
-	# Draw control points for selected, unlocked components (on top of everything)
+	# Draw selection rectangle (if multi-select in progress)
+	if _selection_rect.size.x > 0 or _selection_rect.size.y > 0:
+		draw_rect(_selection_rect, SELECTION_RECT_FILL, true)
+		draw_rect(_selection_rect, SELECTION_RECT_BORDER, false, 1.0)
+
+	# Draw lasso polygon (if lasso select in progress)
+	if _lasso_points.size() >= 2:
+		var offset: Vector2 = -global_position
+		var lasso_col := Color(0.3, 0.7, 1.0, 0.6)
+		var fill_col := Color(0.2, 0.4, 0.7, 0.1)
+		var shifted: PackedVector2Array = PackedVector2Array()
+		for p in _lasso_points:
+			shifted.append(p + offset)
+		if shifted.size() >= 3:
+			draw_polygon(shifted, PackedColorArray([fill_col]))
+		draw_polyline(shifted, lasso_col, 2.0)
+		# Close the loop back to start
+		if shifted.size() >= 2:
+			draw_line(shifted[shifted.size() - 1], shifted[0], lasso_col * Color(1, 1, 1, 0.4), 1.0)
+
+	# Draw cursor indicator (+/-) for selection tools
+	if not _cursor_indicator.is_empty():
+		var ci_pos: Vector2 = _cursor_indicator["pos"] - global_position
+		var ci_type: String = _cursor_indicator["type"]
+		var ci_col := Color(0.3, 1.0, 0.3) if ci_type == "add" else Color(1.0, 0.3, 0.3)
+		# Draw + or - symbol offset from cursor
+		var ix: float = ci_pos.x + 12
+		var iy: float = ci_pos.y - 12
+		if ci_type == "add":
+			draw_line(Vector2(ix - 5, iy), Vector2(ix + 5, iy), ci_col, 2.0)
+			draw_line(Vector2(ix, iy - 5), Vector2(ix, iy + 5), ci_col, 2.0)
+		else:
+			draw_line(Vector2(ix - 5, iy), Vector2(ix + 5, iy), ci_col, 2.0)
+
+	# Draw control points for selected, effectively-unlocked components (on top of everything)
 	for c in _components:
-		if c.get("selected", false) and c.get("visible", true) and not c.get("locked", false):
+		if c.get("selected", false) and is_effectively_visible(c) and not is_effectively_locked(c):
 			_draw_control_points(c)
 
 
@@ -769,6 +1415,28 @@ func _draw_component(c: Dictionary) -> void:
 		"bezier":
 			_draw_bezier(c, col, lw, offset)
 
+		"text":
+			var pos := Vector2(c["x"], c["y"]) + offset
+			var text_str: String = c.get("text", "")
+			var fsize: int = c.get("font_size", 14)
+			if text_str.is_empty():
+				# Show blinking cursor placeholder when empty
+				if int(Time.get_ticks_msec() / 500) % 2 == 0:
+					draw_line(pos, pos + Vector2(0, fsize), col, 1.5)
+			else:
+				draw_string(_font, pos + Vector2(0, fsize), text_str, HORIZONTAL_ALIGNMENT_LEFT, -1, fsize, col)
+			# Size indicator: horizontal ◄─►  left of the position point
+			if is_selected:
+				var sz_x: float = pos.x - 14
+				var sz_y: float = pos.y + fsize * 0.5
+				var sz_col := col * Color(1, 1, 1, 0.5)
+				# Horizontal line with left/right arrows
+				draw_line(Vector2(sz_x - 6, sz_y), Vector2(sz_x + 6, sz_y), sz_col, 1.0)
+				draw_line(Vector2(sz_x - 6, sz_y), Vector2(sz_x - 4, sz_y - 2), sz_col, 1.0)
+				draw_line(Vector2(sz_x - 6, sz_y), Vector2(sz_x - 4, sz_y + 2), sz_col, 1.0)
+				draw_line(Vector2(sz_x + 6, sz_y), Vector2(sz_x + 4, sz_y - 2), sz_col, 1.0)
+				draw_line(Vector2(sz_x + 6, sz_y), Vector2(sz_x + 4, sz_y + 2), sz_col, 1.0)
+
 
 func _draw_arrow(from: Vector2, to: Vector2, col: Color, lw: float, head_size: float) -> void:
 	draw_line(from, to, col, lw)
@@ -862,9 +1530,15 @@ func _draw_normal(c: Dictionary, col: Color, lw: float, offset: Vector2) -> void
 	var normal_tip: Vector2 = endpoints[1] + offset
 
 	draw_line(base, normal_tip, col, lw)
+	# Tick mark at base (perpendicular)
 	var normal_dir: Vector2 = (normal_tip - base).normalized()
 	var tick_dir: Vector2 = Vector2(-normal_dir.y, normal_dir.x)
 	draw_line(base - tick_dir * 4, base + tick_dir * 4, col, lw)
+	# Arrowhead at tip pointing outward
+	var arrow_size: float = 6.0
+	var left: Vector2 = normal_tip - normal_dir * arrow_size + tick_dir * arrow_size * 0.5
+	var right: Vector2 = normal_tip - normal_dir * arrow_size - tick_dir * arrow_size * 0.5
+	draw_polygon(PackedVector2Array([normal_tip, left, right]), PackedColorArray([col, col, col]))
 
 
 func _draw_bezier(c: Dictionary, col: Color, lw: float, offset: Vector2) -> void:
@@ -915,6 +1589,15 @@ func _draw_control_points(c: Dictionary) -> void:
 	for cp in cps:
 		var p: Vector2 = cp["pos"] + offset
 		var key: String = cp["key"]
+		if key == "flip":
+			# Special flip control — draw as a circle with arrows
+			draw_circle(p, CP_SIZE + 1, CP_OUTLINE)
+			draw_circle(p, CP_SIZE, Color(0.9, 0.6, 0.2))
+			# Small up/down arrows
+			draw_line(p + Vector2(0, -3), p + Vector2(0, 3), Color.BLACK, 1.0)
+			draw_line(p + Vector2(0, -3), p + Vector2(-2, -1), Color.BLACK, 1.0)
+			draw_line(p + Vector2(0, 3), p + Vector2(2, 1), Color.BLACK, 1.0)
+			continue
 		# Use blue for center/origin/anchor handles, white for edges/endpoints/controls
 		var is_center: bool = key in ["center", "origin", "pos"] or key.begins_with("a")
 		var fill: Color = CP_CENTER_FILL if is_center else CP_FILL
@@ -922,31 +1605,53 @@ func _draw_control_points(c: Dictionary) -> void:
 		draw_rect(Rect2(p.x - CP_SIZE + 1, p.y - CP_SIZE + 1, CP_SIZE * 2 - 2, CP_SIZE * 2 - 2), fill, true)
 
 
-func _draw_group(g: Dictionary) -> void:
-	# Draw a bounding box around all components in the group
+func _draw_preview_control_points(ghost: Dictionary) -> void:
+	## Draw semi-transparent control points on the preview ghost component.
+	var offset: Vector2 = -global_position
+	var cps: Array = get_control_points(ghost)
+	for cp in cps:
+		var p: Vector2 = cp["pos"] + offset
+		var fill := Color(0.4, 0.7, 1.0, 0.5)
+		draw_rect(Rect2(p.x - CP_SIZE, p.y - CP_SIZE, CP_SIZE * 2, CP_SIZE * 2), Color(0.0, 0.0, 0.0, 0.4), true)
+		draw_rect(Rect2(p.x - CP_SIZE + 1, p.y - CP_SIZE + 1, CP_SIZE * 2 - 2, CP_SIZE * 2 - 2), fill, true)
+
+
+func _draw_group_box(g: Dictionary) -> void:
+	# Draw a bounding box around all components in the group using true AABB
 	var min_pos := Vector2(INF, INF)
 	var max_pos := Vector2(-INF, -INF)
 	var found := false
-	for id in g.get("ids", []):
-		var c := get_component(id)
-		if c.is_empty() or not c.get("visible", true):
+	for cid in g.get("component_ids", []):
+		var c := get_component(int(cid))
+		if c.is_empty() or not is_effectively_visible(c):
 			continue
-		var centroid := _get_centroid(c)
-		min_pos.x = minf(min_pos.x, centroid.x - 20)
-		min_pos.y = minf(min_pos.y, centroid.y - 20)
-		max_pos.x = maxf(max_pos.x, centroid.x + 20)
-		max_pos.y = maxf(max_pos.y, centroid.y + 20)
+		var bounds: Rect2 = get_bounding_rect(c)
+		if bounds.size.length_squared() < 0.001:
+			# Point-like — use centroid with small margin
+			var centroid := _get_centroid(c)
+			min_pos.x = minf(min_pos.x, centroid.x - 4)
+			min_pos.y = minf(min_pos.y, centroid.y - 4)
+			max_pos.x = maxf(max_pos.x, centroid.x + 4)
+			max_pos.y = maxf(max_pos.y, centroid.y + 4)
+		else:
+			min_pos.x = minf(min_pos.x, bounds.position.x)
+			min_pos.y = minf(min_pos.y, bounds.position.y)
+			max_pos.x = maxf(max_pos.x, bounds.end.x)
+			max_pos.y = maxf(max_pos.y, bounds.end.y)
 		found = true
 	if not found:
 		return
+	var offset: Vector2 = -global_position
 	var col: Color = _parse_color(g.get("color", "#888888"))
-	col.a = 0.2
-	var rect := Rect2(min_pos - global_position, max_pos - min_pos)
+	col.a = 0.04
+	var pad: float = 4.0
+	var rect := Rect2(min_pos + offset - Vector2(pad, pad), max_pos - min_pos + Vector2(pad * 2, pad * 2))
 	draw_rect(rect, col, true)
-	col.a = 0.5
+	col.a = 0.15
 	draw_rect(rect, col, false, 1.0)
 	# Group label
-	draw_string(_font, rect.position + Vector2(4, -4), g.get("label", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col)
+	col.a = 0.25
+	draw_string(_font, rect.position + Vector2(4, -4), g.get("name", ""), HORIZONTAL_ALIGNMENT_LEFT, -1, 9, col)
 
 
 func _draw_annotations(c: Dictionary) -> void:
@@ -1004,6 +1709,8 @@ func _make_base(type: String, color: String, label: String) -> Dictionary:
 		"line_width": DEFAULT_LINE_WIDTH,
 		"annotations": [],
 		"show_annotations": true,
+		"layer_id": _active_layer_id,
+		"group_id": -1,
 	}
 
 
@@ -1021,11 +1728,15 @@ func _resolve_color(input: String) -> String:
 	return DEFAULT_COLOR
 
 
-static func _parse_color(hex: String) -> Color:
-	## Parse a stored hex color string to Godot Color
-	if hex.begins_with("#"):
-		return Color.from_string(hex, Color.RED)
-	return Color.from_string("#" + hex, Color.RED)
+func _parse_color(hex: String) -> Color:
+	## Parse a stored color string (hex or named) to Godot Color
+	if not hex.begins_with("#"):
+		# Might be a named color — resolve it first
+		var resolved: String = _resolve_color(hex)
+		if resolved.begins_with("#"):
+			return Color.from_string(resolved, Color.RED)
+		return Color.from_string("#" + resolved, Color.RED)
+	return Color.from_string(hex, Color.RED)
 
 
 func _get_centroid(c: Dictionary) -> Vector2:

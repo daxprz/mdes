@@ -11,7 +11,7 @@ func inject_context(c: Variant) -> void:
 
 # Enums
 enum GrappleState { IDLE, WINDUP, THROWN, CONNECTED, SWINGING, TUG, RETRACTING,
-	TETHER_WINDUP, TETHER_THROWN }
+	TETHER_WINDUP, TETHER_THROWN, SLIDE, SLIDE_FREE }
 
 # Constants
 const GRAPPLE_SWING_RADIUS := 40.0
@@ -47,6 +47,20 @@ const ARCHER_ARROW_SPEED_RATE := 1200.0
 const ARCHER_ARROW_GRAVITY := 500.0
 const ARCHER_AIM_LOCK_COOLDOWN := 0.25
 const ARCHER_AIM_MAX_RANGE := 600.0
+
+# Swing-Slide-Jump constants
+const SLIDE_IMPACT_RADIUS := 48.0        # Detection window (~1 player height)
+const SLIDE_BOOST := 50.0                # Added to surface-parallel speed on slide start
+const SLIDE_FRICTION := 0.985            # Per-frame friction (very low = fast slides)
+const SLIDE_MIN_SPEED := 20.0            # Below this, slide ends
+const SLIDE_GRAVITY := 600.0             # Gravity component along slopes
+const SLIDE_PARTICLE_RATE := 30.0        # Dust puffs per second
+const SLIDE_CHARGE_TIME := 2.0           # Seconds to reach full charge
+
+# Slide state
+var _slide_charge_mod: Variant = null     # RampModifierProvider for charge (pushed on slide start)
+var _slide_on_surface: bool = true        # True while collision box contacts terrain
+var _slide_max_extent: Vector2 = Vector2.ZERO  # Furthest point reached (debug)
 
 
 func on_class_enter() -> void:
@@ -159,6 +173,10 @@ func _handle_ranger_grapple() -> void:
 
 	var delta: float = get_process_delta_time()
 
+	# Trace grapple state each frame (verbose — uncomment when debugging slide)
+	#DebugOverlay.log("player/slide", p, "GRAPPLE TICK: state=%d pos=(%.0f,%.0f) vel=(%.0f,%.0f) on_floor=%s" % [
+	#	p._grapple_state, p.global_position.x, p.global_position.y, p.velocity.x, p.velocity.y, str(p.is_on_floor())])
+
 	match p._grapple_state:
 		GrappleState.WINDUP:
 			_grapple_tick_windup(delta)
@@ -176,13 +194,40 @@ func _handle_ranger_grapple() -> void:
 		GrappleState.TETHER_THROWN:
 			_grapple_tick_swinging(delta)  # Player keeps swinging
 			_tether_tick_thrown(delta)
+		GrappleState.SLIDE, GrappleState.SLIDE_FREE:
+			# Check Circle (interact) release BEFORE tick — so release fires before _slide_end
+			if not p._is_device_action_pressed("interact"):
+				_slide_release()
+			else:
+				_slide_tick(delta)
 
-	# Jump while connected = impulse upward, rope goes slack but stays attached.
-	# Detach is handled by the grapple button logic above (tug/tether/release flow).
+	# Jump: RELEASE rope. If taut → add jump boost. If slack → just detach.
 	if p._grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED,
 						   GrappleState.TETHER_WINDUP, GrappleState.TETHER_THROWN]:
 		if p._is_device_action_just_pressed("jump"):
-			_grapple_jump_on_rope()
+			var dist: float = p.global_position.distance_to(p._grapple_anchor)
+			var is_taut: bool = dist >= p._grapple_rope_len * 0.95
+			if is_taut:
+				# Taut: release with jump boost added to current velocity
+				var jump_boost: float = p.cfg("jump_velocity", p.JUMP_VELOCITY)  # Negative = upward
+				p.velocity.y += jump_boost
+				DebugOverlay.log("player/slide", p, "JUMP RELEASE: TAUT — boost_y=%.0f vel=(%.0f,%.0f)" % [
+					jump_boost, p.velocity.x, p.velocity.y])
+			else:
+				# Slack: release without boost, keep current velocity
+				DebugOverlay.log("player/slide", p, "JUMP RELEASE: SLACK — no boost, vel=(%.0f,%.0f)" % [
+					p.velocity.x, p.velocity.y])
+			p._grapple_launch_immunity = 0.5
+			AudioManager.play("jump")
+			p._rumble(0.3, 0.5, 0.1)
+			_grapple_release()
+
+	# Circle (interact) HELD while swinging near terrain → initiate slide
+	if p._grapple_state in [GrappleState.SWINGING, GrappleState.CONNECTED,
+						   GrappleState.TETHER_WINDUP, GrappleState.TETHER_THROWN]:
+		if p._is_device_action_pressed("interact"):
+			if _check_slide_impact():
+				_slide_initiate()
 
 	p.queue_redraw()
 
@@ -590,6 +635,309 @@ func _grapple_jump_release() -> void:
 
 
 
+# =============================================================================
+# SWING-SLIDE-JUMP (Phase 5.5)
+# =============================================================================
+
+func _check_slide_impact() -> bool:
+	## Check if the player is within SLIDE_IMPACT_RADIUS of a non-ceiling surface.
+	## Ceilings (normal pointing down, y > 0.5) are rejected — can't slide on ceilings.
+	if p.is_on_floor():
+		return true
+	if p.is_on_wall():
+		return true
+	# Not touching — probe ahead
+	var test_vel: Vector2 = p.velocity.normalized() * SLIDE_IMPACT_RADIUS
+	if test_vel.length() < 1.0:
+		test_vel = Vector2(0, SLIDE_IMPACT_RADIUS)
+	var collision: KinematicCollision2D = p.move_and_collide(test_vel * p.get_physics_process_delta_time(), true)
+	if collision:
+		var normal: Vector2 = collision.get_normal()
+		# Reject ceilings: normal.y > 0.5 means surface faces downward
+		if normal.y > 0.5:
+			return false
+		return true
+	return false
+
+
+func _slide_initiate() -> void:
+	## Transition from SWINGING to SLIDE — decompose velocity onto surface.
+	## Pushes a RampModifierProvider for charge buildup.
+	var MCP = preload("res://scripts/systems/monster_config.gd")
+
+	# Get the surface normal from collision — reject ceilings
+	var surface_normal := Vector2.UP
+	if p.is_on_floor():
+		surface_normal = p.get_floor_normal()
+	elif p.is_on_wall():
+		surface_normal = p.get_wall_normal()
+	else:
+		var collision: KinematicCollision2D = p.move_and_collide(
+			p.velocity.normalized() * SLIDE_IMPACT_RADIUS * p.get_physics_process_delta_time(), true)
+		if collision:
+			surface_normal = collision.get_normal()
+	# Reject ceilings
+	if surface_normal.y > 0.5:
+		return
+
+	# Compute TRUE swing velocity from pendulum angular state (not p.velocity,
+	# which gets mangled by move_and_slide floor collisions during the swing).
+	var swing_vel := Vector2.ZERO
+	if p._grapple_swing_vel != 0.0:
+		var tangent := Vector2(cos(p._grapple_swing_angle), -sin(p._grapple_swing_angle))
+		swing_vel = tangent * p._grapple_swing_vel * p._grapple_rope_len
+	else:
+		swing_vel = p.velocity  # Fallback if not in pendulum mode
+
+	# Surface tangent = perpendicular to normal, in the direction of swing
+	var raw_tangent := Vector2(-surface_normal.y, surface_normal.x)
+	if raw_tangent.dot(swing_vel) < 0:
+		raw_tangent = -raw_tangent
+
+	# Decompose swing velocity onto surface: parallel component = slide speed
+	var parallel_speed: float = swing_vel.dot(raw_tangent)
+	parallel_speed = absf(parallel_speed) + SLIDE_BOOST
+
+	var swing_dir: String = "RIGHT" if swing_vel.x > 0 else "LEFT"
+	DebugOverlay.log("player/slide", p, "SLIDE INIT: swing_vel=(%.0f,%.0f) speed=%.0f dir=%s angle=%.2f omega=%.2f p.vel=(%.0f,%.0f)" % [
+		swing_vel.x, swing_vel.y, swing_vel.length(), swing_dir,
+		p._grapple_swing_angle, p._grapple_swing_vel, p.velocity.x, p.velocity.y])
+
+	# Store slide state
+	p._slide_velocity = raw_tangent * parallel_speed
+	p._slide_surface_normal = surface_normal
+	p._slide_surface_tangent = raw_tangent
+	p._grapple_state = GrappleState.SLIDE
+	_slide_on_surface = true
+	_slide_max_extent = p.global_position
+
+	# Push charge ramp modifier: 1.0x → 1.5x over 2 seconds
+	if _slide_charge_mod:
+		p.remove_config(_slide_charge_mod)
+	_slide_charge_mod = MCP.RampModifierProvider.new({
+		"ranger_slide_charge_mult": ["multiply", 1.0, 1.5]
+	}, SLIDE_CHARGE_TIME, "slide_charge")
+	p.push_config(_slide_charge_mod)
+
+	# Snap player to surface — enable floor snapping to maintain contact
+	p.velocity = p._slide_velocity
+	p.floor_snap_length = 8.0  # Snap to floor within 8px
+
+	AudioManager.play("jump", -6.0, 0.7)
+	p._rumble(0.2, 0.1, 0.08)
+
+	DebugOverlay.log("player/slide", p, "SLIDE START: speed=%.0f normal=(%.2f,%.2f) charge_mod pushed" % [
+		parallel_speed, surface_normal.x, surface_normal.y])
+
+	# Lingering debug vectors at impact point
+	if DebugOverlay.should_draw("player/slide", p):
+		p._debug_tracers.append({
+			"pos": p.global_position,
+			"pre_vel": p.velocity,
+			"impulse": surface_normal * 200.0,
+			"post_vel": raw_tangent * parallel_speed,
+			"time": 8.0,
+		})
+
+
+func _slide_tick(delta: float) -> void:
+	## Per-frame slide update: friction, gravity on slopes, terrain following, charge tracking.
+	var speed: float = p._slide_velocity.length()
+
+	# Apply friction
+	speed *= SLIDE_FRICTION
+
+	# Gravity along slope: zero on flat, partial on slopes, full on vertical
+	var slope_sin: float = p._slide_surface_tangent.dot(Vector2.DOWN)
+	speed += SLIDE_GRAVITY * slope_sin * delta
+
+	# End slide if too slow — but only if Circle is released.
+	# While Circle is held, keep the slide alive (player chose to hold).
+	if speed < SLIDE_MIN_SPEED:
+		if not p._is_device_action_pressed("interact"):
+			_slide_end()
+			return
+		speed = 0.0  # Stopped but still in slide state — waiting for release
+
+	p._slide_velocity = p._slide_surface_tangent * speed
+	# Apply slide velocity + surface-hugging force to maintain contact
+	# CharacterBody2D needs a downward component to register is_on_floor()
+	p.velocity = p._slide_velocity - p._slide_surface_normal * 200.0
+
+	# Move and check for terrain changes
+	p.move_and_slide()
+	# Force floor snap after move to maintain contact
+	p.apply_floor_snap()
+
+	# Track surface contact
+	var was_on_surface: bool = _slide_on_surface
+	_slide_on_surface = p.is_on_floor() or p.is_on_wall()
+
+	# Update surface normal from collision (terrain following)
+	if p.is_on_floor():
+		var new_normal: Vector2 = p.get_floor_normal()
+		if new_normal.dot(p._slide_surface_normal) < 0.0:
+			_slide_on_surface = false
+			_slide_leave_surface()
+			return
+		_slide_update_surface(new_normal)
+	elif p.is_on_wall():
+		var new_normal: Vector2 = p.get_wall_normal()
+		_slide_update_surface(new_normal)
+
+	# Detect leaving surface → freeze charge (no boost on release)
+	# Player stays in SLIDE state — Circle release still works (but no boost).
+	if was_on_surface and not _slide_on_surface:
+		_slide_leave_surface()
+
+	# Check taut point: rope reaches max length → constrain to rope circle.
+	# Rope stays connected — player gets pulled off surface by the rope.
+	if p._grapple_state == GrappleState.SLIDE:
+		var rope_vec: Vector2 = p.global_position - p._grapple_anchor
+		var dist: float = rope_vec.length()
+		if dist >= p._grapple_rope_len:
+			# Snap back to rope length
+			p.global_position = p._grapple_anchor + rope_vec.normalized() * p._grapple_rope_len
+			# Remove the velocity component that points away from anchor
+			var rope_dir: Vector2 = rope_vec.normalized()
+			var vel_away: float = p._slide_velocity.dot(rope_dir)
+			if vel_away > 0:
+				p._slide_velocity -= rope_dir * vel_away
+			p._rumble(0.4, 0.6, 0.1)  # Sproing feel
+			DebugOverlay.log("player/slide", p, "SLIDE: rope TAUT at dist=%.0f — constraining" % dist)
+
+	# Track max extent for debug
+	if p.global_position.distance_to(_slide_max_extent) > (_slide_max_extent - p.global_position).length():
+		_slide_max_extent = p.global_position
+
+	# Emit dust particles
+	_slide_emit_particles(delta)
+
+
+func _slide_update_surface(new_normal: Vector2) -> void:
+	## Re-project slide velocity onto new surface tangent (terrain following).
+	var new_tangent := Vector2(-new_normal.y, new_normal.x)
+	if new_tangent.dot(p._slide_velocity) < 0:
+		new_tangent = -new_tangent
+	var speed: float = p._slide_velocity.length()
+	p._slide_surface_normal = new_normal
+	p._slide_surface_tangent = new_tangent
+	p._slide_velocity = new_tangent * speed
+
+
+func _slide_leave_surface() -> void:
+	## Player left the surface (fell off edge or rope pulled them off).
+	## Freeze charge, transition back to SWINGING with current momentum.
+	if _slide_charge_mod and _slide_charge_mod.has_method("freeze"):
+		_slide_charge_mod.freeze()
+	_slide_on_surface = false
+
+	# Preserve momentum from the slide — use the slide velocity (not p.velocity
+	# which was mangled by move_and_slide floor absorption).
+	# Remove the surface-hugging force component so the player launches cleanly.
+	var exit_vel: Vector2 = p._slide_surface_tangent * p._slide_velocity.length()
+	p.velocity = exit_vel
+	p.floor_snap_length = 0.0
+	p._grapple_rope_slack = true  # Rope goes slack, player freefalls until taut
+	p._grapple_state = GrappleState.SWINGING
+	p._grapple_launch_immunity = 0.3
+
+	# Pop charge modifier — slide is over
+	if _slide_charge_mod:
+		p.remove_config(_slide_charge_mod)
+		_slide_charge_mod = null
+
+	DebugOverlay.log("player/slide", p, "SLIDE: left surface → SWINGING with vel=(%.0f,%.0f)" % [
+		p.velocity.x, p.velocity.y])
+
+
+func _slide_release() -> void:
+	## Circle released. If on surface → boosted launch. If off surface → no boost.
+	var charge_mult: float = 1.0
+	var charge_pct: float = 0.0
+	if _slide_charge_mod:
+		charge_pct = _slide_charge_mod.get_progress()
+
+	if _slide_on_surface:
+		# ON SURFACE: RED = GREEN (normal × jump) + BLUE (slide × charge)
+		# GREEN: surface normal × jump boost (the jump component)
+		var jump_boost: float = abs(p.cfg("jump_velocity", p.JUMP_VELOCITY))
+		var green: Vector2 = p._slide_surface_normal * jump_boost
+		# BLUE: slide velocity × charge multiplier
+		charge_mult = p.cfg("ranger_slide_charge_mult", 1.0)
+		var blue: Vector2 = p._slide_velocity * charge_mult
+		# RED: combined launch
+		var launch: Vector2 = green + blue
+		p.velocity = launch
+		p._grapple_launch_immunity = 0.5
+
+		# Debug tracers (lingering)
+		if DebugOverlay.should_draw("player/slide", p):
+			p._debug_tracers.append({
+				"pos": p.global_position,
+				"pre_vel": blue,           # BLUE: slide component
+				"impulse": green,          # GREEN: normal jump component
+				"post_vel": launch,
+				"time": 8.0,
+			})
+
+		AudioManager.play("jump")
+		p._rumble(0.3, 0.5, 0.1)
+		DebugOverlay.log("player/slide", p, "SLIDE RELEASE: on_surface=true charge=%.0f%% mult=%.2f green=(%.0f,%.0f) blue=(%.0f,%.0f) launch=(%.0f,%.0f) speed=%.0f" % [
+			charge_pct * 100.0, charge_mult, green.x, green.y, blue.x, blue.y, launch.x, launch.y, launch.length()])
+	else:
+		# OFF SURFACE: no boost — keep current velocity, charge wasted
+		p._grapple_launch_immunity = 0.3
+		DebugOverlay.log("player/slide", p, "SLIDE RELEASE: on_surface=false — charge WASTED (%.0f%%)" % [
+			charge_pct * 100.0])
+
+	# Pop the charge modifier
+	if _slide_charge_mod:
+		p.remove_config(_slide_charge_mod)
+		_slide_charge_mod = null
+
+	# Restore floor snap
+	p.floor_snap_length = 0.0
+
+	# Rope stays attached — go back to swinging with launch velocity
+	p._grapple_rope_slack = true
+	p._grapple_state = GrappleState.SWINGING
+
+
+func _slide_end() -> void:
+	## Slide ended naturally (too slow). Rope stays attached.
+	if _slide_charge_mod:
+		p.remove_config(_slide_charge_mod)
+		_slide_charge_mod = null
+	p.floor_snap_length = 0.0
+	p._grapple_rope_slack = true
+	p._grapple_state = GrappleState.SWINGING
+	DebugOverlay.log("player/slide", p, "SLIDE END → SWINGING (rope attached)")
+
+
+var _slide_particle_accum: float = 0.0
+
+func _slide_emit_particles(_delta: float) -> void:
+	## Emit dust puffs while sliding. Rate proportional to speed.
+	var speed: float = p._slide_velocity.length()
+	var rate: float = SLIDE_PARTICLE_RATE * (speed / 300.0)  # Scale by speed
+	_slide_particle_accum += rate * _delta
+	while _slide_particle_accum >= 1.0:
+		_slide_particle_accum -= 1.0
+		# Spawn a dust puff behind the player
+		var puff_pos: Vector2 = p.global_position - p._slide_surface_tangent * 8.0
+		puff_pos += Vector2(randf_range(-4, 4), randf_range(-4, 4))
+		var puff_vel: Vector2 = -p._slide_surface_tangent * randf_range(10, 30) + p._slide_surface_normal * randf_range(5, 20)
+		_spawn_dust_puff(puff_pos, puff_vel)
+
+
+func _spawn_dust_puff(pos: Vector2, vel: Vector2) -> void:
+	## Create a small dust/smoke particle. Uses the object pool if available.
+	var pool: Node = get_node_or_null("/root/ObjectPool")
+	if pool and pool.has_method("spawn_particle"):
+		pool.spawn_particle(pos, vel, Color(0.6, 0.55, 0.45, 0.5), randf_range(2.0, 4.0), randf_range(0.3, 0.5))
+
+
 func _grapple_release() -> void:
 	## Release from wall — keep swing momentum
 	p._grapple_state = GrappleState.RETRACTING
@@ -855,6 +1203,29 @@ func _draw_grapple() -> void:
 				p.draw_line(prev_pt, pt, rope_color, 2.0)
 				prev_pt = pt
 			p.draw_circle(anchor_local, 5.0, hook_color)
+
+		GrappleState.SLIDE:
+			# Draw slack rope from player to anchor — droops with catenary sag
+			var slide_anchor: Vector2 = p._grapple_anchor - p.global_position
+			var slide_dist: float = slide_anchor.length()
+			var slide_slack: float = maxf(p._grapple_rope_len - slide_dist, 0.0)
+			var slide_segs: int = maxi(int(p._grapple_rope_len / GRAPPLE_ROPE_SEGMENT_LEN), 3)
+			var slide_prev: Vector2 = Vector2.ZERO
+			for i in range(1, slide_segs + 1):
+				var t: float = float(i) / float(slide_segs)
+				var pt: Vector2 = Vector2.ZERO.lerp(slide_anchor, t)
+				var sag: float = slide_slack * 0.5 + 5.0
+				pt.y += sin(t * PI) * sag
+				p.draw_line(slide_prev, pt, rope_color, 2.0)
+				slide_prev = pt
+			p.draw_circle(slide_anchor, 5.0, hook_color)
+
+		GrappleState.SLIDE_FREE:
+			# Rope detached at taut — draw fading, dangling rope from anchor
+			var free_anchor: Vector2 = p._grapple_anchor - p.global_position
+			var fade_col := rope_color * Color(1, 1, 1, 0.4)
+			p.draw_line(Vector2.ZERO, free_anchor, fade_col, 1.5)
+			p.draw_circle(free_anchor, 4.0, hook_color * Color(1, 1, 1, 0.4))
 
 		GrappleState.RETRACTING:
 			var hook_local: Vector2 = p._grapple_hook_pos - p.global_position

@@ -7,7 +7,7 @@ extends RefCounted
 enum Tool {
 	SELECT, ANNOTATE, POINT, LINE, POLYLINE, POLY,
 	RECT, CIRCLE, ELLIPSE, ARROW, VECTOR, NORMAL,
-	ARC, BEZIER
+	ARC, BEZIER, TEXT, BOX_SELECT, LASSO_SELECT, POLYGON
 }
 
 # -- State --
@@ -15,6 +15,9 @@ var _whiteboard: Node2D = null  # The whiteboard.gd node
 var _active_tool: Tool = Tool.SELECT
 var _color: String = "red"
 var _line_width: float = 2.0
+
+# Text tool state
+var _text_editing_id: int = -1   # Component ID being typed into (-1 = none)
 
 # Drawing state (in-progress operations)
 var _drawing: bool = false          # True while a draw op is in progress
@@ -38,6 +41,18 @@ var _drag_id: int = -1
 var _cp_dragging: bool = false
 var _cp_comp_id: int = -1
 var _cp_key: String = ""
+
+# Box selection (multi-select rectangle)
+var _box_selecting: bool = false
+var _box_select_start: Vector2 = Vector2.ZERO
+
+# Lasso selection (freeform polygon)
+var _lasso_selecting: bool = false
+var _lasso_points: PackedVector2Array = PackedVector2Array()
+
+# Selection cursor indicator (+/- near mouse)
+var _hover_world_pos: Vector2 = Vector2.ZERO
+var _hover_hit_id: int = -1  # Component under cursor (-1 = none)
 
 # Snapping
 var snap_grid: bool = false
@@ -76,15 +91,20 @@ func _snap(pos: Vector2) -> Vector2:
 # INPUT HANDLERS — called by debug_drawer when click is in world space
 # ============================================================================
 
-func handle_click(world_pos: Vector2) -> void:
+func handle_click(world_pos: Vector2, shift_held: bool = false, ctrl_held: bool = false) -> void:
 	if not _whiteboard:
 		return
-	# Apply snapping to all tools except SELECT (which needs raw pos for hit testing)
-	var snap_pos: Vector2 = world_pos if _active_tool == Tool.SELECT else _snap(world_pos)
+	# Apply snapping to all tools except selection tools (which need raw pos for hit testing)
+	var is_select_tool: bool = _active_tool in [Tool.SELECT, Tool.BOX_SELECT, Tool.LASSO_SELECT]
+	var snap_pos: Vector2 = world_pos if is_select_tool else _snap(world_pos)
 
 	match _active_tool:
 		Tool.SELECT:
-			_handle_select_click(world_pos)
+			_handle_click_select(world_pos)
+		Tool.BOX_SELECT:
+			_handle_box_select_click(world_pos)
+		Tool.LASSO_SELECT:
+			_handle_lasso_select_click(world_pos)
 		Tool.ANNOTATE:
 			_handle_annotate_click(world_pos)
 		Tool.POINT:
@@ -96,9 +116,12 @@ func handle_click(world_pos: Vector2) -> void:
 				_did_drag = false
 				_start_pos = snap_pos
 				_current_pos = snap_pos
+				_update_preview()  # Show ghost + start CP immediately
 			else:
 				# Second click finalization (two-click mode)
 				_finalize_two_step(snap_pos)
+		Tool.TEXT:
+			_handle_text_click(snap_pos)
 		Tool.POLYLINE, Tool.POLY:
 			_handle_poly_click(snap_pos)
 		Tool.NORMAL:
@@ -120,10 +143,22 @@ func handle_drag(world_pos: Vector2) -> void:
 		_apply_cp_drag(snap_pos)
 		return
 
-	# Whole-component dragging (SELECT tool)
-	if _active_tool == Tool.SELECT and _drag_selected and _drag_id >= 0:
+	# Box selection dragging (BOX_SELECT tool)
+	if _box_selecting:
+		_whiteboard._selection_rect = _make_rect(_box_select_start, world_pos)
+		_whiteboard.queue_redraw()
+		return
+
+	# Lasso selection dragging
+	if _lasso_selecting:
+		_lasso_points.append(world_pos)
+		_whiteboard.queue_redraw()
+		return
+
+	# Whole-component dragging (any selection tool) — moves all selected components
+	if _active_tool in [Tool.SELECT, Tool.BOX_SELECT, Tool.LASSO_SELECT] and _drag_selected:
 		var delta: Vector2 = world_pos - _start_pos  # Use raw pos for smooth dragging
-		_whiteboard.move_component(_drag_id, delta.x, delta.y)
+		_whiteboard.move_selected(delta.x, delta.y)
 		_start_pos = world_pos
 		return
 
@@ -135,7 +170,7 @@ func handle_drag(world_pos: Vector2) -> void:
 	_update_preview()
 
 
-func handle_release(world_pos: Vector2) -> void:
+func handle_release(world_pos: Vector2, shift_held: bool = false, _ctrl_held: bool = false) -> void:
 	if not _whiteboard:
 		return
 	var snap_pos: Vector2 = _snap(world_pos)
@@ -147,8 +182,40 @@ func handle_release(world_pos: Vector2) -> void:
 		_cp_key = ""
 		return
 
-	# Select drag release
-	if _active_tool == Tool.SELECT:
+	# Box selection release
+	if _box_selecting:
+		_box_selecting = false
+		var rect: Rect2 = _make_rect(_box_select_start, world_pos)
+		_whiteboard._selection_rect = Rect2()
+		if rect.size.length() > MIN_DRAG_DISTANCE:
+			for c in _whiteboard.get_all_components():
+				if not _whiteboard.is_effectively_visible(c):
+					continue
+				if _whiteboard.is_effectively_locked(c):
+					continue
+				if _is_fully_contained(c, rect):
+					_toggle_selection(c["id"])
+		_whiteboard.queue_redraw()
+		return
+
+	# Lasso selection release
+	if _lasso_selecting:
+		_lasso_selecting = false
+		if _lasso_points.size() >= 3:
+			for c in _whiteboard.get_all_components():
+				if not _whiteboard.is_effectively_visible(c):
+					continue
+				if _whiteboard.is_effectively_locked(c):
+					continue
+				var centroid: Vector2 = _whiteboard._get_centroid(c)
+				if _point_in_polygon(centroid, _lasso_points):
+					_toggle_selection(c["id"])
+		_lasso_points.clear()
+		_whiteboard.queue_redraw()
+		return
+
+	# Select tool drag release
+	if _active_tool in [Tool.SELECT, Tool.BOX_SELECT, Tool.LASSO_SELECT]:
 		_drag_selected = false
 		_drag_id = -1
 		return
@@ -192,12 +259,39 @@ func cancel() -> void:
 	_cp_comp_id = -1
 	_cp_key = ""
 	_arc_step = 0
+	_text_editing_id = -1
+	_box_selecting = false
+	_lasso_selecting = false
+	_lasso_points.clear()
 	if _whiteboard:
+		_whiteboard._selection_rect = Rect2()
 		_whiteboard.queue_redraw()
 
 
 func is_drawing() -> bool:
 	return _drawing or not _poly_points.is_empty() or _arc_step > 0
+
+
+func update_hover(world_pos: Vector2) -> void:
+	## Track hover position for +/- cursor indicator on selection tools.
+	_hover_world_pos = world_pos
+	if _active_tool in [Tool.SELECT, Tool.BOX_SELECT, Tool.LASSO_SELECT]:
+		_hover_hit_id = _hit_test(world_pos)
+	else:
+		_hover_hit_id = -1
+
+
+func get_cursor_indicator() -> Dictionary:
+	## Returns cursor indicator info: {pos, type} where type is "add", "remove", or "".
+	if _active_tool not in [Tool.SELECT, Tool.BOX_SELECT, Tool.LASSO_SELECT]:
+		return {}
+	if _hover_hit_id < 0:
+		return {}
+	var c: Dictionary = _whiteboard.get_component(_hover_hit_id)
+	if c.is_empty() or not _whiteboard.is_effectively_visible(c):
+		return {}
+	var is_selected: bool = c.get("selected", false)
+	return {"pos": _hover_world_pos, "type": "remove" if is_selected else "add"}
 
 
 func get_preview() -> Dictionary:
@@ -208,30 +302,73 @@ func get_preview() -> Dictionary:
 # TOOL-SPECIFIC HANDLERS
 # ============================================================================
 
-func _handle_select_click(world_pos: Vector2) -> void:
-	# First check if clicking a control point of an already-selected, unlocked component
+func _select_common_click(world_pos: Vector2) -> bool:
+	## Shared logic for all selection tools: CP hit, then component toggle.
+	## Returns true if a component or CP was hit.
+	# Check control points first
 	var cp_hit: Dictionary = _cp_hit_test(world_pos)
 	if not cp_hit.is_empty():
-		# Check if the component is locked
 		var cp_comp: Dictionary = _whiteboard.get_component(cp_hit["comp_id"])
-		if not cp_comp.get("locked", false):
+		if not _whiteboard.is_effectively_locked(cp_comp):
+			if cp_hit["key"] == "flip":
+				cp_comp["flipped"] = not cp_comp.get("flipped", false)
+				_whiteboard.queue_redraw()
+				return true
 			_cp_dragging = true
 			_cp_comp_id = cp_hit["comp_id"]
 			_cp_key = cp_hit["key"]
-			return
+			return true
 
-	# Otherwise, try to select a component
+	# Hit test for component — toggle selection (+/-)
 	var hit_id: int = _hit_test(world_pos)
 	if hit_id >= 0:
-		_whiteboard.deselect_all()
-		_whiteboard.select_component(hit_id)
+		_toggle_selection(hit_id)
+		# Start drag if unlocked
 		var hit_comp: Dictionary = _whiteboard.get_component(hit_id)
-		if not hit_comp.get("locked", false):
+		if not _whiteboard.is_effectively_locked(hit_comp) and hit_comp.get("selected", false):
 			_drag_selected = true
 			_drag_id = hit_id
 			_start_pos = world_pos
+		return true
+	return false
+
+
+func _toggle_selection(comp_id: int) -> void:
+	## Toggle: add if not selected, remove if selected.
+	var c: Dictionary = _whiteboard.get_component(comp_id)
+	if c.is_empty():
+		return
+	if c.get("selected", false):
+		_whiteboard.deselect_component(comp_id)
 	else:
-		_whiteboard.deselect_all()
+		_whiteboard.select_component(comp_id)
+
+
+func _handle_click_select(world_pos: Vector2) -> void:
+	## Click tool: toggle individual components, NO drag-box on empty space.
+	if _select_common_click(world_pos):
+		return
+	# Empty space click — just deselect all (no box)
+	_whiteboard.deselect_all()
+
+
+func _handle_box_select_click(world_pos: Vector2) -> void:
+	## Box tool: toggle on component, drag-box on empty space.
+	if _select_common_click(world_pos):
+		return
+	# Empty space — start box selection
+	_box_selecting = true
+	_box_select_start = world_pos
+
+
+func _handle_lasso_select_click(world_pos: Vector2) -> void:
+	## Lasso tool: toggle on component, lasso on empty space.
+	if _select_common_click(world_pos):
+		return
+	# Empty space — start lasso
+	_lasso_selecting = true
+	_lasso_points.clear()
+	_lasso_points.append(world_pos)
 
 
 func _handle_annotate_click(world_pos: Vector2) -> void:
@@ -248,6 +385,47 @@ func _handle_poly_click(world_pos: Vector2) -> void:
 	_drawing = true
 	_current_pos = world_pos
 	_update_preview()
+
+
+func _handle_text_click(world_pos: Vector2) -> void:
+	# Place a new text component and start editing it
+	var new_id: int = _whiteboard.add_text(world_pos.x, world_pos.y, "", 14, _color)
+	_whiteboard.deselect_all()
+	_whiteboard.select_component(new_id)
+	_text_editing_id = new_id
+	_whiteboard.queue_redraw()
+
+
+func handle_text_input(event: InputEventKey) -> bool:
+	## Handle keyboard input for text editing. Returns true if consumed.
+	if _text_editing_id < 0:
+		return false
+	var c: Dictionary = _whiteboard.get_component(_text_editing_id)
+	if c.is_empty():
+		_text_editing_id = -1
+		return false
+	var text: String = c.get("text", "")
+	if event.keycode == KEY_BACKSPACE:
+		if text.length() > 0:
+			c["text"] = text.substr(0, text.length() - 1)
+			_whiteboard.queue_redraw()
+		return true
+	elif event.keycode == KEY_ENTER or event.keycode == KEY_ESCAPE:
+		# Finish text editing
+		if c.get("text", "").is_empty():
+			_whiteboard.delete_component(_text_editing_id)
+		_text_editing_id = -1
+		_whiteboard.queue_redraw()
+		return true
+	elif event.unicode > 0 and not event.ctrl_pressed:
+		c["text"] = text + char(event.unicode)
+		_whiteboard.queue_redraw()
+		return true
+	return false
+
+
+func is_editing_text() -> bool:
+	return _text_editing_id >= 0
 
 
 func _handle_normal_click(world_pos: Vector2) -> void:
@@ -383,7 +561,9 @@ func _cp_hit_test(world_pos: Vector2) -> Dictionary:
 	if not _whiteboard:
 		return {}
 	for c in _whiteboard.get_all_components():
-		if not c.get("selected", false) or not c.get("visible", true):
+		if not c.get("selected", false) or not _whiteboard.is_effectively_visible(c):
+			continue
+		if _whiteboard.is_effectively_locked(c):
 			continue
 		var cps: Array = _whiteboard.get_control_points(c)
 		for cp in cps:
@@ -399,6 +579,15 @@ func _apply_cp_drag(world_pos: Vector2) -> void:
 		return
 
 	match c["type"]:
+		"text":
+			if _cp_key == "pos":
+				c["x"] = world_pos.x; c["y"] = world_pos.y
+			elif _cp_key == "size":
+				# Horizontal drag: distance from anchor point controls font size
+				var anchor_x: float = c["x"] - 14
+				var dx: float = world_pos.x - anchor_x
+				# Map horizontal offset to font size: ~1px per font size unit
+				c["font_size"] = clampi(int(14 + dx), 6, 120)
 		"point":
 			if _cp_key == "pos":
 				c["x"] = world_pos.x; c["y"] = world_pos.y
@@ -445,6 +634,7 @@ func _apply_cp_drag(world_pos: Vector2) -> void:
 				var endpoints: Array = _whiteboard._get_normal_endpoints(c)
 				if not endpoints.is_empty():
 					c["length"] = maxf(5.0, world_pos.distance_to(endpoints[0]))
+			# "flip" is handled as a click action in _handle_select_click, not here
 		"arc":
 			if _cp_key == "center":
 				c["cx"] = world_pos.x; c["cy"] = world_pos.y
@@ -620,7 +810,7 @@ func _hit_test(pos: Vector2) -> int:
 	var best_dist: float = hit_radius
 
 	for c in _whiteboard.get_all_components():
-		if not c.get("visible", true):
+		if not _whiteboard.is_effectively_visible(c):
 			continue
 		var dist: float = _distance_to_component(c, pos)
 		if dist < best_dist:
@@ -861,3 +1051,41 @@ func _nearest_point_on_component(c: Dictionary, pos: Vector2) -> Array:
 			return [pos.distance_to(proj), t]
 
 	return [999.0, 0.5]
+
+
+# ============================================================================
+# Box Selection Helpers
+# ============================================================================
+
+func _point_in_polygon(point: Vector2, polygon: PackedVector2Array) -> bool:
+	## Ray-casting point-in-polygon test.
+	var n: int = polygon.size()
+	if n < 3:
+		return false
+	var inside: bool = false
+	var j: int = n - 1
+	for i in range(n):
+		var pi: Vector2 = polygon[i]
+		var pj: Vector2 = polygon[j]
+		if (pi.y > point.y) != (pj.y > point.y) and point.x < (pj.x - pi.x) * (point.y - pi.y) / (pj.y - pi.y) + pi.x:
+			inside = not inside
+		j = i
+	return inside
+
+
+func _make_rect(p1: Vector2, p2: Vector2) -> Rect2:
+	## Create a positive-size Rect2 from two corner points.
+	var min_p := Vector2(minf(p1.x, p2.x), minf(p1.y, p2.y))
+	var max_p := Vector2(maxf(p1.x, p2.x), maxf(p1.y, p2.y))
+	return Rect2(min_p, max_p - min_p)
+
+
+func _is_fully_contained(c: Dictionary, rect: Rect2) -> bool:
+	## Test if all control points of a component are inside the rect.
+	var cps: Array = _whiteboard.get_control_points(c)
+	if cps.is_empty():
+		return false
+	for cp in cps:
+		if not rect.has_point(cp["pos"]):
+			return false
+	return true

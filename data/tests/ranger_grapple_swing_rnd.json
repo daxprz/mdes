@@ -1,0 +1,45 @@
+{
+  "name": "ranger_grapple_swing_rnd",
+  "description": "Ranger grapple swing: throw hook at P3 underside from floor, swing on rope, jump-release with momentum.",
+  "script": [
+    "var inspect default=0",
+    "level title_screen",
+    "wait 0.3",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+
+    "# Spawn ranger on floor below P3 (upper-left platform at 669,525)",
+    "ai_spawn 669 876 class=ranged name=Ranger",
+    "wait 0.5",
+
+    "announce Grapple swing: throw at P3, swing, jump-release",
+
+    "# Step 1: Wind up grapple aimed at P3 underside",
+    "# From (669,876) toward P3 edge (700,525): mostly straight up → (0.09, -0.99)",
+    "ai_cmd grapple 0.8 0.09 -0.99",
+    "wait 1.2",
+
+    "# Step 2: Hook should now be attached. Let pendulum swing develop.",
+    "# Push right during swing to build momentum",
+    "announce Swinging right...",
+    "ai_cmd right 2.0",
+    "wait 2.0",
+
+    "# Step 3: Jump to release rope with swing momentum",
+    "announce Jump release!",
+    "ai_cmd jump 0.2",
+    "wait 0.5",
+
+    "# Step 4: Let physics settle — ranger should fly and land",
+    "ai_cmd none 3.0",
+    "wait 3.5",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"Did ranger swing and launch?\" [\"YES\",\"NO\"] {inspect} blocking"
+  ]
+}

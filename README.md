@@ -203,6 +203,22 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.79
+**Whiteboard overhaul, Ranger swing-slide-jump, modifier system extension**
+- **Whiteboard layers + groups**: hierarchical data model with effective visibility/lock cascading, Layers pane with tree view
+- **Boards/Board panes**: file browser with filter, ghost-row creation, delete-with-confirm, board rename, save flash
+- **Tool categories**: Select (Click/Box/Lasso), Line, Shape, Misc with Text tool (live typing, drag-to-resize)
+- **Selection tools**: +/- cursor indicator, Click toggle, Box drag-rect, Lasso freeform polygon
+- **Color palette**: 24 swatches in 2 rows, named color resolution throughout
+- **Pane resize overhaul**: `_sync_last_pane_height()`, all minimums = header-only, body-edge resize on all tabs
+- **RampModifierProvider**: new modifier type — values lerp over time, freeze/reset, powers charge mechanics
+- **Ranger swing-slide-jump**: Circle initiates surface slide during swing, charge 1.0x→1.5x via modifier, launch = normal jump + slide×charge, rope stays attached, edge-fall → freefall swing
+- **Jump release rework**: taut rope = detach + jump boost, slack = detach only
+- **Floor from JSON**: `_setup_floor_from_config()` repositions floor from level config
+- **RCON**: `ai_grapple`, `ai_status`, `wb assign`, action aliases, hold state cleanup
+- **Test suite**: `ranger_slide` (floor/wall/hill/taut) with matching test level
+- **Debug**: `player/slide` aspect — charge ring, velocity decomposition arrows, impact radius
+
 ### v0.10.78
 **Arc, Bezier, snapping, and component locking**
 - **Arc tool**: three-step creation (center → drag-release for radius/start → click for sweep angle), CPs for center/start/end, RCON `wb arc <cx> <cy> <r> <start°> <sweep°>`

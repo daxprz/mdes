@@ -1,0 +1,74 @@
+{
+  "name": "ranger_slide_floor",
+  "description": "Ranger swing-slide S3 (L=550). EXACT WB geometry. Teleport to S3 (419,200), attach grapple to (960,100), pendulum free-fall to floor, Circle-slide, release-boost.",
+  "debug": {
+    "log": ["player/slide"],
+    "on": ["player/slide", "player/jump_tracers", "player/velocity_arrows"]
+  },
+  "script": [
+    "var inspect default=0",
+
+    "# Load level + WB overlay",
+    "level ranger_slide_test",
+    "wait 0.5",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+    "wb load ranger_swing",
+    "wait 0.3",
+
+    "# === A. Spawn Ranger on floor ===",
+    "ai_spawn 583 490 class=ranged name=Ranger",
+    "wait 0.5",
+
+    "# === B+C. Teleport to S5 start, THEN attach grapple ===",
+    "# Use S5 (L=750) — longest rope, gives maximum slide distance before taut.",
+    "tp 217 200",
+    "wait 0.2",
+    "# Attach grapple to ceiling hook (960,100) with rope=750.",
+    "# Distance from (217,200) to (960,100) ≈ 750. Rope is TAUT.",
+    "# Pendulum starts at rest, swings from far left to floor and beyond.",
+    "ai_grapple 960 100 750",
+    "wait 0.2",
+    "announce Ranger at S5 (217,200). Grapple TAUT to (960,100). L=750.",
+
+    "# === D. HOLD Circle ===",
+    "# Will trigger slide the moment pendulum reaches the floor.",
+    "ai_hold interact on",
+    "wait 0.1",
+    "announce Circle HELD. Pendulum released from rest — swinging to floor.",
+
+    "# === E+F. Free-fall on pendulum — no input ===",
+    "# Pendulum period T ≈ 2π√(L/g) ≈ 2π√(550/600) ≈ 6s full cycle.",
+    "# Quarter-swing (top to bottom) takes ~1.5s.",
+    "# The arc hits the floor at ~(583, 500) — the S3 floor intersection.",
+    "wait 3.0",
+    "announce Pendulum should be near floor. Checking...",
+    "ai_status",
+    "wait 1.0",
+
+    "# === G. Slide briefly ===",
+    "# Circle is held — slide is active, charge building.",
+    "# Release quickly before rope pulls player off surface.",
+    "announce Slide phase",
+    "wait 0.1",
+    "ai_status",
+
+    "# === H. Release Circle — boost! ===",
+    "ai_hold interact off",
+    "wait 0.1",
+    "announce Circle RELEASED — checking boost",
+    "ai_status",
+
+    "# Let launch play out",
+    "ai_cmd none 3.0",
+    "wait 3.0",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"S3 slide+boost?\" [\"YES\",\"NO\",\"NO-SLIDE\",\"NO-BOOST\"] {inspect} blocking"
+  ]
+}

@@ -1254,6 +1254,12 @@ func _execute(command: String) -> String:
 				aim = Vector2(float(parts[3]), float(parts[4]))
 			# Support comma-separated actions: ai_cmd l2,r2 0.2
 			var actions: Array = [] if action == "none" else Array(action.split(","))
+			# Alias short names → Godot input action names
+			var _ai_aliases := {"left": "move_left", "right": "move_right",
+				"up": "move_up", "down": "move_down"}
+			for ai in range(actions.size()):
+				if _ai_aliases.has(actions[ai]):
+					actions[ai] = _ai_aliases[actions[ai]]
 			for p in get_tree().get_nodes_in_group("players"):
 				if p.has_method("ai_queue_cmd") and p._ai_active:
 					p.ai_queue_cmd(actions, duration, aim)
@@ -1267,11 +1273,74 @@ func _execute(command: String) -> String:
 			if parts.size() < 3:
 				return "ERR: usage: ai_hold <action> on|off"
 			var hold_action: String = parts[1]
+			var _hold_aliases := {"left": "move_left", "right": "move_right",
+				"up": "move_up", "down": "move_down"}
+			if _hold_aliases.has(hold_action):
+				hold_action = _hold_aliases[hold_action]
 			var hold_state: bool = parts[2] == "on"
 			for p in get_tree().get_nodes_in_group("players"):
 				if p.has_method("ai_set_hold") and p._ai_active:
 					p.ai_set_hold(hold_action, hold_state)
 					return "OK: %s %s" % [hold_action, "held" if hold_state else "released"]
+			return "ERR: no AI player"
+
+		"ai_grapple":
+			# Force-attach grapple: ai_grapple <anchor_x> <anchor_y> <rope_length>
+			# Puts player into SWINGING state. Computes pendulum angle from current position.
+			# If player distance > rope_length, constrains to rope_length.
+			if parts.size() < 4:
+				return "ERR: usage: ai_grapple <anchor_x> <anchor_y> <rope_length>"
+			var gax: float = float(parts[1])
+			var gay: float = float(parts[2])
+			var grope: float = float(parts[3])
+			for p in get_tree().get_nodes_in_group("players"):
+				if "_grapple_state" in p:
+					var anchor := Vector2(gax, gay)
+					p._grapple_anchor = anchor
+					p._grapple_anchor_entity = null
+					p._grapple_anchor_body = null
+					p._grapple_hook_pos = anchor
+					p._grapple_rope_len = grope
+					p._grapple_pulling = false
+					# Compute swing angle from current player position
+					var diff: Vector2 = p.global_position - anchor
+					var dist: float = diff.length()
+					p._grapple_swing_angle = atan2(diff.x, diff.y)
+					p._grapple_swing_vel = 0.0
+					# If within rope length: start taut (pendulum from rest)
+					# If beyond: constrain position to rope circle
+					if dist <= grope:
+						p._grapple_rope_slack = dist < grope * 0.95
+					else:
+						# Snap to rope length
+						p.global_position = anchor + diff.normalized() * grope
+						p._grapple_rope_slack = false
+					p._grapple_state = 4  # GrappleState.SWINGING
+					p._grapple_swing_drove_velocity = true
+					p._grapple_launch_immunity = 0.3
+					return "OK: grapple at (%.0f,%.0f) rope=%.0f angle=%.2f dist=%.0f %s" % [
+						gax, gay, grope, p._grapple_swing_angle, dist,
+						"SLACK" if p._grapple_rope_slack else "TAUT"]
+			return "ERR: no player"
+
+		"ai_status":
+			# Report AI player state: position, velocity, grapple state, slide state
+			for p in get_tree().get_nodes_in_group("players"):
+				if "_ai_active" in p and p._ai_active:
+					var pos: Vector2 = p.global_position
+					var vel: Vector2 = p.velocity
+					var gs: String = "IDLE"
+					if "_grapple_state" in p:
+						gs = str(p._grapple_state)
+					var slide_info: String = ""
+					if "_slide_velocity" in p and p._grapple_state in [9, 10]:  # SLIDE, SLIDE_FREE
+						slide_info = " slide_speed=%.0f on_surface=%s" % [
+							p._slide_velocity.length(),
+							str(p.is_on_floor() or p.is_on_wall())]
+					var floor_info: String = " on_floor=%s on_wall=%s" % [
+						str(p.is_on_floor()), str(p.is_on_wall())]
+					return "pos=(%.0f,%.0f) vel=(%.0f,%.0f) speed=%.0f grapple=%s%s%s" % [
+						pos.x, pos.y, vel.x, vel.y, vel.length(), gs, floor_info, slide_info]
 			return "ERR: no AI player"
 
 		"ai_off":
@@ -5081,7 +5150,7 @@ func _cmd_wb(parts: PackedStringArray) -> String:
   wb snap [grid|comp] [on|off]         — toggle snapping
   wb set <id> <key>=<val> ...           — set properties
   wb move <id> <dx> <dy>                — translate component
-  wb delete <id>                        — delete component
+  wb delete <id|selected>               — delete component(s)
   wb show <id> / wb hide <id>           — toggle visibility
   wb select <id> [id ...]               — select components
   wb deselect                           — clear selection
@@ -5305,7 +5374,10 @@ Options: color=<name|#hex> label=<text> width=<float>"""
 
 		"delete":
 			if parts.size() < 3:
-				return "ERR: usage: wb delete <id>"
+				return "ERR: usage: wb delete <id|selected>"
+			if parts[2] == "selected":
+				var count: int = wb.delete_selected()
+				return "OK: deleted %d components" % count
 			var id: int = int(parts[2])
 			if wb.delete_component(id):
 				return "OK: deleted #%d" % id
@@ -5400,13 +5472,13 @@ Options: color=<name|#hex> label=<text> width=<float>"""
 			var ids: Array[int] = []
 			for i in range(3, parts.size()):
 				ids.append(int(parts[i]))
-			wb.create_group(label, ids)
+			wb.create_group_by_name(label, ids)
 			return "OK: group '%s' with %d components" % [label, ids.size()]
 
 		"ungroup":
 			if parts.size() < 3:
 				return "ERR: usage: wb ungroup <label>"
-			if wb.remove_group(parts[2]):
+			if wb.remove_group_by_name(parts[2]):
 				return "OK: removed group '%s'" % parts[2]
 			return "ERR: no group '%s'" % parts[2]
 
@@ -5417,14 +5489,146 @@ Options: color=<name|#hex> label=<text> width=<float>"""
 			var lines: PackedStringArray = PackedStringArray()
 			for g in groups:
 				var id_strs: PackedStringArray = PackedStringArray()
-				for id in g.get("ids", []):
-					id_strs.append("#%d" % id)
-				lines.append("  '%s': %s" % [g["label"], " ".join(id_strs)])
+				for cid in g.get("component_ids", []):
+					id_strs.append("#%d" % cid)
+				lines.append("  '%s': %s" % [g.get("name", "?"), " ".join(id_strs)])
 			return "Groups:\n" + "\n".join(lines)
+
+		# -- Layers --
+		"layer":
+			return _wb_layer_cmd(parts, wb)
+
+		"assign":
+			# wb assign <id> [id ...] layer <name_or_id>
+			if parts.size() < 5 or "layer" not in parts:
+				return "ERR: usage: wb assign <id> [id ...] layer <name_or_id>"
+			var layer_kw_idx: int = -1
+			for pi in range(2, parts.size()):
+				if parts[pi] == "layer":
+					layer_kw_idx = pi
+					break
+			if layer_kw_idx < 0 or layer_kw_idx + 1 >= parts.size():
+				return "ERR: usage: wb assign <id> [id ...] layer <name_or_id>"
+			var target_layer: Dictionary = _wb_find_layer(parts[layer_kw_idx + 1], wb)
+			if target_layer.is_empty():
+				return "ERR: no layer '%s'" % parts[layer_kw_idx + 1]
+			var count: int = 0
+			for pi in range(2, layer_kw_idx):
+				var comp_id: int = int(parts[pi])
+				if wb.assign_to_layer(comp_id, target_layer["id"]):
+					count += 1
+			return "OK: assigned %d component(s) to layer '%s'" % [count, target_layer["name"]]
 
 		_:
 			return "ERR: unknown wb subcommand '%s'. Try 'wb' for help" % sub
 	return "ERR: unhandled wb command"
+
+
+func _wb_layer_cmd(parts: PackedStringArray, wb: Node) -> String:
+	## Handle wb layer subcommands.
+	if parts.size() < 3:
+		# List layers
+		var layers: Array = wb.get_layers()
+		if layers.is_empty():
+			return "No layers"
+		var lines: PackedStringArray = PackedStringArray()
+		for layer in layers:
+			var active: String = " *" if layer["id"] == wb.get_active_layer_id() else ""
+			var vis: String = "visible" if layer.get("visible", true) else "hidden"
+			var lck: String = " locked" if layer.get("locked", false) else ""
+			var count: int = layer.get("component_ids", []).size()
+			for g in layer.get("groups", []):
+				count += g.get("component_ids", []).size()
+			lines.append("  #%d '%s' (%d items) %s%s%s" % [layer["id"], layer["name"], count, vis, lck, active])
+		return "Layers:\n" + "\n".join(lines)
+
+	var action: String = parts[2].to_lower()
+	match action:
+		"add":
+			var name: String = parts[3] if parts.size() > 3 else ""
+			var lid: int = wb.add_layer(name)
+			return "OK: added layer #%d '%s'" % [lid, wb.get_layer(lid).get("name", "")]
+		"remove":
+			if parts.size() < 4:
+				return "ERR: usage: wb layer remove <name|id>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			if wb.remove_layer(layer["id"]):
+				return "OK: removed layer '%s'" % layer["name"]
+			return "ERR: cannot remove last layer"
+		"rename":
+			if parts.size() < 5:
+				return "ERR: usage: wb layer rename <name|id> <new_name>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.rename_layer(layer["id"], parts[4])
+			return "OK: renamed to '%s'" % parts[4]
+		"show":
+			if parts.size() < 4:
+				return "ERR: usage: wb layer show <name|id>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.set_layer_visible(layer["id"], true)
+			return "OK: layer '%s' visible" % layer["name"]
+		"hide":
+			if parts.size() < 4:
+				return "ERR: usage: wb layer hide <name|id>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.set_layer_visible(layer["id"], false)
+			return "OK: layer '%s' hidden" % layer["name"]
+		"lock":
+			if parts.size() < 4:
+				return "ERR: usage: wb layer lock <name|id>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.set_layer_locked(layer["id"], true)
+			return "OK: layer '%s' locked" % layer["name"]
+		"unlock":
+			if parts.size() < 4:
+				return "ERR: usage: wb layer unlock <name|id>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.set_layer_locked(layer["id"], false)
+			return "OK: layer '%s' unlocked" % layer["name"]
+		"move":
+			if parts.size() < 5:
+				return "ERR: usage: wb layer move <name|id> <up|down>"
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			var dir: int = -1 if parts[4] == "up" else 1
+			if wb.move_layer(layer["id"], dir):
+				return "OK: moved layer '%s' %s" % [layer["name"], parts[4]]
+			return "ERR: cannot move layer '%s' %s" % [layer["name"], parts[4]]
+		"active":
+			if parts.size() < 4:
+				var active_layer: Dictionary = wb.get_layer(wb.get_active_layer_id())
+				if active_layer.is_empty():
+					return "No active layer"
+				return "Active layer: #%d '%s'" % [active_layer["id"], active_layer["name"]]
+			var layer := _wb_find_layer(parts[3], wb)
+			if layer.is_empty():
+				return "ERR: layer '%s' not found" % parts[3]
+			wb.set_active_layer(layer["id"])
+			return "OK: active layer set to '%s'" % layer["name"]
+	return "ERR: unknown layer action '%s'" % action
+
+
+func _wb_find_layer(name_or_id: String, wb: Node) -> Dictionary:
+	## Find a layer by name or ID.
+	if name_or_id.is_valid_int():
+		return wb.get_layer(int(name_or_id))
+	for layer in wb.get_layers():
+		if layer["name"].to_lower() == name_or_id.to_lower():
+			return layer
+	return {}
 
 
 # -- Whiteboard creation helpers (parse opts from parts) --

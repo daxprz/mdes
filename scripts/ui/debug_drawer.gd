@@ -26,17 +26,18 @@ var _le_sub_resize_idx: int = -1
 var _le_sub_resize_start_y: float = 0.0
 var _le_sub_resize_start_h: float = 0.0
 var _le_sub_resize_next_h: float = 0.0
+var _le_sub_resize_orig: Array[float] = []
 var _le_grip_last_click_idx: int = -1
 var _le_grip_last_click_time: float = 0.0
 
 # Level editor sub-section min heights
 const LE_SUB_MIN := {
-	"le_level":      30.0,
-	"le_modes":      30.0,
-	"le_items":      36.0,
-	"le_properties": 60.0,
-	"le_actions":    36.0,
-	"le_save":       SUB_HEADER_H + 3 * 16.0,
+	"le_level":      SUB_HEADER_H,
+	"le_modes":      SUB_HEADER_H,
+	"le_items":      SUB_HEADER_H,
+	"le_properties": SUB_HEADER_H,
+	"le_actions":    SUB_HEADER_H,
+	"le_save":       SUB_HEADER_H,
 }
 
 # Constructs section state
@@ -46,6 +47,7 @@ var _ct_sub_resize_idx: int = -1
 var _ct_sub_resize_start_y: float = 0.0
 var _ct_sub_resize_start_h: float = 0.0
 var _ct_sub_resize_next_h: float = 0.0
+var _ct_sub_resize_orig: Array[float] = []
 var _ct_grip_last_click_idx: int = -1
 var _ct_grip_last_click_time: float = 0.0
 var _ct_hover_type_idx: int = -1
@@ -54,9 +56,9 @@ var _ct_instances_scroll_offset: int = 0
 var _ct_selected_type: String = "splays"  # "splays" or "trees"
 
 const CT_SUB_MIN := {
-	"ct_types":     30.0,
-	"ct_instances": 36.0,
-	"ct_editor":    60.0,
+	"ct_types":     SUB_HEADER_H,
+	"ct_instances": SUB_HEADER_H,
+	"ct_editor":    SUB_HEADER_H,
 }
 
 # Whiteboard section state
@@ -66,10 +68,14 @@ var _wb_sub_resize_idx: int = -1
 var _wb_sub_resize_start_y: float = 0.0
 var _wb_sub_resize_start_h: float = 0.0
 var _wb_sub_resize_next_h: float = 0.0
+var _wb_sub_resize_orig: Array[float] = []
 var _wb_grip_last_click_idx: int = -1
 var _wb_grip_last_click_time: float = 0.0
 var _wb_inspector_scroll: int = 0
-var _wb_active_tool: int = 0  # Index into WB_TOOLS
+var _wb_layers_scroll: int = 0
+var _wb_layers_expanded: Dictionary = {}  # layer_id → bool
+var _wb_groups_expanded: Dictionary = {}  # group_id → bool
+var _wb_active_tool: int = 0  # Tool enum index from whiteboard_tools.gd
 var _wb_tool_color: String = "red"
 var _wb_name_focused: bool = false
 var _wb_name_text: String = ""
@@ -77,8 +83,14 @@ var _wb_annotate_focused: bool = false
 var _wb_annotate_text: String = ""
 var _wb_hover_tool_idx: int = -1
 var _wb_cached_file_list: Array[String] = []
-var _wb_show_file_picker: bool = false
-var _wb_hover_file_idx: int = -1
+var _wb_boards_filter_text: String = ""
+var _wb_boards_filter_focused: bool = false
+var _wb_boards_scroll_offset: int = 0
+var _wb_boards_hover_idx: int = -1
+var _wb_boards_dirty: bool = true
+var _wb_boards_pending_delete: String = ""  # Board name pending deletion
+var _wb_clear_confirm_time: float = 0.0    # Time when Clear confirm was shown (0 = hidden)
+var _wb_save_flash_time: float = 0.0       # Time when Save was clicked (0 = no flash)
 var _wb_tools_instance: RefCounted = null  # WhiteboardTools
 var _wb_world_dragging: bool = false       # True during world-space drag
 var _wb_last_click_time: float = 0.0       # For double-click detection
@@ -89,43 +101,73 @@ const WB_DOUBLE_CLICK_MS := 350.0
 const WB_DOUBLE_CLICK_DIST := 10.0
 
 const WB_SUB_MIN := {
-	"wb_board":     30.0,
-	"wb_tools":     60.0,
-	"wb_settings":  36.0,
-	"wb_actions":   36.0,
-	"wb_inspector": SUB_HEADER_H + 6 * 16.0,
+	"wb_board":     SUB_HEADER_H,
+	"wb_boards":    SUB_HEADER_H,
+	"wb_tools":     SUB_HEADER_H,
+	"wb_settings":  SUB_HEADER_H,
+	"wb_actions":   SUB_HEADER_H,
+	"wb_layers":    SUB_HEADER_H,
+	"wb_inspector": SUB_HEADER_H,
 }
 
-const WB_TOOLS: Array[Dictionary] = [
-	{"name": "Select",    "icon": "S"},
-	{"name": "Annotate",  "icon": "A"},
-	{"name": "Point",     "icon": "."},
-	{"name": "Line",      "icon": "/"},
-	{"name": "PolyLine",  "icon": "~"},
-	{"name": "Poly",      "icon": "P"},
-	{"name": "Rect",      "icon": "R"},
-	{"name": "Circle",    "icon": "O"},
-	{"name": "Ellipse",   "icon": "E"},
-	{"name": "Arrow",     "icon": ">"},
-	{"name": "Vector",    "icon": "V"},
-	{"name": "Normal",    "icon": "N"},
-	{"name": "Arc",       "icon": "("},
-	{"name": "Bezier",    "icon": "B"},
+## Tool categories: each category maps names to whiteboard_tools.gd Tool enum indices.
+## The enum order is: SELECT(0), ANNOTATE(1), POINT(2), LINE(3), POLYLINE(4), POLY(5),
+##   RECT(6), CIRCLE(7), ELLIPSE(8), ARROW(9), VECTOR(10), NORMAL(11), ARC(12), BEZIER(13),
+##   TEXT(14), BOX_SELECT(15), LASSO_SELECT(16), POLYGON(17)
+const WB_TOOL_CATEGORIES: Array[Dictionary] = [
+	{"name": "Select", "tools": [
+		{"name": "Click",   "idx": 0},   # SELECT
+		{"name": "Box",     "idx": 15},   # BOX_SELECT
+		{"name": "Lasso",   "idx": 16},   # LASSO_SELECT
+	]},
+	{"name": "Line", "tools": [
+		{"name": "Line",    "idx": 3},   # LINE
+		{"name": "Poly",    "idx": 4},   # POLYLINE
+		{"name": "Bezier",  "idx": 13},  # BEZIER
+	]},
+	{"name": "Shape", "tools": [
+		{"name": "Rect",    "idx": 6},   # RECT
+		{"name": "Circle",  "idx": 7},   # CIRCLE
+		{"name": "Ellipse", "idx": 8},   # ELLIPSE
+		{"name": "Polygon", "idx": 17},  # POLYGON
+	]},
+	{"name": "Misc", "tools": [
+		{"name": "Text",     "idx": 14},  # TEXT
+		{"name": "Annotate", "idx": 1},   # ANNOTATE
+		{"name": "Vector",   "idx": 10},  # VECTOR
+		{"name": "Normal",   "idx": 11},  # NORMAL
+	]},
 ]
+var _wb_active_category: int = 0  # Which category is expanded
 
+const WB_COLORS_PER_ROW := 12
 const WB_COLOR_SWATCHES: Array[Dictionary] = [
-	{"name": "red",     "color": Color(1.0, 0.27, 0.27)},
-	{"name": "green",   "color": Color(0.27, 1.0, 0.27)},
-	{"name": "blue",    "color": Color(0.27, 0.53, 1.0)},
-	{"name": "yellow",  "color": Color(1.0, 1.0, 0.27)},
-	{"name": "cyan",    "color": Color(0.27, 1.0, 1.0)},
-	{"name": "magenta", "color": Color(1.0, 0.27, 1.0)},
-	{"name": "orange",  "color": Color(1.0, 0.53, 0.27)},
-	{"name": "white",   "color": Color(1.0, 1.0, 1.0)},
-	{"name": "purple",  "color": Color(0.67, 0.27, 1.0)},
-	{"name": "pink",    "color": Color(1.0, 0.53, 0.67)},
-	{"name": "lime",    "color": Color(0.53, 1.0, 0.27)},
-	{"name": "gold",    "color": Color(1.0, 0.8, 0.27)},
+	# Row 1: spectrum (warm → cool) + white
+	{"name": "red",       "color": Color(1.0, 0.27, 0.27)},
+	{"name": "orange",    "color": Color(1.0, 0.53, 0.27)},
+	{"name": "gold",      "color": Color(1.0, 0.8, 0.27)},
+	{"name": "yellow",    "color": Color(1.0, 1.0, 0.27)},
+	{"name": "lime",      "color": Color(0.53, 1.0, 0.27)},
+	{"name": "green",     "color": Color(0.27, 1.0, 0.27)},
+	{"name": "cyan",      "color": Color(0.27, 1.0, 1.0)},
+	{"name": "blue",      "color": Color(0.27, 0.53, 1.0)},
+	{"name": "purple",    "color": Color(0.67, 0.27, 1.0)},
+	{"name": "magenta",   "color": Color(1.0, 0.27, 1.0)},
+	{"name": "pink",      "color": Color(1.0, 0.53, 0.67)},
+	{"name": "white",     "color": Color(1.0, 1.0, 1.0)},
+	# Row 2: muted/earth tones + greys (dark → light)
+	{"name": "maroon",    "color": Color(0.4, 0.1, 0.12)},
+	{"name": "brown",     "color": Color(0.55, 0.33, 0.16)},
+	{"name": "tan",       "color": Color(0.82, 0.68, 0.46)},
+	{"name": "olive",     "color": Color(0.5, 0.5, 0.2)},
+	{"name": "teal",      "color": Color(0.2, 0.5, 0.5)},
+	{"name": "navy",      "color": Color(0.13, 0.13, 0.35)},
+	{"name": "charcoal",  "color": Color(0.18, 0.18, 0.2)},
+	{"name": "dark_grey", "color": Color(0.3, 0.3, 0.3)},
+	{"name": "slate",     "color": Color(0.4, 0.4, 0.5)},
+	{"name": "steel",     "color": Color(0.45, 0.55, 0.65)},
+	{"name": "grey",      "color": Color(0.5, 0.5, 0.5)},
+	{"name": "light_grey","color": Color(0.75, 0.75, 0.75)},
 ]
 
 # Cached level names
@@ -209,6 +251,7 @@ var _cfg_sub_resize_idx: int = -1
 var _cfg_sub_resize_start_y: float = 0.0
 var _cfg_sub_resize_start_h: float = 0.0
 var _cfg_sub_resize_next_h: float = 0.0
+var _cfg_sub_resize_orig: Array[float] = []
 var _cfg_grip_last_click_idx: int = -1
 var _cfg_grip_last_click_time: float = 0.0
 
@@ -261,20 +304,27 @@ var _cfg_stat_cache: Array = []            # Cached calculation steps for select
 var _cfg_stat_cache_dirty: bool = true
 
 const CFG_SUB_MIN := {
-	"cfg_classes":     30.0,
-	"cfg_class":       36.0,
-	"cfg_entities":    36.0,
-	"cfg_entity_mods": 30.0,
-	"cfg_entity_stats":36.0,
-	"cfg_calculations":30.0,
-	"cfg_modifiers":   36.0,
-	"cfg_modifier":    36.0,
-	"cfg_modified_ents":30.0,
+	"cfg_classes":     SUB_HEADER_H,
+	"cfg_class":       SUB_HEADER_H,
+	"cfg_entities":    SUB_HEADER_H,
+	"cfg_entity_mods": SUB_HEADER_H,
+	"cfg_entity_stats":SUB_HEADER_H,
+	"cfg_calculations":SUB_HEADER_H,
+	"cfg_modifiers":   SUB_HEADER_H,
+	"cfg_modifier":    SUB_HEADER_H,
+	"cfg_modified_ents":SUB_HEADER_H,
 }
 
 # Test runner section state — sub-section framework
 var _test_scroll_offset: int = 0
+var _suites_scroll_offset: int = 0
 var _test_hover_item: String = ""  # Hovered suite or test name
+
+# Test runner filter fields
+var _suites_filter_text: String = ""
+var _suites_filter_focused: bool = false
+var _tests_filter_text: String = ""
+var _tests_filter_focused: bool = false
 
 # Sub-section framework for test runner (collapsible, resizable panels)
 const SUB_HEADER_H := 20.0      # Height of each sub-section header bar
@@ -282,11 +332,11 @@ const SUB_RESIZE_ZONE := 5.0    # Pixels around the bottom edge for resize grab
 
 # Per-sub-section min heights (total including header)
 const SUB_MIN := {
-	"suites":   30.0,
-	"tests":    36.0,
-	"controls": 36.0,
-	"status":   36.0,
-	"editor":   SUB_HEADER_H + 10 * 18.0,  # ~10 lines
+	"suites":   SUB_HEADER_H,
+	"tests":    SUB_HEADER_H,
+	"controls": SUB_HEADER_H,
+	"status":   SUB_HEADER_H,
+	"editor":   SUB_HEADER_H,
 }
 const SUB_SNAP_DISTANCE := 12.0  # Pixels within which height snaps to the snap point
 
@@ -297,6 +347,7 @@ var _sub_resize_idx: int = -1      # Which sub-section is being resized (-1 = no
 var _sub_resize_start_y: float = 0.0
 var _sub_resize_start_h: float = 0.0
 var _sub_resize_next_h: float = 0.0  # Height of the Editor section (absorbs changes)
+var _sub_resize_orig: Array[float] = []
 var _grip_last_click_idx: int = -1   # Last grip index clicked (for double-click detection)
 var _grip_last_click_time: float = 0.0  # Time of last grip click
 
@@ -537,12 +588,12 @@ func _get_preferred_height(sid: String) -> float:
 	match sid:
 		"suites":
 			row_h = 18.0
-			return SUB_HEADER_H + maxf(1, _cached_suite_names.size()) * row_h + 4.0
+			return SUB_HEADER_H + 20.0 + maxf(1, _cached_suite_names.size()) * row_h + 4.0  # +20 for filter
 		"tests":
 			row_h = 16.0
 			var display_tests: Array[String] = _get_display_test_list()
 			var visible: int = mini(display_tests.size(), 10)  # Cap at 10 visible
-			return SUB_HEADER_H + maxf(2, visible) * row_h + 4.0
+			return SUB_HEADER_H + 20.0 + maxf(2, visible) * row_h + 4.0  # +20 for filter
 		"controls":
 			return SUB_HEADER_H + 28.0  # Button bar height
 		"status":
@@ -578,6 +629,7 @@ func _select_suite(suite_name: String) -> void:
 		return
 	_selected_suite_name = suite_name
 	_selected_suite_tests.clear()
+	_test_scroll_offset = 0  # Reset test scroll when suite changes
 	var path: String = "res://data/tests/suites/%s.json" % suite_name
 	var file := FileAccess.open(path, FileAccess.READ)
 	if not file:
@@ -593,10 +645,20 @@ func _select_suite(suite_name: String) -> void:
 
 
 func _get_display_test_list() -> Array[String]:
-	## Returns the test list to display — filtered by selected suite, or all tests.
+	## Returns the test list to display — filtered by selected suite and text filter.
+	var base: Array[String]
 	if not _selected_suite_name.is_empty() and not _selected_suite_tests.is_empty():
-		return _selected_suite_tests
-	return _cached_test_names
+		base = _selected_suite_tests
+	else:
+		base = _cached_test_names
+	if _tests_filter_text.is_empty():
+		return base
+	var filtered: Array[String] = []
+	var ft: String = _tests_filter_text.to_lower()
+	for tn in base:
+		if ft in tn.to_lower():
+			filtered.append(tn)
+	return filtered
 
 
 func _update_suite_result(suite_name: String, passed: int, total: int) -> void:
@@ -793,6 +855,14 @@ func _input(event: InputEvent) -> void:
 					return
 
 		# Text input for filter fields
+		if _suites_filter_focused:
+			_handle_test_filter_input(event, "suites")
+			get_viewport().set_input_as_handled()
+			return
+		if _tests_filter_focused:
+			_handle_test_filter_input(event, "tests")
+			get_viewport().set_input_as_handled()
+			return
 		if _filter_focused:
 			_handle_text_input(event, "_filter_text")
 			get_viewport().set_input_as_handled()
@@ -810,14 +880,21 @@ func _input(event: InputEvent) -> void:
 			_handle_cfg_text_input(event)
 			get_viewport().set_input_as_handled()
 			return
-		if _wb_name_focused or _wb_annotate_focused:
+		# Text tool input (world-space typing)
+		if _wb_tools_instance and _wb_tools_instance.is_editing_text():
+			if _wb_tools_instance.handle_text_input(event):
+				get_viewport().set_input_as_handled()
+				return
+		if _wb_name_focused or _wb_annotate_focused or _wb_boards_filter_focused:
 			_handle_wb_text_input(event)
 			get_viewport().set_input_as_handled()
 			return
 
 		# Escape closes drawer or unfocuses
 		if event.keycode == KEY_ESCAPE:
-			if _filter_focused or _id_filter_focused or _config_filter_focused or _cfg_bp_filter_focused or _cfg_mod_filter_focused or _wb_name_focused or _wb_annotate_focused:
+			if _suites_filter_focused or _tests_filter_focused or _filter_focused or _id_filter_focused or _config_filter_focused or _cfg_bp_filter_focused or _cfg_mod_filter_focused or _wb_name_focused or _wb_annotate_focused or _wb_boards_filter_focused:
+				_suites_filter_focused = false
+				_tests_filter_focused = false
 				_filter_focused = false
 				_id_filter_focused = false
 				_config_filter_focused = false
@@ -825,6 +902,7 @@ func _input(event: InputEvent) -> void:
 				_cfg_mod_filter_focused = false
 				_wb_name_focused = false
 				_wb_annotate_focused = false
+				_wb_boards_filter_focused = false
 			elif _wb_tools_instance and _wb_tools_instance.is_drawing():
 				# Cancel in-progress whiteboard drawing
 				_wb_tools_instance.cancel()
@@ -844,6 +922,19 @@ func _input(event: InputEvent) -> void:
 				var wb := _get_whiteboard()
 				if wb:
 					wb._preview_component = _wb_tools_instance.get_preview()
+				get_viewport().set_input_as_handled()
+				return
+
+		# DEL/Backspace deletes selected whiteboard components
+		if (event.keycode == KEY_DELETE or event.keycode == KEY_BACKSPACE) and _current_section == Section.WHITEBOARD:
+			# Don't delete when a text field is focused
+			if not _wb_name_focused and not _wb_annotate_focused and not _wb_boards_filter_focused:
+				var wb := _get_whiteboard()
+				if wb:
+					var sel_ids: Array = wb.get_selected_ids()
+					for sid in sel_ids:
+						wb.delete_component(sid)
+					wb.queue_redraw()
 				get_viewport().set_input_as_handled()
 				return
 
@@ -912,10 +1003,8 @@ func _input(event: InputEvent) -> void:
 		if _wb_world_dragging:
 			_wb_world_dragging = false
 			if _wb_tools_instance:
-				_wb_tools_instance.handle_release(_wb_get_world_pos(event.position))
-				var wb := _get_whiteboard()
-				if wb:
-					wb._preview_component = _wb_tools_instance.get_preview()
+				_wb_tools_instance.handle_release(_wb_get_world_pos(event.position), event.shift_pressed, event.ctrl_pressed or event.meta_pressed)
+				_wb_sync_tools_state()
 			get_viewport().set_input_as_handled()
 			return
 
@@ -927,6 +1016,9 @@ func _input(event: InputEvent) -> void:
 			# Click outside — unfocus any text field
 			_filter_focused = false
 			_id_filter_focused = false
+			_suites_filter_focused = false
+			_tests_filter_focused = false
+			_wb_boards_filter_focused = false
 			# Route world-space click to whiteboard tools
 			if _current_section == Section.WHITEBOARD:
 				var tools := _wb_get_or_create_tools()
@@ -938,14 +1030,11 @@ func _input(event: InputEvent) -> void:
 						tools.handle_double_click(world_pos)
 						_wb_last_click_time = 0.0
 					else:
-						tools.handle_click(world_pos)
+						tools.handle_click(world_pos, event.shift_pressed, event.ctrl_pressed or event.meta_pressed)
 						_wb_last_click_time = now
 						_wb_last_click_pos = world_pos
 					_wb_world_dragging = true
-					# Sync preview to whiteboard for rendering
-					var wb := _get_whiteboard()
-					if wb:
-						wb._preview_component = tools.get_preview()
+					_wb_sync_tools_state()
 					# Auto-focus annotation field when using ANNOTATE tool
 					if _wb_active_tool == 1:  # ANNOTATE
 						var ann_wb2 := _get_whiteboard()
@@ -1044,11 +1133,14 @@ func _input(event: InputEvent) -> void:
 			_handle_ct_tree_prop_drag(event.position.x)
 			get_viewport().set_input_as_handled()
 		elif _wb_world_dragging and _wb_tools_instance:
-			_wb_tools_instance.handle_drag(_wb_get_world_pos(event.position))
-			var wb := _get_whiteboard()
-			if wb:
-				wb._preview_component = _wb_tools_instance.get_preview()
+			var drag_world: Vector2 = _wb_get_world_pos(event.position)
+			_wb_tools_instance.handle_drag(drag_world)
+			_wb_sync_tools_state()
 			get_viewport().set_input_as_handled()
+		elif _current_section == Section.WHITEBOARD and _wb_tools_instance and event.position.x < _panel_x:
+			# Mouse in world space (not dragging) — update hover for +/- indicator
+			_wb_tools_instance.update_hover(_wb_get_world_pos(event.position))
+			_wb_sync_tools_state()
 		elif event.position.x >= _panel_x + ICON_BAR_WIDTH and event.position.x <= _panel_x + _panel_width:
 			_last_hover_lx = event.position.x - _panel_x - ICON_BAR_WIDTH - 4
 			if _current_section == Section.TEST_RUNNER:
@@ -1083,6 +1175,28 @@ func _handle_text_input(event: InputEventKey, _field: String) -> void:
 	elif event.unicode > 0 and not event.ctrl_pressed:
 		_filter_text += char(event.unicode)
 		_rebuild_visible_rows()
+
+
+func _handle_test_filter_input(event: InputEventKey, which: String) -> void:
+	## Handle text input for test runner filter fields (suites or tests).
+	if which == "suites":
+		if event.keycode == KEY_BACKSPACE:
+			if _suites_filter_text.length() > 0:
+				_suites_filter_text = _suites_filter_text.substr(0, _suites_filter_text.length() - 1)
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_TAB or event.keycode == KEY_ESCAPE:
+			_suites_filter_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_suites_filter_text += char(event.unicode)
+		_suites_scroll_offset = 0  # Reset scroll when filter changes
+	elif which == "tests":
+		if event.keycode == KEY_BACKSPACE:
+			if _tests_filter_text.length() > 0:
+				_tests_filter_text = _tests_filter_text.substr(0, _tests_filter_text.length() - 1)
+		elif event.keycode == KEY_ENTER or event.keycode == KEY_TAB or event.keycode == KEY_ESCAPE:
+			_tests_filter_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_tests_filter_text += char(event.unicode)
+		_test_scroll_offset = 0  # Reset scroll when filter changes
 
 
 func _handle_id_input(event: InputEventKey) -> void:
@@ -1441,8 +1555,12 @@ func _handle_test_click(lx: float, my: float) -> void:
 				# Start resize drag
 				_sub_resize_idx = target_idx
 				_sub_resize_start_y = my
+				_sync_last_pane_height(_subsections)
 				_sub_resize_start_h = _subsections[target_idx]["height"]
 				_sub_resize_next_h = _subsections[_subsections.size() - 1]["height"]
+				_sub_resize_orig.clear()
+				for s in _subsections:
+					_sub_resize_orig.append(s["height"])
 			# Clicks on the title or middle of the header do nothing
 			return
 
@@ -1461,8 +1579,12 @@ func _handle_test_click(lx: float, my: float) -> void:
 		if my >= body_end - SUB_RESIZE_ZONE and my < body_end + SUB_RESIZE_ZONE and i < _subsections.size() - 1:
 			_sub_resize_idx = i
 			_sub_resize_start_y = my
+			_sync_last_pane_height(_subsections)
 			_sub_resize_start_h = sub["height"]
-			_sub_resize_next_h = _subsections[_subsections.size() - 1]["height"]  # Editor's height
+			_sub_resize_next_h = _subsections[_subsections.size() - 1]["height"]
+			_sub_resize_orig.clear()
+			for s in _subsections:
+				_sub_resize_orig.append(s["height"])
 			return
 
 		# Check if click is in the body
@@ -1478,10 +1600,18 @@ func _handle_subsection_click(sub_id: String, lx: float, local_y: float, body_h:
 	## Handle a click inside a specific sub-section body.
 	match sub_id:
 		"suites":
+			# First 18px is filter field
+			if local_y < 18.0:
+				_suites_filter_focused = true
+				_tests_filter_focused = false
+				return
+			_suites_filter_focused = false
 			var row_h: float = 18.0
-			var idx: int = int(local_y / row_h)
-			if idx >= 0 and idx < _cached_suite_names.size():
-				var suite_name: String = _cached_suite_names[idx]
+			var list_y: float = local_y - 20.0  # After filter field
+			var filtered: Array[String] = _get_filtered_suites()
+			var idx: int = int(list_y / row_h) + _suites_scroll_offset
+			if idx >= 0 and idx < filtered.size():
+				var suite_name: String = filtered[idx]
 				# Check if click is on the play button (right 40px)
 				if lx > _content_width - 40:
 					var rcon: Node = get_node_or_null("/root/Rcon")
@@ -1491,9 +1621,16 @@ func _handle_subsection_click(sub_id: String, lx: float, local_y: float, body_h:
 					# Select the suite — filter tests list to show only its tests
 					_select_suite(suite_name)
 		"tests":
+			# First 18px is filter field
+			if local_y < 18.0:
+				_tests_filter_focused = true
+				_suites_filter_focused = false
+				return
+			_tests_filter_focused = false
 			var row_h: float = 16.0
+			var list_y: float = local_y - 20.0  # After filter field
 			var display_tests: Array[String] = _get_display_test_list()
-			var idx: int = int(local_y / row_h) + _test_scroll_offset
+			var idx: int = int(list_y / row_h) + _test_scroll_offset
 			if idx >= 0 and idx < display_tests.size():
 				var tname: String = display_tests[idx]
 				if lx > _content_width - 40:
@@ -1671,14 +1808,19 @@ func _handle_test_hover(my: float) -> void:
 			var local_y: float = my - body_y
 			match sub["id"]:
 				"suites":
-					var idx: int = int(local_y / 18.0)
-					if idx >= 0 and idx < _cached_suite_names.size():
-						_test_hover_item = _cached_suite_names[idx]
+					var list_y: float = local_y - 20.0  # After filter field
+					if list_y >= 0:
+						var filtered: Array[String] = _get_filtered_suites()
+						var idx: int = int(list_y / 18.0) + _suites_scroll_offset
+						if idx >= 0 and idx < filtered.size():
+							_test_hover_item = filtered[idx]
 				"tests":
-					var display_tests: Array[String] = _get_display_test_list()
-					var idx: int = int(local_y / 16.0) + _test_scroll_offset
-					if idx >= 0 and idx < display_tests.size():
-						_test_hover_item = display_tests[idx]
+					var list_y: float = local_y - 20.0  # After filter field
+					if list_y >= 0:
+						var display_tests: Array[String] = _get_display_test_list()
+						var idx: int = int(list_y / 16.0) + _test_scroll_offset
+						if idx >= 0 and idx < display_tests.size():
+							_test_hover_item = display_tests[idx]
 				"editor":
 					# Track insertion indicator using variable row heights
 					var te: Node = _get_test_editor()
@@ -1720,6 +1862,8 @@ func _handle_test_scroll(my: float, delta: int) -> void:
 			body_end = maxf(body_end, 9999.0)
 		if my >= y and my < body_end:
 			match sub["id"]:
+				"suites":
+					_suites_scroll_offset = maxi(0, _suites_scroll_offset + delta)
 				"tests":
 					_test_scroll_offset = maxi(0, _test_scroll_offset + delta)
 				"editor":
@@ -1730,22 +1874,64 @@ func _handle_test_scroll(my: float, delta: int) -> void:
 		y += sub["height"]
 
 
+func _sync_last_pane_height(subs: Array) -> void:
+	## Sync the last pane's stored height to fill remaining panel space.
+	## The last pane always renders to fill the viewport, but its stored height
+	## can diverge. This ensures the resize system sees the real available space.
+	if subs.is_empty():
+		return
+	var ph: float = get_viewport().get_visible_rect().size.y
+	var used: float = 0.0
+	for i in range(subs.size() - 1):
+		used += subs[i]["height"] if not subs[i].get("collapsed", false) else SUB_HEADER_H
+	var last: Dictionary = subs[subs.size() - 1]
+	var actual_h: float = ph - used
+	if not last.get("collapsed", false) and actual_h > last["height"]:
+		last["height"] = actual_h
+
+
+func _sub_resize_distribute(subs: Array, idx: int, start_h: float, dy: float,
+		mins: Dictionary, orig: Array[float]) -> void:
+	## Shared resize logic: distribute delta across ALL panes below, bottom-up.
+	## When growing, collapses below panes toward their minimums in sequence.
+	## When shrinking, gives freed space to the bottom-most below pane.
+	var sub: Dictionary = subs[idx]
+	var min_h: float = mins.get(sub["id"], 30.0)
+	# Calculate total available space from all non-collapsed panes below
+	var max_grow: float = 0.0
+	for i in range(idx + 1, subs.size()):
+		if subs[i].get("collapsed", false):
+			continue
+		max_grow += orig[i] - mins.get(subs[i]["id"], 30.0)
+	dy = clampf(dy, min_h - start_h, max_grow)
+	sub["height"] = start_h + dy
+	var delta: float = sub["height"] - start_h
+	# Restore below panes to originals, then absorb delta bottom-up
+	for i in range(idx + 1, subs.size()):
+		if not subs[i].get("collapsed", false):
+			subs[i]["height"] = orig[i]
+	var to_absorb: float = delta
+	for i in range(subs.size() - 1, idx, -1):
+		if subs[i].get("collapsed", false):
+			continue
+		var pmin: float = mins.get(subs[i]["id"], 30.0)
+		if to_absorb > 0.0:
+			var can_give: float = subs[i]["height"] - pmin
+			var take: float = minf(to_absorb, can_give)
+			subs[i]["height"] -= take
+			to_absorb -= take
+		else:
+			subs[i]["height"] -= to_absorb
+			break
+
+
 func _handle_sub_resize_drag(my: float) -> void:
-	## Resize: growing/shrinking the dragged section, Editor absorbs the difference.
-	## No forced snapping during drag — user can resize freely past snap points.
+	## Resize: growing/shrinking the dragged section, all panes below absorb bottom-up.
 	if _sub_resize_idx < 0 or _sub_resize_idx >= _subsections.size():
 		return
 	var dy: float = my - _sub_resize_start_y
-	var sub: Dictionary = _subsections[_sub_resize_idx]
-	var editor_sub: Dictionary = _subsections[_subsections.size() - 1]
-	var min_h: float = SUB_MIN.get(sub["id"], 30.0)
-	var editor_min: float = SUB_MIN.get(editor_sub["id"], 60.0)
-	var max_dy: float = _sub_resize_next_h - editor_min
-	var min_dy: float = min_h - _sub_resize_start_h
-	dy = clampf(dy, min_dy, max_dy)
-	var new_h: float = _sub_resize_start_h + dy
-	sub["height"] = new_h
-	editor_sub["height"] = _sub_resize_next_h - (new_h - _sub_resize_start_h)
+	_sub_resize_distribute(_subsections, _sub_resize_idx, _sub_resize_start_h,
+		dy, SUB_MIN, _sub_resize_orig)
 
 
 func _handle_sub_resize_release() -> void:
@@ -2345,13 +2531,46 @@ func _draw_test_sub_header(x: float, y: float, pw: float, font: Font, sub: Dicti
 			_panel.draw_rect(Rect2(grip_x + gj * 5, y + 5 + gi * 5, 2, 2), Color(0.3, 0.35, 0.4))
 
 
+func _get_filtered_suites() -> Array[String]:
+	## Return suite names filtered by the suites filter text.
+	if _suites_filter_text.is_empty():
+		return _cached_suite_names
+	var filtered: Array[String] = []
+	var ft: String = _suites_filter_text.to_lower()
+	for sn in _cached_suite_names:
+		if ft in sn.to_lower():
+			filtered.append(sn)
+	return filtered
+
+
 func _draw_sub_suites(x: float, y: float, pw: float, h: float, font: Font) -> void:
-	## Draw selectable suite list with pass/fail indicators and play buttons.
+	## Draw selectable suite list with filter field, scroll, and play buttons.
+	var local_y: float = 0.0
+
+	# Filter field
+	var filter_bg: Color = Color(0.12, 0.12, 0.16) if _suites_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y + local_y, pw - 16, 18), filter_bg)
+	var filter_display: String = _suites_filter_text
+	if _suites_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		filter_display += "_"
+	if filter_display == "" and not _suites_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), "Filter suites...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8))
+	local_y += 20
+
+	# Filtered + scrollable suite list
+	var filtered: Array[String] = _get_filtered_suites()
 	var row_h: float = 18.0
-	var visible_count: int = int(h / row_h)
-	for i in range(mini(visible_count, _cached_suite_names.size())):
-		var suite_name: String = _cached_suite_names[i]
-		var ry: float = y + i * row_h
+	var remaining_h: float = h - local_y
+	var visible_count: int = int(remaining_h / row_h)
+	visible_count = maxi(visible_count, 1)
+	var max_scroll: int = maxi(0, filtered.size() - visible_count)
+	_suites_scroll_offset = clampi(_suites_scroll_offset, 0, max_scroll)
+
+	for i in range(mini(visible_count, filtered.size() - _suites_scroll_offset)):
+		var suite_name: String = filtered[i + _suites_scroll_offset]
+		var ry: float = y + local_y + i * row_h
 		var hover: bool = _test_hover_item == suite_name
 		var is_sel: bool = _selected_suite_name == suite_name
 
@@ -2386,13 +2605,36 @@ func _draw_sub_suites(x: float, y: float, pw: float, h: float, font: Font) -> vo
 			Vector2(btn_x, ry + 3), Vector2(btn_x + 8, ry + 8), Vector2(btn_x, ry + 13)]
 		_panel.draw_polygon(play_pts, PackedColorArray([play_col, play_col, play_col]))
 
+	# Scrollbar
+	if filtered.size() > visible_count and max_scroll > 0:
+		var pct: float = float(_suites_scroll_offset) / float(max_scroll)
+		var bar_h: float = maxf(16.0, remaining_h * float(visible_count) / float(filtered.size()))
+		var bar_y: float = y + local_y + pct * (remaining_h - bar_h)
+		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
+
 
 func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> void:
-	## Draw scrollable test list with number, pass/fail indicator, and play button.
-	## Filtered by selected suite if one is active.
+	## Draw scrollable test list with filter, number, pass/fail indicator, and play button.
+	## Filtered by selected suite and text filter.
+	var local_y: float = 0.0
+
+	# Filter field
+	var filter_bg: Color = Color(0.12, 0.12, 0.16) if _tests_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x, y + local_y, pw - 16, 18), filter_bg)
+	var filter_display: String = _tests_filter_text
+	if _tests_filter_focused and int(_cursor_blink * 2) % 2 == 0:
+		filter_display += "_"
+	if filter_display == "" and not _tests_filter_focused:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), "Filter tests...", HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.4, 0.4, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 4, y + local_y + 12), filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 24, 9, Color(0.8, 0.8, 0.8))
+	local_y += 20
+
 	var row_h: float = 16.0
 	var display_tests: Array[String] = _get_display_test_list()
-	var visible_count: int = int(h / row_h)
+	var remaining_h: float = h - local_y
+	var visible_count: int = int(remaining_h / row_h)
+	visible_count = maxi(visible_count, 1)
 	var max_scroll: int = maxi(0, display_tests.size() - visible_count)
 	_test_scroll_offset = clampi(_test_scroll_offset, 0, max_scroll)
 
@@ -2404,7 +2646,7 @@ func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> voi
 	for i in range(mini(visible_count, display_tests.size() - _test_scroll_offset)):
 		var tname: String = display_tests[i + _test_scroll_offset]
 		var test_num: int = i + _test_scroll_offset + 1
-		var ry: float = y + i * row_h
+		var ry: float = y + local_y + i * row_h
 		var hover: bool = _test_hover_item == tname
 		var is_loaded: bool = te != null and "_test_name" in te and te._test_name == tname
 		var is_running: bool = runner != null and runner._running and runner._current_test_name == tname
@@ -2453,8 +2695,8 @@ func _draw_sub_tests(x: float, y: float, pw: float, h: float, font: Font) -> voi
 	# Scrollbar
 	if display_tests.size() > visible_count and max_scroll > 0:
 		var pct: float = float(_test_scroll_offset) / float(max_scroll)
-		var bar_h: float = maxf(16.0, h * float(visible_count) / float(display_tests.size()))
-		var bar_y: float = y + pct * (h - bar_h)
+		var bar_h: float = maxf(16.0, remaining_h * float(visible_count) / float(display_tests.size()))
+		var bar_y: float = y + local_y + pct * (remaining_h - bar_h)
 		_panel.draw_rect(Rect2(x + pw - 16, bar_y, 6, bar_h), Color(0.35, 0.45, 0.7, 0.5))
 
 
@@ -4732,8 +4974,12 @@ func _handle_cfg_click(lx: float, my: float) -> void:
 				_cfg_grip_last_click_time = now
 				_cfg_sub_resize_idx = target_idx
 				_cfg_sub_resize_start_y = my
+				_sync_last_pane_height(_cfg_subsections)
 				_cfg_sub_resize_start_h = _cfg_subsections[target_idx]["height"]
 				_cfg_sub_resize_next_h = _cfg_subsections[_cfg_subsections.size() - 1]["height"]
+				_cfg_sub_resize_orig.clear()
+				for s in _cfg_subsections:
+					_cfg_sub_resize_orig.append(s["height"])
 			return
 
 		if sub["collapsed"]:
@@ -4744,6 +4990,18 @@ func _handle_cfg_click(lx: float, my: float) -> void:
 		var body_end: float = y + sub["height"]
 		if sub["id"] == "cfg_modified_ents":
 			body_end = maxf(body_end, 9999.0)  # Last section fills remaining space
+
+		# Body-edge resize zone
+		if my >= y + sub["height"] - SUB_RESIZE_ZONE and my < y + sub["height"] + SUB_RESIZE_ZONE and i < _cfg_subsections.size() - 1:
+			_cfg_sub_resize_idx = i
+			_cfg_sub_resize_start_y = my
+			_sync_last_pane_height(_cfg_subsections)
+			_cfg_sub_resize_start_h = sub["height"]
+			_cfg_sub_resize_next_h = _cfg_subsections[_cfg_subsections.size() - 1]["height"]
+			_cfg_sub_resize_orig.clear()
+			for s in _cfg_subsections:
+				_cfg_sub_resize_orig.append(s["height"])
+			return
 
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
@@ -5342,22 +5600,12 @@ func _handle_cfg_class_hover(local_y: float) -> void:
 
 
 func _handle_cfg_sub_resize_drag(my: float) -> void:
-	## Handle drag to resize config sub-sections.
+	## Handle drag to resize config sub-sections — all panes below absorb bottom-up.
 	if _cfg_sub_resize_idx < 0 or _cfg_sub_resize_idx >= _cfg_subsections.size():
 		return
-	var sub: Dictionary = _cfg_subsections[_cfg_sub_resize_idx]
-	var last_sub: Dictionary = _cfg_subsections[_cfg_subsections.size() - 1]
-	var delta: float = my - _cfg_sub_resize_start_y
-	var new_h: float = _cfg_sub_resize_start_h + delta
-	var new_next_h: float = _cfg_sub_resize_next_h - delta
-	var min_h: float = CFG_SUB_MIN.get(sub["id"], 30.0)
-	var min_next: float = CFG_SUB_MIN.get(last_sub["id"], 30.0)
-	new_h = maxf(new_h, min_h)
-	new_next_h = maxf(new_next_h, min_next)
-	# Snap to preferred
-	new_h = _snap_cfg_height(sub["id"], new_h)
-	sub["height"] = new_h
-	last_sub["height"] = new_next_h
+	var dy: float = my - _cfg_sub_resize_start_y
+	_sub_resize_distribute(_cfg_subsections, _cfg_sub_resize_idx, _cfg_sub_resize_start_h,
+		dy, CFG_SUB_MIN, _cfg_sub_resize_orig)
 
 
 func _handle_cfg_sub_resize_release() -> void:
@@ -6010,8 +6258,12 @@ func _handle_le_click(lx: float, my: float) -> void:
 				_le_grip_last_click_time = now
 				_le_sub_resize_idx = target_idx
 				_le_sub_resize_start_y = my
+				_sync_last_pane_height(_le_subsections)
 				_le_sub_resize_start_h = _le_subsections[target_idx]["height"]
 				_le_sub_resize_next_h = _le_subsections[_le_subsections.size() - 1]["height"]
+				_le_sub_resize_orig.clear()
+				for s in _le_subsections:
+					_le_sub_resize_orig.append(s["height"])
 			return
 
 		if sub["collapsed"]:
@@ -6022,6 +6274,18 @@ func _handle_le_click(lx: float, my: float) -> void:
 		var body_end: float = y + sub["height"]
 		if sub["id"] == "le_save":
 			body_end = maxf(body_end, 9999.0)
+
+		# Body-edge resize zone
+		if my >= y + sub["height"] - SUB_RESIZE_ZONE and my < y + sub["height"] + SUB_RESIZE_ZONE and i < _le_subsections.size() - 1:
+			_le_sub_resize_idx = i
+			_le_sub_resize_start_y = my
+			_sync_last_pane_height(_le_subsections)
+			_le_sub_resize_start_h = sub["height"]
+			_le_sub_resize_next_h = _le_subsections[_le_subsections.size() - 1]["height"]
+			_le_sub_resize_orig.clear()
+			for s in _le_subsections:
+				_le_sub_resize_orig.append(s["height"])
+			return
 
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
@@ -6146,13 +6410,8 @@ func _handle_le_sub_resize_drag(my: float) -> void:
 	if _le_sub_resize_idx < 0 or _le_sub_resize_idx >= _le_subsections.size():
 		return
 	var dy: float = my - _le_sub_resize_start_y
-	var sub: Dictionary = _le_subsections[_le_sub_resize_idx]
-	var last_sub: Dictionary = _le_subsections[_le_subsections.size() - 1]
-	var min_h: float = LE_SUB_MIN.get(sub["id"], 30.0)
-	var last_min: float = LE_SUB_MIN.get(last_sub["id"], 30.0)
-	dy = clampf(dy, min_h - _le_sub_resize_start_h, _le_sub_resize_next_h - last_min)
-	sub["height"] = _le_sub_resize_start_h + dy
-	last_sub["height"] = _le_sub_resize_next_h - (sub["height"] - _le_sub_resize_start_h)
+	_sub_resize_distribute(_le_subsections, _le_sub_resize_idx, _le_sub_resize_start_h,
+		dy, LE_SUB_MIN, _le_sub_resize_orig)
 
 
 func _handle_le_sub_resize_release() -> void:
@@ -6794,8 +7053,12 @@ func _handle_ct_click(lx: float, my: float) -> void:
 				_ct_grip_last_click_time = now
 				_ct_sub_resize_idx = target_idx
 				_ct_sub_resize_start_y = my
+				_sync_last_pane_height(_ct_subsections)
 				_ct_sub_resize_start_h = _ct_subsections[target_idx]["height"]
 				_ct_sub_resize_next_h = _ct_subsections[_ct_subsections.size() - 1]["height"]
+				_ct_sub_resize_orig.clear()
+				for s in _ct_subsections:
+					_ct_sub_resize_orig.append(s["height"])
 			return
 
 		if sub["collapsed"]:
@@ -6806,6 +7069,18 @@ func _handle_ct_click(lx: float, my: float) -> void:
 		var body_end: float = y + sub["height"]
 		if sub["id"] == "ct_editor":
 			body_end = maxf(body_end, 9999.0)
+
+		# Body-edge resize zone
+		if my >= y + sub["height"] - SUB_RESIZE_ZONE and my < y + sub["height"] + SUB_RESIZE_ZONE and i < _ct_subsections.size() - 1:
+			_ct_sub_resize_idx = i
+			_ct_sub_resize_start_y = my
+			_sync_last_pane_height(_ct_subsections)
+			_ct_sub_resize_start_h = sub["height"]
+			_ct_sub_resize_next_h = _ct_subsections[_ct_subsections.size() - 1]["height"]
+			_ct_sub_resize_orig.clear()
+			for s in _ct_subsections:
+				_ct_sub_resize_orig.append(s["height"])
+			return
 
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
@@ -7080,13 +7355,8 @@ func _handle_ct_sub_resize_drag(my: float) -> void:
 	if _ct_sub_resize_idx < 0 or _ct_sub_resize_idx >= _ct_subsections.size():
 		return
 	var dy: float = my - _ct_sub_resize_start_y
-	var sub: Dictionary = _ct_subsections[_ct_sub_resize_idx]
-	var last: Dictionary = _ct_subsections[_ct_subsections.size() - 1]
-	var min_h: float = CT_SUB_MIN.get(sub["id"], 30.0)
-	var last_min: float = CT_SUB_MIN.get(last["id"], 60.0)
-	dy = clampf(dy, min_h - _ct_sub_resize_start_h, _ct_sub_resize_next_h - last_min)
-	sub["height"] = _ct_sub_resize_start_h + dy
-	last["height"] = _ct_sub_resize_next_h - (sub["height"] - _ct_sub_resize_start_h)
+	_sub_resize_distribute(_ct_subsections, _ct_sub_resize_idx, _ct_sub_resize_start_h,
+		dy, CT_SUB_MIN, _ct_sub_resize_orig)
 
 
 func _handle_ct_sub_resize_release() -> void:
@@ -7324,6 +7594,18 @@ func _get_whiteboard() -> Node2D:
 	return null
 
 
+func _wb_sync_tools_state() -> void:
+	## Sync tool visual state (preview, lasso, cursor indicator) to whiteboard for rendering.
+	if not _wb_tools_instance:
+		return
+	var wb := _get_whiteboard()
+	if not wb:
+		return
+	wb._preview_component = _wb_tools_instance.get_preview()
+	wb._lasso_points = _wb_tools_instance._lasso_points
+	wb._cursor_indicator = _wb_tools_instance.get_cursor_indicator()
+
+
 func _wb_get_or_create_tools() -> RefCounted:
 	## Lazy-create the WhiteboardTools instance and connect it to the whiteboard.
 	if _wb_tools_instance != null:
@@ -7353,7 +7635,7 @@ func _wb_get_world_pos(screen_pos: Vector2) -> Vector2:
 
 func _init_wb_subsections() -> void:
 	_wb_subsections = []
-	for sid in ["wb_board", "wb_tools", "wb_settings", "wb_actions", "wb_inspector"]:
+	for sid in ["wb_boards", "wb_board", "wb_layers", "wb_tools", "wb_settings", "wb_actions", "wb_inspector"]:
 		_wb_subsections.append({
 			"id": sid,
 			"title": sid.substr(3).capitalize(),  # Strip "wb_" prefix
@@ -7415,14 +7697,23 @@ func _auto_snap_wb() -> void:
 func _get_wb_preferred_height(sid: String) -> float:
 	match sid:
 		"wb_board":
-			return SUB_HEADER_H + 50.0  # Name field + buttons
+			return SUB_HEADER_H + 40.0  # Name field + Save button
+		"wb_boards":
+			# Filter + 5 rows
+			return SUB_HEADER_H + 20.0 + 5 * 16.0 + 4.0
 		"wb_tools":
-			var rows: int = ceili(WB_TOOLS.size() / 2.0)
-			return SUB_HEADER_H + rows * 20.0 + 4.0
+			# 4 category headers (18px each) + 1 expanded sub-tool row (18px)
+			return SUB_HEADER_H + 4 * 18.0 + 18.0 + 4.0
 		"wb_settings":
-			return SUB_HEADER_H + 60.0  # Color swatches + tool-specific
+			return SUB_HEADER_H + 36.0  # 2 rows of color swatches
 		"wb_actions":
 			return SUB_HEADER_H + 60.0
+		"wb_layers":
+			var wb := _get_whiteboard()
+			var layer_count: int = 3  # Default
+			if wb:
+				layer_count = maxi(wb.get_layers().size(), 1)
+			return SUB_HEADER_H + layer_count * 18.0 + 22.0  # Layers + Add button
 		"wb_inspector":
 			return SUB_HEADER_H + 8 * 16.0 + 4.0
 	return SUB_HEADER_H + 40.0
@@ -7466,9 +7757,11 @@ func _draw_whiteboard_section(content_x: float, font: Font, ph: float) -> void:
 		if body_h > 0:
 			match sub["id"]:
 				"wb_board":     _draw_wb_sub_board(x, body_y, pw, body_h, font)
+				"wb_boards":    _draw_wb_sub_boards(x, body_y, pw, body_h, font)
 				"wb_tools":     _draw_wb_sub_tools(x, body_y, pw, body_h, font)
 				"wb_settings":  _draw_wb_sub_settings(x, body_y, pw, body_h, font)
 				"wb_actions":   _draw_wb_sub_actions(x, body_y, pw, body_h, font)
+				"wb_layers":    _draw_wb_sub_layers(x, body_y, pw, body_h, font)
 				"wb_inspector": _draw_wb_sub_inspector(x, body_y, pw, body_h, font)
 
 		# Snap indicator during resize
@@ -7501,10 +7794,18 @@ func _draw_wb_sub_header(x: float, y: float, pw: float, font: Font, sub: Diction
 		"wb_board":
 			if wb:
 				ctx_text = wb.get_board_name()
+		"wb_boards":
+			var count: int = _wb_cached_file_list.size()
+			if count > 0:
+				ctx_text = "%d saved" % count
 		"wb_tools":
-			if _wb_active_tool >= 0 and _wb_active_tool < WB_TOOLS.size():
-				ctx_text = WB_TOOLS[_wb_active_tool]["name"]
-				ctx_col = Color(0.3, 0.85, 0.9)
+			# Find active tool name from categories
+			for cat in WB_TOOL_CATEGORIES:
+				for t in cat["tools"]:
+					if t["idx"] == _wb_active_tool:
+						ctx_text = "%s / %s" % [cat["name"], t["name"]]
+						ctx_col = Color(0.3, 0.85, 0.9)
+						break
 		"wb_settings":
 			ctx_text = _wb_tool_color
 		"wb_inspector":
@@ -7518,88 +7819,235 @@ func _draw_wb_sub_header(x: float, y: float, pw: float, font: Font, sub: Diction
 
 func _draw_wb_sub_board(x: float, y: float, pw: float, _h: float, font: Font) -> void:
 	var wb := _get_whiteboard()
-
 	# Name field
 	var name_text: String = _wb_name_text if _wb_name_focused else (wb.get_board_name() if wb else "untitled")
 	var name_bg: Color = Color(0.12, 0.12, 0.16) if _wb_name_focused else Color(0.08, 0.08, 0.12)
-	_panel.draw_rect(Rect2(x + 4, y + 2, pw - 8, 18), name_bg)
+	_panel.draw_rect(Rect2(x + 4, y + 2, pw - 52, 16), name_bg)
+	if _wb_name_focused:
+		_panel.draw_rect(Rect2(x + 4, y + 2, pw - 52, 16), Color(0.3, 0.6, 0.4, 0.4), false, 1.0)
 	var display: String = name_text
 	if _wb_name_focused and int(Time.get_ticks_msec() / 500) % 2 == 0:
 		display += "_"
 	if display.is_empty() and not _wb_name_focused:
-		display = "Board name..."
-		_panel.draw_string(font, Vector2(x + 8, y + 15), display, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.4, 0.4, 0.4))
+		_panel.draw_string(font, Vector2(x + 8, y + 14), "Board name...", HORIZONTAL_ALIGNMENT_LEFT, pw - 60, 9, Color(0.4, 0.4, 0.4))
 	else:
-		_panel.draw_string(font, Vector2(x + 8, y + 15), display, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 10, Color(0.8, 0.8, 0.8))
+		_panel.draw_string(font, Vector2(x + 8, y + 14), display, HORIZONTAL_ALIGNMENT_LEFT, pw - 60, 9, Color(0.8, 0.8, 0.8))
+	# Save button (right side of name row) — flashes green on save
+	var save_x: float = x + pw - 44
+	var save_flash: bool = _wb_save_flash_time > 0.0 and (Time.get_ticks_msec() / 1000.0 - _wb_save_flash_time) < 1.5
+	var save_col := Color(0.3, 0.85, 0.4)
+	if save_flash:
+		var t: float = (Time.get_ticks_msec() / 1000.0 - _wb_save_flash_time) / 1.5
+		var flash_alpha: float = 1.0 - t
+		_panel.draw_rect(Rect2(save_x, y + 2, 36, 16), Color(0.2, 0.8, 0.3, 0.4 * flash_alpha))
+		_panel.draw_rect(Rect2(save_x, y + 2, 36, 16), Color(0.3, 1.0, 0.4, 0.8 * flash_alpha), false, 1.5)
+		_panel.draw_string(font, Vector2(save_x + 2, y + 14), "Saved!", HORIZONTAL_ALIGNMENT_CENTER, 32, 8, Color(0.4, 1.0, 0.5))
+	else:
+		_panel.draw_rect(Rect2(save_x, y + 2, 36, 16), save_col * Color(1, 1, 1, 0.12))
+		_panel.draw_rect(Rect2(save_x, y + 2, 36, 16), save_col * Color(1, 1, 1, 0.5), false, 1.0)
+		_panel.draw_string(font, Vector2(save_x + 4, y + 14), "Save", HORIZONTAL_ALIGNMENT_CENTER, 28, 8, save_col)
 
-	# Buttons row
-	var btn_y: float = y + 24
-	var btn_w: float = (pw - 20) / 4.0
-	var btn_labels: Array[String] = ["New", "Save", "Load", "Clear"]
-	var btn_colors: Array[Color] = [
-		Color(0.3, 0.7, 0.9),  # New: blue
-		Color(0.3, 0.85, 0.4),  # Save: green
-		Color(0.85, 0.7, 0.3),  # Load: gold
-		Color(0.85, 0.3, 0.3),  # Clear: red
-	]
-	for i in range(4):
-		var bx: float = x + 4 + i * (btn_w + 2)
-		var col: Color = btn_colors[i]
-		_panel.draw_rect(Rect2(bx, btn_y, btn_w, 18), col * Color(1, 1, 1, 0.12))
-		_panel.draw_rect(Rect2(bx, btn_y, btn_w, 18), col * Color(1, 1, 1, 0.5), false, 1.0)
-		_panel.draw_string(font, Vector2(bx + 4, btn_y + 13), btn_labels[i], HORIZONTAL_ALIGNMENT_CENTER, btn_w - 8, 9, col)
 
-	# File picker (if open)
-	if _wb_show_file_picker:
-		var fy: float = btn_y + 22
-		for fi in range(_wb_cached_file_list.size()):
-			var fname: String = _wb_cached_file_list[fi]
-			var is_hover: bool = fi == _wb_hover_file_idx
+func _draw_wb_sub_boards(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	var wb := _get_whiteboard()
+	var current_name: String = wb.get_board_name() if wb else ""
+
+	# Refresh file list if dirty
+	if _wb_boards_dirty and wb:
+		_wb_cached_file_list = wb.list_saved_files()
+		_wb_boards_dirty = false
+
+	# Expire pending delete confirmation after 3 seconds
+	if not _wb_boards_pending_delete.is_empty() and _wb_clear_confirm_time > 0.0:
+		if Time.get_ticks_msec() / 1000.0 - _wb_clear_confirm_time > 3.0:
+			_wb_boards_pending_delete = ""
+			_wb_clear_confirm_time = 0.0
+
+	# Filter field (top 18px)
+	var filter_bg: Color = Color(0.12, 0.12, 0.16) if _wb_boards_filter_focused else Color(0.08, 0.08, 0.12)
+	_panel.draw_rect(Rect2(x + 4, y + 2, pw - 8, 16), filter_bg)
+	var filter_display: String = _wb_boards_filter_text
+	if _wb_boards_filter_focused and int(Time.get_ticks_msec() / 500) % 2 == 0:
+		filter_display += "_"
+	if filter_display.is_empty() and not _wb_boards_filter_focused:
+		_panel.draw_string(font, Vector2(x + 8, y + 14), "Filter boards...", HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.35, 0.35, 0.4))
+	else:
+		_panel.draw_string(font, Vector2(x + 8, y + 14), filter_display, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.8, 0.8, 0.8))
+
+	# Board list (scrollable, starts at y+20)
+	var list_y: float = y + 20
+	var list_h: float = h - 20
+	if list_h <= 0:
+		return
+
+	var filtered: Array[String] = _get_filtered_boards()
+	var row_h: float = 16.0
+	var total_rows: int = filtered.size() + 1  # +1 for ghost "new" row
+	var visible_count: int = int(list_h / row_h)
+	var max_scroll: int = maxi(0, total_rows - visible_count)
+	_wb_boards_scroll_offset = clampi(_wb_boards_scroll_offset, 0, max_scroll)
+
+	for vi in range(visible_count):
+		var fi: int = vi + _wb_boards_scroll_offset
+		if fi >= total_rows:
+			break
+		var ry: float = list_y + vi * row_h
+
+		# Ghost row — "+" to create new board
+		if fi == filtered.size():
+			var is_hover: bool = fi == _wb_boards_hover_idx
 			if is_hover:
-				_panel.draw_rect(Rect2(x + 4, fy, pw - 8, 16), Color(0.2, 0.3, 0.4, 0.5))
-			_panel.draw_string(font, Vector2(x + 8, fy + 12), fname, HORIZONTAL_ALIGNMENT_LEFT, pw - 16, 9, Color(0.7, 0.75, 0.8))
-			fy += 16
+				_panel.draw_rect(Rect2(x + 4, ry, pw - 8, row_h), Color(0.15, 0.25, 0.35, 0.4))
+			_panel.draw_string(font, Vector2(x + 8, ry + 12), "+  New Board", HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, Color(0.4, 0.65, 0.9, 0.7))
+			continue
+
+		var fname: String = filtered[fi]
+		var is_current: bool = fname == current_name
+		var is_hover: bool = fi == _wb_boards_hover_idx
+		var is_pending: bool = fname == _wb_boards_pending_delete
+
+		# Row background
+		if is_pending:
+			_panel.draw_rect(Rect2(x + 4, ry, pw - 8, row_h), Color(0.3, 0.08, 0.08, 0.6))
+		elif is_current:
+			_panel.draw_rect(Rect2(x + 4, ry, pw - 8, row_h), Color(0.15, 0.3, 0.2, 0.6))
+		elif is_hover:
+			_panel.draw_rect(Rect2(x + 4, ry, pw - 8, row_h), Color(0.2, 0.3, 0.4, 0.4))
+
+		# Board name
+		var text_col: Color
+		if is_pending:
+			text_col = Color(0.7, 0.35, 0.35)
+		elif is_current:
+			text_col = Color(0.4, 0.95, 0.5)
+		elif is_hover:
+			text_col = Color(0.8, 0.85, 0.9)
+		else:
+			text_col = Color(0.6, 0.62, 0.65)
+		_panel.draw_string(font, Vector2(x + 8, ry + 12), fname, HORIZONTAL_ALIGNMENT_LEFT, pw - 44, 9, text_col)
+
+		# Strikethrough on pending delete
+		if is_pending:
+			_panel.draw_line(Vector2(x + 8, ry + 8), Vector2(x + 8 + minf(fname.length() * 6.0, pw - 52), ry + 8), Color(0.7, 0.3, 0.3, 0.6), 1.0)
+
+		# Right-side buttons: pending = [↶ ✕], normal = [✕]
+		if is_pending:
+			# Undo button
+			_panel.draw_string(font, Vector2(x + pw - 32, ry + 12), "\u21b6", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.7, 0.9))
+			# Confirm delete
+			_panel.draw_string(font, Vector2(x + pw - 18, ry + 12), "\u2715", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(1.0, 0.4, 0.4))
+		else:
+			# Delete button
+			_panel.draw_string(font, Vector2(x + pw - 18, ry + 12), "\u2715", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.35, 0.35))
+
+	# Scrollbar
+	if total_rows > visible_count:
+		var sb_x: float = x + pw - 6
+		var sb_h: float = list_h
+		var thumb_ratio: float = float(visible_count) / float(total_rows)
+		var thumb_h: float = maxf(sb_h * thumb_ratio, 12.0)
+		var scroll_ratio: float = float(_wb_boards_scroll_offset) / float(max_scroll) if max_scroll > 0 else 0.0
+		var thumb_y: float = list_y + (sb_h - thumb_h) * scroll_ratio
+		_panel.draw_rect(Rect2(sb_x, list_y, 3, sb_h), Color(0.1, 0.1, 0.12, 0.5))
+		_panel.draw_rect(Rect2(sb_x, thumb_y, 3, thumb_h), Color(0.4, 0.5, 0.6, 0.5))
+
+
+func _wb_rename_board(wb: Node, old_name: String, new_name: String) -> void:
+	## Rename the current board: update name, rename save file if it exists.
+	wb.set_board_name(new_name)
+	var old_slug: String = old_name.to_lower().replace(" ", "_")
+	var new_slug: String = new_name.to_lower().replace(" ", "_")
+	# Try both directories
+	for dir_path in ["res://data/whiteboards/", "user://whiteboards/"]:
+		var old_path: String = dir_path + old_slug + ".json"
+		if FileAccess.file_exists(old_path):
+			var new_path: String = dir_path + new_slug + ".json"
+			DirAccess.rename_absolute(old_path, new_path)
+			break
+	_wb_boards_dirty = true
+
+
+func _wb_delete_board_file(board_name: String) -> void:
+	## Delete a saved board file from disk.
+	var slug: String = board_name.to_lower().replace(" ", "_")
+	for dir_path in ["res://data/whiteboards/", "user://whiteboards/"]:
+		var path: String = dir_path + slug + ".json"
+		if FileAccess.file_exists(path):
+			DirAccess.remove_absolute(path)
+			break
+	_wb_boards_dirty = true
+
+
+func _get_filtered_boards() -> Array[String]:
+	if _wb_boards_filter_text.is_empty():
+		return _wb_cached_file_list
+	var result: Array[String] = []
+	var needle: String = _wb_boards_filter_text.to_lower()
+	for f in _wb_cached_file_list:
+		if f.to_lower().contains(needle):
+			result.append(f)
+	return result
 
 
 func _draw_wb_sub_tools(x: float, y: float, pw: float, _h: float, font: Font) -> void:
-	var btn_w: float = (pw - 12) * 0.5
-	var row_h: float = 20.0
-	for i in range(WB_TOOLS.size()):
-		var col_idx: int = i % 2
-		var row_idx: int = i / 2
-		var bx: float = x + 4 + col_idx * (btn_w + 4)
-		var by: float = y + 2 + row_idx * row_h
-		var is_active: bool = i == _wb_active_tool
-		var is_hover: bool = i == _wb_hover_tool_idx
-
-		var bg_col: Color
-		if is_active:
-			bg_col = Color(0.15, 0.3, 0.5, 0.8)
-		elif is_hover:
-			bg_col = Color(0.12, 0.18, 0.25, 0.6)
+	var ry: float = y + 2
+	var cat_h: float = 18.0
+	var tool_h: float = 16.0
+	for ci in range(WB_TOOL_CATEGORIES.size()):
+		var cat: Dictionary = WB_TOOL_CATEGORIES[ci]
+		var is_active_cat: bool = ci == _wb_active_category
+		# Category header
+		var cat_bg := Color(0.12, 0.18, 0.25, 0.7) if is_active_cat else Color(0.06, 0.06, 0.1, 0.5)
+		_panel.draw_rect(Rect2(x + 4, ry, pw - 8, cat_h), cat_bg)
+		if is_active_cat:
+			_panel.draw_rect(Rect2(x + 4, ry, 2, cat_h), Color(0.3, 0.7, 1.0))
+		# Triangle
+		var tri_x: float = x + 10
+		var tri_y: float = ry + cat_h * 0.5
+		var tri_col := Color(0.5, 0.7, 0.9) if is_active_cat else Color(0.35, 0.38, 0.42)
+		if is_active_cat:
+			var pts: PackedVector2Array = [Vector2(tri_x - 1, tri_y - 3), Vector2(tri_x + 5, tri_y - 3), Vector2(tri_x + 2, tri_y + 3)]
+			_panel.draw_polygon(pts, PackedColorArray([tri_col]))
 		else:
-			bg_col = Color(0.08, 0.08, 0.12, 0.4)
-
-		_panel.draw_rect(Rect2(bx, by, btn_w, row_h - 2), bg_col)
-		if is_active:
-			_panel.draw_rect(Rect2(bx, by, 2, row_h - 2), Color(0.3, 0.7, 1.0), true)
-
-		var text_col: Color = Color(0.85, 0.9, 1.0) if is_active else Color(0.5, 0.55, 0.6)
-		var tool_name: String = WB_TOOLS[i]["name"]
-		_panel.draw_string(font, Vector2(bx + 6, by + 14), tool_name, HORIZONTAL_ALIGNMENT_LEFT, btn_w - 12, 9, text_col)
+			var pts: PackedVector2Array = [Vector2(tri_x, tri_y - 4), Vector2(tri_x + 5, tri_y), Vector2(tri_x, tri_y + 4)]
+			_panel.draw_polygon(pts, PackedColorArray([tri_col]))
+		var cat_text_col := Color(0.7, 0.85, 1.0) if is_active_cat else Color(0.45, 0.48, 0.52)
+		_panel.draw_string(font, Vector2(x + 20, ry + 13), cat["name"], HORIZONTAL_ALIGNMENT_LEFT, pw - 28, 9, cat_text_col)
+		# Show active tool name in category header
+		if is_active_cat:
+			var tools_arr: Array = cat["tools"]
+			for t in tools_arr:
+				if t["idx"] == _wb_active_tool:
+					_panel.draw_string(font, Vector2(x + 70, ry + 13), t["name"], HORIZONTAL_ALIGNMENT_LEFT, pw - 80, 8, Color(0.4, 0.8, 0.5))
+					break
+		ry += cat_h
+		# Sub-tools (only if this category is active)
+		if is_active_cat:
+			var tools_arr: Array = cat["tools"]
+			var tool_w: float = (pw - 16) / mini(tools_arr.size(), 4)
+			for ti in range(tools_arr.size()):
+				var tool_info: Dictionary = tools_arr[ti]
+				var tx: float = x + 8 + ti * (tool_w + 2)
+				var is_active: bool = tool_info["idx"] == _wb_active_tool
+				var bg := Color(0.18, 0.32, 0.5, 0.8) if is_active else Color(0.08, 0.08, 0.12, 0.5)
+				_panel.draw_rect(Rect2(tx, ry, tool_w, tool_h), bg)
+				if is_active:
+					_panel.draw_rect(Rect2(tx, ry + tool_h - 2, tool_w, 2), Color(0.3, 0.8, 1.0))
+				var tcol := Color(0.9, 0.95, 1.0) if is_active else Color(0.5, 0.55, 0.6)
+				_panel.draw_string(font, Vector2(tx + 3, ry + 12), tool_info["name"], HORIZONTAL_ALIGNMENT_CENTER, tool_w - 6, 8, tcol)
+			ry += tool_h + 2
 
 
 func _draw_wb_sub_settings(x: float, y: float, pw: float, _h: float, font: Font) -> void:
-	# Color swatches (always shown)
-	_panel.draw_string(font, Vector2(x + 4, y + 12), "Color:", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.5, 0.5, 0.55))
-	var swatch_size: float = 14.0
-	var swatch_pad: float = 3.0
-	var sx: float = x + 44
+	# Color swatches — 2 rows of 12, auto-sized to fill width
+	var swatch_pad: float = 2.0
+	var swatch_size: float = (pw - 8 - (WB_COLORS_PER_ROW - 1) * swatch_pad) / WB_COLORS_PER_ROW
+	var sx: float = x + 4
 	var sy: float = y + 2
 	for i in range(WB_COLOR_SWATCHES.size()):
 		var swatch: Dictionary = WB_COLOR_SWATCHES[i]
-		var cx: float = sx + (i % 6) * (swatch_size + swatch_pad)
-		var cy: float = sy + (i / 6) * (swatch_size + swatch_pad)
+		var cx: float = sx + (i % WB_COLORS_PER_ROW) * (swatch_size + swatch_pad)
+		var cy: float = sy + (i / WB_COLORS_PER_ROW) * (swatch_size + swatch_pad)
 		var is_active: bool = swatch["name"] == _wb_tool_color
 		_panel.draw_rect(Rect2(cx, cy, swatch_size, swatch_size), swatch["color"])
 		if is_active:
@@ -7616,7 +8064,8 @@ func _draw_wb_sub_settings(x: float, y: float, pw: float, _h: float, font: Font)
 			show_ann_input = not ann_sel.is_empty()
 
 	if show_ann_input:
-		var ay: float = y + 38
+		var num_rows: int = ceili(float(WB_COLOR_SWATCHES.size()) / WB_COLORS_PER_ROW)
+		var ay: float = y + 2 + num_rows * (swatch_size + swatch_pad) + 4
 		var p_col := Color(0.3, 0.85, 0.9)  # [H] in cyan
 		_panel.draw_string(font, Vector2(x + 4, ay + 13), "[H]", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, p_col)
 		var field_bg: Color = Color(0.12, 0.14, 0.18) if _wb_annotate_focused else Color(0.07, 0.07, 0.1)
@@ -7661,6 +8110,12 @@ func _draw_wb_sub_actions(x: float, y: float, pw: float, _h: float, font: Font) 
 			actions.append({"label": "Unlock Selected", "cmd": "unlock", "color": Color(0.4, 0.7, 0.3)})
 	actions.append({"label": "Show All", "cmd": "show_all", "color": Color(0.4, 0.7, 0.4)})
 	actions.append({"label": "Grid Toggle", "cmd": "grid", "color": Color(0.4, 0.6, 0.8)})
+	# Clear with timed confirm
+	var clear_confirming: bool = _wb_clear_confirm_time > 0.0 and (Time.get_ticks_msec() / 1000.0 - _wb_clear_confirm_time) < 3.0
+	if clear_confirming:
+		actions.append({"label": "Clear Board — Confirm?", "cmd": "clear_confirm", "color": Color(1.0, 0.3, 0.3)})
+	else:
+		actions.append({"label": "Clear Board", "cmd": "clear", "color": Color(0.6, 0.3, 0.3)})
 	# Snap toggles
 	var snap_g_label: String = "Snap Grid: ON" if _wb_snap_grid else "Snap Grid: OFF"
 	var snap_g_col: Color = Color(0.3, 0.8, 0.8) if _wb_snap_grid else Color(0.4, 0.5, 0.55)
@@ -7676,6 +8131,136 @@ func _draw_wb_sub_actions(x: float, y: float, pw: float, _h: float, font: Font) 
 		_panel.draw_rect(Rect2(x + 4, by, pw - 8, btn_h), col * Color(1, 1, 1, 0.1))
 		_panel.draw_rect(Rect2(x + 4, by, pw - 8, btn_h), col * Color(1, 1, 1, 0.4), false, 1.0)
 		_panel.draw_string(font, Vector2(x + 10, by + 13), act["label"], HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, col)
+
+
+func _draw_wb_sub_layers(x: float, y: float, pw: float, h: float, font: Font) -> void:
+	## Draw the layers tree — layers with expand/collapse, groups, components.
+	var wb := _get_whiteboard()
+	if not wb:
+		_panel.draw_string(font, Vector2(x + 4, y + 14), "No whiteboard", HORIZONTAL_ALIGNMENT_LEFT, -1, 9, Color(0.4, 0.4, 0.4))
+		return
+
+	var row_h: float = 18.0
+	var layers: Array = wb.get_layers()
+	var active_lid: int = wb.get_active_layer_id()
+	var ry: float = y
+
+	for layer in layers:
+		if ry - y > h:
+			break
+		var lid: int = int(layer["id"])
+		var expanded: bool = _wb_layers_expanded.get(lid, false)
+		var is_active: bool = lid == active_lid
+		var is_visible: bool = layer.get("visible", true)
+		var is_locked: bool = layer.get("locked", false)
+
+		# Layer row background
+		if is_active:
+			_panel.draw_rect(Rect2(x, ry, pw - 8, row_h - 1), Color(0.12, 0.18, 0.25))
+
+		# Expand/collapse triangle
+		var tri_x: float = x + 4
+		var tri_y: float = ry + 5
+		if expanded:
+			_panel.draw_polygon(PackedVector2Array([
+				Vector2(tri_x, tri_y), Vector2(tri_x + 8, tri_y), Vector2(tri_x + 4, tri_y + 6)]),
+				PackedColorArray([Color(0.6, 0.6, 0.6), Color(0.6, 0.6, 0.6), Color(0.6, 0.6, 0.6)]))
+		else:
+			_panel.draw_polygon(PackedVector2Array([
+				Vector2(tri_x, tri_y), Vector2(tri_x + 6, tri_y + 4), Vector2(tri_x, tri_y + 8)]),
+				PackedColorArray([Color(0.5, 0.5, 0.5), Color(0.5, 0.5, 0.5), Color(0.5, 0.5, 0.5)]))
+
+		# Layer name
+		var name_col: Color = Color(0.8, 0.9, 1.0) if is_active else Color(0.6, 0.6, 0.6)
+		if not is_visible:
+			name_col = name_col * Color(1, 1, 1, 0.4)
+		var component_count: int = layer.get("component_ids", []).size()
+		for g in layer.get("groups", []):
+			component_count += g.get("component_ids", []).size()
+		var display_name: String = "%s (%d)" % [layer["name"], component_count]
+		_panel.draw_string(font, Vector2(x + 16, ry + 13), display_name, HORIZONTAL_ALIGNMENT_LEFT, pw - 70, 9, name_col)
+
+		# Eye icon (visibility toggle) — right side
+		var eye_x: float = x + pw - 36
+		var eye_col: Color = Color(0.4, 0.8, 0.4) if is_visible else Color(0.4, 0.4, 0.4)
+		_panel.draw_string(font, Vector2(eye_x, ry + 12), "E" if is_visible else "-", HORIZONTAL_ALIGNMENT_LEFT, 12, 9, eye_col)
+
+		# Lock icon — right side
+		var lock_x: float = x + pw - 20
+		var lock_col: Color = Color(0.9, 0.6, 0.2) if is_locked else Color(0.4, 0.4, 0.4)
+		_panel.draw_string(font, Vector2(lock_x, ry + 12), "L" if is_locked else "U", HORIZONTAL_ALIGNMENT_LEFT, 12, 9, lock_col)
+
+		ry += row_h
+
+		# Expanded content: groups and ungrouped components
+		if expanded:
+			# Groups
+			for group in layer.get("groups", []):
+				if ry - y > h:
+					break
+				var gid: int = int(group["id"])
+				var g_expanded: bool = _wb_groups_expanded.get(gid, false)
+				var g_visible: bool = group.get("visible", true) and is_visible
+				var g_locked: bool = group.get("locked", false) or is_locked
+
+				# Group row (indented)
+				var g_tri_x: float = x + 20
+				if g_expanded:
+					_panel.draw_polygon(PackedVector2Array([
+						Vector2(g_tri_x, ry + 5), Vector2(g_tri_x + 6, ry + 5), Vector2(g_tri_x + 3, ry + 10)]),
+						PackedColorArray([Color(0.5, 0.5, 0.5), Color(0.5, 0.5, 0.5), Color(0.5, 0.5, 0.5)]))
+				else:
+					_panel.draw_polygon(PackedVector2Array([
+						Vector2(g_tri_x, ry + 4), Vector2(g_tri_x + 5, ry + 8), Vector2(g_tri_x, ry + 12)]),
+						PackedColorArray([Color(0.4, 0.4, 0.4), Color(0.4, 0.4, 0.4), Color(0.4, 0.4, 0.4)]))
+
+				var g_name_col: Color = Color(0.7, 0.8, 0.5) if g_visible else Color(0.4, 0.4, 0.4)
+				var g_count: int = group.get("component_ids", []).size()
+				_panel.draw_string(font, Vector2(x + 30, ry + 12), "%s (%d)" % [group["name"], g_count], HORIZONTAL_ALIGNMENT_LEFT, pw - 80, 8, g_name_col)
+
+				# Group eye + lock icons
+				var g_eye_col: Color = Color(0.4, 0.7, 0.4) if group.get("visible", true) else Color(0.4, 0.4, 0.4)
+				_panel.draw_string(font, Vector2(eye_x, ry + 12), "E" if group.get("visible", true) else "-", HORIZONTAL_ALIGNMENT_LEFT, 12, 8, g_eye_col)
+				var g_lock_col: Color = Color(0.8, 0.5, 0.2) if group.get("locked", false) else Color(0.4, 0.4, 0.4)
+				_panel.draw_string(font, Vector2(lock_x, ry + 12), "L" if group.get("locked", false) else "U", HORIZONTAL_ALIGNMENT_LEFT, 12, 8, g_lock_col)
+
+				ry += row_h
+
+				# Group components (if group expanded)
+				if g_expanded:
+					for cid in group.get("component_ids", []):
+						if ry - y > h:
+							break
+						var c: Dictionary = wb.get_component(int(cid))
+						if c.is_empty():
+							continue
+						var c_sel: bool = c.get("selected", false)
+						var c_col: Color = Color(0.5, 0.7, 0.5) if c_sel else Color(0.45, 0.45, 0.45)
+						if c_sel:
+							_panel.draw_rect(Rect2(x + 36, ry, pw - 44, row_h - 2), Color(0.1, 0.18, 0.1))
+						_panel.draw_string(font, Vector2(x + 40, ry + 12), "#%d %s" % [c["id"], c["type"]], HORIZONTAL_ALIGNMENT_LEFT, pw - 60, 8, c_col)
+						ry += row_h
+
+			# Ungrouped components on this layer
+			for cid in layer.get("component_ids", []):
+				if ry - y > h:
+					break
+				var c: Dictionary = wb.get_component(int(cid))
+				if c.is_empty():
+					continue
+				var c_sel: bool = c.get("selected", false)
+				var c_col: Color = Color(0.5, 0.7, 0.5) if c_sel else Color(0.45, 0.45, 0.45)
+				if c_sel:
+					_panel.draw_rect(Rect2(x + 16, ry, pw - 24, row_h - 2), Color(0.1, 0.18, 0.1))
+				_panel.draw_string(font, Vector2(x + 20, ry + 12), "#%d %s" % [c["id"], c["type"]], HORIZONTAL_ALIGNMENT_LEFT, pw - 60, 8, c_col)
+				ry += row_h
+
+	# Add Layer button
+	if ry - y + 18 <= h:
+		var btn_col: Color = Color(0.3, 0.6, 0.3)
+		_panel.draw_rect(Rect2(x + 4, ry + 2, pw - 12, 16), btn_col * Color(1, 1, 1, 0.12))
+		_panel.draw_rect(Rect2(x + 4, ry + 2, pw - 12, 16), btn_col * Color(1, 1, 1, 0.4), false, 1.0)
+		_panel.draw_string(font, Vector2(x + 10, ry + 14), "+ Add Layer", HORIZONTAL_ALIGNMENT_LEFT, pw - 20, 9, btn_col)
 
 
 func _draw_wb_sub_inspector(x: float, y: float, pw: float, h: float, font: Font) -> void:
@@ -7786,8 +8371,12 @@ func _handle_wb_click(lx: float, my: float) -> void:
 				_wb_grip_last_click_time = now
 				_wb_sub_resize_idx = target_idx
 				_wb_sub_resize_start_y = my
+				_sync_last_pane_height(_wb_subsections)
 				_wb_sub_resize_start_h = _wb_subsections[target_idx]["height"]
 				_wb_sub_resize_next_h = _wb_subsections[_wb_subsections.size() - 1]["height"]
+				_wb_sub_resize_orig.clear()
+				for s in _wb_subsections:
+					_wb_sub_resize_orig.append(s["height"])
 			return
 
 		if sub["collapsed"]:
@@ -7798,6 +8387,18 @@ func _handle_wb_click(lx: float, my: float) -> void:
 		var body_end: float = y + sub["height"]
 		if sub["id"] == "wb_inspector":
 			body_end = maxf(body_end, 9999.0)
+
+		# Body-edge resize zone (bottom edge of this pane, except the last one)
+		if my >= y + sub["height"] - SUB_RESIZE_ZONE and my < y + sub["height"] + SUB_RESIZE_ZONE and i < _wb_subsections.size() - 1:
+			_wb_sub_resize_idx = i
+			_wb_sub_resize_start_y = my
+			_sync_last_pane_height(_wb_subsections)
+			_wb_sub_resize_start_h = sub["height"]
+			_wb_sub_resize_next_h = _wb_subsections[_wb_subsections.size() - 1]["height"]
+			_wb_sub_resize_orig.clear()
+			for s in _wb_subsections:
+				_wb_sub_resize_orig.append(s["height"])
+			return
 
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
@@ -7820,37 +8421,59 @@ func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _bod
 	match sub_id:
 		"wb_board":
 			# Name field click
-			if local_y < 20:
+			if local_y < 18 and lx < pw - 48:
 				_wb_name_focused = true
 				_wb_name_text = wb.get_board_name()
 				return
 			_wb_name_focused = false
-			# Buttons row
-			if local_y >= 22 and local_y < 42:
-				var btn_w: float = (pw - 20) / 4.0
-				var btn_idx: int = int((lx - 4) / (btn_w + 2))
-				match btn_idx:
-					0:  # New
-						if rcon:
-							rcon._execute("wb new")
-					1:  # Save
-						if rcon:
-							rcon._execute("wb save")
-					2:  # Load
-						_wb_show_file_picker = not _wb_show_file_picker
-						if _wb_show_file_picker:
-							_wb_cached_file_list = wb.list_saved_files()
-					3:  # Clear
-						if rcon:
-							rcon._execute("wb clear")
+			# Save button
+			if local_y < 18 and lx >= pw - 48:
+				if rcon:
+					rcon._execute("wb save")
+					_wb_boards_dirty = true
+					_wb_save_flash_time = Time.get_ticks_msec() / 1000.0
 				return
-			# File picker click
-			if _wb_show_file_picker and local_y >= 44:
-				var fi: int = int((local_y - 44) / 16)
-				if fi >= 0 and fi < _wb_cached_file_list.size():
+
+		"wb_boards":
+			# Filter field click (top 18px)
+			if local_y < 18:
+				_wb_boards_filter_focused = true
+				return
+			_wb_boards_filter_focused = false
+			# Board list click (y >= 20)
+			if local_y >= 20:
+				var row_idx: int = int((local_y - 20) / 16.0) + _wb_boards_scroll_offset
+				var filtered: Array[String] = _get_filtered_boards()
+				# Ghost row — create new board
+				if row_idx == filtered.size():
 					if rcon:
-						rcon._execute("wb load " + _wb_cached_file_list[fi])
-					_wb_show_file_picker = false
+						rcon._execute("wb new")
+						_wb_boards_dirty = true
+					return
+				if row_idx >= 0 and row_idx < filtered.size():
+					var fname: String = filtered[row_idx]
+					# Right-side button zones
+					if lx >= pw - 20:
+						# ✕ button
+						if fname == _wb_boards_pending_delete:
+							# Confirm: actually delete the file
+							_wb_delete_board_file(fname)
+							_wb_boards_pending_delete = ""
+							_wb_clear_confirm_time = 0.0
+							_wb_boards_dirty = true
+						else:
+							# Mark for pending delete
+							_wb_boards_pending_delete = fname
+							_wb_clear_confirm_time = Time.get_ticks_msec() / 1000.0
+					elif lx >= pw - 36 and fname == _wb_boards_pending_delete:
+						# ↶ undo button
+						_wb_boards_pending_delete = ""
+						_wb_clear_confirm_time = 0.0
+					else:
+						# Click row: load the board
+						if rcon:
+							rcon._execute("wb load " + fname)
+						_wb_boards_dirty = true
 
 		"wb_actions":
 			# Action button clicks — rebuild action list to match drawing order
@@ -7871,6 +8494,12 @@ func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _bod
 				if any_locked:
 					actions.append("unlock")
 			actions.append_array(["show_all", "grid", "snap_grid", "snap_comp"])
+			# Clear with timed confirm
+			var clear_confirming: bool = _wb_clear_confirm_time > 0.0 and (Time.get_ticks_msec() / 1000.0 - _wb_clear_confirm_time) < 3.0
+			if clear_confirming:
+				actions.append("clear_confirm")
+			else:
+				actions.append("clear")
 
 			var btn_idx: int = int((local_y - 2) / 20)
 			if btn_idx >= 0 and btn_idx < actions.size():
@@ -7903,6 +8532,89 @@ func _handle_wb_subsection_click(sub_id: String, lx: float, local_y: float, _bod
 						_wb_snap_components = not _wb_snap_components
 						if _wb_tools_instance:
 							_wb_tools_instance.snap_components = _wb_snap_components
+					"clear":
+						_wb_clear_confirm_time = Time.get_ticks_msec() / 1000.0
+					"clear_confirm":
+						if rcon:
+							rcon._execute("wb clear")
+						_wb_clear_confirm_time = 0.0
+
+		"wb_layers":
+			_handle_wb_layers_click(wb, lx, local_y)
+
+
+func _handle_wb_layers_click(wb: Node, lx: float, local_y: float) -> void:
+	## Handle click in the layers pane — toggle expand, active, visibility, lock.
+	var row_h: float = 18.0
+	var layers: Array = wb.get_layers()
+	var ry: float = 0.0
+	var pw: float = _content_width
+
+	for layer in layers:
+		var lid: int = int(layer["id"])
+		var expanded: bool = _wb_layers_expanded.get(lid, false)
+
+		# Click is within this layer's header row
+		if local_y >= ry and local_y < ry + row_h:
+			# Eye icon (visibility) — right 36px region
+			if lx > pw - 40 and lx <= pw - 24:
+				wb.set_layer_visible(lid, not layer.get("visible", true))
+				return
+			# Lock icon — right 20px region
+			if lx > pw - 24:
+				wb.set_layer_locked(lid, not layer.get("locked", false))
+				return
+			# Expand/collapse triangle — left 16px
+			if lx < 16:
+				_wb_layers_expanded[lid] = not expanded
+				return
+			# Click on name — set as active layer
+			wb.set_active_layer(lid)
+			return
+		ry += row_h
+
+		if expanded:
+			# Groups
+			for group in layer.get("groups", []):
+				var gid: int = int(group["id"])
+				var g_expanded: bool = _wb_groups_expanded.get(gid, false)
+
+				if local_y >= ry and local_y < ry + row_h:
+					# Group eye
+					if lx > pw - 40 and lx <= pw - 24:
+						wb.set_group_visible(gid, not group.get("visible", true))
+						return
+					# Group lock
+					if lx > pw - 24:
+						wb.set_group_locked(gid, not group.get("locked", false))
+						return
+					# Expand/collapse
+					if lx < 30:
+						_wb_groups_expanded[gid] = not g_expanded
+						return
+					return
+				ry += row_h
+
+				if g_expanded:
+					for cid in group.get("component_ids", []):
+						if local_y >= ry and local_y < ry + row_h:
+							# Click on component — select it
+							wb.deselect_all()
+							wb.select_component(int(cid))
+							return
+						ry += row_h
+
+			# Ungrouped components
+			for cid in layer.get("component_ids", []):
+				if local_y >= ry and local_y < ry + row_h:
+					wb.deselect_all()
+					wb.select_component(int(cid))
+					return
+				ry += row_h
+
+	# Add Layer button (at the bottom)
+	if local_y >= ry and local_y < ry + 20:
+		wb.add_layer()
 
 
 func _handle_wb_tool_settings_click(sub_id: String, lx: float, local_y: float) -> void:
@@ -7910,35 +8622,57 @@ func _handle_wb_tool_settings_click(sub_id: String, lx: float, local_y: float) -
 	var pw: float = _content_width
 	match sub_id:
 		"wb_tools":
-			var btn_w: float = (pw - 12) * 0.5
-			var col_idx: int = 0 if lx < 4 + btn_w else 1
-			var row_idx: int = int((local_y - 2) / 20.0)
-			var tool_idx: int = row_idx * 2 + col_idx
-			if tool_idx >= 0 and tool_idx < WB_TOOLS.size():
-				_wb_active_tool = tool_idx
-				var tools := _wb_get_or_create_tools()
-				if tools:
-					tools.set_tool(tool_idx)
+			# Walk categories to find which was clicked
+			var ry: float = 2.0
+			var cat_h: float = 18.0
+			var tool_h: float = 16.0
+			for ci in range(WB_TOOL_CATEGORIES.size()):
+				var cat: Dictionary = WB_TOOL_CATEGORIES[ci]
+				# Category header click
+				if local_y >= ry and local_y < ry + cat_h:
+					_wb_active_category = ci
+					# Auto-select first tool in category
+					var first_idx: int = cat["tools"][0]["idx"]
+					_wb_active_tool = first_idx
+					var tools := _wb_get_or_create_tools()
+					if tools:
+						tools.set_tool(first_idx)
+					return
+				ry += cat_h
+				# Sub-tools (only if this category is active)
+				if ci == _wb_active_category:
+					var tools_arr: Array = cat["tools"]
+					if local_y >= ry and local_y < ry + tool_h + 2:
+						var tool_w: float = (pw - 16) / mini(tools_arr.size(), 4)
+						var ti: int = int((lx - 8) / (tool_w + 2))
+						if ti >= 0 and ti < tools_arr.size():
+							var tool_idx: int = tools_arr[ti]["idx"]
+							_wb_active_tool = tool_idx
+							var tools := _wb_get_or_create_tools()
+							if tools:
+								tools.set_tool(tool_idx)
+						return
+					ry += tool_h + 2
 		"wb_settings":
-			if local_y < 36:
-				var swatch_size: float = 14.0
-				var swatch_pad: float = 3.0
-				var rel_x: float = lx - 44
+			if true:
+				var swatch_pad: float = 2.0
+				var swatch_size: float = (pw - 8 - (WB_COLORS_PER_ROW - 1) * swatch_pad) / WB_COLORS_PER_ROW
+				var rel_x: float = lx - 4
 				var rel_y: float = local_y - 2
 				if rel_x >= 0:
 					var col_i: int = int(rel_x / (swatch_size + swatch_pad))
 					var row_i: int = int(rel_y / (swatch_size + swatch_pad))
-					var idx: int = row_i * 6 + col_i
+					var idx: int = row_i * WB_COLORS_PER_ROW + col_i
 					if idx >= 0 and idx < WB_COLOR_SWATCHES.size():
 						_wb_tool_color = WB_COLOR_SWATCHES[idx]["name"]
 						var tools := _wb_get_or_create_tools()
 						if tools:
 							tools.set_color(_wb_tool_color)
-						# When SELECT tool active, also change selected component's color
-						if _wb_active_tool == 0:
-							var sel_wb := _get_whiteboard()
-							if sel_wb:
-								var sel_ids: Array = sel_wb.get_selected_ids()
+						# Apply color to any selected components
+						var sel_wb := _get_whiteboard()
+						if sel_wb:
+							var sel_ids: Array = sel_wb.get_selected_ids()
+							if not sel_ids.is_empty():
 								var hex_col: String = "#" + WB_COLOR_SWATCHES[idx]["color"].to_html(false)
 								for sid in sel_ids:
 									sel_wb.set_component_property(sid, "color", hex_col)
@@ -7959,8 +8693,13 @@ func _handle_wb_scroll(my: float, delta: int) -> void:
 		if sub["id"] == "wb_inspector":
 			body_end = maxf(body_end, 9999.0)
 		if my >= y and my < body_end:
-			if sub["id"] == "wb_inspector":
-				_wb_inspector_scroll = maxi(0, _wb_inspector_scroll + delta)
+			match sub["id"]:
+				"wb_boards":
+					_wb_boards_scroll_offset = maxi(0, _wb_boards_scroll_offset + delta)
+				"wb_inspector":
+					_wb_inspector_scroll = maxi(0, _wb_inspector_scroll + delta)
+				"wb_layers":
+					_wb_layers_scroll = maxi(0, _wb_layers_scroll + delta)
 			return
 		y += sub["height"]
 
@@ -7969,13 +8708,8 @@ func _handle_wb_sub_resize_drag(my: float) -> void:
 	if _wb_sub_resize_idx < 0 or _wb_sub_resize_idx >= _wb_subsections.size():
 		return
 	var dy: float = my - _wb_sub_resize_start_y
-	var sub: Dictionary = _wb_subsections[_wb_sub_resize_idx]
-	var last_sub: Dictionary = _wb_subsections[_wb_subsections.size() - 1]
-	var min_h: float = WB_SUB_MIN.get(sub["id"], 30.0)
-	var last_min: float = WB_SUB_MIN.get(last_sub["id"], 30.0)
-	dy = clampf(dy, min_h - _wb_sub_resize_start_h, _wb_sub_resize_next_h - last_min)
-	sub["height"] = _wb_sub_resize_start_h + dy
-	last_sub["height"] = _wb_sub_resize_next_h - (sub["height"] - _wb_sub_resize_start_h)
+	_sub_resize_distribute(_wb_subsections, _wb_sub_resize_idx, _wb_sub_resize_start_h,
+		dy, WB_SUB_MIN, _wb_sub_resize_orig)
 
 
 func _handle_wb_sub_resize_release() -> void:
@@ -7993,6 +8727,18 @@ func _handle_wb_sub_resize_release() -> void:
 
 
 func _handle_wb_text_input(event: InputEventKey) -> void:
+	if _wb_boards_filter_focused:
+		if event.keycode == KEY_BACKSPACE:
+			if _wb_boards_filter_text.length() > 0:
+				_wb_boards_filter_text = _wb_boards_filter_text.substr(0, _wb_boards_filter_text.length() - 1)
+				_wb_boards_scroll_offset = 0
+		elif event.keycode == KEY_ESCAPE or event.keycode == KEY_ENTER or event.keycode == KEY_TAB:
+			_wb_boards_filter_focused = false
+		elif event.unicode > 0 and not event.ctrl_pressed:
+			_wb_boards_filter_text += char(event.unicode)
+			_wb_boards_scroll_offset = 0
+		return
+
 	if _wb_name_focused:
 		if event.keycode == KEY_BACKSPACE:
 			if _wb_name_text.length() > 0:
@@ -8001,7 +8747,12 @@ func _handle_wb_text_input(event: InputEventKey) -> void:
 			_wb_name_focused = false
 			var wb := _get_whiteboard()
 			if wb:
-				wb.set_board_name(_wb_name_text)
+				var old_name: String = wb.get_board_name()
+				var new_name: String = _wb_name_text.strip_edges()
+				if not new_name.is_empty() and new_name != old_name:
+					_wb_rename_board(wb, old_name, new_name)
+				elif not new_name.is_empty():
+					wb.set_board_name(new_name)
 		elif event.keycode == KEY_ESCAPE:
 			_wb_name_focused = false
 		elif event.unicode > 0 and not event.ctrl_pressed:
@@ -8032,7 +8783,7 @@ func _handle_wb_hover(my: float) -> void:
 	if not _wb_subsections_initialized:
 		return
 	_wb_hover_tool_idx = -1
-	_wb_hover_file_idx = -1
+	_wb_boards_hover_idx = -1
 	var y: float = 0.0
 	for sub in _wb_subsections:
 		if sub["collapsed"]:
@@ -8045,16 +8796,8 @@ func _handle_wb_hover(my: float) -> void:
 		if my >= body_y and my < body_end:
 			var local_y: float = my - body_y
 			match sub["id"]:
-				"wb_tools":
-					var pw: float = _content_width
-					var btn_w: float = (pw - 12) * 0.5
-					var col_idx: int = 0 if _last_hover_lx < 4 + btn_w else 1
-					var row_idx: int = int((local_y - 2) / 20.0)
-					var tool_idx: int = row_idx * 2 + col_idx
-					if tool_idx >= 0 and tool_idx < WB_TOOLS.size():
-						_wb_hover_tool_idx = tool_idx
-				"wb_board":
-					if _wb_show_file_picker and local_y >= 44:
-						_wb_hover_file_idx = int((local_y - 44) / 16)
+				"wb_boards":
+					if local_y >= 20:
+						_wb_boards_hover_idx = int((local_y - 20) / 16.0) + _wb_boards_scroll_offset
 			return
 		y += sub["height"]

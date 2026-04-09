@@ -20,7 +20,15 @@
       "Bash(SwitchAudioSource:*)",
       "Bash(bash /Users/jeremy/.claude/skills/audio-mode/switch.sh develop)",
       "Skill(gd)",
-      "Bash(kill %1)"
+      "Bash(kill %1)",
+      "Bash(gh search:*)",
+      "Bash(gh pr:*)",
+      "Bash(gh release:*)",
+      "Bash(lsof -ti:9999)",
+      "Bash(xargs kill:*)",
+      "Bash(sips:*)",
+      "Bash(screencapture -x /tmp/wb_verify_normal_cp.png)",
+      "Bash(screencapture -x /tmp/wb_diagram.png)"
     ],
     "deny": [],
     "additionalDirectories": [

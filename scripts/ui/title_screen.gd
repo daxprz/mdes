@@ -299,6 +299,31 @@ func _setup_spawn_positions_from_config(positions: Array) -> void:
 		_config_spawn_positions = new_spawns
 
 
+func _setup_floor_from_config(floor_config: Dictionary) -> void:
+	## Apply floor position, width, and color from level JSON to the baked Floor node.
+	var floor_node: Node = get_node_or_null("Floor")
+	if not floor_node:
+		return
+	if floor_config.is_empty():
+		return
+	var pos: Array = floor_config.get("pos", [])
+	if pos.size() >= 2:
+		floor_node.position = Vector2(pos[0], pos[1])
+	var w: float = floor_config.get("width", 1920.0)
+	# Update collision shape size
+	var shape_node: CollisionShape2D = floor_node.get_node_or_null("FloorShape")
+	if shape_node and shape_node.shape is RectangleShape2D:
+		shape_node.shape.size.x = w
+	# Update visual rect
+	var visual: ColorRect = floor_node.get_node_or_null("FloorVisual")
+	if visual:
+		visual.offset_left = -w / 2.0
+		visual.offset_right = w / 2.0
+		var col: Array = floor_config.get("color", [])
+		if col.size() >= 4:
+			visual.color = Color(col[0], col[1], col[2], col[3])
+
+
 func _setup_cave_walls_from_config(cave_config: Dictionary) -> void:
 	if cave_config.is_empty():
 		return
@@ -678,6 +703,7 @@ func _rebuild_from_config(new_config: Dictionary) -> void:
 
 func _deferred_rebuild() -> void:
 	var config: Dictionary = _current_config
+	_setup_floor_from_config(config.get("floor", {}))
 	_setup_migration_patterns_from_config(config.get("migration_patterns", []))
 	_setup_background_trees_from_config(config.get("scenery", {}).get("trees", []))
 	_setup_rocks_from_config(config.get("scenery", {}).get("rocks", []))

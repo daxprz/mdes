@@ -1,0 +1,59 @@
+{
+  "name": "ranger_slide_taut",
+  "description": "Ranger slide with short rope — rope goes taut during slide, pulling ranger off surface. Charge WASTED. Uses S1 (L=420, shortest rope).",
+  "debug": {
+    "log": ["player/slide"],
+    "on": ["player/slide", "player/jump_tracers", "player/velocity_arrows"]
+  },
+  "script": [
+    "var inspect default=0",
+    "level ranger_slide_test",
+    "wait 0.5",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+
+    "# --- Exact WB geometry: S1 at (832, 500), hook at (960,100), L=420 ---",
+    "# Shortest rope. Floor intersection is close to the hook's directly-below point.",
+    "# When the ranger slides right, the rope quickly reaches max length.",
+    "ai_spawn 832 490 class=ranged name=Ranger",
+    "wait 0.5",
+
+    "announce S1: Short rope (L=420) — grapple to ceiling",
+
+    "# Grapple aimed at ceiling — nearly straight up",
+    "ai_cmd grapple 0.6 0.305 -0.952",
+    "wait 1.2",
+
+    "# Swing RIGHT",
+    "announce Swinging right",
+    "ai_cmd right 2.5",
+    "wait 2.5",
+
+    "# Hit floor, start slide",
+    "announce Circle to SLIDE — rope will go TAUT quickly",
+    "ai_hold interact on",
+    "wait 0.2",
+
+    "# Slide on floor. With L=420 and hook at (960,100), the max horizontal",
+    "# distance from hook at floor level is ~128px. The ranger will quickly",
+    "# slide past this and the rope will yank them off the floor.",
+    "announce SLIDING — waiting for rope taut...",
+    "wait 2.0",
+
+    "# Release Circle — should get NO boost (off surface)",
+    "announce Release Circle — charge should be WASTED",
+    "ai_hold interact off",
+    "wait 0.5",
+
+    "ai_cmd none 3.0",
+    "wait 3.0",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"Was charge wasted? (rope pulled off surface)\" [\"YES-WASTED\",\"NO-GOT-BOOST\",\"DIDN'T-SLIDE\"] {inspect} blocking"
+  ]
+}

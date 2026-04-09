@@ -1,0 +1,63 @@
+{
+  "name": "ranger_slide_hill",
+  "description": "Ranger slide on 45-degree slope. NOTE: requires slope geometry not in the basic level. Tests terrain-following if slope surface exists. Uses S3 (L=550) aimed at the hill region.",
+  "debug": {
+    "log": ["player/slide"],
+    "on": ["player/slide", "player/jump_tracers", "player/velocity_arrows"]
+  },
+  "script": [
+    "var inspect default=0",
+    "level ranger_slide_test",
+    "wait 0.5",
+    "clear",
+    "portal off",
+    "clearplayers",
+    "standdown on",
+
+    "# --- WB hill: triangle (625,850)→(960,515)→(1295,850), 45-degree slopes ---",
+    "# The standard level has a flat floor at y=500. The hill is BELOW the floor.",
+    "# This test verifies the slide mechanic on the floor with a longer arc,",
+    "# then checks if terrain-following works if the ranger slides off an edge.",
+    "# (Full hill slope test requires polygon collision bodies.)",
+
+    "# Use S5 (L=750) — longest rope, steepest angle at floor impact",
+    "ai_spawn 326 490 class=ranged name=Ranger",
+    "wait 0.5",
+
+    "announce S5: Longest rope (L=750) — steep impact angle",
+
+    "# Grapple aimed at ceiling",
+    "ai_cmd grapple 0.6 0.846 -0.533",
+    "wait 1.2",
+
+    "# Swing RIGHT hard — build maximum momentum",
+    "announce Swinging right — maximum momentum build",
+    "ai_cmd right 4.0",
+    "wait 4.0",
+
+    "# Steep floor impact — most velocity goes into the surface normal.",
+    "# The blue (surface-parallel) component is smallest for S5.",
+    "# But the total velocity is highest (longest drop).",
+    "announce Circle to SLIDE — steep angle, slow horizontal slide",
+    "ai_hold interact on",
+    "wait 0.2",
+
+    "# Charge up fully (2 seconds = 1.5x multiplier)",
+    "announce SLIDING — full 2s charge for maximum boost",
+    "wait 2.0",
+
+    "# Release with full charge",
+    "announce Release Circle — FULL CHARGE (1.5x) boost!",
+    "ai_hold interact off",
+    "wait 0.5",
+
+    "ai_cmd none 3.0",
+    "wait 3.0",
+
+    "ai_off",
+    "standdown off",
+    "enablejoins",
+    "gameconfig multiple_players_same_class true",
+    "notify {SCRIPT} \"Did ranger slide with steep angle and full-charge boost?\" [\"YES\",\"NO\",\"PARTIAL\"] {inspect} blocking"
+  ]
+}

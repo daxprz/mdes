@@ -1,0 +1,8 @@
+{
+  "name": "ranger",
+  "description": "Ranger class: grapple hook, swing, arrows, tether",
+  "tests": [
+    "ranger_arrow_debug",
+    "ranger_grapple_swing_rnd"
+  ]
+}
