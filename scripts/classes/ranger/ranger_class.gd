@@ -57,10 +57,41 @@ const SLIDE_GRAVITY := 600.0             # Gravity component along slopes
 const SLIDE_PARTICLE_RATE := 30.0        # Dust puffs per second
 const SLIDE_CHARGE_TIME := 2.0           # Seconds to reach full charge
 
+# Run/Dash constants
+const RUN_SPEED_MULT := 2.0
+const RUN_FOOTSTEP_RATE := 8.0           # Puffs per second while running
+const DASH_SPEED_MULT := 4.0
+const DASH_DURATION := 1.0
+const DASH_COOLDOWN := 5.0
+const DASH_TRAIL_MAX_AGE := 0.4          # Trail points live this long (seconds)
+
 # Slide state
 var _slide_charge_mod: Variant = null     # RampModifierProvider for charge (pushed on slide start)
 var _slide_on_surface: bool = true        # True while collision box contacts terrain
 var _slide_max_extent: Vector2 = Vector2.ZERO  # Furthest point reached (debug)
+
+# Run state
+var _is_running: bool = false
+var _run_airborne: bool = false           # True = jumped while running, maintain speed in air
+var _run_footstep_accum: float = 0.0
+var _smoothed_deflection: float = 0.0    # Low-pass filtered stick deflection (prevents jitter)
+var _smoothed_h: float = 0.0             # Smoothed signed horizontal input (filters sign-flip jitter)
+
+# Stick visualizer state
+var _stick_trail: Array = []             # [{x, y, age}] raw stick positions for heat trail
+const STICK_TRAIL_MAX_AGE := 1.5         # Trail points live this long
+const STICK_VIZ_SIZE := 40.0             # Half-size of the visualizer square (pixels)
+
+# Dash state
+var _is_dashing: bool = false
+var _dash_timer: float = 0.0
+var _dash_cooldown_timer: float = 0.0
+var _dash_direction: float = 0.0         # -1 or 1 (locked at start)
+var _dash_jumped: bool = false            # True if player jumped during dash
+var _r1_was_pressed: bool = false         # For just-pressed edge detection
+var _dash_trail: Array = []              # [{pos: Vector2, age: float}]
+var _dash_sparkles: Array = []           # [{pos, vel, age, max_age, yellow: bool}]
+var _run_particles: Array = []           # [{pos, vel, age, max_age, radius}]
 
 
 func on_class_enter() -> void:
@@ -70,6 +101,8 @@ func on_class_enter() -> void:
 func tick(delta: float) -> void:
 	_handle_ranger_reload(delta)
 	_handle_archer_aim(delta)
+	_handle_ranger_run(delta)
+	_handle_ranger_dash(delta)
 
 
 func perform_attack(_intent: Dictionary) -> void:
@@ -938,6 +971,282 @@ func _spawn_dust_puff(pos: Vector2, vel: Vector2) -> void:
 		pool.spawn_particle(pos, vel, Color(0.6, 0.55, 0.45, 0.5), randf_range(2.0, 4.0), randf_range(0.3, 0.5))
 
 
+# -- Ranger Run (block button → 2x speed) --------------------------------------
+
+func _handle_ranger_run(delta: float) -> void:
+	if p.character_class != PlayerManager.CharacterClass.RANGED:
+		return
+	if _is_dashing:
+		_is_running = false
+		_run_airborne = false
+		return
+	var deflection: float = _get_h_deflection()
+	var h_raw: float = _get_h_raw()
+	var was_running := _is_running
+
+	# Asymmetric smoothing: fast rise (0.3), slow fall (0.08)
+	# Controller jitter causes single-frame drops to ~25% even at full deflection.
+	# Slow fall means garbage frames barely move the smoothed value.
+	if deflection >= _smoothed_deflection:
+		_smoothed_deflection = lerpf(_smoothed_deflection, deflection, 0.3)
+	else:
+		_smoothed_deflection = lerpf(_smoothed_deflection, deflection, 0.08)
+
+	# Smooth signed input — prevents sign-flip jitter from briefly walking backwards.
+	# Same asymmetric approach: fast toward larger magnitude, slow toward smaller/opposite.
+	if absf(h_raw) >= absf(_smoothed_h) or signf(h_raw) == signf(_smoothed_h):
+		_smoothed_h = lerpf(_smoothed_h, h_raw, 0.3)
+	else:
+		_smoothed_h = lerpf(_smoothed_h, h_raw, 0.08)
+
+	# Update stick visualizer trail
+	_stick_viz_update(h_raw, get_process_delta_time())
+
+	if p.is_on_floor():
+		# Hysteresis on smoothed value: enter run at >90%, exit only when <80%
+		if _is_running:
+			_is_running = _smoothed_deflection > 0.8
+		else:
+			_is_running = _smoothed_deflection > 0.9
+		if _run_airborne:
+			_run_airborne = false
+			DebugOverlay.log("player/run", p, "RUN AIRBORNE: landed")
+	else:
+		# In air: if was running (or airborne from run), maintain momentum
+		if was_running or _run_airborne:
+			_run_airborne = true
+			_is_running = false  # Not ground-running, but momentum preserved
+		else:
+			_is_running = false
+			_run_airborne = false
+
+	DebugOverlay.log("player/stick", p, "STICK: raw=%.3f defl=%.0f%% smooth=%.0f%% facing=%s run=%s airborne=%s dash=%s vel=(%.0f,%.0f)" % [
+		h_raw, deflection * 100.0, _smoothed_deflection * 100.0,
+		"R" if p._facing_right else "L",
+		str(_is_running), str(_run_airborne), str(_is_dashing),
+		p.velocity.x, p.velocity.y])
+
+	if _is_running and not was_running:
+		_spawn_run_start_puff()
+		DebugOverlay.log("player/run", p, "RUN START: deflection=%.0f%%" % [deflection * 100])
+
+	if _is_running:
+		_run_emit_footstep(delta)
+	else:
+		_run_footstep_accum = 0.0
+		if was_running and not _run_airborne:
+			DebugOverlay.log("player/run", p, "RUN END")
+
+	# Age and cull run particles
+	_age_run_particles(delta)
+
+
+func _get_h_raw() -> float:
+	## Returns signed horizontal input (-1.0 to 1.0). Analog for gamepad, binary for keyboard.
+	if p.device_id >= 0:
+		var raw: float = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_X)
+		return raw if absf(raw) >= 0.1 else 0.0
+	var h := 0.0
+	if p._is_device_action_pressed("move_left"): h -= 1.0
+	if p._is_device_action_pressed("move_right"): h += 1.0
+	return h
+
+
+func _get_h_deflection() -> float:
+	## Returns 0.0–1.0 horizontal stick deflection (absolute value of raw).
+	return absf(_get_h_raw())
+
+
+func _spawn_run_start_puff() -> void:
+	## Burst of 8 smoke circles at feet, expanding outward.
+	var foot_pos: Vector2 = p.global_position + Vector2(0, 8)
+	for i in range(8):
+		var angle: float = TAU * i / 8.0 + randf_range(-0.2, 0.2)
+		var speed: float = randf_range(30.0, 70.0)
+		_run_particles.append({
+			"pos": foot_pos + Vector2(randf_range(-4, 4), randf_range(-2, 2)),
+			"vel": Vector2(cos(angle), sin(angle)) * speed,
+			"age": 0.0,
+			"max_age": randf_range(0.3, 0.5),
+			"radius": randf_range(3.0, 6.0),
+		})
+	p.queue_redraw()
+
+
+func _run_emit_footstep(delta: float) -> void:
+	## Small puff at feet while running, alternating left/right.
+	_run_footstep_accum += RUN_FOOTSTEP_RATE * delta
+	while _run_footstep_accum >= 1.0:
+		_run_footstep_accum -= 1.0
+		var foot_offset: float = -6.0 if int(_run_footstep_accum * 10) % 2 == 0 else 6.0
+		var foot_pos: Vector2 = p.global_position + Vector2(foot_offset, 8)
+		_run_particles.append({
+			"pos": foot_pos,
+			"vel": Vector2(randf_range(-15, 15), randf_range(-25, -10)),
+			"age": 0.0,
+			"max_age": randf_range(0.2, 0.35),
+			"radius": randf_range(1.5, 3.0),
+		})
+	p.queue_redraw()
+
+
+func _age_run_particles(delta: float) -> void:
+	var i: int = _run_particles.size() - 1
+	while i >= 0:
+		_run_particles[i]["age"] += delta
+		_run_particles[i]["pos"] += _run_particles[i]["vel"] * delta
+		_run_particles[i]["vel"] *= 0.92  # Drag
+		if _run_particles[i]["age"] >= _run_particles[i]["max_age"]:
+			_run_particles.remove_at(i)
+		i -= 1
+
+
+# -- Ranger Dash (R1 when grounded + not grappling → 4x speed, 0.5s) -----------
+
+func _handle_ranger_dash(delta: float) -> void:
+	if p.character_class != PlayerManager.CharacterClass.RANGED:
+		return
+
+	# Tick cooldown
+	if _dash_cooldown_timer > 0.0:
+		_dash_cooldown_timer = maxf(_dash_cooldown_timer - delta, 0.0)
+
+	# Tick active dash
+	if _is_dashing:
+		_dash_timer -= delta
+		_dash_update_trail(delta)
+
+		# Track if player jumped during dash
+		if not p.is_on_floor():
+			_dash_jumped = true
+
+		# End: timer expired AND (touching any surface OR never jumped)
+		if _dash_timer <= 0.0:
+			var on_surface: bool = p.is_on_floor() or p.is_on_wall() or p.is_on_ceiling()
+			if on_surface or not _dash_jumped:
+				_dash_end()
+		_r1_was_pressed = _is_r1_pressed()
+		return
+
+	# Fade trail/sparkles when not dashing
+	_dash_fade_trail(delta)
+
+	# Check R1 for dash initiation
+	var r1_now: bool = _is_r1_pressed()
+	var r1_just: bool = r1_now and not _r1_was_pressed
+	_r1_was_pressed = r1_now
+
+	if not r1_just:
+		return
+	if p._grapple_state != GrappleState.IDLE:
+		return  # R1 is pull-to-anchor while grappling
+	if not p.is_on_floor():
+		return
+	if _dash_cooldown_timer > 0.0:
+		# Cooldown flash / feedback
+		DebugOverlay.log("player/dash", p, "DASH: on cooldown (%.1fs remaining)" % _dash_cooldown_timer)
+		return
+
+	_dash_start()
+
+
+func _is_r1_pressed() -> bool:
+	if p.device_id >= 0:
+		return Input.is_joy_button_pressed(p.device_id, JOY_BUTTON_RIGHT_SHOULDER)
+	return Input.is_key_pressed(KEY_SHIFT)
+
+
+func _dash_start() -> void:
+	_is_dashing = true
+	_dash_timer = DASH_DURATION
+	_dash_jumped = false
+	_dash_direction = 1.0 if p._facing_right else -1.0
+	_is_running = false  # Dash overrides run
+	_dash_trail.clear()
+	_dash_sparkles.clear()
+
+	AudioManager.play("grapple_launch", -3.0, 1.5)
+	p._rumble(0.2, 0.4, 0.1)
+	p.queue_redraw()
+
+	DebugOverlay.log("player/dash", p, "DASH START: dir=%.0f cooldown=%.1f" % [
+		_dash_direction, DASH_COOLDOWN])
+
+
+func _dash_end() -> void:
+	_is_dashing = false
+	_dash_cooldown_timer = DASH_COOLDOWN
+	_dash_jumped = false
+	p.queue_redraw()
+	DebugOverlay.log("player/dash", p, "DASH END: cooldown=%.1fs" % DASH_COOLDOWN)
+
+
+func _dash_update_trail(delta: float) -> void:
+	# Add current position to trail
+	_dash_trail.append({"pos": p.global_position, "age": 0.0})
+
+	# Spawn sparkles (~30/sec, mix of green outer + yellow streak)
+	var sparkle_count: int = int(30.0 * delta) + (1 if randf() < fmod(30.0 * delta, 1.0) else 0)
+	for _si in range(sparkle_count):
+		var offset := Vector2(randf_range(-12, 12), randf_range(-18, 6))
+		var sparkle_vel := Vector2(-_dash_direction * randf_range(20, 80), randf_range(-40, 15))
+		_dash_sparkles.append({
+			"pos": p.global_position + offset,
+			"vel": sparkle_vel,
+			"age": 0.0,
+			"max_age": randf_range(0.15, 0.35),
+			"yellow": randf() < 0.35,
+		})
+
+	# Age trail points
+	var i: int = _dash_trail.size() - 1
+	while i >= 0:
+		_dash_trail[i]["age"] += delta
+		if _dash_trail[i]["age"] >= DASH_TRAIL_MAX_AGE:
+			_dash_trail.remove_at(i)
+		i -= 1
+
+	# Age sparkles
+	i = _dash_sparkles.size() - 1
+	while i >= 0:
+		_dash_sparkles[i]["age"] += delta
+		_dash_sparkles[i]["pos"] += _dash_sparkles[i]["vel"] * delta
+		if _dash_sparkles[i]["age"] >= _dash_sparkles[i]["max_age"]:
+			_dash_sparkles.remove_at(i)
+		i -= 1
+
+
+func _dash_fade_trail(delta: float) -> void:
+	## Continue fading trail and sparkles after dash ends.
+	var i: int = _dash_trail.size() - 1
+	while i >= 0:
+		_dash_trail[i]["age"] += delta * 2.5  # Fade faster post-dash
+		if _dash_trail[i]["age"] >= DASH_TRAIL_MAX_AGE:
+			_dash_trail.remove_at(i)
+		i -= 1
+
+	i = _dash_sparkles.size() - 1
+	while i >= 0:
+		_dash_sparkles[i]["age"] += delta
+		_dash_sparkles[i]["pos"] += _dash_sparkles[i]["vel"] * delta
+		if _dash_sparkles[i]["age"] >= _dash_sparkles[i]["max_age"]:
+			_dash_sparkles.remove_at(i)
+		i -= 1
+
+	if _dash_trail.is_empty() and _dash_sparkles.is_empty() and not _run_particles.is_empty():
+		pass  # run particles handled separately
+
+
+func get_speed_multiplier() -> float:
+	## Returns the speed multiplier from run/dash state.
+	## Includes airborne momentum — run/dash speed carries through jumps.
+	if _is_dashing:
+		return DASH_SPEED_MULT
+	if _is_running or _run_airborne:
+		return RUN_SPEED_MULT
+	return 1.0
+
+
 func _grapple_release() -> void:
 	## Release from wall — keep swing momentum
 	p._grapple_state = GrappleState.RETRACTING
@@ -1138,6 +1447,11 @@ var _hud_aura_fade: float = 0.0  # 1.0 = fully visible, fades to 0 over 1s
 
 
 func _draw_grapple() -> void:
+	# Always draw run/dash visuals (even when grapple is idle)
+	_draw_dash_trail()
+	_draw_run_particles()
+	_draw_stick_viz()
+
 	if p._grapple_state == GrappleState.IDLE:
 		return
 
@@ -1304,8 +1618,174 @@ func _draw_grapple() -> void:
 				p.draw_arc(dot_pos, 2.0, 0, TAU, 8, Color(0.5, 0.4, 0.3, 0.6), 0.5)
 
 
-# -- Ranger Reload -------------------------------------------------------------
+# -- Run/Dash Drawing ----------------------------------------------------------
 
+func _draw_dash_trail() -> void:
+	## Draw the DASH visual: green streak, yellow center highlight, sparkles.
+	if _dash_trail.is_empty() and _dash_sparkles.is_empty():
+		return
+
+	# Draw streak (thick green line connecting trail points)
+	if _dash_trail.size() >= 2:
+		# Sort by age descending so we draw oldest first (painter's order)
+		var sorted_trail: Array = _dash_trail.duplicate()
+		sorted_trail.sort_custom(func(a, b): return a["age"] > b["age"])
+
+		for i in range(sorted_trail.size() - 1):
+			var a_data: Dictionary = sorted_trail[i]
+			var b_data: Dictionary = sorted_trail[i + 1]
+			var a_local: Vector2 = a_data["pos"] - p.global_position
+			var b_local: Vector2 = b_data["pos"] - p.global_position
+			var alpha_a: float = 1.0 - (a_data["age"] / DASH_TRAIL_MAX_AGE)
+			var alpha_b: float = 1.0 - (b_data["age"] / DASH_TRAIL_MAX_AGE)
+			var alpha: float = minf(alpha_a, alpha_b)
+			if alpha <= 0.0:
+				continue
+
+			# Outer green streak (thick)
+			var green := Color(0.2, 0.9, 0.3, alpha * 0.6)
+			p.draw_line(a_local, b_local, green, 8.0)
+
+			# Yellow center highlight (thin, bright)
+			var yellow := Color(1.0, 0.95, 0.3, alpha * 0.9)
+			p.draw_line(a_local, b_local, yellow, 3.0)
+
+	# Draw sparkles
+	for spark in _dash_sparkles:
+		var alpha: float = 1.0 - (spark["age"] / spark["max_age"])
+		if alpha <= 0.0:
+			continue
+		var spark_local: Vector2 = spark["pos"] - p.global_position
+		var radius: float = lerpf(2.5, 0.5, spark["age"] / spark["max_age"])
+		if spark["yellow"]:
+			# Yellow streak sparkle
+			p.draw_circle(spark_local, radius, Color(1.0, 0.95, 0.3, alpha * 0.8))
+		else:
+			# Green outer sparkle
+			p.draw_circle(spark_local, radius, Color(0.3, 1.0, 0.4, alpha * 0.7))
+
+
+func _draw_run_particles() -> void:
+	## Draw smoke puffs from running.
+	for particle in _run_particles:
+		var t: float = particle["age"] / particle["max_age"]
+		if t >= 1.0:
+			continue
+		var alpha: float = 1.0 - t
+		var radius: float = particle["radius"] * (1.0 + t * 0.8)  # Expand slightly
+		var local_pos: Vector2 = particle["pos"] - p.global_position
+		# Smoke: light gray, fading
+		p.draw_circle(local_pos, radius, Color(0.75, 0.72, 0.68, alpha * 0.5))
+
+
+# -- Stick Visualizer ----------------------------------------------------------
+
+func _stick_viz_update(h_raw: float, delta: float) -> void:
+	## Record raw stick position for the heat trail each frame.
+	var v_raw: float = 0.0
+	if p.device_id >= 0:
+		v_raw = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_Y)
+	else:
+		if p._is_device_action_pressed("move_up"): v_raw -= 1.0
+		if p._is_device_action_pressed("move_down"): v_raw += 1.0
+
+	# Only record when stick is off-center
+	if absf(h_raw) > 0.05 or absf(v_raw) > 0.05:
+		_stick_trail.append({"x": h_raw, "y": v_raw, "age": 0.0})
+
+	# Age and cull trail
+	var i: int = _stick_trail.size() - 1
+	while i >= 0:
+		_stick_trail[i]["age"] += delta
+		if _stick_trail[i]["age"] >= STICK_TRAIL_MAX_AGE:
+			_stick_trail.remove_at(i)
+		i -= 1
+
+
+func _draw_stick_viz() -> void:
+	## Thumbstick visualizer: square frame, crosshair, raw dot, smoothed ring, heat trail.
+	if not DebugOverlay.should_draw("player/stick_viz", p):
+		return
+
+	var S: float = STICK_VIZ_SIZE  # Half-size
+	# Center on the player (local coords = 0,0)
+	var cx := 0.0
+	var cy := 0.0
+
+	# -- Background: translucent dark square --
+	var bg := Rect2(cx - S, cy - S, S * 2.0, S * 2.0)
+	p.draw_rect(bg, Color(0.0, 0.0, 0.0, 0.25))
+
+	# -- Border --
+	p.draw_rect(bg, Color(1.0, 1.0, 1.0, 0.3), false, 1.0)
+
+	# -- Crosshair lines (translucent) --
+	var xhair_col := Color(1.0, 1.0, 1.0, 0.15)
+	p.draw_line(Vector2(cx - S, cy), Vector2(cx + S, cy), xhair_col, 1.0)  # Horizontal
+	p.draw_line(Vector2(cx, cy - S), Vector2(cx, cy + S), xhair_col, 1.0)  # Vertical
+
+	# -- Min/max vertical extent lines (90% threshold) --
+	var thresh_y: float = 0.9 * S
+	var thresh_col := Color(0.3, 0.8, 1.0, 0.2)
+	# Horizontal threshold lines at ±90%
+	p.draw_line(Vector2(cx - S, cy - thresh_y), Vector2(cx + S, cy - thresh_y), thresh_col, 1.0)
+	p.draw_line(Vector2(cx - S, cy + thresh_y), Vector2(cx + S, cy + thresh_y), thresh_col, 1.0)
+	# Vertical threshold lines at ±90% (run threshold)
+	p.draw_line(Vector2(cx - thresh_y, cy - S), Vector2(cx - thresh_y, cy + S), thresh_col, 1.0)
+	p.draw_line(Vector2(cx + thresh_y, cy - S), Vector2(cx + thresh_y, cy + S), thresh_col, 1.0)
+
+	# -- Heat trail: older = cooler color, newer = hotter --
+	for pt in _stick_trail:
+		var t: float = pt["age"] / STICK_TRAIL_MAX_AGE
+		if t >= 1.0:
+			continue
+		var px: float = cx + pt["x"] * S
+		var py: float = cy + pt["y"] * S
+		# Heat color: white-hot → yellow → red → dim red
+		var heat_col: Color
+		if t < 0.25:
+			heat_col = Color(1.0, 1.0, 1.0 - t * 4.0, 0.6 * (1.0 - t))  # White → yellow
+		elif t < 0.6:
+			var t2: float = (t - 0.25) / 0.35
+			heat_col = Color(1.0, 1.0 - t2 * 0.7, 0.0, 0.5 * (1.0 - t))  # Yellow → red
+		else:
+			var t3: float = (t - 0.6) / 0.4
+			heat_col = Color(0.8 - t3 * 0.5, 0.3 - t3 * 0.3, 0.0, 0.3 * (1.0 - t))  # Red → dim
+		var radius: float = lerpf(2.0, 0.5, t)
+		p.draw_circle(Vector2(px, py), radius, heat_col)
+
+	# -- Smoothed deflection ring (shows the filtered value used for run threshold) --
+	var smooth_radius: float = _smoothed_deflection * S
+	p.draw_arc(Vector2(cx, cy), smooth_radius, 0, TAU, 24, Color(0.3, 0.8, 1.0, 0.35), 1.5)
+
+	# -- Raw stick dot (current position, bright) --
+	var raw_h: float = _get_h_raw()
+	var raw_v: float = 0.0
+	if p.device_id >= 0:
+		raw_v = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_Y)
+	var dot_x: float = cx + raw_h * S
+	var dot_y: float = cy + raw_v * S
+	var dot_col := Color.WHITE
+	if _is_running or _run_airborne:
+		dot_col = Color(0.3, 1.0, 0.4)  # Green when running
+	elif _is_dashing:
+		dot_col = Color(1.0, 0.95, 0.3)  # Yellow when dashing
+	p.draw_circle(Vector2(dot_x, dot_y), 3.0, dot_col)
+
+	# -- Mode label --
+	var mode_text: String = "WALK"
+	var mode_col := Color(0.7, 0.7, 0.7, 0.6)
+	if _is_dashing:
+		mode_text = "DASH"
+		mode_col = Color(1.0, 0.95, 0.3, 0.8)
+	elif _is_running or _run_airborne:
+		mode_text = "RUN"
+		mode_col = Color(0.3, 1.0, 0.4, 0.8)
+	p.draw_string(ThemeDB.fallback_font, Vector2(cx - S, cy - S - 4), mode_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 9, mode_col)
+
+	# -- Deflection % label --
+	var defl_text: String = "%.0f%% (s:%.0f%%)" % [_get_h_deflection() * 100, _smoothed_deflection * 100]
+	p.draw_string(ThemeDB.fallback_font, Vector2(cx - S, cy + S + 10), defl_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 8, Color(0.7, 0.7, 0.7, 0.5))
 
 
 # -- Ranger Reload -------------------------------------------------------------

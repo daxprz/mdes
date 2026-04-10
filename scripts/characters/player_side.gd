@@ -1088,11 +1088,22 @@ func _handle_movement() -> void:
 	if _shield_charging:
 		return
 
+	# Read analog stick (gamepad) or binary keys (keyboard)
 	var h_input := 0.0
-	if _is_device_action_pressed("move_left"):
-		h_input -= 1.0
-	if _is_device_action_pressed("move_right"):
-		h_input += 1.0
+	if device_id >= 0:
+		h_input = Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X)
+		if absf(h_input) < 0.1:
+			h_input = 0.0
+	else:
+		if _is_device_action_pressed("move_left"):
+			h_input -= 1.0
+		if _is_device_action_pressed("move_right"):
+			h_input += 1.0
+
+	# Ranger uses smoothed input to filter sign-flip jitter from noisy controllers
+	var move_h: float = h_input
+	if _ranger_class and character_class == PlayerManager.CharacterClass.RANGED:
+		move_h = _ranger_class._smoothed_h
 
 	var speed: float = PlayerManager.get_player(player_index).get("speed", 100)
 	if _melee_enraged:
@@ -1101,10 +1112,27 @@ func _handle_movement() -> void:
 		speed *= 1.25
 	if _is_blocking:
 		speed *= 0.5
-	velocity.x = h_input * speed
+	# Ranger dash: locked direction at 4x speed (overrides input)
+	if _ranger_class and _ranger_class._is_dashing:
+		velocity.x = _ranger_class._dash_direction * speed * _ranger_class.DASH_SPEED_MULT
+		return
+	# Ranger variable walk/run: 0-90% stick = walk (proportional), 91%+ = run (2x)
+	if _ranger_class and character_class == PlayerManager.CharacterClass.RANGED:
+		var deflection := absf(move_h)
+		if _ranger_class._is_running or _ranger_class._run_airborne:
+			# Run mode (or airborne from run): 2x speed in input direction
+			velocity.x = signf(move_h) * speed * _ranger_class.RUN_SPEED_MULT if deflection > 0.0 else 0.0
+		else:
+			# Walk mode: scale within 0-90% range (90% stick = full walk speed)
+			var walk_factor := clampf(deflection / 0.9, 0.0, 1.0)
+			velocity.x = signf(move_h) * speed * walk_factor
+	else:
+		velocity.x = h_input * speed
 
-	if h_input != 0.0:
-		_facing_right = h_input > 0.0
+	# Update facing — use smoothed input for Ranger, raw for others
+	var face_h: float = move_h if _ranger_class else h_input
+	if absf(face_h) > 0.2:
+		_facing_right = face_h > 0.0
 		sprite.flip_h = not _facing_right
 
 
@@ -2659,6 +2687,9 @@ func _screen_shake(intensity: float, duration: float) -> void:
 # -- Block / Parry -------------------------------------------------------------
 
 func _handle_block() -> void:
+	# Ranger uses block button for RUN — skip block/parry
+	if character_class == PlayerManager.CharacterClass.RANGED:
+		return
 	var pressing_block: bool = _is_device_action_pressed("block")
 	if pressing_block and not _is_blocking:
 		# Start blocking

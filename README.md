@@ -16,7 +16,7 @@ Players battle through tower dungeons, fight bosses, and collect muffins across 
 | **Triangle (Y)** | Special ability | — | Delete character |
 | **Circle (O)** | Interact / Reload | — | — |
 | **L1 (bumper)** | Grapple: hold to spin, release to throw | While connected: second hook for tether | — |
-| **R1 (bumper)** | — | Pull to anchor | — |
+| **R1 (bumper)** | Dash (Ranger, grounded) | Pull to anchor | — |
 | **L2 (trigger)** | Archer aim mode (analog power) | — | — |
 | **R2 (trigger)** | Fire aimed arrow | — | — |
 | **L3 (left stick click)** | Block | — | — |
@@ -202,6 +202,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 ---
 
 ## Release Notes
+
+### v0.10.80
+**Ranger run/dash, variable walk speed, thumbstick visualizer**
+- **Variable walk/run**: analog stick 0-90% = proportional walk speed, 91%+ = run (2x speed with smoke puffs)
+- **Dash ability**: R1 when grounded + not grappling — 4x speed burst for 1s, green/yellow streak trail with sparkles, 5s cooldown
+- **Jump momentum preservation**: run and dash speed carries through jumps; dash persists airborne until landing
+- **Dash-wall fix**: dash ends on any surface contact (floor, wall, ceiling) after timer expires
+- **Input smoothing**: asymmetric low-pass filter on stick deflection and signed input — fast rise, slow fall filters controller jitter and sign-flip garbage frames
+- **Thumbstick visualizer**: debug overlay (`player/stick_viz`) — crosshair square with raw dot, smoothed ring, heat trail, mode label, deflection readout
+- **Block removed for Ranger**: block/parry replaced by movement abilities (run is stick-driven, block button freed)
+- **Debug aspects**: `player/run`, `player/dash`, `player/stick`, `player/stick_viz`
 
 ### v0.10.79
 **Whiteboard overhaul, Ranger swing-slide-jump, modifier system extension**
