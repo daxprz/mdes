@@ -1042,14 +1042,9 @@ func _handle_ranger_run(delta: float) -> void:
 
 
 func _get_h_raw() -> float:
-	## Returns signed horizontal input (-1.0 to 1.0). Analog for gamepad, binary for keyboard.
-	if p.device_id >= 0:
-		var raw: float = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_X)
-		return raw if absf(raw) >= 0.1 else 0.0
-	var h := 0.0
-	if p._is_device_action_pressed("move_left"): h -= 1.0
-	if p._is_device_action_pressed("move_right"): h += 1.0
-	return h
+	## Returns signed horizontal input (-1.0 to 1.0) via Godot's action system.
+	## Applies project deadzone, works for gamepad + keyboard automatically.
+	return Input.get_axis("move_left", "move_right")
 
 
 func _get_h_deflection() -> float:
@@ -1682,12 +1677,7 @@ func _draw_run_particles() -> void:
 
 func _stick_viz_update(h_raw: float, delta: float) -> void:
 	## Record raw stick position for the heat trail each frame.
-	var v_raw: float = 0.0
-	if p.device_id >= 0:
-		v_raw = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_Y)
-	else:
-		if p._is_device_action_pressed("move_up"): v_raw -= 1.0
-		if p._is_device_action_pressed("move_down"): v_raw += 1.0
+	var v_raw: float = Input.get_axis("move_up", "move_down")
 
 	# Only record when stick is off-center
 	if absf(h_raw) > 0.05 or absf(v_raw) > 0.05:
@@ -1760,9 +1750,7 @@ func _draw_stick_viz() -> void:
 
 	# -- Raw stick dot (current position, bright) --
 	var raw_h: float = _get_h_raw()
-	var raw_v: float = 0.0
-	if p.device_id >= 0:
-		raw_v = Input.get_joy_axis(p.device_id, JOY_AXIS_LEFT_Y)
+	var raw_v: float = Input.get_axis("move_up", "move_down")
 	var dot_x: float = cx + raw_h * S
 	var dot_y: float = cy + raw_v * S
 	var dot_col := Color.WHITE

@@ -1088,17 +1088,8 @@ func _handle_movement() -> void:
 	if _shield_charging:
 		return
 
-	# Read analog stick (gamepad) or binary keys (keyboard)
-	var h_input := 0.0
-	if device_id >= 0:
-		h_input = Input.get_joy_axis(device_id, JOY_AXIS_LEFT_X)
-		if absf(h_input) < 0.1:
-			h_input = 0.0
-	else:
-		if _is_device_action_pressed("move_left"):
-			h_input -= 1.0
-		if _is_device_action_pressed("move_right"):
-			h_input += 1.0
+	# Analog stick via Godot's action system (applies project deadzone, works for all input types)
+	var h_input: float = Input.get_axis("move_left", "move_right")
 
 	# Ranger uses smoothed input to filter sign-flip jitter from noisy controllers
 	var move_h: float = h_input

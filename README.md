@@ -203,6 +203,12 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.81
+**Switch movement input to Godot action system**
+- **`Input.get_axis()` migration**: movement input now uses Godot's action-based `Input.get_axis("move_left", "move_right")` instead of raw `get_joy_axis()` — applies project deadzone, supports remapping, works across all input devices
+- **Stick visualizer**: vertical axis also migrated to `Input.get_axis("move_up", "move_down")`
+- **Net -19 lines**: removed manual deadzone and device branching code; asymmetric smoothing retained on top
+
 ### v0.10.80
 **Ranger run/dash, variable walk speed, thumbstick visualizer**
 - **Variable walk/run**: analog stick 0-90% = proportional walk speed, 91%+ = run (2x speed with smoke puffs)
