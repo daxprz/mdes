@@ -36,20 +36,29 @@ Measured during CHASE/PATROL state, single monster, no chains:
 
 The most expensive single operation in the game.
 
-| Metric | Before v0.10.76 | After v0.10.76 |
-|--------|-----------------|----------------|
-| Pairs per frame | 5 (fixed) | 1-2 (time-budgeted, 2ms budget) |
-| Peak frame cost | 340-453ms | 24-47ms |
-| Flight times tested | 7 | 5 |
-| Arc simulation steps | 40 | 32 |
-| Landing samples | 5 | 4 |
-| Arc clearance step | every 2nd point | every 3rd point |
-| Graph build duration | ~4 frames | ~15-20 frames |
-| FPS during build | 2 FPS (freeze) | 24-38 FPS (playable) |
+| Metric | Before v0.10.76 | After v0.10.76 | With Caching + Grid (v0.10.82) |
+|--------|-----------------|----------------|--------------------------------|
+| Pairs per frame | 5 (fixed) | 1-2 (time-budgeted, 2ms budget) | 1-2 (time-budgeted) |
+| Peak frame cost | 340-453ms | 24-47ms | 5-15ms (grid lookup) |
+| Graph build (first) | ~4 frames | ~15-20 frames | ~15-20 frames (during PATROL) |
+| Graph build (repeat) | ~15-20 frames | ~15-20 frames | **0 frames (cached)** |
+| FPS during build | 2 FPS (freeze) | 24-38 FPS | 40-55 FPS (estimated) |
+| Arc clearance method | intersect_shape | intersect_shape | occupancy grid |
 
 **Cost per pair** depends on platform layout:
-- Simple (2 platforms, few launches): ~5-15ms
-- Complex (5 platforms, many launches): ~30-50ms
+- Simple (2 platforms, few launches): ~5-15ms → ~2-5ms with grid
+- Complex (5 platforms, many launches): ~30-50ms → ~8-15ms with grid
+
+## Spatial Occupancy Grid
+
+One-time build cost at level load. Grid spacing: 8px.
+
+| Level Size | Grid Cells | Memory | Build Time |
+|------------|-----------|---------|------------|
+| 1920x960   | ~28,000   | ~28 KB  | ~0.5-1.0s  |
+
+Arc clearance check cost (per arc): ~150-300us (grid) vs ~300-450us (physics).
+Main win: eliminates CircleShape2D allocation and physics engine contention.
 
 ## Physics Query Costs
 

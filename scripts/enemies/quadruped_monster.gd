@@ -595,7 +595,16 @@ var _precog_phase: int = 0  # 0=ball drop, 1=build graph, 2=pathfind, 3=execute
 var _precog_ball_lands: Array[Vector2] = []  # World positions where balls landed (raw)
 var _precog_platforms: Array = []  # [{pos, weight, min_x, max_x}] — detected platforms
 var _precog_platforms_cached: bool = false  # Platforms only need to be detected once
+var _precog_edges_cached: bool = false     # Edges only need to be built once (platforms don't move)
 var _precog_edges: Array = []  # [{from, to, launch_vel, arc_l, arc_r}] — leaps between platforms
+
+# Spatial occupancy grid for fast arc clearance checks (Opt 3)
+var _occupancy_grid: PackedByteArray = PackedByteArray()  # 1 = occupied, 0 = free
+var _occupancy_grid_w: int = 0             # Grid width in cells
+var _occupancy_grid_h: int = 0             # Grid height in cells
+var _occupancy_grid_origin: Vector2 = Vector2.ZERO  # World position of grid cell (0,0)
+const OCCUPANCY_GRID_SPACING := 8.0        # Cell size in pixels
+var _occupancy_grid_built: bool = false    # Grid has been built
 var _precog_path: Array = []  # Ordered list of platform indices to traverse
 var _precog_path_edges: Array = []  # The edge data for each hop in the path
 var _precog_current_hop: int = 0  # Which hop we're currently executing
@@ -3619,14 +3628,19 @@ func _find_wall_x(direction: int) -> float:
 # -- Pre-cognition (two-hop leap chaining) -------------------------------------
 
 func _precache_platforms() -> void:
-	## Pre-compute platform map, then build graph edges across multiple frames.
+	## Pre-compute platform map, build occupancy grid, then build graph edges async.
 	_precog_platforms_cached = false
+	_precog_edges_cached = false
 	_precog_drop_and_detect()
+	# Build occupancy grid for fast arc clearance (replaces intersect_shape)
+	if not _occupancy_grid_built:
+		_build_occupancy_grid()
 	_precog_edges.clear()
 	# Start async graph building
 	_precog_graph_building = true
 	_precog_process_i = 0
 	_precog_process_j = 1
+	_precog_build_frames = 0
 	DebugOverlay.log("precog/platform_list", self, "PRECOG PRECACHE: %d platforms detected, building graph...", [_precog_platforms.size()])
 	for pi in range(_precog_platforms.size()):
 		var p: Dictionary = _precog_platforms[pi]
@@ -3654,7 +3668,8 @@ func _precog_build_graph_tick() -> void:
 	while true:
 		if _precog_process_i >= n:
 			_precog_graph_building = false
-			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH READY: %d edges in %d frames", [_precog_edges.size(), _precog_build_frames])
+			_precog_edges_cached = true
+			DebugOverlay.log("precog/graph_edges", self, "PRECOG GRAPH READY: %d edges in %d frames (cached)", [_precog_edges.size(), _precog_build_frames])
 			return
 		if _precog_process_j >= n:
 			_precog_process_i += 1
@@ -3686,16 +3701,11 @@ func _start_precognition() -> void:
 	_state_lock_timer = 3.0  # Commit to precog for at least 3 seconds
 	_change_state(State.PRECOGNITION)
 	_precog_phase = 0
-	_precog_ball_lands.clear()
-	_precog_platforms.clear()
-	_precog_edges.clear()
+	# Only clear per-cycle state — preserve cached platforms, edges, and grid
 	_precog_path.clear()
 	_precog_path_edges.clear()
 	_precog_current_hop = 0
 	_precog_has_waypoint = false
-	_precog_process_i = 0
-	_precog_process_j = 1
-	_precog_build_frames = 0
 	_time_since_strike_range = 0.0
 	velocity.x = 0
 
@@ -3713,12 +3723,16 @@ func _do_precognition(delta: float) -> void:
 
 	match _precog_phase:
 		0:
-			# Build graph if not cached yet
-			if not _precog_platforms_cached or _precog_platforms.size() < 3:
+			# Fast path: platforms + edges already cached → pathfind immediately
+			if _precog_platforms_cached and _precog_edges_cached and not _precog_graph_building:
+				DebugOverlay.log("precog/status_text", self, "PRECOG: graph CACHED — skipping build")
+			elif _precog_graph_building:
+				return  # Build in progress (from init or previous cycle) — wait
+			elif not _precog_platforms_cached or _precog_platforms.size() < 3:
 				_precache_platforms()
-			# Wait for async graph building to complete
-			if _precog_graph_building:
-				return  # Still building — wait
+				return  # Just started build — wait for next frame
+			else:
+				return  # Shouldn't happen, but wait
 			# Re-tag entity positions
 			for plat in _precog_platforms:
 				plat["label"] = ""
@@ -3920,10 +3934,13 @@ func _precog_add_entity_platform(world_pos: Vector2, label: String) -> void:
 			plat["label"] = label
 			return
 
-	# No exact match — find the nearest platform (by 2D distance)
+	# No exact match — find the nearest UNLABELED platform (by 2D distance).
+	# Skip platforms already claimed by another entity to prevent label collisions.
 	var best_plat: Dictionary = {}
 	var best_dist: float = INF
 	for plat in _precog_platforms:
+		if plat["label"] != "" and plat["label"] != label:
+			continue  # Already claimed by another entity
 		var d: float = Vector2(world_pos.x, floor_y).distance_to(plat["pos"])
 		if d < best_dist:
 			best_dist = d
@@ -3953,6 +3970,140 @@ func _precog_build_graph_step() -> void:
 
 	_precog_phase = 2
 	return
+
+
+# -- Spatial Occupancy Grid (Opt 3) --------------------------------------------
+
+func _build_occupancy_grid() -> void:
+	## Build a binary occupancy grid covering the level.
+	## Each cell is OCCUPANCY_GRID_SPACING px. A cell is "occupied" if a raycast
+	## from its center hits geometry in any cardinal direction within half-cell.
+	## Enables O(1) arc clearance checks instead of physics shape queries.
+	var spacing: float = OCCUPANCY_GRID_SPACING
+	var bounds_left: float = _find_wall_x(-1) + 10
+	var bounds_right: float = _find_wall_x(1) - 10
+	var bounds_top: float = 10.0
+	var bounds_bottom: float = 950.0
+
+	_occupancy_grid_origin = Vector2(bounds_left, bounds_top)
+	_occupancy_grid_w = int(ceil((bounds_right - bounds_left) / spacing))
+	_occupancy_grid_h = int(ceil((bounds_bottom - bounds_top) / spacing))
+	_occupancy_grid.resize(_occupancy_grid_w * _occupancy_grid_h)
+	_occupancy_grid.fill(0)
+
+	var space := get_world_2d().direct_space_state
+	if not space:
+		return
+
+	var half: float = spacing * 0.5
+	var probe_len: float = spacing  # Full cell width for reliable detection
+	for gy in range(_occupancy_grid_h):
+		var world_y: float = bounds_top + gy * spacing + half
+		for gx in range(_occupancy_grid_w):
+			var world_x: float = bounds_left + gx * spacing + half
+			var center := Vector2(world_x, world_y)
+			# Probe 4 cardinal directions. Mark occupied if 2+ directions hit
+			# geometry. This correctly detects:
+			# - Walls (hit from both horizontal sides = 2+)
+			# - Platform surfaces (hit from above + one side = 2+)
+			# - Solid interiors (3-4 hits)
+			# But NOT:
+			# - Open air near a single surface edge (only 1 hit)
+			var hit_count: int = 0
+			for dir in [Vector2(probe_len, 0), Vector2(-probe_len, 0), Vector2(0, probe_len), Vector2(0, -probe_len)]:
+				var query := PhysicsRayQueryParameters2D.create(center, center + dir, 1)
+				query.exclude = [get_rid()]
+				if not space.intersect_ray(query).is_empty():
+					hit_count += 1
+			if hit_count >= 2:
+				_occupancy_grid[gy * _occupancy_grid_w + gx] = 1
+
+	_occupancy_grid_built = true
+	DebugOverlay.log("precog/platform_list", self,
+		"OCCUPANCY GRID: %dx%d cells (%d bytes) spacing=%.0fpx",
+		[_occupancy_grid_w, _occupancy_grid_h, _occupancy_grid.size(), spacing])
+
+
+func _occupancy_grid_occupied(world_x: float, world_y: float) -> bool:
+	## Check if a world-space point falls in an occupied grid cell. O(1).
+	var gx: int = int((world_x - _occupancy_grid_origin.x) / OCCUPANCY_GRID_SPACING)
+	var gy: int = int((world_y - _occupancy_grid_origin.y) / OCCUPANCY_GRID_SPACING)
+	if gx < 0 or gx >= _occupancy_grid_w or gy < 0 or gy >= _occupancy_grid_h:
+		return true  # Out of bounds = blocked
+	return _occupancy_grid[gy * _occupancy_grid_w + gx] != 0
+
+
+func _check_arc_body_clearance_grid(arc: PackedVector2Array, radius: float,
+		dest_min_x: float, dest_max_x: float, dest_y: float) -> bool:
+	## Grid-based body clearance: check if a circle of given radius at each
+	## arc sample overlaps any occupied grid cells. Falls back to physics-based
+	## check if grid is not built.
+	if not _occupancy_grid_built:
+		return _check_arc_body_clearance(arc, radius, dest_min_x, dest_max_x, dest_y)
+
+	if arc.size() < 8:
+		return true
+
+	var spacing: float = OCCUPANCY_GRID_SPACING
+	var ox: float = _occupancy_grid_origin.x
+	var oy: float = _occupancy_grid_origin.y
+	var launch_y: float = arc[0].y
+	var fade_start_height: float = radius * 3.0
+	var edge_margin: float = radius * 0.8
+	# Grid resolution compensation: cells near surfaces are conservatively marked,
+	# so shrink the effective check radius by half a cell to avoid false rejections.
+	var grid_margin: float = spacing * 0.75
+
+	for i in range(3, arc.size() - 3, 3):  # Step 3, same as original
+		var pt: Vector2 = arc[i]
+		if pt.y > launch_y - radius - 20:
+			continue
+
+		# Dynamic radius near destination (same logic as original)
+		var check_radius: float = radius
+		var height_above_dest: float = dest_y - pt.y
+
+		if height_above_dest > 0 and height_above_dest < fade_start_height:
+			var inside_x: bool = pt.x > dest_min_x + edge_margin and pt.x < dest_max_x - edge_margin
+			if inside_x:
+				check_radius = radius * (height_above_dest / fade_start_height)
+		elif height_above_dest <= 0:
+			var inside_x: bool = pt.x > dest_min_x + edge_margin and pt.x < dest_max_x - edge_margin
+			if inside_x:
+				var max_safe: float = -height_above_dest - 5.0
+				check_radius = maxf(0.0, minf(check_radius, max_safe))
+
+		# Apply grid margin compensation
+		check_radius = maxf(0.0, check_radius - grid_margin)
+		if check_radius < 5.0:
+			continue
+
+		# Check all grid cells within check_radius of pt
+		var min_gx: int = maxi(int((pt.x - check_radius - ox) / spacing), 0)
+		var max_gx: int = mini(int((pt.x + check_radius - ox) / spacing), _occupancy_grid_w - 1)
+		var min_gy: int = maxi(int((pt.y - check_radius - oy) / spacing), 0)
+		var max_gy: int = mini(int((pt.y + check_radius - oy) / spacing), _occupancy_grid_h - 1)
+
+		var r_sq: float = check_radius * check_radius
+		var blocked: bool = false
+		for gy in range(min_gy, max_gy + 1):
+			var row_off: int = gy * _occupancy_grid_w
+			var cell_cy: float = oy + gy * spacing + spacing * 0.5
+			for gx in range(min_gx, max_gx + 1):
+				if _occupancy_grid[row_off + gx] != 0:
+					var cell_cx: float = ox + gx * spacing + spacing * 0.5
+					var dx: float = cell_cx - pt.x
+					var dy: float = cell_cy - pt.y
+					if dx * dx + dy * dy <= r_sq:
+						blocked = true
+						break
+			if blocked:
+				break
+		if blocked:
+			if _dbg_first_body_clip.is_empty():
+				_dbg_first_body_clip = "grid at (%.0f,%.0f) r=%.0f" % [pt.x, pt.y, check_radius]
+			return false
+	return true
 
 
 func _precog_build_one_edge(pi: int, pj: int) -> void:
@@ -4268,7 +4419,7 @@ func _plan_leap_to_surface(from_pos: Vector2, plat: Dictionary, down_jump: bool 
 			# for intersection with ANY collision object. Near the destination
 			# platform, the check radius reduces dynamically to allow landing
 			# from above while still catching corner clips from the side.
-			if not _check_arc_body_clearance(arc_c, effective_radius, plat_min_x, plat_max_x, plat_y):
+			if not _check_arc_body_clearance_grid(arc_c, effective_radius, plat_min_x, plat_max_x, plat_y):
 				_dbg_arc += 1
 				continue
 

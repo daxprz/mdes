@@ -40,6 +40,8 @@ func _register_all() -> void:
 	r.call("precog/attach_points", "Chain/tether attachment point circles")
 	r.call("precog/ball_landings", "Ball simulation landing dots")
 	r.call("precog/status_text", "Precog phase/state text overlay")
+	r.call("precog/occupancy_grid", "Spatial occupancy grid overlay (heavy)")
+	r.call("precog/cache_status", "Graph cache hit/miss and build progress")
 
 	# -- Testing --
 	r.call("testing/etz_daz_zones", "ETZ/DAZ zone circles and labels")

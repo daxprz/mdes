@@ -203,6 +203,17 @@ xattr -cr "/Applications/The Ultimate Muffin.app"
 
 ## Release Notes
 
+### v0.10.82
+**Precog optimization: graph caching, async pre-build, spatial occupancy grid**
+- **Graph caching**: edge graph built once and reused — repeat precog cycles skip the build entirely (0 frames vs 15-20)
+- **Async pre-computation**: graph builds during PATROL/init, ready before PRECOGNITION triggers
+- **Spatial occupancy grid**: 8px binary grid (~28K cells) replaces `intersect_shape()` physics queries for arc clearance — O(1) lookups vs ~30μs per query
+- **2-hit threshold**: grid cells marked occupied only when 2+ cardinal probes hit geometry — correctly detects walls/surfaces without blocking arcs near platform edges
+- **Grid margin compensation**: effective check radius reduced by 0.75× cell size to prevent false rejections from grid granularity
+- **Entity label collision fix**: precog entity-to-platform mapping no longer overwrites labels when two entities nearest-match to the same platform
+- **FPS during precog**: 60 FPS (was 24-38), first build during idle, repeat cycles instant
+- **Debug aspects**: `precog/occupancy_grid`, `precog/cache_status`
+
 ### v0.10.81
 **Switch movement input to Godot action system**
 - **`Input.get_axis()` migration**: movement input now uses Godot's action-based `Input.get_axis("move_left", "move_right")` instead of raw `get_joy_axis()` — applies project deadzone, supports remapping, works across all input devices
