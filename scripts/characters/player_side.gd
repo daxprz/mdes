@@ -1103,6 +1103,9 @@ func _handle_movement() -> void:
 		speed *= 1.25
 	if _is_blocking:
 		speed *= 0.5
+	# Ranger ground slide: velocity driven by slide tick, skip normal movement
+	if _ranger_class and _ranger_class._ground_sliding:
+		return
 	# Ranger dash: locked direction at 4x speed (overrides input)
 	if _ranger_class and _ranger_class._is_dashing:
 		velocity.x = _ranger_class._dash_direction * speed * _ranger_class.DASH_SPEED_MULT

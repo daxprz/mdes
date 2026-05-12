@@ -1,0 +1,37 @@
+{
+  "active_layer_id": 1,
+  "components": [
+    {"type": "text", "id": 1, "layer_id": 1, "x": 300, "y": 15, "text": "Grapple + Swing", "font_size": 34, "color": "#aa6633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 10, "layer_id": 1, "x": 0, "y": 0, "w": 20, "h": 550, "color": "#554433", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Wall"},
+    {"type": "rect", "id": 11, "layer_id": 1, "x": 940, "y": 0, "w": 20, "h": 550, "color": "#554433", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Wall"},
+    {"type": "rect", "id": 12, "layer_id": 1, "x": 20, "y": 500, "w": 920, "h": 16, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Floor"},
+    {"type": "rect", "id": 13, "layer_id": 1, "x": 300, "y": 330, "w": 200, "h": 14, "color": "#665544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Platform"},
+
+    {"type": "point", "id": 20, "layer_id": 1, "x": 20, "y": 180, "radius": 6, "color": "#ff88aa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Hook anchor"},
+
+    {"type": "circle", "id": 25, "layer_id": 1, "cx": 200, "cy": 488, "r": 14, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Player"},
+
+    {"type": "text", "id": 28, "layer_id": 1, "x": 230, "y": 475, "text": "HOLD L1 → spin", "font_size": 11, "color": "#ffaa44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "circle", "id": 29, "layer_id": 1, "cx": 200, "cy": 488, "r": 25, "color": "#aa664444", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 30, "layer_id": 1, "x": 222, "y": 478, "radius": 4, "color": "#ff88aa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "hook orbits"},
+
+    {"type": "text", "id": 31, "layer_id": 1, "x": 50, "y": 170, "text": "release L1 →\nhook flies", "font_size": 11, "color": "#cccccc", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 32, "layer_id": 1, "x1": 200, "y1": 488, "x2": 22, "y2": 180, "color": "#886644", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "rope"},
+
+    {"type": "arc", "id": 40, "layer_id": 1, "cx": 20, "cy": 180, "r": 360, "start_angle": 0.5, "sweep_angle": 0.9, "color": "#4488ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "swing arc"},
+    {"type": "arc", "id": 41, "layer_id": 1, "cx": 20, "cy": 180, "r": 300, "start_angle": 0.6, "sweep_angle": 0.7, "color": "#4488ff33", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "shorter rope"},
+    {"type": "arc", "id": 42, "layer_id": 1, "cx": 20, "cy": 180, "r": 420, "start_angle": 0.4, "sweep_angle": 1.0, "color": "#4488ff22", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "longer rope"},
+
+    {"type": "text", "id": 50, "layer_id": 1, "x": 420, "y": 350, "text": "← stick: boost/brake", "font_size": 11, "color": "#88bbdd", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 51, "layer_id": 1, "x": 420, "y": 370, "text": "↕ stick: rope length", "font_size": 11, "color": "#88bbdd", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 55, "layer_id": 1, "x": 550, "y": 120, "text": "JUMP (taut) → boost + detach", "font_size": 13, "color": "#44ff88", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 56, "layer_id": 1, "x": 550, "y": 145, "text": "JUMP (slack) → detach only", "font_size": 13, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 57, "layer_id": 1, "x": 550, "y": 175, "text": "R1 → pull to anchor", "font_size": 13, "color": "#ddaa44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 58, "layer_id": 1, "x": 550, "y": 205, "text": "L1 again → tether 2nd hook", "font_size": 13, "color": "#aa88cc", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""}
+  ],
+  "groups": [],
+  "layers": [{"id": 1, "name": "Main", "visible": true, "locked": false}],
+  "next_id": 70
+}

@@ -1,3 +1,8 @@
+---
+description: Control the running Godot instance — restart, launch, kill, status
+argument-hint: <restart|launch|kill|status>
+---
+
 # Godot
 
 Control the running Godot instance.

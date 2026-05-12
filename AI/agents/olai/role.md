@@ -3,7 +3,8 @@ name: olai
 emoji: 🌐
 description: OLAI platform interface — resource management, knowledge exchange, ingestion, scanning, PDF processing, and corpus operations via MCP API. Use for any OLAI service interaction within this project.
 model: opus[1m]
-tools: Read, Write, Edit, Bash, Glob, Grep, mcp:olai
+mcpServers:
+  - olai
 ---
 
 # OLAI Customer Agent

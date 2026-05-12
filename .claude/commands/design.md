@@ -1,3 +1,8 @@
+---
+description: Design a game component using knowledge from the research repository and codebase patterns
+argument-hint: <component> [--quick]
+---
+
 # Design Command
 
 ## Purpose

@@ -1,11 +1,11 @@
 ---
-name: delegate
-description: Delegate a task to another agent within this project. Writes a task file to the target agent's inbox. Use when the current agent needs another agent's expertise.
+name: handoff
+description: Hand off a task to another agent within this project. Writes a task file to the target agent's inbox. Use when the current agent needs another agent's expertise.
 disable-model-invocation: false
 argument-hint: <agent> <task description>
 ---
 
-# Delegate Task to Another Agent
+# Hand Off Task to Another Agent
 
 Hand off a task to another agent in this project by writing to their inbox.
 

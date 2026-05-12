@@ -65,10 +65,63 @@ const DASH_DURATION := 1.0
 const DASH_COOLDOWN := 5.0
 const DASH_TRAIL_MAX_AGE := 0.4          # Trail points live this long (seconds)
 
+# Ground slide constants (Circle while running/dashing on flat/downhill)
+const GROUND_SLIDE_MIN_SPEED := 15.0     # Below this, slide ends
+const GROUND_SLIDE_MAX_DURATION := 3.0   # Curve spans this time (seconds)
+const GROUND_SLIDE_BOOST_START := 1.2    # Entry speed multiplier
+const GROUND_SLIDE_BOOST_PEAK := 1.5     # Peak speed multiplier
+const GROUND_SLIDE_PEAK_TIME := 0.15     # Seconds to reach peak (normalized: 0.05)
+const GROUND_SLIDE_PARTICLE_RATE := 25.0 # Dust puffs per second
+
+# Sweeping kick constants (attack during ground slide)
+const KICK_RANGE := 60.0                 # Hitbox radius around player
+const KICK_DAMAGE := 30                  # Base damage
+const KICK_STUN_MIN := 1.0              # Stun at lowest slide speed (seconds)
+const KICK_STUN_MAX := 5.0              # Stun at highest slide speed (seconds)
+const KICK_SPEED_MIN := 50.0            # Speed floor for stun interpolation
+const KICK_SPEED_MAX := 600.0           # Speed ceiling for stun interpolation
+const KICK_COMBO_WINDOW := 1.0          # Seconds after kick to input the follow-up
+
+# Aurora volley constants (attack+jump follow-up after kick stun)
+const AURORA_BLAST_DURATION := 0.3       # Sparkly aurora burst (seconds)
+const AURORA_ARROW_COUNT := 3            # Arrows in the volley
+const AURORA_ARROW_SPACING := 0.1       # Seconds between arrows
+const AURORA_ARROW_DAMAGE := 80          # Per arrow (full force)
+
+# L2 multi-tap reticle snap constants
+const L2_TAP_WINDOW := 0.35              # Max time between taps to count as multi-tap
+const L2_SNAP_RANGE := 300.0             # How far in front/behind to place the reticle
+
 # Slide state
 var _slide_charge_mod: Variant = null     # RampModifierProvider for charge (pushed on slide start)
 var _slide_on_surface: bool = true        # True while collision box contacts terrain
 var _slide_max_extent: Vector2 = Vector2.ZERO  # Furthest point reached (debug)
+
+# Ground slide state (from run/dash)
+var _ground_sliding: bool = false
+var _ground_slide_dir: float = 0.0       # -1 or 1, locked at initiation
+var _ground_slide_speed: float = 0.0     # Current slide speed (curve-driven)
+var _ground_slide_entry_speed: float = 0.0  # Speed at initiation (curve multiplies this)
+var _ground_slide_time: float = 0.0      # Elapsed time since slide start
+var _ground_slide_particle_accum: float = 0.0
+var _ground_slide_curve: Curve = null    # Speed multiplier over normalized time
+
+# Sweeping kick / aurora combo state
+var _kick_performed: bool = false         # Kick already used this slide
+var _kick_stun_target: Node2D = null      # Enemy that was stunned (for combo)
+var _kick_stun_pos: Vector2 = Vector2.ZERO  # World position of the kick hit
+var _kick_combo_timer: float = 0.0        # Time remaining in combo window
+var _aurora_active: bool = false          # Aurora blast is playing
+var _aurora_timer: float = 0.0           # Time remaining in aurora blast
+var _aurora_arrows_fired: int = 0         # Arrows fired so far
+var _aurora_arrow_timer: float = 0.0     # Timer for next arrow
+var _aurora_target_pos: Vector2 = Vector2.ZERO  # Where arrows aim
+var _aurora_particles: Array = []         # [{pos, vel, age, max_age, color}]
+
+# L2 multi-tap tracking
+var _l2_tap_count: int = 0               # Taps counted in current window
+var _l2_tap_timer: float = 0.0           # Time since last tap (resets on each tap)
+var _l2_was_pressed: bool = false        # Previous frame L2 state for edge detection
 
 # Run state
 var _is_running: bool = false
@@ -95,17 +148,48 @@ var _run_particles: Array = []           # [{pos, vel, age, max_age, radius}]
 
 
 func on_class_enter() -> void:
-	pass
+	_init_ground_slide_curve()
+
+
+func _init_ground_slide_curve() -> void:
+	## Build the ground slide speed curve (Curve resource).
+	## Maps normalized time (0→1) to speed multiplier:
+	##   t=0.00 → 1.2x  (initial boost)
+	##   t=0.05 → 1.5x  (peak, ~0.15s into a 3s slide)
+	##   t→1.00 → 0.0   (exponential decay)
+	_ground_slide_curve = Curve.new()
+	_ground_slide_curve.min_value = 0.0
+	_ground_slide_curve.max_value = GROUND_SLIDE_BOOST_PEAK
+	var peak_t: float = GROUND_SLIDE_PEAK_TIME / GROUND_SLIDE_MAX_DURATION  # ~0.05
+	# Point 0: start at 1.2x, rising steeply toward peak
+	_ground_slide_curve.add_point(Vector2(0.0, GROUND_SLIDE_BOOST_START), 0.0, 6.0)
+	# Point 1: peak at 1.5x, then steep negative tangent for exponential feel
+	_ground_slide_curve.add_point(Vector2(peak_t, GROUND_SLIDE_BOOST_PEAK), 0.0, -3.0)
+	# Point 2: mid-decay — ~0.3x at 30% through (exponential knee)
+	_ground_slide_curve.add_point(Vector2(0.3, 0.3), -1.5, -0.5)
+	# Point 3: tail — approaches zero slowly
+	_ground_slide_curve.add_point(Vector2(1.0, 0.0), -0.1, 0.0)
+	_ground_slide_curve.bake()
 
 
 func tick(delta: float) -> void:
-	_handle_ranger_reload(delta)
-	_handle_archer_aim(delta)
-	_handle_ranger_run(delta)
-	_handle_ranger_dash(delta)
+	_handle_aurora_volley(delta)
+	_handle_kick_combo_window(delta)
+	_handle_ground_slide(delta)
+	if not _ground_sliding:
+		_handle_ranger_reload(delta)
+		_handle_archer_aim(delta)
+		_handle_ranger_run(delta)
+		_handle_ranger_dash(delta)
 
 
 func perform_attack(_intent: Dictionary) -> void:
+	# During ground slide, attack = sweeping kick (handled in tick), not crossbow
+	if _ground_sliding:
+		return
+	# During aurora volley, suppress normal attacks
+	if _aurora_active:
+		return
 	_attack_ranged()
 
 
@@ -1242,6 +1326,388 @@ func get_speed_multiplier() -> float:
 	return 1.0
 
 
+# -- Ground Slide (Circle while running/dashing on flat/downhill) ---------------
+
+func _handle_ground_slide(delta: float) -> void:
+	if p.character_class != PlayerManager.CharacterClass.RANGED:
+		return
+
+	# Active slide tick
+	if _ground_sliding:
+		_ground_slide_tick(delta)
+		return
+
+	# Check for slide initiation: Circle pressed while running or dashing
+	if not p._is_device_action_just_pressed("interact"):
+		return
+	if not (_is_running or _is_dashing):
+		return
+	if not p.is_on_floor():
+		return
+	# Reject uphill surfaces: floor normal tilted against movement direction
+	if p.is_on_floor():
+		var normal: Vector2 = p.get_floor_normal()
+		# Flat = normal.x ≈ 0. Downhill = normal.x has same sign as direction.
+		# Uphill = normal.x has opposite sign. Reject if slope > ~15° uphill.
+		var move_dir: float = 1.0 if p._facing_right else -1.0
+		if normal.x * move_dir < -0.25:
+			DebugOverlay.log("player/dash", p, "GROUND SLIDE: rejected (uphill, normal=(%.2f,%.2f))" % [normal.x, normal.y])
+			return
+
+	_ground_slide_start()
+
+
+func _ground_slide_start() -> void:
+	## Enter ground slide from run or dash.
+	## Speed is driven by a Curve resource: boost → peak → exponential decay.
+	var base_speed: float = PlayerManager.get_player(p.player_index).get("speed", 100)
+	if _is_dashing:
+		_ground_slide_entry_speed = base_speed * DASH_SPEED_MULT
+	elif _is_running:
+		_ground_slide_entry_speed = base_speed * RUN_SPEED_MULT
+	else:
+		_ground_slide_entry_speed = absf(p.velocity.x)
+
+	_ground_slide_dir = 1.0 if p._facing_right else -1.0
+	_ground_sliding = true
+	_ground_slide_time = 0.0
+	_ground_slide_particle_accum = 0.0
+	_kick_performed = false
+	_kick_stun_target = null
+	# Sample curve at t=0 for initial speed (1.2x entry)
+	_ground_slide_speed = _ground_slide_entry_speed * _ground_slide_curve.sample_baked(0.0)
+
+	# Cancel run/dash states
+	_is_running = false
+	_run_airborne = false
+	_is_dashing = false
+	_dash_timer = 0.0
+
+	p.velocity.x = _ground_slide_dir * _ground_slide_speed
+
+	var source: String = "DASH" if _ground_slide_entry_speed > base_speed * 2.5 else "RUN"
+	AudioManager.play("grapple_hit", -5.0, 0.7)
+	p._rumble(0.15, 0.3, 0.1)
+	p.queue_redraw()
+
+	DebugOverlay.log("player/dash", p, "GROUND SLIDE START: dir=%.0f entry=%.0f boost=%.0f from=%s" % [
+		_ground_slide_dir, _ground_slide_entry_speed, _ground_slide_speed, source])
+
+
+func _ground_slide_tick(delta: float) -> void:
+	## Per-frame ground slide: curve-driven speed, slope gravity, particles, end conditions.
+	_ground_slide_time += delta
+
+	# Sample speed from curve: entry_speed × curve(t)
+	var t: float = clampf(_ground_slide_time / GROUND_SLIDE_MAX_DURATION, 0.0, 1.0)
+	var curve_mult: float = _ground_slide_curve.sample_baked(t)
+	_ground_slide_speed = _ground_slide_entry_speed * curve_mult
+
+	# Slope gravity: bonus accel on downhill, drag on uphill (additive on top of curve)
+	if p.is_on_floor():
+		var normal: Vector2 = p.get_floor_normal()
+		var tangent := Vector2(-normal.y, normal.x)
+		if tangent.x * _ground_slide_dir < 0:
+			tangent = -tangent
+		var slope_accel: float = tangent.dot(Vector2.DOWN) * SLIDE_GRAVITY * delta
+		_ground_slide_speed += slope_accel
+
+	# Apply velocity
+	p.velocity.x = _ground_slide_dir * _ground_slide_speed
+	# Hug the floor
+	if p.is_on_floor():
+		p.velocity.y = 100.0  # Gentle downward push to maintain floor contact
+
+	# Sweeping kick: attack button during slide
+	if not _kick_performed and p._is_device_action_just_pressed("attack"):
+		_perform_sweeping_kick()
+
+	# End conditions
+	if _ground_slide_speed < GROUND_SLIDE_MIN_SPEED:
+		_ground_slide_end()
+		return
+	if not p.is_on_floor():
+		_ground_sliding = false
+		_run_airborne = true
+		DebugOverlay.log("player/dash", p, "GROUND SLIDE: left surface → airborne, speed=%.0f" % _ground_slide_speed)
+		return
+	if p.is_on_wall():
+		_ground_slide_end()
+		return
+	if p._is_device_action_just_pressed("jump"):
+		_ground_sliding = false
+		_run_airborne = true
+		DebugOverlay.log("player/dash", p, "GROUND SLIDE: jump exit, speed=%.0f t=%.2f mult=%.2f" % [_ground_slide_speed, t, curve_mult])
+		return
+
+	# Dust particles
+	_ground_slide_emit_particles(delta)
+	p.queue_redraw()
+
+
+func _ground_slide_end() -> void:
+	_ground_sliding = false
+	_ground_slide_speed = 0.0
+	_dash_cooldown_timer = DASH_COOLDOWN  # Shared cooldown with dash
+	p.queue_redraw()
+	DebugOverlay.log("player/dash", p, "GROUND SLIDE END")
+
+
+func _ground_slide_emit_particles(delta: float) -> void:
+	## Emit dust puffs while ground sliding.
+	var rate: float = GROUND_SLIDE_PARTICLE_RATE * (_ground_slide_speed / 200.0)
+	_ground_slide_particle_accum += rate * delta
+	while _ground_slide_particle_accum >= 1.0:
+		_ground_slide_particle_accum -= 1.0
+		var foot_pos: Vector2 = p.global_position + Vector2(-_ground_slide_dir * 8, 8)
+		foot_pos += Vector2(randf_range(-4, 4), randf_range(-2, 2))
+		var puff_vel := Vector2(-_ground_slide_dir * randf_range(15, 40), randf_range(-30, -10))
+		_run_particles.append({
+			"pos": foot_pos,
+			"vel": puff_vel,
+			"age": 0.0,
+			"max_age": randf_range(0.2, 0.4),
+			"radius": randf_range(2.0, 4.0),
+		})
+
+
+# -- Sweeping Kick + Aurora Volley Combo ----------------------------------------
+
+func _perform_sweeping_kick() -> void:
+	## Attack during ground slide — sweep kick that stuns enemies.
+	## Stun duration scales with slide speed: 1s at min → 5s at max.
+	_kick_performed = true
+	var kick_pos: Vector2 = p.global_position + Vector2(_ground_slide_dir * 20, 0)
+
+	# Find enemies in range
+	var stun_t: float = clampf(
+		(_ground_slide_speed - KICK_SPEED_MIN) / (KICK_SPEED_MAX - KICK_SPEED_MIN),
+		0.0, 1.0)
+	var stun_duration: float = lerpf(KICK_STUN_MIN, KICK_STUN_MAX, stun_t)
+	var scaled_dmg: int = int(KICK_DAMAGE * PlayerManager.get_skill_bonus(p.player_index, "attack"))
+
+	var hit_any: bool = false
+	for body in p.get_tree().get_nodes_in_group("enemies"):
+		if not is_instance_valid(body) or not body is Node2D:
+			continue
+		var dist: float = kick_pos.distance_to(body.global_position)
+		if dist > KICK_RANGE:
+			continue
+
+		# Deal damage
+		if body.has_method("take_damage"):
+			body.take_damage(scaled_dmg, p.player_index)
+		# Apply stun via EntityEffects
+		var EntityEffects := preload("res://scripts/systems/entity_effects.gd")
+		EntityEffects.apply(body, "stun", stun_duration, stun_duration)
+		# Knockback
+		if body.has_method("apply_knockback"):
+			var kb := Vector2(_ground_slide_dir * 200, -100)
+			body.apply_knockback(kb)
+
+		_kick_stun_target = body
+		_kick_stun_pos = body.global_position
+		_kick_combo_timer = KICK_COMBO_WINDOW
+		hit_any = true
+
+		DebugOverlay.log("player/dash", p, "SWEEP KICK: hit %s stun=%.1fs dmg=%d speed=%.0f" % [
+			body.name, stun_duration, scaled_dmg, _ground_slide_speed])
+
+	if hit_any:
+		AudioManager.play("player_hurt", -2.0, 0.6)  # Impact sound
+		p._rumble(0.4, 0.6, 0.15)
+		# Kick VFX: arc sweep
+		_spawn_kick_vfx(kick_pos)
+		PlayerManager.add_skill_xp(p.player_index, "attack", 5)
+	else:
+		# Whiff
+		AudioManager.play("reload_click", -6.0, 1.5)
+		DebugOverlay.log("player/dash", p, "SWEEP KICK: whiff (no enemies in range)")
+
+
+func _spawn_kick_vfx(pos: Vector2) -> void:
+	## Sweeping arc VFX at kick position.
+	for i in range(10):
+		var angle: float = (_ground_slide_dir * 0.5 + randf_range(-0.8, 0.8))
+		var speed: float = randf_range(80, 180)
+		_run_particles.append({
+			"pos": pos + Vector2(randf_range(-6, 6), randf_range(-10, 5)),
+			"vel": Vector2(cos(angle) * speed, sin(angle) * speed - 40),
+			"age": 0.0,
+			"max_age": randf_range(0.2, 0.4),
+			"radius": randf_range(2.0, 5.0),
+		})
+	p.queue_redraw()
+
+
+func _handle_kick_combo_window(delta: float) -> void:
+	## Tick down the combo window after a successful kick.
+	## If attack+jump pressed during window, trigger aurora volley.
+	if _kick_combo_timer <= 0.0:
+		return
+	_kick_combo_timer -= delta
+
+	# Check for attack+jump combo input
+	var attack_pressed: bool = p._is_device_action_just_pressed("attack")
+	var jump_pressed: bool = p._is_device_action_just_pressed("jump")
+	# Accept both in same frame, OR attack held + jump just pressed
+	var attack_held: bool = p._is_device_action_pressed("attack")
+	if (attack_pressed and jump_pressed) or (attack_held and jump_pressed) or (attack_pressed and p._is_device_action_pressed("jump")):
+		_trigger_aurora_volley()
+		_kick_combo_timer = 0.0
+		return
+
+	if _kick_combo_timer <= 0.0:
+		_kick_stun_target = null
+		DebugOverlay.log("player/dash", p, "KICK COMBO: window expired")
+
+
+func _trigger_aurora_volley() -> void:
+	## Aurora blast + jump + 3-arrow volley at the kick point.
+	_aurora_active = true
+	_aurora_timer = AURORA_BLAST_DURATION
+	_aurora_arrows_fired = 0
+	_aurora_arrow_timer = 0.0
+	_aurora_target_pos = _kick_stun_pos
+	_aurora_particles.clear()
+
+	# End ground slide if still active
+	if _ground_sliding:
+		_ground_sliding = false
+
+	# Perform jump
+	p.velocity.y = p.cfg("jump_velocity", p.JUMP_VELOCITY)
+
+	# Spawn aurora blast particles
+	_spawn_aurora_blast()
+
+	AudioManager.play("grapple_launch", 0.0, 0.8)
+	p._rumble(0.5, 0.7, 0.2)
+
+	DebugOverlay.log("player/dash", p, "AURORA VOLLEY: triggered at (%.0f,%.0f) target=%s" % [
+		p.global_position.x, p.global_position.y,
+		_kick_stun_target.name if is_instance_valid(_kick_stun_target) else "gone"])
+
+
+func _spawn_aurora_blast() -> void:
+	## Sparkly aurora burst VFX — expanding ring of colored particles.
+	var colors: Array[Color] = [
+		Color(0.3, 0.8, 1.0),   # Cyan
+		Color(0.5, 0.3, 1.0),   # Purple
+		Color(0.2, 1.0, 0.6),   # Green
+		Color(1.0, 0.8, 0.3),   # Gold
+		Color(1.0, 0.4, 0.8),   # Pink
+	]
+	for i in range(24):
+		var angle: float = TAU * i / 24.0 + randf_range(-0.1, 0.1)
+		var speed: float = randf_range(120, 280)
+		var col: Color = colors[i % colors.size()]
+		_aurora_particles.append({
+			"pos": p.global_position + Vector2(randf_range(-4, 4), randf_range(-8, 4)),
+			"vel": Vector2(cos(angle), sin(angle)) * speed,
+			"age": 0.0,
+			"max_age": randf_range(0.25, 0.45),
+			"color": col,
+		})
+	p.queue_redraw()
+
+
+func _handle_aurora_volley(delta: float) -> void:
+	## Tick the aurora blast and fire arrows at timed intervals.
+	# Age aurora particles (always, even after blast ends)
+	var ai: int = _aurora_particles.size() - 1
+	while ai >= 0:
+		_aurora_particles[ai]["age"] += delta
+		_aurora_particles[ai]["pos"] += _aurora_particles[ai]["vel"] * delta
+		_aurora_particles[ai]["vel"] *= 0.92  # Drag
+		if _aurora_particles[ai]["age"] >= _aurora_particles[ai]["max_age"]:
+			_aurora_particles.remove_at(ai)
+		ai -= 1
+	if not _aurora_particles.is_empty():
+		p.queue_redraw()
+
+	if not _aurora_active:
+		return
+
+	_aurora_timer -= delta
+
+	# Fire arrows at intervals
+	_aurora_arrow_timer -= delta
+	if _aurora_arrow_timer <= 0.0 and _aurora_arrows_fired < AURORA_ARROW_COUNT:
+		_fire_aurora_arrow()
+		_aurora_arrows_fired += 1
+		_aurora_arrow_timer = AURORA_ARROW_SPACING
+
+	# Face toward kick point mid-air
+	if is_instance_valid(_kick_stun_target):
+		_aurora_target_pos = _kick_stun_target.global_position
+	var aim_dir: float = signf(_aurora_target_pos.x - p.global_position.x)
+	if aim_dir != 0:
+		p._facing_right = aim_dir > 0
+		p.sprite.flip_h = not p._facing_right
+
+	# End aurora when blast expires and all arrows fired
+	if _aurora_timer <= 0.0 and _aurora_arrows_fired >= AURORA_ARROW_COUNT:
+		_aurora_active = false
+		_kick_stun_target = null
+		DebugOverlay.log("player/dash", p, "AURORA VOLLEY: complete (%d arrows)" % _aurora_arrows_fired)
+
+
+func _fire_aurora_arrow() -> void:
+	## Fire one full-force arrow at the aurora target position.
+	var aim: Vector2 = (_aurora_target_pos - p.global_position).normalized()
+	var scaled_dmg: int = int(AURORA_ARROW_DAMAGE * PlayerManager.get_skill_bonus(p.player_index, "attack"))
+	p._spawn_projectile(scaled_dmg, 800.0, "crossbow_bolt")
+	# Override the projectile's direction to target the kick point
+	# (spawn_projectile uses _get_aim_direction, but we need to aim at the target)
+	# The projectile was just added — find it and redirect
+	var children: Array = p.get_parent().get_children()
+	for ci in range(children.size() - 1, maxi(children.size() - 4, -1), -1):
+		var child: Node = children[ci]
+		if child.has_method("take_damage") or child.get("projectile_type") == "crossbow_bolt":
+			if "direction" in child:
+				child.direction = aim
+				child.global_position = p.global_position + aim * 16.0
+				break
+
+	# Sparkle trail on arrow
+	_aurora_particles.append({
+		"pos": p.global_position + aim * 16.0,
+		"vel": aim * 60.0 + Vector2(randf_range(-20, 20), randf_range(-20, 20)),
+		"age": 0.0,
+		"max_age": 0.3,
+		"color": Color(1.0, 0.9, 0.4, 0.8),
+	})
+
+	AudioManager.play("crossbow_shoot", -2.0, 1.0 + _aurora_arrows_fired * 0.15)
+	DebugOverlay.log("player/dash", p, "AURORA ARROW %d: aim=(%.2f,%.2f) dmg=%d" % [
+		_aurora_arrows_fired + 1, aim.x, aim.y, scaled_dmg])
+
+
+# -- Aurora / Kick Drawing -----------------------------------------------------
+
+func _draw_aurora() -> void:
+	## Draw aurora particles (sparkly burst + arrow trails).
+	for particle in _aurora_particles:
+		var t: float = particle["age"] / particle["max_age"]
+		if t >= 1.0:
+			continue
+		var alpha: float = (1.0 - t) * 0.8
+		var radius: float = lerpf(3.5, 1.0, t)
+		var local_pos: Vector2 = particle["pos"] - p.global_position
+		var col: Color = particle["color"]
+		col.a = alpha
+		p.draw_circle(local_pos, radius, col)
+		# Inner bright core
+		p.draw_circle(local_pos, radius * 0.4, Color(1.0, 1.0, 1.0, alpha * 0.6))
+
+	# Draw combo window indicator (pulsing ring around player when window is active)
+	if _kick_combo_timer > 0.0:
+		var pulse: float = 0.5 + 0.5 * sin(_kick_combo_timer * 12.0)
+		var combo_alpha: float = _kick_combo_timer / KICK_COMBO_WINDOW * pulse
+		p.draw_arc(Vector2.ZERO, 20.0, 0, TAU, 16, Color(1.0, 0.8, 0.3, combo_alpha * 0.6), 2.0)
+
+
 func _grapple_release() -> void:
 	## Release from wall — keep swing momentum
 	p._grapple_state = GrappleState.RETRACTING
@@ -1445,6 +1911,7 @@ func _draw_grapple() -> void:
 	# Always draw run/dash visuals (even when grapple is idle)
 	_draw_dash_trail()
 	_draw_run_particles()
+	_draw_aurora()
 	_draw_stick_viz()
 
 	if p._grapple_state == GrappleState.IDLE:
@@ -1854,6 +2321,38 @@ func _handle_archer_aim(delta: float) -> void:
 		if p._archer_debug_trails[trail_i]["time"] <= 0.0:
 			p._archer_debug_trails.remove_at(trail_i)
 		trail_i -= 1
+
+	# L2 multi-tap detection: double-tap = snap forward, triple-tap = snap behind
+	var l2_just: bool = l2_pressed and not _l2_was_pressed
+	_l2_was_pressed = l2_pressed
+	if _l2_tap_timer > 0.0:
+		_l2_tap_timer -= delta
+		if _l2_tap_timer <= 0.0:
+			_l2_tap_count = 0  # Window expired, reset
+	if l2_just:
+		if _l2_tap_timer > 0.0:
+			_l2_tap_count += 1
+		else:
+			_l2_tap_count = 1
+		_l2_tap_timer = L2_TAP_WINDOW
+
+		if _l2_tap_count >= 2:
+			# Double-tap: snap reticle in the direction the right stick is pointing
+			var stick_dir := Vector2.ZERO
+			if p.device_id >= 0:
+				stick_dir = Vector2(
+					Input.get_joy_axis(p.device_id, JOY_AXIS_RIGHT_X),
+					Input.get_joy_axis(p.device_id, JOY_AXIS_RIGHT_Y))
+			if stick_dir.length() < 0.2:
+				# Stick not pointing — fall back to facing direction
+				stick_dir = Vector2.RIGHT if p._facing_right else Vector2.LEFT
+			else:
+				stick_dir = stick_dir.normalized()
+			p._archer_reticle_pos = p.global_position + stick_dir * L2_SNAP_RANGE
+			_l2_tap_count = 0
+			_l2_tap_timer = 0.0
+			DebugOverlay.log("player/archer_triggers", p, "L2 DOUBLE-TAP: snap dir=(%.2f,%.2f) ret=(%.0f,%.0f)" % [
+				stick_dir.x, stick_dir.y, p._archer_reticle_pos.x, p._archer_reticle_pos.y])
 
 	if l2_pressed:
 		if not p._archer_aiming:

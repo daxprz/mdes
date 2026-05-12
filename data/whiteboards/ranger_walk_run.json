@@ -1,0 +1,40 @@
+{
+  "active_layer_id": 1,
+  "components": [
+    {"type": "text", "id": 1, "layer_id": 1, "x": 350, "y": 20, "text": "Walk / Run", "font_size": 36, "color": "#44cc88", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 10, "layer_id": 1, "x": 80, "y": 400, "w": 800, "h": 20, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Ground"},
+
+    {"type": "circle", "id": 20, "layer_id": 1, "cx": 150, "cy": 385, "r": 12, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Idle"},
+    {"type": "circle", "id": 21, "layer_id": 1, "cx": 330, "cy": 385, "r": 12, "color": "#66bb66", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Walk"},
+    {"type": "circle", "id": 22, "layer_id": 1, "cx": 600, "cy": 385, "r": 12, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Run"},
+
+    {"type": "line", "id": 30, "layer_id": 1, "x1": 165, "y1": 385, "x2": 315, "y2": 385, "color": "#66bb66", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 31, "layer_id": 1, "x1": 345, "y1": 385, "x2": 585, "y2": 385, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 3, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "point", "id": 35, "layer_id": 1, "x": 330, "y": 355, "radius": 2, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "puffs start"},
+    {"type": "point", "id": 36, "layer_id": 1, "x": 420, "y": 365, "radius": 3, "color": "#aa9988", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 37, "layer_id": 1, "x": 470, "y": 358, "radius": 2, "color": "#998877", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 38, "layer_id": 1, "x": 520, "y": 370, "radius": 3, "color": "#887766", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 39, "layer_id": 1, "x": 560, "y": 360, "radius": 2, "color": "#776655", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "smoke"},
+
+    {"type": "rect", "id": 50, "layer_id": 1, "x": 80, "y": 120, "w": 560, "h": 35, "color": "#1a2a1a", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "Stick Deflection"},
+    {"type": "rect", "id": 51, "layer_id": 1, "x": 82, "y": 122, "w": 502, "h": 31, "color": "#334433", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "0–90% WALK"},
+    {"type": "rect", "id": 52, "layer_id": 1, "x": 584, "y": 122, "w": 54, "h": 31, "color": "#226622", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "91–100% RUN"},
+
+    {"type": "line", "id": 55, "layer_id": 1, "x1": 584, "y1": 115, "x2": 584, "y2": 160, "color": "#ffaa33", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "90% threshold"},
+
+    {"type": "text", "id": 60, "layer_id": 1, "x": 88, "y": 165, "text": "0%", "font_size": 10, "color": "#666666", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 61, "layer_id": 1, "x": 570, "y": 165, "text": "90%", "font_size": 10, "color": "#ffaa33", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 62, "layer_id": 1, "x": 620, "y": 165, "text": "100%", "font_size": 10, "color": "#666666", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 70, "layer_id": 1, "x": 300, "y": 200, "text": "Speed proportional to stick", "font_size": 11, "color": "#66bb66", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 71, "layer_id": 1, "x": 580, "y": 200, "text": "2× speed", "font_size": 11, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 80, "layer_id": 1, "x": 650, "y": 310, "text": "JUMP →\nmomentum\npreserved", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "arc", "id": 81, "layer_id": 1, "cx": 700, "cy": 390, "r": 80, "start_angle": -1.57, "sweep_angle": 1.2, "color": "#33ff5566", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "run-jump arc"}
+  ],
+  "groups": [],
+  "layers": [{"id": 1, "name": "Main", "visible": true, "locked": false}],
+  "next_id": 90
+}

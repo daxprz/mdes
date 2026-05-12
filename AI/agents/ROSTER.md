@@ -1,12 +1,12 @@
 # Agent Roster — TUMU/DAX
 
-> Agents consult this to know who handles what. Use `/delegate <agent> <task>` for handoffs.
+> Agents consult this to know who handles what. Use `/handoff <agent> <task>` for handoffs.
 
 | Agent | Emoji | Model | Specialty | Delegate when... |
 |-------|-------|-------|-----------|-----------------|
 | tumu | 🧁 | opus[1m] | Game testing via RCON, debug diagnostics, test monitoring, GDScript inspection | Running tests, debugging monster behavior, verifying fixes, inspecting debug output |
-| liaison | 🔗 | sonnet | External interface, cross-project contact | Cross-project requests (use `/notify` from outside) |
-| olai | 🌐 | sonnet | OLAI platform interface — resource management, ingestion, knowledge exchange, scanning via MCP API | Interacting with OLAI services, managing resources, contributing knowledge |
+| liaison | 🔗 | haiku | External interface, cross-project contact | Cross-project requests (use `/notify` from outside) |
+| olai | 🌐 | opus[1m] | OLAI platform interface — resource management, ingestion, knowledge exchange, scanning via MCP API | Interacting with OLAI services, managing resources, contributing knowledge |
 
 ## Routing
 

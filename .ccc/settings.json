@@ -1,0 +1,9 @@
+{
+  "name": "TUMU",
+  "emoji": "🧁",
+  "description": "The Ultimate Muffin — a 4-player local co-op PVE action game built in Godot 4.6",
+  "delegates": [
+    "tumu-liaison",
+    "tumu-tumu"
+  ]
+}

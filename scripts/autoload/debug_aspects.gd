@@ -117,7 +117,7 @@ func _register_all() -> void:
 	r.call("player/reticle_info", "Reticle position text overlay")
 	r.call("player/button_state", "Controller/keyboard button state labels on HUD")
 	r.call("player/run", "Ranger run: activation, speed mult, footstep puffs")
-	r.call("player/dash", "Ranger dash: activation, cooldown, trail, jump-carry")
+	r.call("player/dash", "Ranger dash: activation, cooldown, trail, jump-carry, ground slide")
 	r.call("player/stick", "Per-frame stick deflection, direction, speed mode (verbose)")
 	r.call("player/stick_viz", "Thumbstick visualizer: crosshair, dot, heat trail, raw vs smoothed")
 

@@ -10,27 +10,9 @@
       "// ============================================================",
       "// PERSONAL - Session Management",
       "// ============================================================",
-      "Bash(cp /var/tumu/aid/sessions/*)",
-      "Bash(mv /var/tumu/aid/sessions/*)",
-      "Bash(mkdir -p /var/tumu/aid/sessions/*)",
-      "Bash(nc -z localhost 6005)",
-      "Bash(nc -w5 localhost 9999)",
-      "Bash(nc -w10 localhost 9999)",
-      "Bash(afplay:*)",
-      "Bash(SwitchAudioSource:*)",
       "Bash(bash /Users/jeremy/.claude/skills/audio-mode/switch.sh develop)",
-      "Skill(gd)",
-      "Bash(kill %1)",
-      "Bash(gh search:*)",
-      "Bash(gh pr:*)",
-      "Bash(gh release:*)",
-      "Bash(lsof -ti:9999)",
-      "Bash(xargs kill:*)",
-      "Bash(sips:*)",
-      "Bash(screencapture -x /tmp/wb_verify_normal_cp.png)",
-      "Bash(screencapture -x /tmp/wb_diagram.png)"
+      "Skill(gd)"
     ],
-    "deny": [],
     "additionalDirectories": [
       "/var/tumu/research",
       "/var/tumu/aid/sessions"

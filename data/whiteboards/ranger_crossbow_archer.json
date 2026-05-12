@@ -1,0 +1,41 @@
+{
+  "active_layer_id": 1,
+  "components": [
+    {"type": "text", "id": 1, "layer_id": 1, "x": 250, "y": 15, "text": "Crossbow + Archer Aim", "font_size": 32, "color": "#dd4444", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 10, "layer_id": 1, "x": 50, "y": 250, "w": 350, "h": 14, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "circle", "id": 20, "layer_id": 1, "cx": 100, "cy": 238, "r": 12, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Player"},
+    {"type": "line", "id": 21, "layer_id": 1, "x1": 115, "y1": 238, "x2": 350, "y2": 238, "color": "#ff444466", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "□ quick shot"},
+    {"type": "point", "id": 22, "layer_id": 1, "x": 350, "y": 238, "radius": 4, "color": "#ff4444", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "bolt"},
+
+    {"type": "text", "id": 25, "layer_id": 1, "x": 80, "y": 278, "text": "10 arrows max | ○ to reload", "font_size": 11, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 30, "layer_id": 1, "x": 480, "y": 330, "w": 350, "h": 14, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "rect", "id": 31, "layer_id": 1, "x": 650, "y": 240, "w": 200, "h": 14, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Upper platform"},
+
+    {"type": "circle", "id": 35, "layer_id": 1, "cx": 520, "cy": 318, "r": 12, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "L2 aim"},
+
+    {"type": "circle", "id": 36, "layer_id": 1, "cx": 750, "cy": 228, "r": 10, "color": "#ff222244", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "reticle ⊕"},
+    {"type": "line", "id": 37, "layer_id": 1, "x1": 740, "y1": 228, "x2": 760, "y2": 228, "color": "#ff2222", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 38, "layer_id": 1, "x1": 750, "y1": 218, "x2": 750, "y2": 238, "color": "#ff2222", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "arc", "id": 40, "layer_id": 1, "cx": 630, "cy": 400, "r": 200, "start_angle": -1.3, "sweep_angle": 0.6, "color": "#ff8844", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "aimed arc (R2)"},
+
+    {"type": "text", "id": 45, "layer_id": 1, "x": 620, "y": 270, "text": "right stick\nmoves reticle", "font_size": 10, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 50, "layer_id": 1, "x": 80, "y": 370, "text": "Double-Tap L2", "font_size": 22, "color": "#ffdd44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "circle", "id": 55, "layer_id": 1, "cx": 150, "cy": 460, "r": 12, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Player"},
+    {"type": "rect", "id": 56, "layer_id": 1, "x": 50, "y": 480, "w": 350, "h": 14, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "circle", "id": 58, "layer_id": 1, "cx": 180, "cy": 430, "r": 20, "color": "#555555", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "right stick →"},
+
+    {"type": "line", "id": 60, "layer_id": 1, "x1": 155, "y1": 458, "x2": 420, "y2": 420, "color": "#ffdd4466", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "snap 300px"},
+    {"type": "circle", "id": 61, "layer_id": 1, "cx": 420, "cy": 420, "r": 8, "color": "#ffdd44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "reticle snaps here"},
+    {"type": "text", "id": 62, "layer_id": 1, "x": 250, "y": 400, "text": "instant aim, then fine-tune", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""}
+  ],
+  "groups": [],
+  "layers": [{"id": 1, "name": "Main", "visible": true, "locked": false}],
+  "next_id": 70
+}

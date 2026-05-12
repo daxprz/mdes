@@ -1,0 +1,39 @@
+{
+  "active_layer_id": 1,
+  "components": [
+    {"type": "text", "id": 1, "layer_id": 1, "x": 380, "y": 20, "text": "Dash (R1)", "font_size": 36, "color": "#33dd55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 10, "layer_id": 1, "x": 50, "y": 300, "w": 860, "h": 16, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Ground"},
+
+    {"type": "circle", "id": 20, "layer_id": 1, "cx": 120, "cy": 285, "r": 14, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Press R1"},
+
+    {"type": "line", "id": 30, "layer_id": 1, "x1": 138, "y1": 285, "x2": 700, "y2": 285, "color": "#22aa33", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 8, "annotations": [], "show_annotations": true, "label": "GREEN streak"},
+    {"type": "line", "id": 31, "layer_id": 1, "x1": 138, "y1": 285, "x2": 700, "y2": 285, "color": "#dddd44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 3, "annotations": [], "show_annotations": true, "label": "YELLOW center"},
+
+    {"type": "circle", "id": 35, "layer_id": 1, "cx": 700, "cy": 285, "r": 14, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "4× speed"},
+
+    {"type": "point", "id": 40, "layer_id": 1, "x": 250, "y": 268, "radius": 3, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 41, "layer_id": 1, "x": 320, "y": 275, "radius": 2, "color": "#dddd44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 42, "layer_id": 1, "x": 400, "y": 265, "radius": 3, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "sparkles"},
+    {"type": "point", "id": 43, "layer_id": 1, "x": 500, "y": 272, "radius": 2, "color": "#dddd44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 44, "layer_id": 1, "x": 580, "y": 260, "radius": 3, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 50, "layer_id": 1, "x": 300, "y": 240, "text": "1 second duration", "font_size": 12, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 55, "layer_id": 1, "x": 100, "y": 90, "text": "DASH + JUMP", "font_size": 22, "color": "#ffffff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 60, "layer_id": 1, "x": 100, "y": 480, "w": 300, "h": 16, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Ground"},
+    {"type": "circle", "id": 61, "layer_id": 1, "cx": 140, "cy": 468, "r": 12, "color": "#4488ff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Dash"},
+    {"type": "line", "id": 62, "layer_id": 1, "x1": 140, "y1": 468, "x2": 250, "y2": 468, "color": "#22aa33", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 6, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "arc", "id": 63, "layer_id": 1, "cx": 400, "cy": 480, "r": 160, "start_angle": -2.8, "sweep_angle": 2.2, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 3, "annotations": [], "show_annotations": true, "label": "velocity + trail carry"},
+    {"type": "circle", "id": 64, "layer_id": 1, "cx": 250, "cy": 460, "r": 10, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "JUMP here"},
+
+    {"type": "rect", "id": 65, "layer_id": 1, "x": 500, "y": 480, "w": 200, "h": 16, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "circle", "id": 66, "layer_id": 1, "cx": 555, "cy": 468, "r": 10, "color": "#888888", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "land → dash ends"},
+
+    {"type": "text", "id": 70, "layer_id": 1, "x": 700, "y": 450, "text": "5s cooldown", "font_size": 14, "color": "#ff6644", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""}
+  ],
+  "groups": [],
+  "layers": [{"id": 1, "name": "Main", "visible": true, "locked": false}],
+  "next_id": 80
+}

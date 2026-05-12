@@ -1,0 +1,53 @@
+{
+  "active_layer_id": 1,
+  "components": [
+    {"type": "text", "id": 1, "layer_id": 1, "x": 300, "y": 15, "text": "Ground Slide (Circle)", "font_size": 34, "color": "#cc8844", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 10, "layer_id": 2, "x": 50, "y": 350, "w": 860, "h": 16, "color": "#445544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Flat ground"},
+
+    {"type": "circle", "id": 20, "layer_id": 2, "cx": 100, "cy": 335, "r": 14, "color": "#33ff55", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "Running"},
+    {"type": "text", "id": 21, "layer_id": 2, "x": 130, "y": 320, "text": "press ○", "font_size": 11, "color": "#ffaa44", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "circle", "id": 25, "layer_id": 2, "cx": 200, "cy": 340, "r": 10, "color": "#cc8844", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "1.2×"},
+    {"type": "circle", "id": 26, "layer_id": 2, "cx": 280, "cy": 340, "r": 12, "color": "#ff6633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "1.5× PEAK"},
+    {"type": "circle", "id": 27, "layer_id": 2, "cx": 450, "cy": 340, "r": 10, "color": "#996633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "decay..."},
+    {"type": "circle", "id": 28, "layer_id": 2, "cx": 650, "cy": 340, "r": 8, "color": "#664422", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "...slow"},
+    {"type": "circle", "id": 29, "layer_id": 2, "cx": 800, "cy": 342, "r": 6, "color": "#443322", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "stop"},
+
+    {"type": "line", "id": 30, "layer_id": 2, "x1": 200, "y1": 340, "x2": 800, "y2": 342, "color": "#88663366", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 4, "annotations": [], "show_annotations": true, "label": "slide path"},
+
+    {"type": "point", "id": 35, "layer_id": 2, "x": 230, "y": 355, "radius": 3, "color": "#998877", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 36, "layer_id": 2, "x": 310, "y": 358, "radius": 4, "color": "#887766", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "dust"},
+    {"type": "point", "id": 37, "layer_id": 2, "x": 400, "y": 356, "radius": 3, "color": "#776655", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 38, "layer_id": 2, "x": 500, "y": 355, "radius": 2, "color": "#665544", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "rect", "id": 50, "layer_id": 1, "x": 100, "y": 80, "w": 600, "h": 180, "color": "#111118", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": "Speed Curve"},
+    {"type": "line", "id": 51, "layer_id": 1, "x1": 100, "y1": 250, "x2": 700, "y2": 250, "color": "#333333", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 52, "layer_id": 1, "x1": 100, "y1": 80, "x2": 100, "y2": 250, "color": "#333333", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "point", "id": 55, "layer_id": 1, "x": 110, "y": 140, "radius": 5, "color": "#cc8844", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "1.2× START"},
+    {"type": "point", "id": 56, "layer_id": 1, "x": 140, "y": 90, "radius": 6, "color": "#ff4422", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "1.5× PEAK"},
+    {"type": "line", "id": 57, "layer_id": 1, "x1": 110, "y1": 140, "x2": 140, "y2": 90, "color": "#ff6633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 58, "layer_id": 1, "x1": 140, "y1": 90, "x2": 280, "y2": 210, "color": "#cc6633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 59, "layer_id": 1, "x1": 280, "y1": 210, "x2": 500, "y2": 240, "color": "#885533", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "line", "id": 60, "layer_id": 1, "x1": 500, "y1": 240, "x2": 695, "y2": 248, "color": "#554433", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 1, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "point", "id": 61, "layer_id": 1, "x": 280, "y": 210, "radius": 3, "color": "#886633", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "0.3× knee"},
+    {"type": "point", "id": 62, "layer_id": 1, "x": 695, "y": 248, "radius": 3, "color": "#444444", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": "0 (3s)"},
+
+    {"type": "text", "id": 65, "layer_id": 1, "x": 105, "y": 253, "text": "0s", "font_size": 9, "color": "#555555", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 66, "layer_id": 1, "x": 135, "y": 253, "text": "0.15s", "font_size": 9, "color": "#555555", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 67, "layer_id": 1, "x": 685, "y": 253, "text": "3s", "font_size": 9, "color": "#555555", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+
+    {"type": "text", "id": 75, "layer_id": 1, "x": 750, "y": 100, "text": "Exits:", "font_size": 14, "color": "#ffffff", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 76, "layer_id": 1, "x": 750, "y": 125, "text": "• speed < 15", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 77, "layer_id": 1, "x": 750, "y": 145, "text": "• wall hit", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 78, "layer_id": 1, "x": 750, "y": 165, "text": "• jump (keeps speed)", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""},
+    {"type": "text", "id": 79, "layer_id": 1, "x": 750, "y": 185, "text": "• leaves surface", "font_size": 11, "color": "#aaaaaa", "locked": false, "visible": true, "selected": false, "group_id": -1, "line_width": 2, "annotations": [], "show_annotations": true, "label": ""}
+  ],
+  "groups": [],
+  "layers": [
+    {"id": 1, "name": "Curve", "visible": true, "locked": false},
+    {"id": 2, "name": "Scene", "visible": true, "locked": false}
+  ],
+  "next_id": 90
+}
