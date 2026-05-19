@@ -40,7 +40,7 @@ TUMU is a co-op action game with:
 
 ## Workflow
 
-Follow the standard protocol in `AI/agents/WORKFLOW.md`.
+Follow the standard protocol in `ai/agents/WORKFLOW.md`.
 
 On startup:
 1. Check `inbox/` for new tasks from the overseer or other projects

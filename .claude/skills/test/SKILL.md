@@ -67,7 +67,7 @@ See [reference.md](reference.md) for the full gate protocol (staleness check, ta
 5. Run each stale suite via `echo "suite <name> owait=0" | nc -w2 localhost 9999`
 6. Poll for `SUITE_COMPLETE` per suite
 7. Tag results: `git tag -f "ts/<suite>/pass" HEAD` or `ts/<suite>/fail`
-8. If failures, create/update `AI/agents/tumu/inbox/test_failures.md`
+8. If failures, create/update `ai/agents/tumu/inbox/test_failures.md`
 9. Print final report table
 
 ---

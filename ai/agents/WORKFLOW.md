@@ -5,7 +5,7 @@ Each agent has four workflow folders that manage task lifecycle.
 ## Folder Structure
 
 ```
-AI/agents/{agent-name}/
+ai/agents/{agent-name}/
   inbox/        New tasks assigned to this agent — check here first
   active/       Tasks currently being worked on
   pending/      Tasks blocked or waiting on input
@@ -65,7 +65,7 @@ Slash commands and automated processes can drop task files into an agent's inbox
 
 Every project using this workflow **must** have a `liaison` agent. The liaison is the project's external interface — the single point of contact for cross-project interaction.
 
-- External projects write requests to `AI/agents/liaison/inbox/` using `source: project:{project-name}`
+- External projects write requests to `ai/agents/liaison/inbox/` using `source: project:{project-name}`
 - The liaison triages: handles directly or delegates to the appropriate internal agent
 - The liaison is the **only** agent that external projects should interact with directly
 - Internal agents should not receive tasks directly from external projects

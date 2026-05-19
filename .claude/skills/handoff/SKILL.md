@@ -18,7 +18,7 @@ $ARGUMENTS
 
 ## Agent Registry
 
-Read `AI/agents/ROSTER.md` for the full agent roster.
+Read `ai/agents/ROSTER.md` for the full agent roster.
 
 Available agents:
 - `tumu` 🧁 — Game testing, RCON, debug diagnostics
@@ -28,10 +28,10 @@ Available agents:
 
 ### Phase 1: Resolve Target Agent
 
-1. Match `$0` against agent directory names in `AI/agents/`
+1. Match `$0` against agent directory names in `ai/agents/`
 2. If no exact match, check aliases above
 3. If still no match, list available agents and ask
-4. Verify `AI/agents/{agent}/inbox/` exists
+4. Verify `ai/agents/{agent}/inbox/` exists
 
 ### Phase 2: Check for Duplicates
 
@@ -46,7 +46,7 @@ Available agents:
 2. Determine the calling agent:
    - If you're running as a named agent (check your system prompt), use `source: agent:{your-name}`
    - If running as the main session, use `source: user`
-3. Write to `AI/agents/{target}/inbox/{filename}`:
+3. Write to `ai/agents/{target}/inbox/{filename}`:
 
 ```markdown
 ---
@@ -76,7 +76,7 @@ If the calling agent has an active task related to this delegation:
 
 ```
 Delegated to: {agent} ({emoji})
-  File:   AI/agents/{agent}/inbox/{filename}
+  File:   ai/agents/{agent}/inbox/{filename}
   Title:  {task title}
   Source:  agent:{calling-agent}
 ```

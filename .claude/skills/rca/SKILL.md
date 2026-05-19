@@ -15,7 +15,7 @@ Iteratively triage, analyze, and fix all failing tests.
 ### 1. Identify Failures
 
 Collect failing tests from:
-- `AI/agents/tumu/inbox/test_failures.md` — recorded failures from `/test gate`
+- `ai/agents/tumu/inbox/test_failures.md` — recorded failures from `/test gate`
 - `git tag -l "ts/*/fail"` — failed gate suites
 - Run `echo "suite todo owait=0" | nc -w3 localhost 9999` if todo suite has entries
 

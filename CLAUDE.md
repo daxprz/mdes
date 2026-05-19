@@ -14,7 +14,7 @@ DAX is a 2D action game built in Godot 4.6, rendered entirely via `_draw()` (no 
 
 ## Agents
 
-@AI/agents/ROSTER.md
+@ai/agents/ROSTER.md
 
 ## Agent Recommendation
 
