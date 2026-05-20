@@ -80,3 +80,4 @@ specific files moved by the `git mv` operation.
   liaison triage + rename commit.
 
 - 2026-05-12: Picked up by liaison, beginning rename
+- 2026-05-12: Rename complete — AI → ai via two-step git mv, all in-tree references updated, committed to trunk

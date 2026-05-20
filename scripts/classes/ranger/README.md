@@ -6,7 +6,7 @@ Mobility-focused class built around a grapple hook, tether system, crossbow, and
 
 | Input | Action |
 |-------|--------|
-| Square | Fire crossbow bolt (consumes ammo) |
+| Square | ~~Fire crossbow bolt (consumes ammo)~~ UNASSIGNED |
 | Triangle | Grapple hook special (see Grapple below) |
 | L1 (grapple) | Grapple: hold to windup, release to throw. While connected: starts tether second hook. When all tether slots full: releases grapple. |
 | R1 (shoulder) | Pull toward anchor (reel in while connected) |
