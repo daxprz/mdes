@@ -1,29 +1,6 @@
 {
   "$schemaVersion": "1",
-  "name": "tumu",
-  "emoji": "\ud83e\uddc1",
-  "description": "The Ultimate Muffin \u2014 a 4-player local co-op PVE action game built in Godot 4.6",
-  "paths": [
-    "/Users/jeremy/dev/dax/test123"
-  ],
-  "delegates": [
-    {
-      "name": "liaison",
-      "agent": "liaison",
-      "instance-pattern": "{PROJECT}-{AGENT}",
-      "emoji": "\ud83d\udd17",
-      "model": "haiku"
-    },
-    {
-      "name": "tumu",
-      "agent": "tumu",
-      "instance-pattern": "{PROJECT}-{AGENT}",
-      "emoji": "\ud83e\uddc1",
-      "model": "opus[1m]"
-    }
-  ],
-  "durable": [
-    "liaison",
-    "tumu"
-  ]
+  "name": "mdes",
+  "emoji": "🪐",
+  "description": "Project M.D.E.S. - Maintained Doomed Enviornment, Stranded. Metroidvainia Rougelike game built in Godot 4.6"
 }
