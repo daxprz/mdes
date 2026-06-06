@@ -1,0 +1,1 @@
+../../.ccc/agents/ember/role.md

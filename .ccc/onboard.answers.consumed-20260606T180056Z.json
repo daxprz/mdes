@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "ambiguities_resolved": [
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "assets/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "bin/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "data/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "docs/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "documentation/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "levels/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "scenes/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "scripts/" },
+    { "type": "unknown-top-level-dir", "answer": "ignore", "detail": "tools/" }
+  ]
+}

@@ -1,6 +1,168 @@
 {
   "$schemaVersion": "1",
+  "version": "1.0.0",
   "name": "mdes",
   "emoji": "🪐",
-  "description": "Project M.D.E.S. - Maintained Doomed Enviornment, Stranded. Metroidvainia Rougelike game built in Godot 4.6"
+  "description": "Project M.D.E.S. - Maintained Doomed Enviornment, Stranded. Metroidvainia Rougelike game built in Godot 4.6",
+  "paths": [
+    "/private/var/mdes/workspace"
+  ],
+  "agents-dir": ".ccc/agents",
+  "delegates": [
+    {
+      "name": "liaison",
+      "agent": "liaison",
+      "instance-pattern": "{PROJECT}-{AGENT}",
+      "emoji": "🔗",
+      "model": "haiku"
+    },
+    {
+      "name": "ccc",
+      "agent": "ccc",
+      "instance-pattern": "{PROJECT}-{AGENT}",
+      "emoji": "Σ",
+      "model": "haiku"
+    },
+    {
+      "name": "ember",
+      "agent": "ember",
+      "instance-pattern": "{PROJECT}-{AGENT}",
+      "emoji": "🔥",
+      "model": "opus[1m]"
+    }
+  ],
+  "durable": [
+    "liaison",
+    "ccc",
+    "ember"
+  ],
+  "file_watchers": {
+    "globs": [
+      {
+        "pattern": "effort/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "goals/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "messages/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "milestones/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/effort/**/*.md",
+        "scopes": [
+          "list",
+          "ready"
+        ]
+      },
+      {
+        "pattern": "**/design/**/*.md",
+        "scopes": [
+          "list",
+          "ready"
+        ]
+      },
+      {
+        "pattern": "**/milestones/**/*.md",
+        "scopes": [
+          "list",
+          "ready"
+        ]
+      },
+      {
+        "pattern": "**/goals/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/aiqs.md",
+        "scopes": [
+          "list",
+          "ready"
+        ]
+      },
+      {
+        "pattern": "**/.ccc/*.json",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/inbox/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/active/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/pending/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/archive/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      },
+      {
+        "pattern": "**/messages/**/*.md",
+        "scopes": [
+          "list"
+        ]
+      }
+    ]
+  },
+  "peer_roots": [
+    {
+      "path": "../messages",
+      "purpose": "Cross-agent message bodies — content-path target for MSG/REQ/REP artifacts."
+    },
+    {
+      "path": "../inbox",
+      "purpose": "Cross-project handoff intake (post-EPI-FLOW REQ ingest path; some hosts unprovisioned)."
+    },
+    {
+      "path": "../cache",
+      "purpose": "Per-project derived caches — index rebuilds, ccc-combine state, etc."
+    },
+    {
+      "path": "../projects",
+      "purpose": "Sibling projects under the same CCC container (overseer + cross-project agents)."
+    }
+  ],
+  "onboard-ignore": [
+    "assets",
+    "bin",
+    "data",
+    "docs",
+    "documentation",
+    "levels",
+    "scenes",
+    "scripts",
+    "tools"
+  ],
+  "ccc_combine_port": 7159,
+  "messages-root": "./messages"
 }

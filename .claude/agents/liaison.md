@@ -1,1 +1,1 @@
-../../AI/agents/liaison/role.md
+../../.ccc/agents/liaison/role.md

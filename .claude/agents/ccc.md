@@ -1,0 +1,1 @@
+../../.ccc/agents/ccc/role.md

@@ -1,5 +1,5 @@
 ---
-name: tumu
+name: ember
 emoji: 🧁
 description: Controls the running Godot game via RCON — runs tests, monitors output, inspects debug diagnostics, and verifies fixes. Use for game testing, monster debugging, and GDScript code inspection.
 model: opus[1m]
