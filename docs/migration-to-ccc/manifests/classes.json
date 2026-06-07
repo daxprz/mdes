@@ -1,0 +1,415 @@
+{
+ "effort": "CLS",
+ "slug": "classes",
+ "design_title": "Class Mechanics",
+ "design_summary": "TUMU's playable class roster and their per-class kits — base stats, basic/special/charge/dash attacks, and Circle abilities. New classes (Demolitionist, Healer, Tank, Ninja, Balloonist, Guitarist, Werewolf) were authored alongside an ability-expansion pass that gave every existing class a new Circle ability and aimable weapons. Most class work landed in the v0.9.x baseline (Mar 2026) before release tagging began.",
+ "standalone_designs": [
+   {
+     "slug": "ranger-swing-slide-jump",
+     "title": "Ranger Swing-Slide-Jump Traversal",
+     "summary": "While swinging on a grappling rope and approaching terrain, the Ranger can press JUMP to convert swing momentum into a surface slide, then release JUMP to launch off. Velocity is decomposed into surface-parallel (slide) and normal (launch boost) components, with terrain-following and gravity-on-slope behavior.",
+     "status": "shipped",
+     "version": "v0.10.79",
+     "source": "docs/design/ranger_swing_slide.md"
+   },
+   {
+     "slug": "ranger-slide-ramp-modifier",
+     "title": "Ranger Slide Charge via RampModifierProvider",
+     "summary": "Extends the static modifier stack with a RampModifierProvider that lerps modifier values over time, used to ramp the slide-charge boost from 1.0x to 1.5x over 2s. Includes the slide config keys, charge/release lifecycle, and a full set of phase visuals plus a player/slide debug aspect.",
+     "status": "shipped",
+     "version": "v0.10.79",
+     "source": "docs/design/ranger_slide_modifiers.md"
+   }
+ ],
+ "epics": [
+   {
+     "slug": "demolitionist-class",
+     "title": "New Class: Demolitionist",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 9; docs/design/new_classes.md (Demolitionist section)",
+     "summary": "Explosive area-damage specialist who controls space with arcing bombs. Adds the base class kit, a bomb upgrade system (power, blast size, fragment, napalm), and four mutually-exclusive elemental bomb aspects (electric, fire, impact, ice).",
+     "stories": [
+       {
+         "slug": "base-demolitionist-class",
+         "title": "Base Demolitionist Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 9.1; docs/design/new_classes.md",
+         "summary": "Adds DEMOLITIONIST with stats, sprites, an arcing bomb basic attack, and the Big Bomb special.",
+         "tasks": [
+           {"title": "Add DEMOLITIONIST to CharacterClass enum + stats (100 HP, 100 mana, 105 speed, 1.5 mana regen)", "done": true},
+           {"title": "Create demolitionist topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: throw bomb (arcs with gravity, bounces once, explodes after 1.5s or on enemy contact)", "done": true},
+           {"title": "Bomb explosion: 25 damage, 60px radius, knockback, VFX + screen shake", "done": true},
+           {"title": "Special: Big Bomb (costs 40 mana, 50 damage, 90px radius, bigger VFX)", "done": true}
+         ]
+       },
+       {
+         "slug": "bomb-upgrade-system",
+         "title": "Bomb Upgrade System",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 9.2; docs/design/new_classes.md",
+         "summary": "Tiered bomb upgrades for damage and radius plus fragment and napalm bomb variants.",
+         "tasks": [
+           {"title": "Explosive Power upgrades (damage multiplier tiers)", "done": true},
+           {"title": "Blast Size upgrades (radius multiplier tiers)", "done": true},
+           {"title": "Fragment Bombs (split into 3-5 mini-bombs after first bounce) - via charge attack", "done": true},
+           {"title": "Napalm Bombs (leave burning ground for 3s, DoT damage)", "done": true}
+         ]
+       },
+       {
+         "slug": "bomb-aspects",
+         "title": "Bomb Aspects (Elemental Types)",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 9.3; docs/design/new_classes.md",
+         "summary": "Four mutually-exclusive elemental bomb aspects that change explosion behavior.",
+         "tasks": [
+           {"title": "Electric aspect (chains to nearby enemies, brief stun)", "done": true},
+           {"title": "Fire aspect (ignites enemies, DoT for 3s)", "done": true},
+           {"title": "Impact aspect (massive knockback, lower damage)", "done": true},
+           {"title": "Ice aspect (slows enemies in blast radius)", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "healer-class",
+     "title": "New Class: Healer",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 10; docs/design/new_classes.md (Healer section)",
+     "summary": "Support class with a healing staff that damages enemies while topping up allies. Adds the base kit, a charge-attack healing blast wave that buffs allies and stuns enemies, and a dash that emits a perpendicular healing/push wave.",
+     "stories": [
+       {
+         "slug": "base-healer-class",
+         "title": "Base Healer Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 10.1; docs/design/new_classes.md",
+         "summary": "Adds HEALER with stats, sprites, a heal-on-hit staff swing, auto-targeting heal beam, and the Healing Burst special.",
+         "tasks": [
+           {"title": "Add HEALER to CharacterClass enum + stats (90 HP, 130 mana, 95 speed, 2.5 mana regen)", "done": true},
+           {"title": "Create healer topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: staff swing (10 damage) that ALSO heals closest allied player for 8 HP", "done": true},
+           {"title": "Auto-target: healing beam visual arcs to nearest injured ally", "done": true},
+           {"title": "Special: Healing Burst (costs 50 mana, heals all allies in 80px for 30 HP)", "done": true}
+         ]
+       },
+       {
+         "slug": "healer-charge-attack",
+         "title": "Healer Charge Attack",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 10.2; docs/design/new_classes.md",
+         "summary": "Charged circular healing wave that scales with charge time, buffs allies, and stuns enemies.",
+         "tasks": [
+           {"title": "Charge attack sends healing blast wave (circular pulse outward)", "done": true},
+           {"title": "Wave distance + healing power scales with charge duration (1-3s)", "done": true},
+           {"title": "Visual: circular ring expands outward from healer", "done": true},
+           {"title": "Allies in wave radius get healed + temporary buff (10% speed + 10% damage for 5s)", "done": true},
+           {"title": "Enemies hit by wave get stunned for 1.5s", "done": true}
+         ]
+       },
+       {
+         "slug": "healer-dash",
+         "title": "Healer Dash",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 10.3; docs/design/new_classes.md",
+         "summary": "Dash emits a perpendicular wave that heals allies and pushes enemies aside.",
+         "tasks": [
+           {"title": "Dash creates perpendicular wave pulse (line expanding outward from dash direction)", "done": true},
+           {"title": "Wave heals allies and pushes enemies aside", "done": true},
+           {"title": "Visual: bright line expanding perpendicular to movement", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "tank-class",
+     "title": "New Class: Tank",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 14",
+     "summary": "Armored frontliner with crowd control and damage absorption. Adds the base kit (mace slam, ground-pound stun, charged shockwave) and a Fortify ability that trades damage output for heavy damage reduction.",
+     "stories": [
+       {
+         "slug": "base-tank-class",
+         "title": "Base Tank Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 14.1",
+         "summary": "Adds TANK with high-HP stats, sprites, a heavy mace slam, ground-pound AoE stun, and a charged shockwave.",
+         "tasks": [
+           {"title": "Add TANK to CharacterClass enum + stats (250 HP, 30 mana, 70 speed, 0.5 mana regen)", "done": true},
+           {"title": "Create tank topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: heavy mace slam (45 damage, 1.2s cooldown, wide area)", "done": true},
+           {"title": "Special: ground pound AoE stun around the tank", "done": true},
+           {"title": "Charge attack: massive ground shockwave (60-160px radius, 20-70 damage scaled by charge)", "done": true}
+         ]
+       },
+       {
+         "slug": "fortify-ability",
+         "title": "Fortify Ability",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 14.2",
+         "summary": "Circle ability granting heavy damage reduction at the cost of reduced attack damage, with bronze-glow VFX.",
+         "tasks": [
+           {"title": "Fortify ability on Circle (interact) - 8s duration, 25s cooldown", "done": true},
+           {"title": "Fortified: ignore 60% of incoming damage", "done": true},
+           {"title": "Fortified: attack damage reduced by 50% (tradeoff)", "done": true},
+           {"title": "Bronze glow VFX with pulsing, warning flash at 2s remaining", "done": true},
+           {"title": "\"FORTIFIED!\" floating text on activation", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "class-ability-expansion",
+     "title": "Class Ability Expansion",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 15",
+     "summary": "New abilities added across the existing class roster — Melee Enrage, Ranged ammo/reload + grappling hook, Mage beam/mana-potion/air-walk, Summoner homing mark + delegate mode, Rogue stealth/backstab, Demolitionist jetpack, Healer wind gust/channel — plus a universal aimable-weapons pass.",
+     "stories": [
+       {
+         "slug": "melee-enrage",
+         "title": "Melee - Enrage",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.1",
+         "summary": "Circle ability granting a temporary speed and damage boost with red-tint VFX.",
+         "tasks": [
+           {"title": "Enrage ability on Circle (interact) - 10s duration, 45s cooldown", "done": true},
+           {"title": "Enraged: 1.5x speed multiplier, 1.8x damage multiplier", "done": true},
+           {"title": "Red tint VFX, \"ENRAGE!\" floating text", "done": true}
+         ]
+       },
+       {
+         "slug": "ranged-ammo-grappling-hook",
+         "title": "Ranged - Ammo/Reload + Grappling Hook",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.2",
+         "summary": "Adds a limited-ammo reload system and replaces the Ranged special with an aimed grappling hook.",
+         "tasks": [
+           {"title": "Ammo system with limited arrows (reload on Circle, 1.5s reload time)", "done": true},
+           {"title": "Crossbow bolt damage increased to 60", "done": true},
+           {"title": "Special changed to Grappling Hook (fires aimed, pulls to walls or enemies, 20 damage on enemy hit)", "done": true},
+           {"title": "All ranged attacks use aim direction system", "done": true}
+         ]
+       },
+       {
+         "slug": "mage-beam-mana-airwalk",
+         "title": "Mage - Beam of Light + Mana Potion + Air-Walk",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.3",
+         "summary": "Rapid-fire bolts, a Mana Potion special, a charged Beam of Light, and an Air-Walk Circle ability.",
+         "tasks": [
+           {"title": "Rapid-fire magic bolts (6 damage each, 450px/s, costs mana)", "done": true},
+           {"title": "Special changed to Mana Potion (restores 60% max mana)", "done": true},
+           {"title": "Charge attack: Beam of Light (raycast, 40-120 damage, multi-hit, scales with charge)", "done": true},
+           {"title": "Air-Walk ability on Circle (5s duration, 10s cooldown, no gravity while active)", "done": true}
+         ]
+       },
+       {
+         "slug": "summoner-homing-mark-delegate",
+         "title": "Summoner - Homing Mark + Delegate Mode",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.4",
+         "summary": "Homing-mark basic attack and a Delegate Mode where the summoner freezes and controls a faster ghost.",
+         "tasks": [
+           {"title": "Basic attack changed to Homing Mark (slow homing orb, marks target for +damage from buddies, 6s duration)", "done": true},
+           {"title": "Delegate Mode on Circle (30s cooldown, 10s duration) - summoner freezes, ghost moves freely", "done": true},
+           {"title": "Ghost: 1.5x speed, 1.5x jump, can dash. Buddies follow ghost", "done": true},
+           {"title": "Summoner takes 1.5x damage while delegating; hit >= 15 cancels it", "done": true},
+           {"title": "Aether rift teleport VFX on enter/exit delegate mode", "done": true}
+         ]
+       },
+       {
+         "slug": "rogue-stealth-backstab",
+         "title": "Rogue - Stealth + Backstab",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.5",
+         "summary": "Knife-fan attack plus a Stealth ability enabling high-multiplier backstabs.",
+         "tasks": [
+           {"title": "Knife fan basic attack pattern", "done": true},
+           {"title": "Stealth ability on Circle (5s duration, 20s cooldown)", "done": true},
+           {"title": "Stealthed: semi-transparent, enemies ignore, take 50% less damage", "done": true},
+           {"title": "Backstab from stealth: 3.75x damage multiplier", "done": true}
+         ]
+       },
+       {
+         "slug": "demolitionist-jetpack-crash-refuel",
+         "title": "Demolitionist - Rocket Jetpack + Crash + Refuel",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.6",
+         "summary": "Double-jump rocket jetpack with drift, crash explosion on fuel depletion, and manual refuel.",
+         "tasks": [
+           {"title": "Rocket jetpack activated by second jump press (4s fuel)", "done": true},
+           {"title": "Thrust with aim direction, drift increases over time (chaos/spin)", "done": true},
+           {"title": "Fuel depletion = crash explosion (damage to self + nearby)", "done": true},
+           {"title": "Refuel on Circle while grounded (hold to refill, no auto-refuel on landing)", "done": true}
+         ]
+       },
+       {
+         "slug": "healer-wind-gust-potion-throw",
+         "title": "Healer - Wind Gust + Healing Potion Throw",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.7",
+         "summary": "Throwable healing-zone potion, a Wind Gust knockback ability, and a channelable healing aura.",
+         "tasks": [
+           {"title": "Basic attack changed to Healing Potion Throw (arcing projectile, creates healing zone on land)", "done": true},
+           {"title": "Wind Gust ability on Circle (8s cooldown, 100px radius, 400 force knockback)", "done": true},
+           {"title": "Channel heal: hold attack to channel continuous healing aura (5 HP/s to nearby allies)", "done": true},
+           {"title": "Interrupted channel fires proportional burst heal", "done": true}
+         ]
+       },
+       {
+         "slug": "all-classes-aim-weapons",
+         "title": "All Classes Aim Weapons",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 15.8",
+         "summary": "Universal aim-direction system so all projectiles and attacks use right-stick/movement aim.",
+         "tasks": [
+           {"title": "All projectiles and attacks use right-stick/movement aim direction", "done": true},
+           {"title": "Grappling hook, bolts, bombs, marks, potions all aim-able", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "ninja-class",
+     "title": "New Class: Ninja",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 20",
+     "summary": "Fast aerial specialist with triple jump and dive attacks. Adds the base kit including sequential slices, dive kick, charged meteor strike, an air-dash/item-pickup ability, and triple-jump passive.",
+     "stories": [
+       {
+         "slug": "base-ninja-class",
+         "title": "Base Ninja Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 20.1",
+         "summary": "Adds NINJA with high-speed stats, sprites, and its full aerial kit including triple jump.",
+         "tasks": [
+           {"title": "Add NINJA to CharacterClass enum + stats (85 HP, 70 mana, 140 speed, 1.5 mana regen)", "done": true},
+           {"title": "Create ninja topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: 3 fast sequential slices", "done": true},
+           {"title": "Special: dive kick (fast downward kick, bounces on hit)", "done": true},
+           {"title": "Charge attack: meteor strike (charge in air, slam down with scaling damage/radius)", "done": true},
+           {"title": "Circle ability: air dash / item pickup (dash through air + pull nearby items)", "done": true},
+           {"title": "Passive: triple jump (3 jumps before needing ground)", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "balloonist-class",
+     "title": "New Class: Balloonist",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 21",
+     "summary": "Chaos controller with physics-based balloons and H2 gas explosions. Adds the base balloon-dart kit plus a lingering hydrogen-gas system that ignites from fire attacks and chains explosions.",
+     "stories": [
+       {
+         "slug": "base-balloonist-class",
+         "title": "Base Balloonist Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 21.1",
+         "summary": "Adds BALLOONIST with stats, sprites, physics-string balloon darts, Pop All special, giant-balloon charge, and self-float.",
+         "tasks": [
+           {"title": "Add BALLOONIST to CharacterClass enum + stats (80 HP, 90 mana, 100 speed, 1.0 mana regen)", "done": true},
+           {"title": "Create balloonist topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: balloon darts (physics string with 12 segments, teardrop-shaped balloons)", "done": true},
+           {"title": "Balloon physics: repulsion between balloons, wind sensitivity, weight system", "done": true},
+           {"title": "3x fire rate, max 10 active balloons", "done": true},
+           {"title": "Special: Pop All (Triangle) - pop all active balloons, release H2 gas", "done": true},
+           {"title": "Charge attack: giant balloon (larger, more lift, scales with charge)", "done": true},
+           {"title": "Circle ability: self-float (attach balloon to self for flight)", "done": true}
+         ]
+       },
+       {
+         "slug": "h2-gas-hydrogen-explosion",
+         "title": "H2 Gas & Hydrogen Explosion System",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 21.2",
+         "summary": "Lingering H2 gas clouds that ignite from fire-type attacks or lava and chain into hydrogen explosions.",
+         "tasks": [
+           {"title": "H2 gas lingers for 25 seconds after balloon pop", "done": true},
+           {"title": "H2 gas ignites on contact with fire-type attacks or lava", "done": true},
+           {"title": "Hydrogen explosion with area damage on ignition", "done": true},
+           {"title": "Chain reactions: explosions ignite nearby H2 clouds", "done": true},
+           {"title": "Mage fireballs (fire type) explode balloons and ignite H2 gas", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "guitarist-class",
+     "title": "New Class: Guitarist",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 22",
+     "summary": "Rhythm-based fighter with sine-wave note projectiles and weight-based push attacks, including a charged power chord, an amp-up buff, and Karplus-Strong guitar synthesis.",
+     "stories": [
+       {
+         "slug": "base-guitarist-class",
+         "title": "Base Guitarist Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 22.1",
+         "summary": "Adds GUITARIST with stats, sprites, sine-wave note attacks, blast-wave push, power chord charge, amp-up ability, and synthesized guitar sounds.",
+         "tasks": [
+           {"title": "Add GUITARIST to CharacterClass enum + stats (110 HP, 100 mana, 95 speed, 2.0 mana regen)", "done": true},
+           {"title": "Create guitarist topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: musical notes (sine wave trajectory)", "done": true},
+           {"title": "Special: blast wave (60-degree arc, weight-based push using entity weight system)", "done": true},
+           {"title": "Charge attack: power chord (massive sound blast, scales with charge)", "done": true},
+           {"title": "Circle ability: amp up (15s duration, 30s cooldown, amplified damage + effect radius)", "done": true},
+           {"title": "Guitar sounds via Karplus-Strong string synthesis (guitar_note.wav, guitar_blast.wav)", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "werewolf-class",
+     "title": "New Class: Werewolf",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG.md EPIC 23",
+     "summary": "Brutal melee brawler with blood effects and a frenzy mode. Adds the base kit: triple claw combo, roar push, charged pounce leap, and a frenzy attack/move-speed boost.",
+     "stories": [
+       {
+         "slug": "base-werewolf-class",
+         "title": "Base Werewolf Class",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG.md Story 23.1",
+         "summary": "Adds WEREWOLF with high-HP brawler stats, sprites, triple claw combo, roar push, pounce charge, and frenzy.",
+         "tasks": [
+           {"title": "Add WEREWOLF to CharacterClass enum + stats (200 HP, 40 mana, 120 speed, 0.5 mana regen)", "done": true},
+           {"title": "Create werewolf topdown + side spritesheets", "done": true},
+           {"title": "Basic attack: triple claw slash (3-hit combo, 8 blood drops per slash)", "done": true},
+           {"title": "Special: roar push (30-degree arc, 250px range, weight-based push)", "done": true},
+           {"title": "Charge attack: pounce (charge and leap, damage/distance scale with charge)", "done": true},
+           {"title": "Circle ability: frenzy (8s duration, 35s cooldown, boosted attack/move speed)", "done": true}
+         ]
+       }
+     ]
+   }
+ ]
+}

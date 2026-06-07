@@ -1,0 +1,518 @@
+{
+  "effort": "ENMY",
+  "slug": "enemies",
+  "design_title": "Enemy Design & Behaviors",
+  "design_summary": "The enemy roster and behavior systems for TUMU, spanning a procedurally animated quadruped predator (skeleton, IK, locomotion, attacks, precog pathfinding, scaling, weak spots) and a candy-themed enemy variety roster with density, coordination, and mini-bosses. All enemies are vector-rendered via _draw() with no sprites. The quadruped is the primary active development area and carries the most complex AI and physics work.",
+  "standalone_designs": [],
+  "epics": [
+    {
+      "slug": "quadruped-monster-predator",
+      "title": "Quadruped Monster — Procedurally Animated Predator",
+      "status": "in-progress",
+      "version": "v0.10.82",
+      "source": "docs/EPIC_quadruped_monster.md; docs/design/quadruped_monster.md (epic-specific design memo)",
+      "summary": "A physics-based procedurally animated quadruped that hunts players across multi-platform levels using foot-driven locomotion, 2-bone IK, head tracking, eight attack types, and pre-cognition platform pathfinding. Rendered entirely via _draw() with a 23-point skeleton and runtime config stack. Core build shipped across v0.9.8-v0.9.17 and refined through the v0.10.x line; thrash/IK/damage polish stories remain open.",
+      "stories": [
+        {
+          "slug": "eliminate-strategy-thrashing",
+          "title": "Eliminate Strategy Thrashing",
+          "status": "open",
+          "version": "",
+          "source": "docs/EPIC_quadruped_monster.md Story 1",
+          "summary": "Reduce the monster's worst_thrash from 31 to under 5 by locking states for a minimum duration and adding hysteresis to precog triggers.",
+          "tasks": [
+            {"title": "Lock state for minimum duration — commit attack/precog plan for at least 2s", "done": false},
+            {"title": "Add hysteresis to height-based precog trigger (80px on, 40px off)", "done": false},
+            {"title": "Don't interrupt a set waypoint until reached or timeout", "done": false},
+            {"title": "Track plan enacted vs abandoned — only re-plan after enacting or 3 fails", "done": false}
+          ]
+        },
+        {
+          "slug": "fix-ik-leg-quality",
+          "title": "Fix IK Leg Quality",
+          "status": "open",
+          "version": "",
+          "source": "docs/EPIC_quadruped_monster.md Story 2",
+          "summary": "Stop legs from stretching, hovering, or splaying by re-planting feet after transitions and validating planted feet against solid surfaces.",
+          "tasks": [
+            {"title": "After every state transition, force feet to re-plant at floor level below hips", "done": false},
+            {"title": "Validate each planted foot is on a solid surface every N frames; replant if not", "done": false},
+            {"title": "Reduce max horizontal foot-to-hip distance to 30px", "done": false},
+            {"title": "Replant all feet immediately when body Y changes rapidly", "done": false},
+            {"title": "Benchmark: IK score avg < 20, peak < 100", "done": false}
+          ]
+        },
+        {
+          "slug": "improve-debug-draw-performance",
+          "title": "Improve Debug Draw Performance",
+          "status": "open",
+          "version": "",
+          "source": "docs/EPIC_quadruped_monster.md Story 3",
+          "summary": "Lift min FPS with debug on from 14 to over 30 by throttling and caching debug rendering.",
+          "tasks": [
+            {"title": "Only redraw debug info every 3rd frame", "done": false},
+            {"title": "Cache platform bar geometry instead of recomputing per frame", "done": false},
+            {"title": "Reduce text labels into fewer draw_string calls", "done": false},
+            {"title": "Skip precog visualization when not in PRECOGNITION state", "done": false}
+          ]
+        },
+        {
+          "slug": "reach-all-platforms-reliably",
+          "title": "Reach All Platforms Reliably",
+          "status": "in-progress",
+          "version": "v0.10.0",
+          "source": "docs/EPIC_quadruped_monster.md Story 4",
+          "summary": "Raise leap hit rate to 10/10 by fixing trajectory accuracy, landing correction, and launch-position velocity adjustment. Cross-platform gap detection and bounded leaps landed in v0.10.0.",
+          "tasks": [
+            {"title": "Add post-leap floor detection — retry if not on target platform", "done": false},
+            {"title": "Increase flight time range for more arc options", "done": false},
+            {"title": "Adjust velocity vector when launch position differs from planned", "done": false},
+            {"title": "Add landing correction — nudge onto platform within 30px of edge", "done": false},
+            {"title": "Score arrival accuracy per scenario", "done": false}
+          ]
+        },
+        {
+          "slug": "maximize-damage-output",
+          "title": "Maximize Damage Output",
+          "status": "in-progress",
+          "version": "v0.10.15",
+          "source": "docs/EPIC_quadruped_monster.md Story 5",
+          "summary": "Push damage output above 1000 via aggressive chase/bite after reaching target and a pounce mechanic. Aerial ballistic strike on the final precog hop landed in the v0.10.x line.",
+          "tasks": [
+            {"title": "After reaching target's platform, enter chase+bite mode (no more precog)", "done": true},
+            {"title": "Increase bite damage check frequency", "done": false},
+            {"title": "Add pounce mechanic — instant damage when landing within 60px of target", "done": true},
+            {"title": "Trigger sprint slash more aggressively on same-level scenarios", "done": false},
+            {"title": "Track damage-per-second as a baseline metric", "done": false}
+          ]
+        },
+        {
+          "slug": "new-moves-and-polish",
+          "title": "New Moves & Polish",
+          "status": "in-progress",
+          "version": "v0.10.18",
+          "source": "docs/EPIC_quadruped_monster.md Story 6",
+          "summary": "Future moves and polish: wall-cling, pounce impact, death animation, audio, and health bar. Chain daze and connected hop-up landed in the v0.10.x line.",
+          "tasks": [
+            {"title": "Standing hop-up for short climbs (< 140px)", "done": true},
+            {"title": "Wall-cling: grab cave walls during multi-hop routes", "done": false},
+            {"title": "Pounce landing impact: area damage + screen shake", "done": false},
+            {"title": "Death animation: part-by-part collapse with physics", "done": false},
+            {"title": "Audio: growl, footsteps, leap whoosh, bite crunch", "done": false},
+            {"title": "Health bar rendering", "done": false}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "arc-planning-precog-fixes",
+      "title": "Arc Planning & Precog Pathfinding Fixes",
+      "status": "shipped",
+      "version": "v0.10.0",
+      "source": "docs/epics/EPIC_arc_planning_fixes.md",
+      "summary": "Incrementally re-apply seven interacting leap/precog fixes (arrival velocity, peak index, floor snap, chained-suspend skip, precog facing, waypoint protection, launch-under-platform filter) one at a time, plus fix the entity-platform matching that left the monster unable to locate itself (monster=P-1). Landed in Release v0.10.0 (Test Editor, Arc Planning, Bounded Leaps) with cross-platform gap detection following in subsequent fixes.",
+      "stories": [
+        {
+          "slug": "entity-platform-matching",
+          "title": "Entity-Platform Matching (monster=P-1)",
+          "status": "shipped",
+          "version": "v0.10.0",
+          "source": "docs/epics/EPIC_arc_planning_fixes.md (New Issue)",
+          "summary": "Fix the test-spawned monster failing to locate its own platform, which aborts precog before it starts. Must land before the arc fixes matter.",
+          "tasks": [
+            {"title": "Fix raycast floor Y matching against known platforms (±30px tolerance)", "done": true},
+            {"title": "Resolve RCON-spawn initialization order vs platform cache race", "done": true},
+            {"title": "Prevent label overwrite when multiple monsters exist", "done": true}
+          ]
+        },
+        {
+          "slug": "leap-arc-clearance-fixes",
+          "title": "Leap Arc Clearance Fixes",
+          "status": "shipped",
+          "version": "v0.10.0",
+          "source": "docs/epics/EPIC_arc_planning_fixes.md Fixes A,B,G",
+          "summary": "Eliminate through-platform arcs via arrival velocity check, correct peak index default, and a launch-under-platform filter. Platforms are solid so arcs must approach from above.",
+          "tasks": [
+            {"title": "Fix A: Arrival velocity check — reject arcs arriving while ascending", "done": true},
+            {"title": "Fix B: peak_i default to last simulated point for long arcs", "done": true},
+            {"title": "Fix G: Launch-under-platform filter with dynamic margin", "done": true}
+          ]
+        },
+        {
+          "slug": "leap-physics-state-fixes",
+          "title": "Leap Physics & State Fixes",
+          "status": "shipped",
+          "version": "v0.10.0",
+          "source": "docs/epics/EPIC_arc_planning_fixes.md Fixes C,D",
+          "summary": "Let the monster actually leave the ground during leaps by zeroing floor snap and skipping chained-suspended physics during leap states.",
+          "tasks": [
+            {"title": "Fix C: floor_snap_length = 0 during leap, reset to 1.0 in _end_leap()", "done": true},
+            {"title": "Fix D: skip chained-suspended physics during leap windup/airborne", "done": true}
+          ]
+        },
+        {
+          "slug": "precog-facing-waypoint-fixes",
+          "title": "Precog Facing & Waypoint Protection",
+          "status": "shipped",
+          "version": "v0.10.0",
+          "source": "docs/epics/EPIC_arc_planning_fixes.md Fixes E,F",
+          "summary": "Force correct launch-direction facing at precog arrival and protect the planned walk-to-waypoint path from re-triggering or attack selection.",
+          "tasks": [
+            {"title": "Fix E: face launch velocity direction at precog arrival; honor _precog_leap in windup", "done": true},
+            {"title": "Fix F: early-return _choose_attack and skip new precog when waypoint set", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "monster-damage-weak-spots",
+      "title": "Monster Damage & Weak Spots",
+      "status": "in-progress",
+      "version": "v0.9.18",
+      "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md",
+      "summary": "Expand the quadruped's body-part system with targetable attachment points, tiered weak-spot damage states with blood effects and gameplay penalties, attachable balloon/grapple items with per-segment weight physics, an Attack Dummy test entity, and a stand-down test mode. Built across 2026-03-19 (Stories 1-7, 9 shipped); grapple attachment deferred and the regression-testing story remains open.",
+      "stories": [
+        {
+          "slug": "targetable-attachment-points",
+          "title": "Targetable Attachment Points",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 1",
+          "summary": "Invisible larger hitbox zones (head, tail tip, shoulders, waist) where items can attach, tracked to skeleton anchors each frame with a public attach/detach API.",
+          "tasks": [
+            {"title": "Add attachment point Area2D nodes (head r16, tail_tip r30, shoulders r14, waist r12)", "done": true},
+            {"title": "Update positions every frame in _update_hitbox_positions()", "done": true},
+            {"title": "_attachments Dictionary keyed by point name", "done": true},
+            {"title": "Public API: attach_item, detach_item, get_attach_world_position", "done": true},
+            {"title": "Attached items' global_position tracked each frame with freed-item cleanup", "done": true},
+            {"title": "Debug draw: dashed cyan circles with labels and item count when selected", "done": true}
+          ]
+        },
+        {
+          "slug": "vulnerable-weak-spots",
+          "title": "Vulnerable Weak Spots with Tiered Damage",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 2",
+          "summary": "Per-region HP with three damage states (none/medium/high), escalating blood effects, and gameplay penalties including an eye critical hit and leg/arm/tail/torso degradation.",
+          "tasks": [
+            {"title": "Replace flat _part_health with per-part struct {max_hp, current_hp, damage_state}", "done": true},
+            {"title": "Recalculate damage_state from HP percentage on each take_part_damage()", "done": true},
+            {"title": "Head weak spot — scaled blood particles at skull", "done": true},
+            {"title": "Eye weak spot — 2x critical hit, PING sound, 5-direction blood squirt, head-local transform", "done": true},
+            {"title": "Mid-tail weak spot — high damage disables grab/ball attack", "done": true},
+            {"title": "Torso weak spot — high damage continuous blood drip until death", "done": true},
+            {"title": "Rear legs — high damage reduces leap launch velocity 25%/50%", "done": true},
+            {"title": "Front legs/arms — high damage reduces slash damage 50%/75%", "done": true},
+            {"title": "Blood particle system _spawn_blood with splash/squirt modes", "done": true},
+            {"title": "RCON partstatus command", "done": true},
+            {"title": "RCON partdmg command", "done": true}
+          ]
+        },
+        {
+          "slug": "attachable-items-balloons-grapple",
+          "title": "Attachable Items — Balloons & Grapple",
+          "status": "in-progress",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 3",
+          "summary": "Balloon darts attach to specific body points and exert weight-aware forces; grapple hook attachment deferred until a grapple projectile exists.",
+          "tasks": [
+            {"title": "Balloon dart checks attachment points before body center; anchors string", "done": true},
+            {"title": "get_attach_force() returns inflation-based upward force at attach point", "done": true},
+            {"title": "Grapple hook attachment with pull force (deferred — no grapple projectile)", "done": false},
+            {"title": "Multiple items per point with stacked forces and cleanup", "done": true}
+          ]
+        },
+        {
+          "slug": "per-segment-weight-system",
+          "title": "Per-Segment Weight System",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 4",
+          "summary": "Distribute weight across the skeleton (total ~193) so localized attach forces produce different effects, with force propagation, gravity reduction, and RCON inspection.",
+          "tasks": [
+            {"title": "SEGMENT_WEIGHTS dict per body part", "done": true},
+            {"title": "Forces divided by local segment weight in _apply_attach_forces()", "done": true},
+            {"title": "Force propagation through skeleton chains with attenuation", "done": true},
+            {"title": "Gravity reduced when upward force > 50% body weight (cap -120)", "done": true},
+            {"title": "Head balloons tilt spine[0] upward", "done": true},
+            {"title": "RCON weight command", "done": true},
+            {"title": "RCON attach balloon <point> command", "done": true},
+            {"title": "RCON detach <point> command", "done": true}
+          ]
+        },
+        {
+          "slug": "attack-dummy-test-entity",
+          "title": "Attack Dummy (Test Entity)",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 5",
+          "summary": "A test entity that actively fires bow or balloon weapons at the monster, configurable to target specific body parts, driven entirely via RCON.",
+          "tasks": [
+            {"title": "New script attack_dummy.gd — CharacterBody2D rendered as orange circle", "done": true},
+            {"title": "Configurable target via set_target()", "done": true},
+            {"title": "Configurable body part targeting via set_target_part()", "done": true},
+            {"title": "Weapon: Ranger bow firing arc projectiles", "done": true},
+            {"title": "Weapon: Balloonist balloon darts", "done": true},
+            {"title": "Weapon switching via set_weapon()", "done": true},
+            {"title": "RCON commands: spawn attacker, target, part, weapon, rate, stop, start, stats", "done": true},
+            {"title": "Debug draw: aim line, weapon name, shot/hit stats", "done": true},
+            {"title": "Dummy takes no damage and is untargetable by monster", "done": true}
+          ]
+        },
+        {
+          "slug": "monster-stand-down-mode",
+          "title": "Monster Stand-Down Mode",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 6",
+          "summary": "A passive test mode where the monster stops attacking/moving but still runs skeleton physics and receives damage, with a visible white-flag indicator.",
+          "tasks": [
+            {"title": "New State.STANDDOWN — skip attack/chase/precog logic", "done": true},
+            {"title": "Still run skeleton physics (breathing, IK, foot planting)", "done": true},
+            {"title": "take_damage and take_part_damage still function", "done": true},
+            {"title": "Attachment points active in stand-down", "done": true},
+            {"title": "RCON standdown toggle command", "done": true},
+            {"title": "RCON standdown on/off explicit set", "done": true},
+            {"title": "Visual indicator: white flag + STANDDOWN text", "done": true}
+          ]
+        },
+        {
+          "slug": "automated-damage-attachment-tests",
+          "title": "Automated Test Suite — Damage & Attachments",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 7",
+          "summary": "Scripted RCON test scenarios verifying weak spots, damage states, and attachment physics with pass/fail output.",
+          "tasks": [
+            {"title": "test_damage.sh — 6 damage/weak-spot scenarios", "done": true},
+            {"title": "test_attachments.sh — 6 attachment physics scenarios", "done": true},
+            {"title": "Both scripts output pass/fail per scenario", "done": true}
+          ]
+        },
+        {
+          "slug": "regression-testing-each-change",
+          "title": "Regression Testing After Each Change",
+          "status": "open",
+          "version": "",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 8",
+          "summary": "Gate each story transition by running the full, baseline, and edge-case suites and recording results; stop and fix on any regression.",
+          "tasks": [
+            {"title": "Run test_all.sh (18 scenarios) after each story", "done": false},
+            {"title": "Run test_baseline.sh (10 scenarios) and compare", "done": false},
+            {"title": "Run test_edge_cases.sh (8 cases) and confirm no regressions", "done": false},
+            {"title": "On regression: stop, diagnose, fix before next story", "done": false},
+            {"title": "Record per-story results in Baseline History table", "done": false}
+          ]
+        },
+        {
+          "slug": "capture-official-baseline",
+          "title": "Capture Official Baseline",
+          "status": "in-progress",
+          "version": "v0.9.18",
+          "source": "docs/epics/EPIC_monster_damage_and_weak_spots.md Story 9",
+          "summary": "Record pre-EPIC baseline metrics for full, baseline, and edge-case suites as the measurement snapshot.",
+          "tasks": [
+            {"title": "Run test_all.sh — 17/18 hit, 3757 dmg baseline", "done": true},
+            {"title": "Run test_baseline.sh — 5/10 hit, 865 dmg (debug on)", "done": true},
+            {"title": "Run test_edge_cases.sh — 8/8 hit", "done": true},
+            {"title": "Record Pre-EPIC row in Baseline History", "done": true},
+            {"title": "Add updated row after each story completes", "done": false}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "procedural-monster-scaling",
+      "title": "Procedural Monster Scaling",
+      "status": "shipped",
+      "version": "v0.10.1",
+      "source": "docs/epics/EPIC_monster_scaling.md",
+      "summary": "Make the quadruped's size a single runtime float (creature_scale) from which every spatial system derives — skeleton, collision, hitboxes, attach points, locomotion, speed, combat ranges, leap planning, precog, and drawing. Scale 1.0 is behaviorally identical to before. Shipped in Release v0.10.1 with extras: pathing_radius override, scaled chains/splay, live scale slider, and per-monster entity_id.",
+      "stories": [
+        {
+          "slug": "scale-property-skeleton-init",
+          "title": "Scale Property & Skeleton Init",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 1",
+          "summary": "Add creature_scale and the s() helper, then scale all skeleton geometry and collision init.",
+          "tasks": [
+            {"title": "Add creature_scale and speed_override properties", "done": true},
+            {"title": "Add s(base) scaled-value helper", "done": true},
+            {"title": "Scale all _init_skeleton() segment lengths and rest poses", "done": true},
+            {"title": "Scale _init_collision() shape radius and offset", "done": true},
+            {"title": "Verify behavior identical at scale 1.0", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-hitboxes-attach-collision",
+          "title": "Hitboxes, Attach Points & Collision",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 2",
+          "summary": "Scale all interaction radii and skeleton constraint margins.",
+          "tasks": [
+            {"title": "Scale _init_hitboxes() circle radii (s12, s8, s4 eye)", "done": true},
+            {"title": "Scale _init_attach_points() radii", "done": true},
+            {"title": "Scale _constrain_skeleton_to_world() push-out margins", "done": true},
+            {"title": "Scale raycast offsets in constraint function", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-locomotion-speed-combat",
+          "title": "Locomotion, Speed & Combat",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 3",
+          "summary": "Scale foot-driven movement, floor raycasting, speed tiers, and combat ranges with size.",
+          "tasks": [
+            {"title": "Scale _raycast_floor() cast distance to s(200)", "done": true},
+            {"title": "Scale STEP_THRESHOLD, STEP_HEIGHT, FOOT_PUSH_FORCE", "done": true},
+            {"title": "Auto-scale speed tiers unless speed_override set", "done": true},
+            {"title": "Scale combat ranges (bite, tail, grab, sprint slash)", "done": true},
+            {"title": "Scale LUNGE_SPEED, SPRINT_SPEED", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-leap-planning-precog",
+          "title": "Leap Planning & Precog",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 4",
+          "summary": "Scale all leap trajectory, body clearance, and precog pathfinding dimensions; keep precog grid world-space.",
+          "tasks": [
+            {"title": "Scale LEAP_BODY_RADIUS at point of use", "done": true},
+            {"title": "Scale LEAP_STRIKE_REACH, LEAP_RANGE, LEAP_LAUNCH_SPEED, HOP_UP_MAX_HEIGHT", "done": true},
+            {"title": "Scale precog entity-platform matching tolerances", "done": true},
+            {"title": "Keep PRECOG_GRID_SPACING world-space", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-drawing",
+          "title": "Drawing",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 5",
+          "summary": "Scale every hardcoded pixel value across all _draw_*() functions.",
+          "tasks": [
+            {"title": "Scale _draw_body() spine thickness and circle radii", "done": true},
+            {"title": "Scale _draw_tail() and _draw_legs() dimensions", "done": true},
+            {"title": "Scale _draw_neck_head(), skull/jaw polygons, eye, teeth", "done": true},
+            {"title": "Scale _draw_debug() selection ring and floor line", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-rcon-integration-test",
+          "title": "RCON Integration & Test",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 6",
+          "summary": "Add scale parameter to spawn monster RCON, a reinit_skeleton path, and a scaled-monster test scenario.",
+          "tasks": [
+            {"title": "Extend spawn monster syntax with scale=N", "done": true},
+            {"title": "Parse scale and apply before _ready() or reinit", "done": true},
+            {"title": "Add reinit_skeleton() re-running all init with current scale", "done": true},
+            {"title": "Create giant_floor_to_P3.json test and add to all.json suite", "done": true}
+          ]
+        },
+        {
+          "slug": "scale-debug-aspects",
+          "title": "Debug Aspects",
+          "status": "shipped",
+          "version": "v0.10.1",
+          "source": "docs/epics/EPIC_monster_scaling.md Story 7",
+          "summary": "Register scale diagnostic aspects (active scale, effective radii, speed info) and render scaled body circle in debug.",
+          "tasks": [
+            {"title": "Register scaling/active_scale aspect", "done": true},
+            {"title": "Register scaling/effective_radii aspect", "done": true},
+            {"title": "Register scaling/speed_info aspect", "done": true},
+            {"title": "Render scaled body circle in _draw_debug()", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "enemy-variety",
+      "title": "Enemy Variety",
+      "status": "shipped",
+      "version": "v0.9.13",
+      "source": "docs/BACKLOG.md EPIC 4",
+      "summary": "A candy-themed enemy roster expanding combat variety: flying/ranged/tank/swarm base types, eight wave-2 enemies with distinct mechanics, density and placement scaling per tower floor, coordinated behaviors, and per-tower mini-bosses. Roster and mini-bosses landed in the 2026-03-14 enemy-variety push (v0.9.x era).",
+      "stories": [
+        {
+          "slug": "new-enemy-types",
+          "title": "New Enemy Types",
+          "status": "shipped",
+          "version": "v0.9.13",
+          "source": "docs/BACKLOG.md Story 4.1",
+          "summary": "Four base enemy archetypes with distinct movement and combat profiles.",
+          "tasks": [
+            {"title": "Flying enemy (bat/fairy cake) — sine wave movement", "done": true},
+            {"title": "Ranged enemy (cookie archer) — shoots from distance", "done": true},
+            {"title": "Tank enemy (candy golem) — slow, high HP, big hits", "done": true},
+            {"title": "Swarm enemy (sprinkle bugs) — small, fast, in groups", "done": true}
+          ]
+        },
+        {
+          "slug": "enemy-density-placement",
+          "title": "Enemy Density & Placement",
+          "status": "shipped",
+          "version": "v0.9.13",
+          "source": "docs/BACKLOG.md Story 4.2",
+          "summary": "Scale enemy count with tower difficulty and add height-triggered spawn points with mixed types per floor.",
+          "tasks": [
+            {"title": "Increase enemy count per tower floor (scale with difficulty)", "done": true},
+            {"title": "Add height-triggered spawn points", "done": true},
+            {"title": "Mix enemy types per floor for tactical variety", "done": true}
+          ]
+        },
+        {
+          "slug": "enemy-behaviors",
+          "title": "Enemy Behaviors",
+          "status": "shipped",
+          "version": "v0.9.13",
+          "source": "docs/BACKLOG.md Story 4.3",
+          "summary": "Coordinated enemy tactics that respond to player class and combat roles.",
+          "tasks": [
+            {"title": "Enemies work together (ranged stays back, melee charges)", "done": true},
+            {"title": "Enemies react to player class (focus summoner's buddies, etc.)", "done": true}
+          ]
+        },
+        {
+          "slug": "new-enemy-types-wave-2",
+          "title": "New Enemy Types — Wave 2",
+          "status": "shipped",
+          "version": "v0.9.13",
+          "source": "docs/BACKLOG.md Story 4.4",
+          "summary": "Eight additional enemies, each with a distinct mechanic from bombing to splitting to shielding.",
+          "tasks": [
+            {"title": "Cupcake Bomber — drops frosting bombs that splat and slow", "done": true},
+            {"title": "Licorice Whip — tentacle grab-and-pull", "done": true},
+            {"title": "Gummy Bear Brute — line charge, wall bounce, dizzy", "done": true},
+            {"title": "Wafer Shield Bearer — hit from behind or with charge", "done": true},
+            {"title": "Candy Corn Spinner — AoE spin, vulnerable when dizzy", "done": true},
+            {"title": "Marshmallow Blob — splits into smaller blobs on death", "done": true},
+            {"title": "Peppermint Roller — rolls and bounces, speeds up over time", "done": true},
+            {"title": "Jellybean Sniper — background sniper, flushed by AoE", "done": true}
+          ]
+        },
+        {
+          "slug": "mini-bosses",
+          "title": "Mini-Bosses",
+          "status": "shipped",
+          "version": "v0.9.13",
+          "source": "docs/BACKLOG.md Story 4.5",
+          "summary": "Mid-tower mini-boss encounters, one per tower, each with a signature attack pattern.",
+          "tasks": [
+            {"title": "Each tower gets a mini-boss halfway up", "done": true},
+            {"title": "Tower 1: Giant Cookie Cutter — slices platforms", "done": true},
+            {"title": "Tower 2: Frosting Fountain — rotating icing spray", "done": true},
+            {"title": "Tower 3: Sprinkle Tornado — pull-in plus outward sprinkles", "done": true},
+            {"title": "Tower 4: Batter Elemental — shapeshifting mimic", "done": true}
+          ]
+        }
+      ]
+    }
+  ]
+}

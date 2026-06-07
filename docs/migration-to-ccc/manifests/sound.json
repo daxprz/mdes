@@ -1,0 +1,197 @@
+{
+  "effort": "SND",
+  "slug": "sound",
+  "design_title": "Sound & Sound Design",
+  "design_summary": "The audio area covers TUMU's sound effects library and its procedural music system. Sound effects are per-ability .wav assets wired to gameplay events, while the music side is a from-scratch GDScript port of Strudel's pattern algebra driving GDSiON FM synthesis with a live-coding Music Drawer. A composition layer (movements, bridges, turnarounds) sits on top to make music data-driven and reactive to game state.",
+  "standalone_designs": [
+    {
+      "slug": "pattern-engine-spec",
+      "title": "Pattern Engine Specification",
+      "summary": "Implementation-agnostic functional spec for the cycle-based algorithmic music engine: rational time, the Pattern/Hap/TimeSpan algebra, signals, mini-notation grammar, scheduler, audio bridge, and the editor. Written as a clean-room reference describing behavior rather than any specific code.",
+      "status": "shipped",
+      "version": "v0.10.48",
+      "source": "docs/design/pattern_engine_spec.md"
+    },
+    {
+      "slug": "strudel-compatibility-audit",
+      "title": "Strudel v1.2.0 Compatibility Audit",
+      "summary": "Cross-cutting feature-by-feature audit of what the GDScript port supports versus Strudel v1.2.0 across mini-notation, pattern algebra, signals, and visualizers, plus the major missing systems (JS expression language, sample playback, full control set, chord/scale). Doubles as the priority roadmap for closing compatibility gaps.",
+      "status": "shipped",
+      "version": "v0.10.52",
+      "source": "docs/design/strudel_compatibility.md"
+    }
+  ],
+  "epics": [
+    {
+      "slug": "audio-expansion-sfx",
+      "title": "Audio Expansion — Ability Sound Effects",
+      "status": "shipped",
+      "version": "v0.9.5",
+      "source": "BACKLOG.md EPIC 18: Audio Expansion",
+      "summary": "Add per-ability sound effects covering the class roster: grappling hook, demolitionist rocket, rogue stealth and backstab, mage beam and air-walk, healer wind gust, melee enrage, ranger reload, and summoner mark. Each .wav was synthesized and wired to its triggering gameplay event.",
+      "stories": [
+        {
+          "slug": "new-sound-effects",
+          "title": "New Sound Effects",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 18.1; commit 441bc6a (Add 15 new sound effects for all new abilities)",
+          "summary": "Fifteen new ability sound effects synthesized and bound to their gameplay triggers across the class roster. All landed in a single batch (commit 441bc6a, 2026-03-15).",
+          "tasks": [
+            {"title": "airwalk_activate.wav - Mage air-walk activation", "done": true},
+            {"title": "backstab_hit.wav - Rogue backstab strike", "done": true},
+            {"title": "beam_fire.wav - Mage beam of light", "done": true},
+            {"title": "enrage_roar.wav - Melee enrage activation", "done": true},
+            {"title": "grapple_hit.wav - Grappling hook impact", "done": true},
+            {"title": "grapple_launch.wav - Grappling hook fire", "done": true},
+            {"title": "mana_drink.wav - Mage mana potion", "done": true},
+            {"title": "mark_target.wav - Summoner homing mark hit", "done": true},
+            {"title": "refuel_gurgle.wav - Demolitionist refueling", "done": true},
+            {"title": "reload_click.wav - Ranger reload", "done": true},
+            {"title": "rocket_crash.wav - Demolitionist crash landing", "done": true},
+            {"title": "rocket_ignite.wav - Demolitionist jetpack ignition", "done": true},
+            {"title": "rocket_thrust.wav - Demolitionist jetpack loop", "done": true},
+            {"title": "stealth_activate.wav - Rogue stealth activation", "done": true},
+            {"title": "wind_gust.wav - Healer wind gust", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "strudel-pattern-engine",
+      "title": "Strudel Integration — Procedural Music Pattern Engine",
+      "status": "shipped",
+      "version": "v0.10.48",
+      "source": "docs/epics/EPIC_strudel_integration.md; supporting specs docs/design/pattern_engine_spec.md and docs/design/strudel_compatibility.md",
+      "summary": "Port Strudel v1.2.0's pattern algebra and mini-notation to GDScript, driving GDSiON synthesis with a live-editing Music Drawer. Built depth-first as a separable plugin tree, prioritizing one complete end-to-end user-feedback path before broadening. All seven implementation phases shipped across v0.10.47 through v0.10.53.",
+      "stories": [
+        {
+          "slug": "pattern-core-algebra",
+          "title": "Pattern Core — The Algebra",
+          "status": "shipped",
+          "version": "v0.10.48",
+          "source": "EPIC_strudel_integration.md EPIC 1 (Stories 1.1-1.9); commit 'Strudel pattern engine (live-coding music)'",
+          "summary": "Port the five core types (Fraction, TimeSpan, Hap, State, Pattern) and the full pattern algebra to GDScript, mathematically identical to Strudel v1.2.0. Includes combinators, composers, euclidean rhythms, and continuous signals.",
+          "tasks": [
+            {"title": "Fraction type: exact rational arithmetic, comparison, cycle ops, conversion", "done": true},
+            {"title": "TimeSpan: spanCycles, intersection, duration, cycleArc", "done": true},
+            {"title": "Hap and State types with source-location context", "done": true},
+            {"title": "Pattern foundation: queryArc, pure/silence/gap, reify, fmap, filters", "done": true},
+            {"title": "Applicative + monadic ops: appBoth/Left/Right, bind/join, squeezeJoin", "done": true},
+            {"title": "Combinators: stack/sequence/slowcat, fast/slow, every, rev, layer, ply", "done": true},
+            {"title": "Composers: set/keep/add/sub/mul/div with hows, struct, mask", "done": true},
+            {"title": "Euclidean rhythms: Bjorklund, euclid, euclidRot, euclidLegato", "done": true},
+            {"title": "Continuous signals: saw, sine, tri, square, rand, range, segment", "done": true}
+          ]
+        },
+        {
+          "slug": "mini-notation-parser",
+          "title": "Mini-Notation Parser",
+          "status": "shipped",
+          "version": "v0.10.51",
+          "source": "EPIC_strudel_integration.md EPIC 2 (Stories 2.1-2.3); commit 'Strudel v1.2.0 compat'",
+          "summary": "Port the krill PEG grammar to a hand-written recursive-descent GDScript parser producing an AST that converts to Pattern trees. Tracks source locations on every leaf for editor highlighting.",
+          "tasks": [
+            {"title": "Lexer/tokenizer: atoms, rests, brackets, operators, source offsets", "done": true},
+            {"title": "Recursive-descent parser: sequences, stacks, groups, slowcat, polymeter, operators", "done": true},
+            {"title": "AST-to-Pattern: patternifyAST, applyOptions, alignment dispatch, leaf locations", "done": true},
+            {"title": "Compatibility test: mini() output matches Strudel firstCycleValues", "done": true}
+          ]
+        },
+        {
+          "slug": "scheduler-gdsion-bridge",
+          "title": "Scheduler + GDSiON Bridge",
+          "status": "shipped",
+          "version": "v0.10.47",
+          "source": "EPIC_strudel_integration.md EPIC 3 (Stories 3.1-3.4); commit 'Procedural adaptive music system (GDSiON)'",
+          "summary": "Connect the pattern engine to real-time audio via a cycle-based Cyclist scheduler and a Hap-to-SiON note_on bridge. Maps note/n/s/freq value types and per-note controls to GDSiON, integrated with the existing MusicManager.",
+          "tasks": [
+            {"title": "Clock: port zyklus.mjs to Godot frame timing with latency/overlap", "done": true},
+            {"title": "Cyclist scheduler: cps tracking, query window, setPattern/start/stop/now", "done": true},
+            {"title": "SiON trigger bridge: hap value to note_on params, voice mapping (87 presets)", "done": true},
+            {"title": "Controls: note/s/n/gain/speed/velocity/pan/cutoff, cps/cpm tempo", "done": true}
+          ]
+        },
+        {
+          "slug": "music-drawer-editor",
+          "title": "Music Drawer — Editor UI",
+          "status": "shipped",
+          "version": "v0.10.51",
+          "source": "EPIC_strudel_integration.md EPIC 4 (Stories 4.1-4.5); commits 'Multi-line editor', 'source text highlighting', 'Pianoroll options'",
+          "summary": "Build the in-game live-coding panel (Ctrl+M) modeled on Strudel's REPL using Godot _draw(): multi-line editor with full keybindings, source highlighting, pianoroll, and hot-reload on edit. Closes the type-see-hear feedback loop.",
+          "tasks": [
+            {"title": "Music Drawer panel: slide-out with play/stop/BPM controls, Ctrl+M shortcut", "done": true},
+            {"title": "Music line text editing: cursor, selection, multi-line, syntax coloring, live eval", "done": true},
+            {"title": "Source highlighting: active hap locations glow behind leaf text with fade", "done": true},
+            {"title": "Pianoroll visualization: scrolling window, value axis, playhead, labels, options", "done": true},
+            {"title": "Live editing / hot reload: re-parse, atomic pattern swap, flash + error display", "done": true}
+          ]
+        },
+        {
+          "slug": "rcon-debug-aspects",
+          "title": "RCON Integration + Debug Aspects",
+          "status": "shipped",
+          "version": "v0.10.50",
+          "source": "EPIC_strudel_integration.md EPIC 5 (Stories 5.1-5.2); commits 'strudel edit command', 'strudel start/stop'",
+          "summary": "Wire the Strudel system into the existing RCON/console infrastructure with strudel play/stop/cps/hush commands, console autocomplete, and debug aspects exposing scheduler, hap, pattern, and parse state.",
+          "tasks": [
+            {"title": "RCON commands: strudel <mini>, stop, cps, hush, console autocomplete", "done": true},
+            {"title": "Debug aspects: strudel/scheduler, /haps, /pattern, /parse with logging + overlay", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "music-composition-architecture",
+      "title": "Music Composition Architecture",
+      "status": "shipped",
+      "version": "v0.10.72",
+      "source": "docs/design/composition_architecture.md; commits 'Composition refactor phases 3-5' (v0.10.41), 'composition architecture' (v0.10.72)",
+      "summary": "Add a Composition / Movement / Bridge / Turnaround / Record data layer on top of the Strudel engine so music is data independent of any UI. Extracts the line compiler out of the drawer, introduces a bar scheduler that hot-swaps patterns at cycle boundaries, and lets game events transition movements via bridges. Shipped across v0.10.41 (phases 3-5) and v0.10.72-v0.10.75.",
+      "stories": [
+        {
+          "slug": "extract-line-compiler",
+          "title": "Extract Strudel Line Compiler",
+          "status": "shipped",
+          "version": "v0.10.41",
+          "source": "composition_architecture.md Phase 1; commit 'Composition refactor phases 3-5'",
+          "summary": "Move the ~800-line line parser out of music_drawer.gd into a standalone StrudelLineCompiler, plus the merge/expand helpers from rcon.gd. Pure refactor gated by the 47-test A/B suite for zero behavior change.",
+          "tasks": [
+            {"title": "Create strudel_line_compiler.gd from drawer parse methods", "done": true},
+            {"title": "Drawer delegates to StrudelLineCompiler.parse_line", "done": true},
+            {"title": "Move merge_continuation_lines and expand_stacks from rcon.gd", "done": true},
+            {"title": "Gate: 47 A/B tests pass identically", "done": true}
+          ]
+        },
+        {
+          "slug": "composition-data-model",
+          "title": "Composition Data Model",
+          "status": "shipped",
+          "version": "v0.10.72",
+          "source": "composition_architecture.md Phase 2; commit 'composition architecture'",
+          "summary": "Define the typed data objects: MusicTrack, Movement, MovementBridge, Turnaround, Composition, plus playback types MusicBar, PlayHead, and MusicRecord. Music becomes pure data with history, playhead, and cued future bars.",
+          "tasks": [
+            {"title": "Track, Movement, MovementBridge, Turnaround, Composition classes", "done": true},
+            {"title": "Bar, PlayHead, Record playback types with signals", "done": true},
+            {"title": "Composition JSON format + CompositionLoader", "done": true}
+          ]
+        },
+        {
+          "slug": "bar-scheduler-transitions",
+          "title": "Bar Scheduler + Movement Transitions",
+          "status": "shipped",
+          "version": "v0.10.72",
+          "source": "composition_architecture.md Phases 4-5; commits 'composition architecture' (v0.10.72), 'CPS ramping, battle movement' (v0.10.75)",
+          "summary": "Add a BarScheduler that detects cycle boundaries, advances the Record, and hot-swaps the cyclist pattern; wire MusicManager's new API (load/play/transition_to/activate_turnaround). Game events transition movements through bridges, with CPS ramping at boundaries.",
+          "tasks": [
+            {"title": "BarScheduler: process(), transition_to_movement, activate_turnaround", "done": true},
+            {"title": "MusicManager new API: load/play_composition, transition_to, get_record", "done": true},
+            {"title": "Wire title_screen.gd to composition API; remove old segment queue", "done": true},
+            {"title": "Composition reset button + per-note velocity + boundary fix", "done": true},
+            {"title": "CPS ramping and battle-movement transitions", "done": true}
+          ]
+        }
+      ]
+    }
+  ]
+}

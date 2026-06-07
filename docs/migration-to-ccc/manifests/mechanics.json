@@ -1,0 +1,803 @@
+{
+  "effort": "MECH",
+  "slug": "mechanics",
+  "design_title": "Game Mechanics",
+  "design_summary": "Core gameplay mechanics for The Ultimate Muffin: physics-driven traversal (grappling hook, dual-grapple tethers, physics chains/ropes), universal combat systems shared across all classes, environmental traps and hazards, and supporting physics like the entity mass/weight model. Most surfaces shipped across the v0.9.x and v0.10.x release lines, with later refactors extracting per-class logic into reusable components. A handful of developer-facing design memos (animation roadmap, input mapping, velocity audit) remain partly aspirational.",
+  "standalone_designs": [
+    {
+      "slug": "procedural-animation-roadmap",
+      "title": "Procedural Animation Roadmap",
+      "summary": "Cross-cutting roadmap for the quadruped monster's procedural animation: momentum and speed curves, attack wind-up and follow-through, and future wall climbing and wall jumping. Built atop the existing 2.5D projection, state machine, and cfg() systems.",
+      "status": "in-progress",
+      "version": "v0.10.10",
+      "source": "docs/design/animation_roadmap.md"
+    },
+    {
+      "slug": "input-mapping-reference",
+      "title": "Input Mapping Reference",
+      "summary": "Cross-cutting reference for all input actions across PS5, Xbox, and keyboard, including hardcoded reads that bypass the Godot input map. Notes recommended improvements for remapping and ai_cmd test coverage of L2/R2/R1.",
+      "status": "in-progress",
+      "version": "v0.10.81",
+      "source": "docs/design/input_mapping.md"
+    },
+    {
+      "slug": "velocity-audit-system",
+      "title": "Velocity Audit System",
+      "summary": "Proposed debug system that wraps all velocity writes behind a reason-tagging function so unexplained changes render as on-screen tracer arrows. Documented but not implemented; complements the existing SELECT-toggle debug rendering.",
+      "status": "open",
+      "version": "",
+      "source": "docs/design/velocity_audit_system.md"
+    }
+  ],
+  "epics": [
+    {
+      "slug": "wall-jump-limits",
+      "title": "Wall Jump Limits",
+      "status": "shipped",
+      "version": "v0.9.18",
+      "source": "BACKLOG EPIC 6",
+      "summary": "Constrain wall traversal with a depleting wall-cling stamina that regenerates on the ground, a visual exhaustion indicator, and a hard cap of three wall jumps before the player must touch ground.",
+      "stories": [
+        {
+          "slug": "wall-cling-stamina",
+          "title": "Wall Cling Stamina",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "BACKLOG Story 6.1",
+          "summary": "Wall sliding depletes a stamina meter that regenerates on the ground, with a red exhaustion flash and a 3-jump cap before ground contact is required.",
+          "tasks": [
+            {"title": "Add wall-cling stamina (deplete while wall sliding, regen on ground)", "done": true},
+            {"title": "Visual indicator showing remaining wall-cling time (red flash when exhausted)", "done": true},
+            {"title": "Max 2-3 wall jumps before must touch ground (max 3)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "traps-and-obstacles",
+      "title": "Traps & Obstacles",
+      "status": "shipped",
+      "version": "v0.9.4",
+      "source": "BACKLOG EPIC 7",
+      "summary": "A library of hazards and obstacles for the towers: damaging traps (spikes, pendulum blades, arrow traps, lava pools, pressure plates), environmental hazards (falling rocks, wind gusts, smoke), and a candy-themed wave-2 obstacle set (saw blades, bounce pads, rising lava, breakable barriers, slides, crumble floors, sticky zones, geysers, mines).",
+      "stories": [
+        {
+          "slug": "trap-types",
+          "title": "Trap Types",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 7.1",
+          "summary": "Core damaging traps with tuned damage and cooldowns, plus signal-based pressure plates that trigger linked traps.",
+          "tasks": [
+            {"title": "Spike floors (deal damage on contact) - 15 dmg, 0.5s cooldown", "done": true},
+            {"title": "Swinging pendulum blades (timed obstacle) - 20 dmg, sin() swing", "done": true},
+            {"title": "Arrow traps (shoot from walls on a timer) - 10 dmg, 2.5s interval", "done": true},
+            {"title": "Lava/acid pools (instant kill or heavy damage) - 30 dmg/0.3s + knockback", "done": true},
+            {"title": "Pressure plates that trigger traps - signal-based, links to other traps", "done": true}
+          ]
+        },
+        {
+          "slug": "environmental-hazards",
+          "title": "Environmental Hazards",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 7.2",
+          "summary": "Ambient hazards that push and damage players, including falling debris, intermittent wind gusts, and a smoke-bomb visibility system.",
+          "tasks": [
+            {"title": "Falling rocks/debris in certain sections - 20 dmg, 3-5 rocks, proximity trigger", "done": true},
+            {"title": "Wind gusts that push players sideways - 200px/s push, intermittent on/off", "done": true},
+            {"title": "Dark rooms where only nearby area is visible - replaced with smoke bomb system", "done": true}
+          ]
+        },
+        {
+          "slug": "new-obstacles-wave-2",
+          "title": "New Obstacles - Wave 2",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 7.3",
+          "summary": "A candy-themed obstacle set adding movement-altering and timed hazards across the towers.",
+          "tasks": [
+            {"title": "Rotating saw blades on chains (circle around an anchor point)", "done": true},
+            {"title": "Icing waterfall (slippery vertical stream, pushes players down if they enter)", "done": true},
+            {"title": "Candy cane poles (bounce pads - launch players upward when touched)", "done": true},
+            {"title": "Chocolate lava rising floor (slowly rises from bottom, forces players to climb faster)", "done": true},
+            {"title": "Sugar crystal barriers (breakable walls that block paths, require X hits)", "done": true},
+            {"title": "Frosting slides (angled platforms that are slippery, players slide down)", "done": true},
+            {"title": "Cookie crumble floors (entire sections that collapse after a timer once stepped on)", "done": true},
+            {"title": "Caramel sticky zones (slow player movement to 30%, must jump through)", "done": true},
+            {"title": "Popcorn geysers (periodic upward blast that launches players + enemies high)", "done": true},
+            {"title": "Sprinkle mines (hidden on platforms, explode when stepped on, 15 dmg + knockback)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "combat-system-overhaul",
+      "title": "Combat System Overhaul",
+      "status": "shipped",
+      "version": "v0.10.46",
+      "source": "BACKLOG EPIC 11",
+      "summary": "Universal combat mechanics shared by all classes: buffed melee with arc VFX and combo sounds, a hold-to-charge attack system with per-class behaviors, ground-pound improvements, a stagger state, a block/parry system with perfect-parry windows, and a dash wave. The charge system was later extracted into a reusable ChargeComponent (v0.10.46).",
+      "stories": [
+        {
+          "slug": "melee-buff",
+          "title": "Melee Buff",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 11.1",
+          "summary": "Increased melee range with a visible combo-colored swing arc and distinct per-hit sounds.",
+          "tasks": [
+            {"title": "Increase melee swing range by 40% (20->28, 22->31, 28->39)", "done": true},
+            {"title": "Visible swing arc VFX (colored arc that follows the attack area)", "done": true},
+            {"title": "Arc color matches combo stage (white->yellow->orange)", "done": true},
+            {"title": "Add distinct sound per combo hit (light->medium->heavy slash)", "done": true}
+          ]
+        },
+        {
+          "slug": "charge-attack-system",
+          "title": "Charge Attack System (ALL classes)",
+          "status": "shipped",
+          "version": "v0.10.46",
+          "source": "BACKLOG Story 11.2",
+          "summary": "Hold-to-charge attack with glow and particle buildup that scales damage and effect by hold time, with distinct per-class charged behaviors.",
+          "tasks": [
+            {"title": "Hold attack button to charge (0.5s minimum, 3s maximum)", "done": true},
+            {"title": "Visual: character glows brighter the longer they charge, particles emit", "done": true},
+            {"title": "Release to fire charged attack (damage/effect scales with charge time)", "done": true},
+            {"title": "Per-class charge behavior (melee, ranged, mage, summoner, rogue, demolitionist, healer)", "done": true}
+          ]
+        },
+        {
+          "slug": "melee-ground-pound",
+          "title": "Melee Ground Pound Improvements",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 11.3",
+          "summary": "Air-charge hover with wiggle and smoke buildup, then a charge-scaled slam with blast radius, damage scaling, and screen shake.",
+          "tasks": [
+            {"title": "While charging in air: character hovers in place", "done": true},
+            {"title": "Hover wiggle animation (oscillate position +/-2px)", "done": true},
+            {"title": "Smoke/particle VFX builds during hover", "done": true},
+            {"title": "On release: slam down with blast radius proportional to charge (40px min -> 120px max)", "done": true},
+            {"title": "Damage scales: 30 min -> 80 max based on charge", "done": true},
+            {"title": "Screen shake on impact (intensity scales with charge)", "done": true}
+          ]
+        },
+        {
+          "slug": "stagger-mechanic",
+          "title": "Stagger Mechanic",
+          "status": "shipped",
+          "version": "v0.9.6",
+          "source": "BACKLOG Story 11.4",
+          "summary": "Getting hit while charging staggers the character into a 1s uncontrollable wiggle with increased damage taken and dazed VFX/SFX.",
+          "tasks": [
+            {"title": "Getting hit while charging -> staggered state", "done": true},
+            {"title": "Staggered: character wiggles rapidly for 1s, cannot act", "done": true},
+            {"title": "Staggered players take 25% more damage", "done": true},
+            {"title": "Visual: rapid left-right shake + stars above head", "done": true},
+            {"title": "Sound: dazed/dizzy sound effect", "done": true}
+          ]
+        },
+        {
+          "slug": "block-parry-system",
+          "title": "Block/Parry System (ALL classes)",
+          "status": "shipped",
+          "version": "v0.9.6",
+          "source": "BACKLOG Story 11.5",
+          "summary": "Hold-to-block damage reduction with a guard VFX, plus a perfect-parry window that stuns the attacker with a bright flash and clang.",
+          "tasks": [
+            {"title": "Map block to a button (R2 / Left Shift)", "done": true},
+            {"title": "Holding block: reduce incoming damage by 50%, movement speed halved", "done": true},
+            {"title": "Visual: shield/guard VFX in front of character", "done": true},
+            {"title": "Perfect parry: block within 0.2s of being hit -> attacker stunned for 1.5s", "done": true},
+            {"title": "Perfect parry VFX: bright flash + metallic clang sound", "done": true},
+            {"title": "Perfect parry window indicator (brief white flash on character when block starts)", "done": true}
+          ]
+        },
+        {
+          "slug": "dash-wave",
+          "title": "Dash Wave",
+          "status": "shipped",
+          "version": "v0.9.6",
+          "source": "BACKLOG Story 11.6",
+          "summary": "All class dashes emit a perpendicular wave pulse that pushes enemies sideways for crowd control, larger for the rogue shadow dash.",
+          "tasks": [
+            {"title": "All class dashes create a perpendicular wave pulse", "done": true},
+            {"title": "Wave pushes enemies sideways (away from dash line)", "done": true},
+            {"title": "Wave visual: line expanding outward perpendicular to dash direction", "done": true},
+            {"title": "Wave damage: 5 (minor, mainly for crowd control)", "done": true},
+            {"title": "Rogue shadow dash wave is larger and deals 10 damage", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "top-down-ability-port",
+      "title": "Top-Down Ability Port",
+      "status": "shipped",
+      "version": "v0.9.4",
+      "source": "BACKLOG EPIC 16",
+      "summary": "Port all side-scrolling class abilities to function in the top-down overworld, including 8-directional aim handling.",
+      "stories": [
+        {
+          "slug": "overworld-abilities",
+          "title": "Overworld Abilities",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 16.1",
+          "summary": "All class abilities work in top-down mode with aim direction adapted to 8-directional movement.",
+          "tasks": [
+            {"title": "All class abilities functional in top-down mode", "done": true},
+            {"title": "Aim direction works in 8-directional top-down movement", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "entity-weight-system",
+      "title": "Entity Weight System",
+      "status": "shipped",
+      "version": "v0.10.31",
+      "source": "BACKLOG EPIC 24",
+      "summary": "Physics weight values per entity used to drive knockback and push calculations for guitarist blast wave, werewolf roar, and balloon lift. Later refined into an absolute mass model (v0.10.31).",
+      "stories": [
+        {
+          "slug": "weight-implementation",
+          "title": "Weight Implementation",
+          "status": "shipped",
+          "version": "v0.10.31",
+          "source": "BACKLOG Story 24.1",
+          "summary": "Assigns per-entity weight values and wires them into push-distance and lift calculations.",
+          "tasks": [
+            {"title": "Assign weight values: Player 70, Skeleton 30, Bat 5, Golem 150, Boss 300", "done": true},
+            {"title": "Guitarist blast wave uses weight for push distance calculation", "done": true},
+            {"title": "Werewolf roar uses weight for push distance calculation", "done": true},
+            {"title": "Balloon lift affected by entity weight", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "balloon-physics-environmental",
+      "title": "Balloon Physics & Environmental Interactions",
+      "status": "shipped",
+      "version": "v0.9.4",
+      "source": "BACKLOG EPIC 25",
+      "summary": "Advanced physics interactions between balloons, gas, fire, and lava, including chocolate lava igniting H2 gas, fire-type fireballs popping balloons, and group-membership cleanup for dead and stealthed players.",
+      "stories": [
+        {
+          "slug": "environmental-interactions",
+          "title": "Environmental Interactions",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 25.1",
+          "summary": "Cross-system reactions among lava, gas, fire, and balloons, plus AI-targeting group cleanup for dead and stealthed players.",
+          "tasks": [
+            {"title": "Rising chocolate lava kills enemies instantly", "done": true},
+            {"title": "Rising chocolate lava ignites H2 gas on contact", "done": true},
+            {"title": "Mage fireballs are fire type - explode balloons on contact", "done": true},
+            {"title": "Dead players removed from \"players\" group (enemies stop targeting)", "done": true},
+            {"title": "Stealthed rogue removed from \"players\" group (invisible to enemy AI)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "rift-tentacle-system",
+      "title": "Rift Tentacle System",
+      "status": "shipped",
+      "version": "v0.9.7",
+      "source": "BACKLOG EPIC 28",
+      "summary": "A verlet-physics tentacle emerges from a red rift portal when players change class, progressing through confused, hunting, and grab phases. It also grabs and buffs enemies, has its own sub-health that absorbs damage, and enforces tentacle limits with full reset on transitions.",
+      "stories": [
+        {
+          "slug": "base-tentacle",
+          "title": "Base Tentacle",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 28.1",
+          "summary": "A 14-segment verlet tentacle with phased behavior (confused, hunt, grab) and a class-change lockout, spawned via a red portal with ghost and smoke VFX.",
+          "tasks": [
+            {"title": "Verlet physics tentacle (14 segments, ~126px) with purple visual", "done": true},
+            {"title": "Phase 0 (0-5s): confused wiggling", "done": true},
+            {"title": "Phase 1 (5-15s): hunt nearest non-owner player, lunge at 1.5x reach", "done": true},
+            {"title": "Phase 2 (grab): 4 smashes (8 dmg each) + smoke VFX + fling", "done": true},
+            {"title": "Red portal + ghost + smoke poof on class change", "done": true},
+            {"title": "15-second class-change lockout during rift", "done": true}
+          ]
+        },
+        {
+          "slug": "enemy-attachment",
+          "title": "Enemy Attachment",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 28.2",
+          "summary": "The tentacle can permanently attach to and buff an enemy, attacking players from it and permanently revoking the owner's class-change ability.",
+          "tasks": [
+            {"title": "Tentacle also grabs enemies (permanent attach)", "done": true},
+            {"title": "Enemy buff: 2x health, 1.5x scale, red-purple tint", "done": true},
+            {"title": "Attached tentacle attacks players: single pound + random fling", "done": true},
+            {"title": "Owner permanently loses class-change ability on attachment", "done": true}
+          ]
+        },
+        {
+          "slug": "tentacle-sub-health",
+          "title": "Tentacle Sub-Health",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 28.3",
+          "summary": "A 50 HP sub-health absorbs damage before the enemy, scales the rift size, and on depletion restores the enemy and unlocks the owner.",
+          "tasks": [
+            {"title": "50 HP sub-health absorbs damage before enemy takes it", "done": true},
+            {"title": "Rift size scales with tentacle health", "done": true},
+            {"title": "At 0 HP: purple smoke puff, enemy restored, owner unlocked", "done": true},
+            {"title": "Patched boss_base.gd + all 18 enemy take_damage functions", "done": true}
+          ]
+        },
+        {
+          "slug": "tentacle-limits-reset",
+          "title": "Tentacle Limits & Reset",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 28.4",
+          "summary": "Caps active tentacles at 4, resets all tentacle state on scene transitions, and shows status on the HUD.",
+          "tasks": [
+            {"title": "Max 4 active tentacles in-game", "done": true},
+            {"title": "All tentacle state resets on level/scene transition", "done": true},
+            {"title": "HUD shows tentacle status (available/active/lost)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "item-drops",
+      "title": "Item Drops",
+      "status": "shipped",
+      "version": "v0.9.4",
+      "source": "BACKLOG EPIC 29",
+      "summary": "Health pickups that drop from enemies with a chance on death, heal on contact, despawn after a timer, and play collect VFX.",
+      "stories": [
+        {
+          "slug": "health-pickup",
+          "title": "Health Pickup",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 29.1",
+          "summary": "A green plus-shaped health pickup with 25% drop chance from all enemies, healing on contact and despawning after 30 seconds.",
+          "tasks": [
+            {"title": "Green + shaped health pickup with sparkle particles", "done": true},
+            {"title": "25% drop chance on enemy death (all 18 enemy types)", "done": true},
+            {"title": "Heals 15 HP on player contact", "done": true},
+            {"title": "30-second despawn timer, bobble animation", "done": true},
+            {"title": "Collect VFX: green particle burst + scale-up fade", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "ranger-grappling-hook-rework",
+      "title": "Ranger Grappling Hook Rework (Physics-Based)",
+      "status": "shipped",
+      "version": "v0.10.79",
+      "source": "BACKLOG EPIC 30; docs/design/grappling_hook_physics.md",
+      "summary": "Replaces the raycast grapple with a full physics simulation: circular windup, gravity-arced throw, launch on connect, pendulum swing with momentum and rope-length control, two-phase release, and Newtonian enemy tug driven by the entity mass system. Tuned heavily through v0.9.x and refined into velocity-based swing-on-rope in v0.10.79.",
+      "stories": [
+        {
+          "slug": "grapple-windup-throw",
+          "title": "Grapple Windup & Throw",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 30.1; grappling_hook_physics.md Phases 1-2",
+          "summary": "L1 spins the hook in a circle with thumbstick aim, releasing into a gravity-arced throw, with full movement preserved during windup.",
+          "tasks": [
+            {"title": "L1/LB initiates grapple. Hook swings in a circle (14-35 rad/s)", "done": true},
+            {"title": "Either thumbstick aims (right priority). Dotted arrow shows direction.", "done": true},
+            {"title": "Release L1 throws at 4000-10000 px/s with gravity arc. Max range 900px.", "done": true},
+            {"title": "Full movement during windup (walk, jump, gravity all work)", "done": true}
+          ]
+        },
+        {
+          "slug": "grapple-connection-launch",
+          "title": "Grapple Connection & Launch",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 30.2; grappling_hook_physics.md Phase 3",
+          "summary": "The hook connects to walls or entities and launches the player toward the anchor with rope slack physics and taut bounce.",
+          "tasks": [
+            {"title": "Hook connects on walls or entities (10 damage on hit)", "done": true},
+            {"title": "Player launched toward anchor at 75% jump velocity, blended with travel direction", "done": true},
+            {"title": "Rope slack physics: goes slack above anchor, bounces when taut", "done": true}
+          ]
+        },
+        {
+          "slug": "pendulum-swing-physics",
+          "title": "Pendulum Swing Physics",
+          "status": "shipped",
+          "version": "v0.10.79",
+          "source": "BACKLOG Story 30.3; grappling_hook_physics.md Phase 4",
+          "summary": "Full pendulum swing with momentum/brake input and rope-length control, catenary rope sag, and launch immunity preserving momentum through freefall.",
+          "tasks": [
+            {"title": "Full pendulum physics with momentum/brake input and rope length adjustment", "done": true},
+            {"title": "Rope rendered with catenary sag proportional to slack", "done": true},
+            {"title": "Launch immunity preserves momentum through freefall until landing", "done": true}
+          ]
+        },
+        {
+          "slug": "grapple-release-enemy-tug",
+          "title": "Grapple Release & Enemy Tug",
+          "status": "shipped",
+          "version": "v0.9.4",
+          "source": "BACKLOG Story 30.4; grappling_hook_physics.md Phase 5",
+          "summary": "Two-phase wall disconnect, jump-disconnect boost, and a Newtonian F=ma enemy tug, all with controller rumble at every grapple event.",
+          "tasks": [
+            {"title": "Two-phase disconnect (wall): L1 = pull toward anchor, L1 again = release", "done": true},
+            {"title": "Jump disconnect: additive 25% jump velocity in thumbstick direction", "done": true},
+            {"title": "Enemy tug: Newtonian F=ma on both ends based on mass", "done": true},
+            {"title": "Controller rumble at all grapple events (windup, throw, connect, swing, tug, release)", "done": true}
+          ]
+        },
+        {
+          "slug": "entity-mass-system",
+          "title": "Entity Mass System",
+          "status": "shipped",
+          "version": "v0.10.31",
+          "source": "BACKLOG Story 30.5; grappling_hook_physics.md Entity Mass System",
+          "summary": "A mass property on all enemies, bosses, and the player (range 5-300) drives grapple tug and supersedes the older weight system.",
+          "tasks": [
+            {"title": "mass property on all 18 enemies, boss_base, and player (70)", "done": true},
+            {"title": "Mass values from 5 (Sprinkle Swarm) to 300 (Bosses)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "archer-aimed-shot",
+      "title": "Archer Aimed Shot",
+      "status": "shipped",
+      "version": "v0.10.71",
+      "source": "BACKLOG EPIC 31",
+      "summary": "Physics-based arrow aiming with a quadratic arc solver: a hold-to-aim reticle, power control with lockable charge level and direction reversal, and edge-detected fire mechanics with auto re-string that bypass the regular ammo pool.",
+      "stories": [
+        {
+          "slug": "aim-system",
+          "title": "Aim System",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 31.1",
+          "summary": "L2 enters aim mode with a movable reticle and a quadratic arc solver that finds the launch angle, with arrows following a gravity arc.",
+          "tasks": [
+            {"title": "L2 hold enters aim mode with movable reticle (right stick)", "done": true},
+            {"title": "Quadratic arc solver finds launch angle for target position", "done": true},
+            {"title": "Reticle sparkles when solution found, 50% transparent when not", "done": true},
+            {"title": "Arrow follows parabolic arc with gravity (500 px/s^2)", "done": true},
+            {"title": "Can fire without solution (best-attempt trajectory)", "done": true}
+          ]
+        },
+        {
+          "slug": "power-control",
+          "title": "Power Control",
+          "status": "shipped",
+          "version": "v0.9.7",
+          "source": "BACKLOG Story 31.2",
+          "summary": "Trigger-hold power scaling with a lockable power level, direction reversal, and a charge-bar lock indicator.",
+          "tasks": [
+            {"title": "Pull strength scales with L2 hold time (300-1800 px/s)", "done": true},
+            {"title": "Partial trigger pull = proportional max power cap", "done": true},
+            {"title": "RB reverses power direction, release RB locks power level", "done": true},
+            {"title": "Locked power persists across shots, charges up to lock level", "done": true},
+            {"title": "Lock indicator (white tick + gold diamond) on charge bar", "done": true}
+          ]
+        },
+        {
+          "slug": "fire-mechanics",
+          "title": "Fire Mechanics",
+          "status": "shipped",
+          "version": "v0.10.71",
+          "source": "BACKLOG Story 31.3",
+          "summary": "Edge-detected firing with a cooldown and auto re-string while aiming, not consuming regular ammo and persisting reticle position.",
+          "tasks": [
+            {"title": "R2 fires with edge detection (fresh press required)", "done": true},
+            {"title": "0.5s cooldown, auto re-string while L2 held", "done": true},
+            {"title": "Does not consume regular ammo pool", "done": true},
+            {"title": "Reticle position persists across L2 pulls", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "quality-of-life",
+      "title": "Quality of Life",
+      "status": "shipped",
+      "version": "v0.9.16",
+      "source": "BACKLOG EPIC 34",
+      "summary": "Player-experience polish: out-of-bounds teleport to the nearest player with an aether rift VFX, profile class memory that auto-selects the last class on rejoin, and a ghost materialize step before in-game class-change rifts spawn.",
+      "stories": [
+        {
+          "slug": "out-of-bounds-teleport",
+          "title": "Out-of-Bounds Teleport",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "BACKLOG Story 34.1",
+          "summary": "Teleports out-of-bounds players to the nearest player with a purple aether rift VFX.",
+          "tasks": [
+            {"title": "Teleport OOB players to nearest player with purple aether rift VFX", "done": true}
+          ]
+        },
+        {
+          "slug": "profile-class-memory",
+          "title": "Profile Class Memory",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "BACKLOG Story 34.2",
+          "summary": "Saves last_class to the profile and auto-selects it on rejoin when available.",
+          "tasks": [
+            {"title": "Save last_class to profile, auto-select on rejoin if available", "done": true}
+          ]
+        },
+        {
+          "slug": "class-change-ghost-state",
+          "title": "Class Change Ghost State",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "BACKLOG Story 34.3",
+          "summary": "Requires a button press to materialize before the in-game class-change rift spawns.",
+          "tasks": [
+            {"title": "In-game class change requires button press to materialize before rift spawns", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "dual-grapple-tether-system",
+      "title": "Dual-Grapple Tether System",
+      "status": "in-progress",
+      "version": "v0.9.18",
+      "source": "docs/epics/EPIC_dual_grapple_tether.md",
+      "summary": "Extends the Ranger grapple into a two-point tether: grapple onto one anchor, then fire a second hook from that anchor's far end to a second anchor, connecting them with a physics rope that pulls strongly to a chosen length. Tethers respect entity mass and attachment-point weights, can be severed by damage, and are tracked in a 5-slot HUD inventory. A few tasks (self-tether, attack-through-rope damage, transition animations) remain open.",
+      "stories": [
+        {
+          "slug": "tether-state-machine",
+          "title": "Tether State Machine",
+          "status": "in-progress",
+          "version": "v0.9.18",
+          "source": "EPIC_dual_grapple_tether.md Story 1",
+          "summary": "Extends the grapple FSM with tether windup/thrown/active states triggered by L2, a 5-slot tether inventory, and player drop on second-hook connect. Self-tether remains unimplemented.",
+          "tasks": [
+            {"title": "Add tether states: TETHER_WINDUP, TETHER_THROWN, TETHER_ACTIVE", "done": true},
+            {"title": "CONNECTED/SWINGING + L2 hold -> TETHER_WINDUP at anchor A", "done": true},
+            {"title": "L2 release in TETHER_WINDUP -> TETHER_THROWN from anchor A", "done": true},
+            {"title": "Second hook uses primary hook physics (gravity, drag, raycast)", "done": true},
+            {"title": "Second hook connect -> TETHER_ACTIVE: player detaches, rope persists", "done": true},
+            {"title": "Store tether data (anchor A, anchor B, target length)", "done": true},
+            {"title": "Move existing L2 boost/shrink to a different binding", "done": true},
+            {"title": "Tether inventory: max 5 active tethers per player", "done": true},
+            {"title": "Severed tethers auto-reclaimed, freeing a slot", "done": true},
+            {"title": "Player drops from rope on second-hook connect; rope becomes standalone", "done": true},
+            {"title": "Self-tether: anchor B = player when aimed at nothing / cancel", "done": false}
+          ]
+        },
+        {
+          "slug": "tether-rope-entity",
+          "title": "Tether Rope Entity",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "EPIC_dual_grapple_tether.md Story 2",
+          "summary": "A standalone tether.gd entity applies mass-weighted spring pull between two anchors, interacts with balloon float, and cleans up when either anchor is freed.",
+          "tasks": [
+            {"title": "New script tether.gd: Node2D with anchor A/B, length, HP, segments", "done": true},
+            {"title": "Per-frame distance check: pull force when distance > target length", "done": true},
+            {"title": "Strong spring pull scaled by (distance - target_length)", "done": true},
+            {"title": "Force divided by each anchor's mass (wall = infinite mass)", "done": true},
+            {"title": "Enemy mass lookup with default 50.0", "done": true},
+            {"title": "Apply force at enemy attachment points via segment weight", "done": true},
+            {"title": "Tether interacts with balloon float (holds floating enemies down)", "done": true},
+            {"title": "Tether entity added to \"tethers\" group", "done": true},
+            {"title": "Tether cleans up if either anchor is freed", "done": true}
+          ]
+        },
+        {
+          "slug": "tether-length-control",
+          "title": "Tether Length Control",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "EPIC_dual_grapple_tether.md Story 3",
+          "summary": "D-pad sets the tether target length before the second hook launches, with min/max constraints and a numeric/marker indicator.",
+          "tasks": [
+            {"title": "D-pad UP/DOWN adjusts and stores _tether_target_length", "done": true},
+            {"title": "Default tether length = current rope length at L2 press", "done": true},
+            {"title": "TETHER_ACTIVE immediately pulls anchors to target length", "done": true},
+            {"title": "Visual length indicator while adjusting", "done": true},
+            {"title": "Length adjust speed = GRAPPLE_ROPE_ADJUST_SPEED (80 px/s)", "done": true},
+            {"title": "Min 30px, max 900px tether length", "done": true}
+          ]
+        },
+        {
+          "slug": "body-part-targeting",
+          "title": "Body Part Targeting",
+          "status": "shipped",
+          "version": "v0.9.16",
+          "source": "EPIC_dual_grapple_tether.md Story 4",
+          "summary": "Tether hooks snap to nearest attachment points on enemies, applying weight-aware forces and supporting same-enemy and cross-enemy tethers.",
+          "tasks": [
+            {"title": "Hook snaps to nearest attachment point in range on enemy hit", "done": true},
+            {"title": "Store attachment point name; forces applied at that skeleton position", "done": true},
+            {"title": "Force at attachment point uses get_segment_weight()", "done": true},
+            {"title": "Support tethering two parts on the same enemy", "done": true},
+            {"title": "Support tethering parts across different enemies", "done": true},
+            {"title": "Rope endpoints track attachment point world position each frame", "done": true}
+          ]
+        },
+        {
+          "slug": "tether-severing",
+          "title": "Tether Severing",
+          "status": "in-progress",
+          "version": "v0.9.16",
+          "source": "EPIC_dual_grapple_tether.md Story 5",
+          "summary": "Tethers have HP, take damage from projectiles passing through, and snap at 0 HP with color feedback. Damage from enemy attacks through the rope remains unimplemented.",
+          "tasks": [
+            {"title": "Tether HP configurable (default 20 HP)", "done": true},
+            {"title": "Projectile proximity hit detection against rope segments", "done": true},
+            {"title": "On hit: deal projectile damage, projectile passes through", "done": true},
+            {"title": "At 0 HP: rope snaps, both anchors released, snap visual + sound", "done": true},
+            {"title": "Damaged rope color shifts brown -> orange -> red", "done": true},
+            {"title": "Enemies attacking through the rope also damage it", "done": false}
+          ]
+        },
+        {
+          "slug": "tether-rendering",
+          "title": "Tether Rendering",
+          "status": "in-progress",
+          "version": "v0.9.16",
+          "source": "EPIC_dual_grapple_tether.md Story 6",
+          "summary": "Renders the spinning second hook, the thrown rope, and the active tether with tension-based visuals, anchor indicators, and a sever snap animation. Subtle transition animations remain open.",
+          "tasks": [
+            {"title": "TETHER_WINDUP: draw second hook spinning at anchor A", "done": true},
+            {"title": "TETHER_THROWN: draw rope from anchor A to flying hook", "done": true},
+            {"title": "TETHER_ACTIVE: multi-segment rope with catenary sag when slack", "done": true},
+            {"title": "Tension visual: slack grey, taut brown, pulling bright/vibrating", "done": true},
+            {"title": "Anchor indicators at each end", "done": true},
+            {"title": "Snap animation on sever: recoil + particle burst", "done": true}
+          ]
+        },
+        {
+          "slug": "tether-hud-inventory-dots",
+          "title": "Tether HUD - Inventory Dots",
+          "status": "in-progress",
+          "version": "v0.9.18",
+          "source": "EPIC_dual_grapple_tether.md Story 7",
+          "summary": "Five brown dots on the Ranger HUD show available vs in-use tether slots, transitioning on create and reclaim. Subtle transition animation remains open.",
+          "tasks": [
+            {"title": "Draw 5 small dots near the Ranger grapple UI", "done": true},
+            {"title": "Solid dot = available, empty/outline = in use", "done": true},
+            {"title": "Severed/broken tether: dot empty -> solid (reclaimed)", "done": true},
+            {"title": "Created tether: dot solid -> empty", "done": true},
+            {"title": "Subtle animation on transitions (pulse/fade)", "done": false}
+          ]
+        },
+        {
+          "slug": "attack-dummy-tether-support",
+          "title": "Attack Dummy Tether Support",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "EPIC_dual_grapple_tether.md Story 8",
+          "summary": "Adds a tether weapon to the attack dummy that aims at attachment points and creates tethers, with RCON controls for length and target B.",
+          "tasks": [
+            {"title": "New attack dummy weapon: tether", "done": true},
+            {"title": "Tether weapon flow: aim at attachment point, create to floor or target", "done": true},
+            {"title": "set_tether_length(px) configurable", "done": true},
+            {"title": "set_tether_target_b(floor / enemy node part)", "done": true},
+            {"title": "RCON: attacker weapon tether", "done": true},
+            {"title": "RCON: attacker tether_length <px>", "done": true},
+            {"title": "RCON: attacker tether_b floor / enemy <idx> <part>", "done": true}
+          ]
+        },
+        {
+          "slug": "tether-rcon-tests",
+          "title": "RCON & Automated Tests",
+          "status": "shipped",
+          "version": "v0.9.18",
+          "source": "EPIC_dual_grapple_tether.md Story 9",
+          "summary": "RCON commands to create, configure, sever, and inspect tethers, plus an automated test suite verifying tether physics.",
+          "tasks": [
+            {"title": "RCON: tether <enemy_idx> <point> floor", "done": true},
+            {"title": "RCON: tether <enemy_idx1> <point1> <enemy_idx2> <point2>", "done": true},
+            {"title": "RCON: tether wall <x1> <y1> <x2> <y2>", "done": true},
+            {"title": "RCON: tether length <px>", "done": true},
+            {"title": "RCON: tether cut", "done": true},
+            {"title": "RCON: tether status", "done": true},
+            {"title": "test_tether.sh: 7 automated tests", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "physics-chain-system",
+      "title": "Physics-Based Chain System",
+      "status": "shipped",
+      "version": "v0.10.28",
+      "source": "docs/epics/EPIC_physics_chains.md",
+      "summary": "A multi-body physics chain replacing the single-Node2D chain, with rigid links, joint rotation, selective collision (players pass through, world drapes), per-link damage and breakage, and rope parity via elastic joints. Shipped as FABRIK rigid-link chains across v0.9.19-v0.10.28, with creature attachment and breakaway sequences.",
+      "stories": [
+        {
+          "slug": "chain-links",
+          "title": "Chain Links (Physics Bodies)",
+          "status": "shipped",
+          "version": "v0.9.19",
+          "source": "EPIC_physics_chains.md Story 1",
+          "summary": "Replaces chain rendering with physics-body links sized from a configurable link length, joint-connected with fixed endpoints, and the existing alternating-segment visual.",
+          "tasks": [
+            {"title": "Define CHAIN_LINK_LENGTH constant (default 8px)", "done": true},
+            {"title": "Link count from target_length / CHAIN_LINK_LENGTH", "done": true},
+            {"title": "Spawn each link as a physics body with collision shape", "done": true},
+            {"title": "Link collision layer excludes players, includes world", "done": true},
+            {"title": "Connect links with joints (rotate, no stretch)", "done": true},
+            {"title": "Endpoint A: joint to static anchor at attachment point", "done": true},
+            {"title": "Endpoint B: same as A for other end", "done": true},
+            {"title": "Render alternating thin/thick segments from link positions", "done": true}
+          ]
+        },
+        {
+          "slug": "chain-physics-behavior",
+          "title": "Chain Physics Behavior",
+          "status": "shipped",
+          "version": "v0.10.34",
+          "source": "EPIC_physics_chains.md Story 2",
+          "summary": "Tunes link mass, gravity drape, catenary hang, joint-following motion, and angular/linear damping for stable chain behavior.",
+          "tasks": [
+            {"title": "Link mass proportional to size, gravity enabled", "done": true},
+            {"title": "Links drape under gravity when slack", "done": true},
+            {"title": "Catenary hang when suspended between two points", "done": true},
+            {"title": "Chain follows creature movement through joints", "done": true},
+            {"title": "Angular damping prevents wild spinning", "done": true},
+            {"title": "Linear damping reduces oscillation", "done": true}
+          ]
+        },
+        {
+          "slug": "chain-damage-system",
+          "title": "Chain Damage System",
+          "status": "shipped",
+          "version": "v0.9.19",
+          "source": "EPIC_physics_chains.md Story 3",
+          "summary": "Per-link HP with proximity-based damage, breakage at 0 HP that splits the chain, and shake/flash/snap feedback.",
+          "tasks": [
+            {"title": "Per-link HP derived from chain total / link count", "done": true},
+            {"title": "Hits damage nearest link(s) within proximity", "done": true},
+            {"title": "Link at 0 HP breaks the chain at that point", "done": true},
+            {"title": "Breaking splits into separate chains / free fall", "done": true},
+            {"title": "Shake/flash feedback on damaged link", "done": true},
+            {"title": "Metallic snap sound on break", "done": true}
+          ]
+        },
+        {
+          "slug": "rope-parity",
+          "title": "Rope Parity",
+          "status": "shipped",
+          "version": "v0.10.28",
+          "source": "EPIC_physics_chains.md Story 4",
+          "summary": "Ropes reuse the chain architecture with smaller, more numerous segments, elastic joints, higher damping, and thinner brown rendering.",
+          "tasks": [
+            {"title": "Rope links smaller and more numerous (4px vs 8px)", "done": true},
+            {"title": "Rope joints elastic (allow slight stretch)", "done": true},
+            {"title": "Lower mass per segment, more linear damping", "done": true},
+            {"title": "Rope rendering thinner, brown color", "done": true},
+            {"title": "Same endpoint pinning system as chains", "done": true}
+          ]
+        },
+        {
+          "slug": "creature-attachment",
+          "title": "Creature Attachment",
+          "status": "shipped",
+          "version": "v0.9.21",
+          "source": "EPIC_physics_chains.md Story 5",
+          "summary": "Chains attach to creatures via a tracking kinematic anchor, freeze with the creature, and trigger a breakaway sequence when all chains break.",
+          "tasks": [
+            {"title": "Creature endpoint joint tracks attachment point position", "done": true},
+            {"title": "Kinematic anchor moves with creature; chain responds", "done": true},
+            {"title": "Anchor stays fixed when creature is physics_frozen", "done": true},
+            {"title": "Breakaway sequence when all creature chains break", "done": true}
+          ]
+        }
+      ]
+    }
+  ]
+}

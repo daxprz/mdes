@@ -1,0 +1,107 @@
+{
+ "effort": "ART",
+ "slug": "art",
+ "design_title": "Art & Style",
+ "design_summary": "Defines the game's visual identity: 16-bit retro pixel art with a warm bakery/candy palette, 1px outlines, multi-tone shading, and per-class color schemes. Specifies sprite sheet sizes, animation guidelines, and environment themes per tower. Backs the Art Style Overhaul epic.",
+ "standalone_designs": [],
+ "epics": [
+   {
+     "slug": "art-style-overhaul",
+     "title": "Art Style Overhaul",
+     "status": "shipped",
+     "version": "",
+     "source": "BACKLOG EPIC 1 (Art Style Overhaul); docs/design/art_style_guide.md",
+     "summary": "Replace all placeholder pixel art with polished retro-style assets across characters, bosses, enemies, items, environment tiles, and UI. Follows the art style guide's bakery/candy palette, 1px outlines, and multi-tone shading. Shipped in the initial baseline as spritesheets for all five classes, four bosses, enemies, and items.",
+     "stories": [
+       {
+         "slug": "character-sprites",
+         "title": "Character Sprites",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.1",
+         "summary": "Topdown and side spritesheets for all five classes plus the donut buddy, with shading, outlines, and detail.",
+         "tasks": [
+           {"title": "Melee knight - topdown spritesheet (128x128) with shading, outline, detail", "done": true},
+           {"title": "Melee knight - side spritesheet (192x32) with shading, outline, detail", "done": true},
+           {"title": "Ranged ranger - topdown spritesheet", "done": true},
+           {"title": "Ranged ranger - side spritesheet", "done": true},
+           {"title": "Mage wizard - topdown spritesheet", "done": true},
+           {"title": "Mage wizard - side spritesheet", "done": true},
+           {"title": "Summoner - topdown spritesheet", "done": true},
+           {"title": "Summoner - side spritesheet", "done": true},
+           {"title": "Rogue - topdown spritesheet", "done": true},
+           {"title": "Rogue - side spritesheet", "done": true},
+           {"title": "Donut buddy sprite (144x24)", "done": true}
+         ]
+       },
+       {
+         "slug": "boss-sprites",
+         "title": "Boss Sprites",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.2",
+         "summary": "256x64 spritesheets for all four bosses with themed bakery detailing.",
+         "tasks": [
+           {"title": "Gingerbread Skeleton (256x64) - cookie bones, icing detail, gumdrop eyes", "done": true},
+           {"title": "Icing Goblin (256x64) - dripping frosting, cherry eyes, sprinkle decor", "done": true},
+           {"title": "Sprinkle Dragon (256x64) - rainbow sprinkle scales, candy fire breath", "done": true},
+           {"title": "Giant Muffin (256x64) - angry face, paper wrapper lines, chocolate chips", "done": true}
+         ]
+       },
+       {
+         "slug": "enemy-sprites",
+         "title": "Enemy Sprites",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.3",
+         "summary": "Skeleton enemy plus additional enemy types with themed pixel art.",
+         "tasks": [
+           {"title": "Skeleton enemy (128x32) - visible ribcage, glowing eyes, bone club", "done": true},
+           {"title": "Design & create 2-3 additional enemy types", "done": true}
+         ]
+       },
+       {
+         "slug": "item-sprites",
+         "title": "Item Sprites",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.4",
+         "summary": "Muffin pickups, class artifacts, and potion sprites with animations.",
+         "tasks": [
+           {"title": "Mini muffin (64x16) with sparkle animation", "done": true},
+           {"title": "Ultimate muffin (16x16) with halo glow", "done": true},
+           {"title": "5 class artifacts (16x16 each)", "done": true},
+           {"title": "Mana potion / health potion pickups", "done": true}
+         ]
+       },
+       {
+         "slug": "environment-tiles",
+         "title": "Environment Tiles",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.5",
+         "summary": "Overworld and tower tilesets plus per-boss arena backgrounds.",
+         "tasks": [
+           {"title": "Overworld tileset (160x160) - grass, paths, water, trees, rocks", "done": true},
+           {"title": "Tower tileset (160x160) - stone, platforms, ladders, spikes, torches", "done": true},
+           {"title": "Boss arena backgrounds (per boss theme)", "done": true}
+         ]
+       },
+       {
+         "slug": "ui-art",
+         "title": "UI Art",
+         "status": "shipped",
+         "version": "",
+         "source": "BACKLOG Story 1.6",
+         "summary": "HUD icons, portal animation, title logo, and menu/button art.",
+         "tasks": [
+           {"title": "Heart icon, mana icon, muffin counter icon", "done": true},
+           {"title": "Portal animation (128x32)", "done": true},
+           {"title": "Title logo \"THE ULTIMATE MUFFIN\" (256x64)", "done": true},
+           {"title": "Menu panel art / button styles", "done": true}
+         ]
+       }
+     ]
+   }
+ ]
+}

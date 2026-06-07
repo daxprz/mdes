@@ -1,0 +1,64 @@
+{
+ "effort":"BUG", "slug":"bugs", "design_title":"Bugs",
+ "design_summary":"Defect-fixing efforts across two waves that hardened the boss-fight loop, combat input, multiplayer death/revive handling, and the title-screen profile/join flow. Most fixes traced to collision-layer and Variant type-inference root causes and landed in the pre-v0.10.0 stabilization push of mid-March 2026.",
+ "standalone_designs":[],
+ "epics":[
+   {"slug":"bug-fixes","title":"Bug Fixes","status":"shipped","version":"","source":"BACKLOG EPIC 2: Bug Fixes","summary":"First wave of defect fixes covering boss arena escape, crash/Variant inference errors, pause menu control, broken attack input, boss damage and floor-clipping, all-players-dead soft-lock, melee ground hits, and the title-screen START button. All stories shipped during the mid-March 2026 stabilization before v0.10.0 tagging began.",
+    "stories":[
+      {"slug":"boss-arena-escape","title":"Boss Arena Escape","status":"shipped","version":"","source":"BACKLOG Story 2.1","summary":"Confined the boss arena with walls/ceiling and added a kill zone below the floor that respawns players who fall.",
+       "tasks":[
+         {"title":"Add walls/ceiling to boss arena so players can't jump out","done":true},
+         {"title":"Add kill zone below arena floor (respawn player if they fall)","done":true}
+       ]},
+      {"slug":"crash-fixes","title":"Crash Fixes","status":"shipped","version":"","source":"BACKLOG Story 2.2","summary":"Audited scripts for Variant type-inference crashes, tested all scene transitions, and resolved call_deferred issues in physics callbacks. Multiple Variant inference and post-boss-defeat crash fixes landed 2026-03-14.",
+       "tasks":[
+         {"title":"Audit all scripts for Variant type inference errors (sign(), etc.)","done":true},
+         {"title":"Test all scene transitions (title→overworld→tower→boss→overworld)","done":true},
+         {"title":"Fix any remaining call_deferred issues during physics callbacks","done":true}
+       ]},
+      {"slug":"pause-menu","title":"Pause Menu","status":"shipped","version":"","source":"BACKLOG Story 2.3","summary":"Restricted pause-menu control to the player who pressed START, added navigation cooldown, and split Quit-to-title from Quit Game.",
+       "tasks":[
+         {"title":"Only the player who pressed START controls the menu","done":true},
+         {"title":"Add navigation cooldown to prevent too-fast scrolling","done":true},
+         {"title":"Quit goes to title screen first, separate \"Quit Game\" exits entirely","done":true}
+       ]},
+      {"slug":"attack-button-not-working","title":"Attack Button Not Working","status":"shipped","version":"","source":"BACKLOG Story 2.5","summary":"Fixed the attack button doing nothing for any class — the charge system was intercepting every press on the first frame. Charge now only activates after a 0.3s hold so quick taps fire normal attacks (commit 2026-03-14: charge system was eating all taps).",
+       "tasks":[
+         {"title":"BUG: Square button (attack) does nothing for any class — charge system intercepted every press; fix: charge only after 0.3s hold","done":true}
+       ]},
+      {"slug":"boss-damage-bug","title":"Boss Damage Bug","status":"shipped","version":"","source":"BACKLOG Story 2.4","summary":"Players could not damage the Giant Muffin because bosses had no collision_layer set (defaulted to world) and were invisible to attack masks. Fix put all 4 bosses on collision_layer 8 and in the enemies/bosses groups (commit 2026-03-14: bosses now on collision layer 8).",
+       "tasks":[
+         {"title":"BUG: Players cannot damage the final boss (Giant Muffin) - attacks don't register","done":true},
+         {"title":"Investigate boss collision layers vs player attack area masks","done":true},
+         {"title":"Verify boss is in \"enemies\"/\"bosses\" group and take_damage is callable","done":true}
+       ]},
+      {"slug":"soft-lock-all-players-die","title":"Soft-Lock When All Players Die","status":"shipped","version":"","source":"BACKLOG Story 2.8","summary":"Fixed the soft-lock when all players died with no revive path; PlayerManager now emits all_players_dead and GameManager shows an overlay then auto-restarts the scene with players revived (commit 2026-03-14: auto restart).",
+       "tasks":[
+         {"title":"BUG: Game soft-locks when all players die (no revive possible) — fix: all_players_dead signal + auto-restart with revive","done":true}
+       ]},
+      {"slug":"melee-ground-attack-not-hitting","title":"Melee Ground Attack Not Hitting","status":"shipped","version":"","source":"BACKLOG Story 2.7","summary":"Fixed melee ground attacks not registering (monitoring and get_overlapping_bodies on the same frame) by waiting one physics frame, then added arcing slash VFX and blood particles (commits 2026-03-14: fix melee attack + arc VFX and blood particles).",
+       "tasks":[
+         {"title":"BUG: Melee attack on ground doesn't hit enemies — wait one physics frame after enabling monitoring","done":true},
+         {"title":"Replace melee swing VFX with large arcing slash + silver/grey/yellow/white particles","done":true},
+         {"title":"Blood particles on enemy hit (3 squirts, arc upward, land on surfaces, drip down)","done":true}
+       ]},
+      {"slug":"boss-falls-through-floor","title":"Boss Falls Through Floor","status":"shipped","version":"","source":"BACKLOG Story 2.6","summary":"Fixed the Giant Muffin falling through the arena floor — summoned minions on collision_layer 1 pushed the boss through; minions now use layer 8 plus a safety teleport when the boss drops below the arena (commit 2026-03-16: fix stuck pseudo-enemy squares in boss arenas).",
+       "tasks":[
+         {"title":"BUG: Giant Muffin falls through arena floor — minions moved to collision_layer 8 + safety teleport","done":true}
+       ]},
+      {"slug":"title-screen-start-ignored","title":"Title Screen START Button Ignored","status":"shipped","version":"","source":"BACKLOG Story 2.9","summary":"Fixed START doing nothing on fresh launch with no players — name-entry/camera setup only ran on return-from-game, so no profile bound. Fix calls _setup_camera() and _setup_name_entry() unconditionally in _ready() (commit 2026-03-16: fix 3 title screen bugs incl. START button).",
+       "tasks":[
+         {"title":"BUG: Pressing START on title screen with no players does nothing — call setup unconditionally in _ready()","done":true}
+       ]}
+    ]},
+   {"slug":"bug-fixes-wave-2","title":"Bug Fixes - Wave 2","status":"shipped","version":"","source":"BACKLOG EPIC 19: Bug Fixes - Wave 2","summary":"Second wave focused on the profile and join flow: requiring profile selection before joining, persisting profiles to JSON in user://, and adding a ProfileManager autoload for device-profile mapping. Landed mid-March 2026 (commits 2026-03-14: persistent profiles saved to disk; players must always select profile on title screen).",
+    "stories":[
+      {"slug":"profile-join-fixes","title":"Profile & Join Fixes","status":"shipped","version":"","source":"BACKLOG Story 19.1","summary":"Required profile selection before joining, added cross-session profile persistence in user://, and introduced a ProfileManager autoload for device-profile mapping.",
+       "tasks":[
+         {"title":"Profile selection required before joining game","done":true},
+         {"title":"Profile persistence across sessions (JSON in user://)","done":true},
+         {"title":"ProfileManager autoload handles device-profile mapping","done":true}
+       ]}
+    ]}
+ ]
+}

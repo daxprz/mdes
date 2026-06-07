@@ -1,0 +1,144 @@
+{
+  "effort": "DSGN",
+  "slug": "game-design",
+  "design_title": "Overall Game Design",
+  "design_summary": "Structural game-design work for The Ultimate Muffin: overworld progression gating, varied tower level design, a dungeon-maze tower variant, ambient wildlife migration, and the cross-cutting composition refactor of the character system. These efforts shape how the world is structured, how players progress through it, and how combatant code is organized.",
+  "standalone_designs": [
+    {
+      "slug": "migration-patterns",
+      "title": "Wildlife Migration Patterns",
+      "summary": "Cyclic multi-phase migration system that compels species (fireflies, bats) toward the nearest active destination zone, then returns them to normal behavior on arrival. Includes a per-species pattern model, a level-config JSON schema, and a MIGRATION level-editor mode.",
+      "status": "shipped",
+      "version": "v0.9.7",
+      "source": "docs/design/migration_patterns.md; git: 'Implement migration patterns: cyclic multi-phase species movement' (2026-03-18), 'Migration: per-species patterns, stagger, bat repulsion, editor polish'"
+    },
+    {
+      "slug": "character-composition-refactor",
+      "title": "Unified Character Composition Architecture",
+      "summary": "Refactor the 9.6K-line player_side.gd and the enemy system into one composition-based Character base with node FSMs, components, Resource-backed config, and swappable ClassComponents, where the only player/enemy distinction is the attached InputController. Phases 1-5 (foundation, movement/action FSMs, simple and complex class extraction) shipped; full enemy migration and player_side.gd deletion are not yet complete.",
+      "status": "in-progress",
+      "version": "v0.10.46",
+      "source": "docs/design/player_refactor.md; git: 'Refactor Phase 1+2: Foundation classes, FSM, components, resources, object pool' (2026-04-01), 'Release v0.10.41 — Composition refactor phases 3-5', 'Release v0.10.46 — ChargeComponent, Character virtuals, player_side.gd under 4K'"
+    },
+    {
+      "slug": "test-runner-and-systems-overhaul",
+      "title": "Test Runner, Player & Gameplay Systems Overhaul (v0.10.18-23)",
+      "summary": "Six-release build log covering the docked test editor with three editor modes, script-hash result caching, generic entity selection, and gameplay/player additions (chain daze, soccer dummy, balloon chain explosions, press-to-join controllers, debug-aspect migration). All six releases shipped.",
+      "status": "shipped",
+      "version": "v0.10.23",
+      "source": "docs/design/session_v0.10.18_to_v0.10.23.md; git: 'Release v0.10.18 — Docked test editor, chain daze, soccer ball, balloon explosions, press-to-join' through 'Release v0.10.23 — Remove static entity info, clean test menu, save/diff detection'"
+    }
+  ],
+  "epics": [
+    {
+      "slug": "overworld-progression",
+      "title": "Overworld Progression",
+      "status": "shipped",
+      "version": "v0.9.5",
+      "source": "BACKLOG.md EPIC 3; git: 'Fix overworld: visible chasm blocker + smaller tower visuals' (2026-03-15), 'Add god mode: SHIFT+1/2/3 completes towers in overworld'",
+      "summary": "Give the overworld structure so players gate into towers progressively rather than accessing everything at once. Tower completions unlock ziplines that ferry players across chasms to the next area, with proper map boundaries and camera limits.",
+      "stories": [
+        {
+          "slug": "area-gating",
+          "title": "Area Gating",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 3.1; git: chasm blocker + tower-completion unlock commits (2026-03-14/15)",
+          "summary": "Block paths to later towers until Tower 1 is done, with each completion unlocking a zipline to the next area and the final area gated behind all three.",
+          "tasks": [
+            {"title": "Block paths to Tower 2 and Tower 3 until Tower 1 is complete", "done": true},
+            {"title": "Each tower completion unlocks a zipline to the NEXT area", "done": true},
+            {"title": "Zipline is an interactive object players ride across chasms", "done": true},
+            {"title": "Final tower area only accessible after all 3 ziplines unlocked", "done": true}
+          ]
+        },
+        {
+          "slug": "overworld-boundaries",
+          "title": "Overworld Boundaries",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 3.2; git: 'Fix overworld: visible chasm blocker + smaller tower visuals'",
+          "summary": "Constrain the playable overworld with walls, fences, and visual barriers, plus camera limits so players cannot see off the map.",
+          "tasks": [
+            {"title": "Add proper walls/fences around the playable overworld area", "done": true},
+            {"title": "Add visual boundaries (cliffs, water, dense forest)", "done": true},
+            {"title": "Camera limits so players can't see outside the map", "done": true}
+          ]
+        },
+        {
+          "slug": "overworld-polish",
+          "title": "Overworld Polish",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 3.3; git: overworld fixes (2026-03-15)",
+          "summary": "Make ziplines genuinely functional and animated, and enrich the overworld with lore signposts and optional ambient enemies.",
+          "tasks": [
+            {"title": "Make ziplines animated/functional (not just visual blocks)", "done": true},
+            {"title": "Add NPC or signpost near each tower with lore/hints", "done": true},
+            {"title": "Add ambient overworld enemies (optional combat)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "level-design-variety",
+      "title": "Level Design Variety",
+      "status": "shipped",
+      "version": "v0.9.5",
+      "source": "BACKLOG.md EPIC 5; git: 'More platforms in towers: base 12->22, spacing 140->110px' (2026-03-15), 'More moving platforms + thick outer walls', 'Tower 2: even more platforms (87 total)'",
+      "summary": "Improve tower layouts and platforming challenge so each tower feels distinct and traversable. Tighten platform spacing to match jump height, add multiple routes and secrets, themed visuals, and dynamic platform types.",
+      "stories": [
+        {
+          "slug": "tower-layout-improvements",
+          "title": "Tower Layout Improvements",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 5.1; git: platform-count/spacing tuning commits (2026-03-15)",
+          "summary": "Rework tower layouts with jump-matched spacing, branching routes, secret bonus areas, and a unique visual theme per tower.",
+          "tasks": [
+            {"title": "Reduce platform spacing to match jump height with comfortable margin", "done": true},
+            {"title": "Add multiple paths up (left route vs right route)", "done": true},
+            {"title": "Add secret areas with bonus muffins", "done": true},
+            {"title": "Each tower has a unique visual theme (gingerbread, icing, sprinkle)", "done": true}
+          ]
+        },
+        {
+          "slug": "platforming-challenge",
+          "title": "Platforming Challenge",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 5.2; git: 'More moving platforms + thick outer walls' (2026-03-15)",
+          "summary": "Add dynamic platform mechanics: moving, crumbling, and conveyor platforms plus vertical climbing sections.",
+          "tasks": [
+            {"title": "Add moving platforms", "done": true},
+            {"title": "Add crumbling platforms (break after standing on them)", "done": true},
+            {"title": "Add conveyor belt platforms", "done": true},
+            {"title": "Add vertical sections (climbing challenges)", "done": true}
+          ]
+        }
+      ]
+    },
+    {
+      "slug": "tower-2-dungeon-maze",
+      "title": "Tower 2 Dungeon Maze",
+      "status": "shipped",
+      "version": "v0.9.5",
+      "source": "BACKLOG.md EPIC 17; git: 'Tower 2: Top-down dungeon maze replaces side-scrolling tower' (2026-03-15), 'Tower 2 is the dungeon maze again', 'Fix dungeon enemies + balloon shadows'",
+      "summary": "Replace Tower 2's side-scrolling layout with a top-down maze-style dungeon variant, adding a dedicated dungeon tower scene and script.",
+      "stories": [
+        {
+          "slug": "dungeon-tower-scene",
+          "title": "Dungeon Tower Scene",
+          "status": "shipped",
+          "version": "v0.9.5",
+          "source": "BACKLOG.md Story 17.1; git: 'Tower 2: Top-down dungeon maze replaces side-scrolling tower' (2026-03-15)",
+          "summary": "Build the maze-style dungeon tower scene and its driving script as a Tower 2 variant.",
+          "tasks": [
+            {"title": "Create dungeon_tower.tscn - maze-style tower variant", "done": true},
+            {"title": "Dungeon tower script (dungeon_tower.gd)", "done": true}
+          ]
+        }
+      ]
+    }
+  ]
+}

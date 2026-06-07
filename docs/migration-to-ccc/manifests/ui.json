@@ -1,0 +1,234 @@
+{
+ "effort": "UI",
+ "slug": "ui",
+ "design_title": "User Interface",
+ "design_summary": "The TUMU user-interface surface covers the always-visible inline player HUD, profile and class selection via D-pad, controller features (haptics and LED color), and the title-screen portal doorway that replaces the legacy press-START flow. Selection happens directly in the lobby arena rather than through menu overlays, and the HUD persists across all game states. Input rules are codified per game state across title, gameplay, and pause contexts.",
+ "standalone_designs": [
+   {
+     "slug": "dpad-menu-input-rules",
+     "title": "D-Pad & Menu Input Rules",
+     "summary": "Cross-cutting input contract defining what D-pad and menu buttons do in each game state: title screen (unlimited profile/class cycling), gameplay (class cycling rift-limited, no profile switching), pause menu, and profile-selection mode. Also specifies rift-status reset triggers on scene transition and quit-to-menu.",
+     "status": "shipped",
+     "version": "v0.9.8",
+     "source": "docs/design/dpad_menu_rules.md"
+   }
+ ],
+ "epics": [
+   {
+     "slug": "hud-profile-enhancements",
+     "title": "HUD & Profile Enhancements",
+     "status": "shipped",
+     "version": "v0.9.8",
+     "source": "BACKLOG EPIC 26",
+     "summary": "Always-visible HUD showing total muffins and per-player stats, plus profile-flow improvements including auto-join on return from quit-to-menu, fresh-launch-only profile selection, and D-pad class cycling on the title screen.",
+     "stories": [
+       {
+         "slug": "always-visible-hud",
+         "title": "Always-Visible HUD",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 26.1",
+         "summary": "Persistent on-screen HUD with total muffin count at top center and per-player stats at top right.",
+         "tasks": [
+           {"title": "Total muffins display (top center)", "done": true},
+           {"title": "Per-player stats display (top right)", "done": true}
+         ]
+       },
+       {
+         "slug": "profile-flow-improvements",
+         "title": "Profile Flow Improvements",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 26.2",
+         "summary": "Smoother profile handling: auto-join returning from menu, profile selection only on fresh launch, and title-screen profile/class switching via controller.",
+         "tasks": [
+           {"title": "Auto-join on return from quit-to-menu", "done": true},
+           {"title": "Profile selection on fresh launch only", "done": true},
+           {"title": "Triangle to switch profile on title screen", "done": true},
+           {"title": "D-pad left/right for class cycling on title screen", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "inline-player-hud-selection",
+     "title": "Inline Player HUD & Selection Rework",
+     "status": "in-progress",
+     "version": "v0.9.8",
+     "source": "BACKLOG EPIC 27; docs/design/inline_hud_selection.md",
+     "summary": "Replace menu-based profile/class selection with an always-visible inline HUD at the bottom-center showing 1-4 panels for connected controllers. Players select profile (title only) and class (any state) directly via D-pad, with portal/ghost/poof VFX on class change. The old overlay-based selection system is removed and joining is now auto-on-connect. A small amount of dead-code cleanup remains.",
+     "stories": [
+       {
+         "slug": "persistent-player-hud",
+         "title": "Persistent Player HUD",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 27.1; inline_hud_selection.md",
+         "summary": "New player_hud.gd autoload on CanvasLayer 100 renders 1-4 bottom-center panels (name, class, color icon, HP/mana) visible across all game states, replacing the old GameManager HUD.",
+         "tasks": [
+           {"title": "Create new player_hud.gd autoload with CanvasLayer (layer 100)", "done": true},
+           {"title": "Show 1-4 HUD panels at bottom-center, evenly spaced, based on connected controllers", "done": true},
+           {"title": "Each HUD shows: profile name (default P1-P4), class name, class color icon, HP/mana bars", "done": true},
+           {"title": "HUD visible in ALL game states (title, overworld, tower, boss)", "done": true},
+           {"title": "Remove old HUD from GameManager (_create_hud, _muffin_label, _player_stat_labels)", "done": true}
+         ]
+       },
+       {
+         "slug": "inline-profile-selection",
+         "title": "Inline Profile Selection (Title Screen Only)",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 27.2; inline_hud_selection.md",
+         "summary": "D-pad up/down cycles available profiles on the title screen, skipping those taken by other players, with immediate HUD updates and a START-triggered create-profile name entry.",
+         "tasks": [
+           {"title": "D-pad up/down cycles through available profiles on the title screen", "done": true},
+           {"title": "Profiles already selected by another player are skipped", "done": true},
+           {"title": "Default display is P1-P4 when no profile is bound", "done": true},
+           {"title": "HUD updates immediately when profile changes", "done": true},
+           {"title": "START button shows Create Profile name entry overlay (title screen only)", "done": true},
+           {"title": "Newly created profile auto-selects for that player", "done": true}
+         ]
+       },
+       {
+         "slug": "inline-class-selection",
+         "title": "Inline Class Selection (Title Screen Only)",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 27.3; inline_hud_selection.md",
+         "summary": "D-pad left/right cycles available classes (skipping taken ones) with a red-portal/ghost/smoke-poof model-swap sequence and re-materialization on the next button press.",
+         "tasks": [
+           {"title": "D-pad left/right cycles through available classes on the title screen", "done": true},
+           {"title": "Classes already selected by another player are skipped", "done": true},
+           {"title": "On class change: red portal appears at player position, player becomes ghost", "done": true},
+           {"title": "Character model swaps with smoke poof VFX at same position", "done": true},
+           {"title": "Pressing any non-movement button spawns 2nd red portal, player becomes interactive", "done": true}
+         ]
+       },
+       {
+         "slug": "play-area-buffer",
+         "title": "Play Area Buffer",
+         "status": "shipped",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 27.4; inline_hud_selection.md",
+         "summary": "Camera/viewport reserves bottom margin so the HUD never covers gameplay, with a dark backing strip for readability over any background.",
+         "tasks": [
+           {"title": "Add bottom margin to camera/viewport so HUD doesn't cover gameplay", "done": true},
+           {"title": "Ensure HUD is readable over all backgrounds (slight dark backing)", "done": true}
+         ]
+       },
+       {
+         "slug": "remove-old-selection-system",
+         "title": "Remove Old Selection System",
+         "status": "in-progress",
+         "version": "v0.9.8",
+         "source": "BACKLOG Story 27.5; inline_hud_selection.md",
+         "summary": "Tear down the legacy overlay-based profile/class selection and slot UI, switching to auto-join on controller connect; a few unused files/signals still await deletion.",
+         "tasks": [
+           {"title": "Remove profile/class selection logic from title_screen.gd (_input overlay triggers)", "done": true},
+           {"title": "Remove old player slot UI from title_screen.tscn (PlayerSlots HBoxContainer)", "done": true},
+           {"title": "Clean up PlayerManager._input join flow — auto-join on controller connect", "done": true},
+           {"title": "Remove profile_select_overlay.gd file (no longer loaded, safe to delete)", "done": false},
+           {"title": "Clean up unused signals and methods in ProfileManager", "done": false}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "controller-features",
+     "title": "Controller Features",
+     "status": "shipped",
+     "version": "v0.9.5",
+     "source": "BACKLOG EPIC 33",
+     "summary": "Controller feedback features: haptic rumble across grapple windup/swing/release scaling with velocity, and DualSense-style LED color that matches the player's class color via Godot 4.6 Input.set_joy_light.",
+     "stories": [
+       {
+         "slug": "haptic-feedback",
+         "title": "Haptic Feedback",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG Story 33.1",
+         "summary": "Grapple rumble fires at all key moments and swing rumble scales 5-20% on the weak motor with velocity.",
+         "tasks": [
+           {"title": "Grapple rumble at all key moments (windup through release)", "done": true},
+           {"title": "Swing rumble scales with velocity (5-20% weak motor)", "done": true}
+         ]
+       },
+       {
+         "slug": "led-color",
+         "title": "LED Color",
+         "status": "shipped",
+         "version": "v0.9.5",
+         "source": "BACKLOG Story 33.2",
+         "summary": "Controller LED matches the player's class color via Input.set_joy_light, updating on spawn and class change.",
+         "tasks": [
+           {"title": "Controller LED matches player class color (Godot 4.6 Input.set_joy_light)", "done": true},
+           {"title": "Updates on spawn and class change", "done": true}
+         ]
+       }
+     ]
+   },
+   {
+     "slug": "portal-doorway-title-screen",
+     "title": "Portal Doorway (Title Screen)",
+     "status": "shipped",
+     "version": "v0.9.24",
+     "source": "BACKLOG EPIC 35",
+     "summary": "Replace the press-START prompt with a magical stone portal doorway in the lobby arena that players walk into to start the game. Front/back-layer arch with keystone over a black void, a blue spiral that brightens and shoots rays when players gather, and a pull-in transition that shrinks and spins players into the void. Implemented in portal_doorway.gd and wired through title_screen.gd; the backlog checkboxes are stale relative to the shipped code.",
+     "stories": [
+       {
+         "slug": "doorway-structure",
+         "title": "Doorway Structure",
+         "status": "shipped",
+         "version": "v0.9.24",
+         "source": "BACKLOG Story 35.1",
+         "summary": "Large stone doorway with a layered archway, keystone, and pure-black void behind, with players rendered between the front and back layers when near.",
+         "tasks": [
+           {"title": "Large stone doorway in center of title screen arena", "done": true},
+           {"title": "Front layer: stacked stones with archway and keystone", "done": true},
+           {"title": "Back layer: pure black (void behind the arch)", "done": true},
+           {"title": "Players render between front and back layers when near", "done": true}
+         ]
+       },
+       {
+         "slug": "portal-activation",
+         "title": "Portal Activation",
+         "status": "shipped",
+         "version": "v0.9.24",
+         "source": "BACKLOG Story 35.2",
+         "summary": "A spinning blue sparkly spiral with heavy particles appears for a present player; the glow brightens and translucent rays shoot outward when all players gather.",
+         "tasks": [
+           {"title": "Single player in front of doorway: blue sparkly spiral appears, spinning", "done": true},
+           {"title": "Heavy particle effects around the spiral", "done": true},
+           {"title": "ALL players in front of doorway: glow brightens", "done": true},
+           {"title": "Translucent sparkly rays shoot outward from center", "done": true}
+         ]
+       },
+       {
+         "slug": "transition-sequence",
+         "title": "Transition Sequence",
+         "status": "shipped",
+         "version": "v0.9.24",
+         "source": "BACKLOG Story 35.3",
+         "summary": "After all players are present, they are pulled toward the door center, shrinking and spinning as they are sucked in, then the scene transitions to the overworld.",
+         "tasks": [
+           {"title": "All players pulled toward door center", "done": true},
+           {"title": "Players shrink and spin as they are sucked in", "done": true},
+           {"title": "Transition to overworld after animation completes", "done": true}
+         ]
+       },
+       {
+         "slug": "ui-cleanup",
+         "title": "UI Cleanup",
+         "status": "shipped",
+         "version": "v0.9.24",
+         "source": "BACKLOG Story 35.4",
+         "summary": "Remove the legacy press-START prompt text and the START begin hint from the HUD now that the portal drives game start.",
+         "tasks": [
+           {"title": "Remove Press START to begin text", "done": true},
+           {"title": "Remove START: begin from HUD hints", "done": true}
+         ]
+       }
+     ]
+   }
+ ]
+}

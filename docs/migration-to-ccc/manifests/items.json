@@ -1,0 +1,91 @@
+{
+ "effort": "ITEM",
+ "slug": "items",
+ "design_title": "Items, Artifacts, Shops & Inventory",
+ "design_summary": "A procedural crafting and inventory area where each class assembles unique weapons from three class-specific components that drive stats, appearance, and a generated name. Materials come from enemy drops, boss rewards, mini-muffin currency, and secret areas. As of migration the area is design-only; no crafting, inventory, or shop systems have shipped.",
+ "standalone_designs": [],
+ "epics": [
+  {
+   "slug": "procedural-weapon-crafting",
+   "title": "Procedural Weapon Crafting",
+   "status": "open",
+   "version": "",
+   "source": "BACKLOG EPIC 8; docs/design/weapon_crafting.md",
+   "summary": "A large, design-gated feature letting each class craft weapons from three components (per-class slots) that determine stats, visuals, and a procedurally generated bakery-themed name. Includes rarity tiers, a crafting station, material drops, and a mini-muffin currency shop. No implementation has shipped; the backlog marks it as needing a design phase first.",
+   "stories": [
+    {
+     "slug": "crafting-design-phase",
+     "title": "Design Phase",
+     "status": "open",
+     "version": "",
+     "source": "BACKLOG Story 8.1; docs/design/weapon_crafting.md",
+     "summary": "Define the component system, stat modifiers, name-generation rules, material sources, and crafting UI before implementation. The weapon_crafting.md design memo captures the initial pass.",
+     "tasks": [
+      {"title": "Define weapon component system per class (see design doc)", "done": false},
+      {"title": "Define stat modifiers per component", "done": false},
+      {"title": "Define name generation rules (funny, short, readable)", "done": false},
+      {"title": "Define crafting material sources (drops, muffin currency, boss rewards)", "done": false},
+      {"title": "Define crafting UI wireframes", "done": false}
+     ]
+    },
+    {
+     "slug": "weapon-components-per-class",
+     "title": "Weapon Components Per Class",
+     "status": "open",
+     "version": "",
+     "source": "BACKLOG Story 8.2; docs/design/weapon_crafting.md",
+     "summary": "Implement the three-slot component set for each class so weapons assemble from class-specific parts.",
+     "tasks": [
+      {"title": "Melee - Blade + Hilt + Enchantment", "done": false},
+      {"title": "Ranged - Limb + String + Bolt Type", "done": false},
+      {"title": "Mage - Orb + Staff + Rune", "done": false},
+      {"title": "Summoner - Core + Shell + Spirit", "done": false},
+      {"title": "Rogue - Blade + Grip + Poison", "done": false}
+     ]
+    },
+    {
+     "slug": "name-generation",
+     "title": "Name Generation",
+     "status": "open",
+     "version": "",
+     "source": "BACKLOG Story 8.3; docs/design/weapon_crafting.md",
+     "summary": "Build a template-driven name generator producing funny bakery-themed weapon names from rarity, material, and effect word lists.",
+     "tasks": [
+      {"title": "Build name template system: [Prefix] [Material] [Weapon] of [Suffix]", "done": false},
+      {"title": "Create word lists per component (funny/bakery themed)", "done": false},
+      {"title": "Examples: \"Crispy Gingerbread Sword of Sprinkles\", \"Soggy Muffin Dagger of Crumbs\"", "done": false}
+     ]
+    },
+    {
+     "slug": "crafting-system-implementation",
+     "title": "Crafting System Implementation",
+     "status": "open",
+     "version": "",
+     "source": "BACKLOG Story 8.4; docs/design/weapon_crafting.md",
+     "summary": "Build the crafting station, drag-to-combine UI, material inventory, equip/swap flow, and wire crafted weapon stats into combat.",
+     "tasks": [
+      {"title": "Crafting station in overworld (or between towers)", "done": false},
+      {"title": "Crafting UI - drag components together", "done": false},
+      {"title": "Material inventory system", "done": false},
+      {"title": "Weapon equip/swap system", "done": false},
+      {"title": "Weapon stats affect combat (damage, speed, effects)", "done": false}
+     ]
+    },
+    {
+     "slug": "crafting-materials",
+     "title": "Crafting Materials",
+     "status": "open",
+     "version": "",
+     "source": "BACKLOG Story 8.5; docs/design/weapon_crafting.md",
+     "summary": "Source crafting materials from enemy drops, boss rewards, and a mini-muffin currency shop, with storage UI.",
+     "tasks": [
+      {"title": "Common drops from enemies (flour, sugar, sprinkles)", "done": false},
+      {"title": "Rare drops from bosses (enchanted icing, golden crumbs)", "done": false},
+      {"title": "Muffin currency can buy base materials", "done": false},
+      {"title": "Material storage/inventory UI", "done": false}
+     ]
+    }
+   ]
+  }
+ ]
+}

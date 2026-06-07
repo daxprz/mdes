@@ -1,0 +1,9 @@
+{
+  "$schemaVersion": "1",
+  "locations": [
+    {
+      "path": "effort",
+      "relative": true
+    }
+  ]
+}

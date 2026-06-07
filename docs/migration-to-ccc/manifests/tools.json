@@ -1,0 +1,333 @@
+{
+ "effort":"TOOLS", "slug":"tools", "design_title":"Developer Tooling",
+ "design_summary":"In-game and editor tooling that lets humans and AIs build, debug, test, and diagram the game from inside a running Godot session. Spans a unified debug overlay/drawer, a JSON-driven level editor, an RCON console and test runner, a splay pose authoring system, a collaborative whiteboard, plus a webcam motion-capture bridge for procedural-animation tuning. Nearly all surfaces route through the RCON server on port 9999 so tests and scripts can drive them headlessly.",
+ "standalone_designs":[
+   {"slug":"motion-capture-bridge","title":"Motion Capture Bridge","summary":"A Python (MediaPipe) to Godot TCP bridge that streams webcam skeleton data into the running game to drive a quadruped's skeleton in real time for animation tuning. Includes a 2.5D projection pipeline, pinning, calibration poses, and a config slider panel. Cross-cutting animation tooling, not tied to a single feature epic.","status":"in-progress","version":"","source":"docs/design/mocap_bridge.md"},
+   {"slug":"config-panel-redesign","title":"Config Panel Redesign","summary":"Restructures the debug drawer Config tab into 10 cross-linked sub-sections with class-level defaults, per-entity stat breakdowns, and modifier calculation chains. Establishes the principle that every physics body gets its own config stack and JSON default file.","status":"shipped","version":"0.10.36","source":"docs/design/config_panel_redesign.md"}
+ ],
+ "epics":[
+   {"slug":"debug-overlay-developer-tools","title":"Debug Overlay & Developer Tools","status":"shipped","version":"0.10.26","source":"BACKLOG EPIC 32; docs/epics/EPIC_debug_overlay.md; docs/design/debug_panel_spec.md","summary":"Replaces ad-hoc debug rendering with a unified DebugOverlay singleton: a 2-level aspect tree, an observer model (human/test/script), entity filtering, and a slide-out drawer for in-game configuration. All debug visuals and logs route through one API, drivable from RCON and test JSON. The drawer grew into a multi-section dockable panel hosting debug aspects, the test runner, config, level editor, and blueprints.",
+    "stories":[
+      {"slug":"core-infrastructure","title":"Core Infrastructure","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_debug_overlay.md Story 1","summary":"DebugOverlay autoload with aspect registry, observer model, entity filtering, global gate, and draw-primitive wrappers.","tasks":[
+        {"title":"DebugOverlay autoload singleton with aspect registry","done":true},
+        {"title":"Observer model (add/remove, resolve actualized state)","done":true},
+        {"title":"Entity filtering (type + ID wildcard)","done":true},
+        {"title":"Global on/off gate","done":true},
+        {"title":"Draw primitive wrappers (line, circle, arc, rect, string, polyline, polygon, log)","done":true},
+        {"title":"Registration API","done":true}
+      ]},
+      {"slug":"debug-drawer-ui","title":"Debug Drawer UI","status":"shipped","version":"0.10.26","source":"docs/epics/EPIC_debug_overlay.md Story 2; docs/design/debug_panel_spec.md","summary":"Slide-out left-edge panel with aspect search, entity filter, global toggle, and a collapsible V/T aspect tree. Persisted to user:// on Ctrl+S.","tasks":[
+        {"title":"Slide-out panel from left edge (Ctrl+D toggle)","done":true},
+        {"title":"Aspect filter search box","done":true},
+        {"title":"Entity filter section (type checkboxes, ID wildcard)","done":true},
+        {"title":"Global on/off checkbox","done":true},
+        {"title":"2-level collapsible tree with V/T columns","done":true},
+        {"title":"Group header toggles","done":true},
+        {"title":"Ctrl+S save, auto-load on startup","done":true}
+      ]},
+      {"slug":"rcon-integration","title":"RCON Integration","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_debug_overlay.md Story 3","summary":"All debug subcommands wired to DebugOverlay with console tab completion for aspect names.","tasks":[
+        {"title":"All debug subcommands (on/off/log/console/both/filter/save/load/reset/profile)","done":true},
+        {"title":"Wired to DebugOverlay singleton","done":true},
+        {"title":"Tab completion in console for aspect names","done":true}
+      ]},
+      {"slug":"test-runner-integration","title":"Test Runner Integration","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_debug_overlay.md Story 4","summary":"Test JSON debug block registers transient test observers, cleared when the test ends.","tasks":[
+        {"title":"Parse debug block from test JSON","done":true},
+        {"title":"Register/unregister test observers on test start/end","done":true},
+        {"title":"debug clear_transient command","done":true}
+      ]},
+      {"slug":"migrate-existing-rendering","title":"Migrate Existing Debug Rendering","status":"shipped","version":"0.10.18","source":"docs/epics/EPIC_debug_overlay.md Story 5; BACKLOG 32.1","summary":"All legacy debug rendering rewritten onto DebugOverlay aspects; PlayerHUD._debug_mode replaced by DebugOverlay.global_enabled.","tasks":[
+        {"title":"SELECT button toggles debug mode","done":true},
+        {"title":"Velocity arrows (green=current, red=predicted jump)","done":true},
+        {"title":"Debug tracer arrows on grapple jump","done":true},
+        {"title":"HUD button state display above each player panel","done":true},
+        {"title":"Archer debug: solver arc + arrow trail","done":true},
+        {"title":"Player debug rendering migrated to DebugOverlay aspects","done":true},
+        {"title":"Hitbox debug aspects added","done":true}
+      ]},
+      {"slug":"docked-test-runner-panel","title":"Docked Test Runner Panel","status":"shipped","version":"0.10.21","source":"docs/epics/EPIC_debug_overlay.md Story 6; docs/design/debug_panel_spec.md","summary":"Five collapsible resizable sub-sections (Suites, Tests, Controls, Status, Editor) docked in the debug panel with layout persistence.","tasks":[
+        {"title":"Sub-section framework with 5 resizable panels","done":true},
+        {"title":"Layout persisted to user://debug_panel_layout.json","done":true},
+        {"title":"Test editor docked; floating window suppressed","done":true},
+        {"title":"RCON run/suite auto-dock when drawer open","done":true}
+      ]},
+      {"slug":"generic-entity-selection-config","title":"Generic Entity Selection & Config Panel","status":"shipped","version":"0.10.19","source":"docs/epics/EPIC_debug_overlay.md Story 7","summary":"Config panel reorganized with a universal entity list and a world-space selection overlay that works for any entity type.","tasks":[
+        {"title":"Config panel: search filter, entity list, config sliders","done":true},
+        {"title":"Entity list shows ALL entities with numbers, ID, type","done":true},
+        {"title":"Generic world-space selection overlay","done":true},
+        {"title":"Config adapts to entity type","done":true},
+        {"title":"Debug aspect tree click offset bug fixed","done":true}
+      ]},
+      {"slug":"velocity-audit-system","title":"Velocity Audit System","status":"open","version":"","source":"BACKLOG 32.2; docs/design/velocity_audit_system.md","summary":"Documented physics-debugging audit system; design only, not yet implemented.","tasks":[
+        {"title":"See docs/design/velocity_audit_system.md","done":false}
+      ]}
+    ]},
+   {"slug":"level-editor","title":"Level Editor","status":"shipped","version":"0.10.24","source":"BACKLOG EPIC 36; docs/design/level_editor.md; docs/epics/EPIC_editor_change_tracking.md","summary":"A built-in editor that configures levels via JSON (res:// defaults with user:// overrides and graceful fallback). Modes for spawn areas, seeds, platforms, and the portal, with drag handles and a properties panel. Includes per-component change tracking, visual change indicators, a summary bar, and an Original/Custom save workflow.",
+    "stories":[
+      {"slug":"json-level-configuration","title":"JSON Level Configuration","status":"shipped","version":"0.10.24","source":"BACKLOG 36.1; docs/design/level_editor.md","summary":"JSON schema for levels with bundled defaults, user overrides, a LevelConfig autoload, and validation fallback.","tasks":[
+        {"title":"Define JSON schema (spawn zones, platforms, scenery, portal, camera)","done":true},
+        {"title":"Default JSON files in res://levels/","done":true},
+        {"title":"Override JSON files in user://levels/","done":true},
+        {"title":"LevelConfig autoload loads with fallback to defaults","done":true},
+        {"title":"Validation: corrupt/missing override falls back gracefully","done":true}
+      ]},
+      {"slug":"level-loading-integration","title":"Level Loading Integration","status":"shipped","version":"0.10.24","source":"BACKLOG 36.2; docs/design/level_editor.md","summary":"Title screen and tower levels load layout, spawn zones, and scenery from JSON instead of hardcoded values.","tasks":[
+        {"title":"Title screen loads configuration from JSON","done":true},
+        {"title":"Tower levels load platform layout from JSON","done":true},
+        {"title":"Spawn zones for all creature types loaded from JSON","done":true},
+        {"title":"Scenery (trees, rocks) loaded from JSON with seeds","done":true}
+      ]},
+      {"slug":"editor-ui-framework","title":"Editor UI Framework","status":"shipped","version":"0.10.24","source":"BACKLOG 36.3; docs/design/level_editor.md","summary":"Ctrl+E toggle, mode selector tab bar, properties panel, and Save/Reset buttons.","tasks":[
+        {"title":"Editor toggle via Ctrl+E","done":true},
+        {"title":"Mode selector tab bar","done":true},
+        {"title":"Properties panel for selected item","done":true},
+        {"title":"Save/Reset buttons","done":true}
+      ]},
+      {"slug":"edit-spawn-areas-mode","title":"Edit Spawn Areas Mode","status":"shipped","version":"0.10.24","source":"BACKLOG 36.4","summary":"Spawn zones rendered as translucent overlays with draggable corners, context-menu add/delete, and editable weight/type.","tasks":[
+        {"title":"Spawn zones shown as colored translucent overlays","done":true},
+        {"title":"Corner vertices draggable via mouse","done":true},
+        {"title":"Add/delete zones via right-click context menu","done":true},
+        {"title":"Zone weight and type editable","done":true}
+      ]},
+      {"slug":"edit-seeds-mode","title":"Edit Seeds Mode","status":"shipped","version":"0.10.24","source":"BACKLOG 36.5","summary":"Procedural items shown with seed numbers, selectable, regeneratable, and draggable.","tasks":[
+        {"title":"Procedural items shown with seed numbers","done":true},
+        {"title":"Click to select, G to regenerate","done":true},
+        {"title":"Position draggable via mouse","done":true}
+      ]},
+      {"slug":"edit-platforms-mode","title":"Edit Platforms Mode","status":"shipped","version":"0.10.24","source":"BACKLOG 36.6","summary":"Platform drag handles to move, resize, and add platforms.","tasks":[
+        {"title":"Platform positions and widths shown with drag handles","done":true},
+        {"title":"Drag center to move, drag edges to resize","done":true},
+        {"title":"Click empty space to add new platform","done":true}
+      ]},
+      {"slug":"edit-portal-mode","title":"Edit Portal Mode","status":"shipped","version":"0.10.24","source":"BACKLOG 36.7","summary":"Portal position draggable with activation-range overlay and editable timer.","tasks":[
+        {"title":"Portal position draggable","done":true},
+        {"title":"Activation range shown as circle overlay","done":true},
+        {"title":"Timer value editable","done":true}
+      ]},
+      {"slug":"change-tracking-save-workflow","title":"Change Tracking & Save Workflow","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_editor_change_tracking.md","summary":"Per-component and per-item change tracking with yellow change indicators, an on-screen change summary bar, and an Original/Custom save dialog mirroring the splay pose editor.","tasks":[
+        {"title":"_changed dictionary tracks changed components","done":true},
+        {"title":"Per-item change state (_changed_items)","done":true},
+        {"title":"Yellow dot/asterisk on changed items in every mode","done":true},
+        {"title":"On-screen change summary bar (yellow pending / green clean)","done":true},
+        {"title":"Custom vs Original indicator","done":true},
+        {"title":"Ctrl+S Original/Custom save dialog; delete custom when promoted","done":true}
+      ]}
+    ]},
+   {"slug":"ingame-console-test-runner","title":"In-Game Console & Test Runner","status":"shipped","version":"0.10.21","source":"docs/epics/EPIC_ingame_console.md","summary":"A Quake-style pop-down console (backtick) that accepts all RCON commands, plus a file-based test system where tests and suites are JSON on disk. A sequential task queue runs setup, wait, check, and aggregation steps and surfaces progress and results in the console.",
+    "stories":[
+      {"slug":"pop-down-console","title":"Pop-Down Console","status":"shipped","version":"0.10.24","source":"docs/epics/EPIC_ingame_console.md Story 1","summary":"CanvasLayer console sliding from the top, routing input to Rcon._execute with history and colored output.","tasks":[
+        {"title":"game_console.gd CanvasLayer slides from top","done":true},
+        {"title":"Toggle with backtick","done":true},
+        {"title":"Text input field + scrollable output log","done":true},
+        {"title":"Commands routed to Rcon._execute","done":true},
+        {"title":"Command history (up/down arrows)","done":true},
+        {"title":"Output colored (green=OK, red=ERR)","done":true},
+        {"title":"Special console commands: run, suite, tests","done":true}
+      ]},
+      {"slug":"test-file-format-loader","title":"Test File Format & Loader","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_ingame_console.md Story 2","summary":"JSON test format with setup, wait, and typed checks, loaded and validated by test_runner.gd.","tasks":[
+        {"title":"Test files in res://data/tests/ and user://data/tests/","done":true},
+        {"title":"Test format: name, description, setup, wait, checks","done":true},
+        {"title":"Check types: expect_gt/lt/eq/contains","done":true},
+        {"title":"Extract: parse RCON response to a named value","done":true},
+        {"title":"test_runner.gd loader + validation","done":true},
+        {"title":"Convert existing bash scenarios to JSON","done":true}
+      ]},
+      {"slug":"test-runner-task-queue","title":"Test Runner & Task Queue","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_ingame_console.md Story 3","summary":"Sequential task queue executing setup/wait/check per test, recording per-check pass/fail with console progress.","tasks":[
+        {"title":"Task queue executed sequentially","done":true},
+        {"title":"Each test becomes setup/wait/check tasks","done":true},
+        {"title":"Wait task with console countdown","done":true},
+        {"title":"Check task compares results, records pass/fail","done":true},
+        {"title":"run <test_name> command","done":true},
+        {"title":"Progress shown in console","done":true}
+      ]},
+      {"slug":"test-suite-aggregation","title":"Test Suite & Aggregation","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_ingame_console.md Story 4","summary":"Suite files aggregate tests with a summary grid and a tests listing command.","tasks":[
+        {"title":"Suite file format (name, test paths, aggregation)","done":true},
+        {"title":"suite <suite_name> command","done":true},
+        {"title":"Aggregation task with summary grid","done":true},
+        {"title":"Grid display on screen","done":true},
+        {"title":"tests command lists files and suites","done":true}
+      ]},
+      {"slug":"migrate-existing-tests","title":"Migrate Existing Tests","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_ingame_console.md Story 5","summary":"Bash test scenarios converted to JSON tests and suites.","tasks":[
+        {"title":"Convert test_quick.sh to quick.json","done":true},
+        {"title":"Convert test_all.sh to suites/full.json","done":true},
+        {"title":"Convert test_baseline.sh to suites/baseline.json","done":true},
+        {"title":"Convert test_damage.sh to suites/damage.json","done":true},
+        {"title":"Convert test_tether.sh to suites/tether.json","done":true}
+      ]}
+    ]},
+   {"slug":"ingame-test-editor","title":"In-Game Test Editor","status":"in-progress","version":"0.10.21","source":"docs/epics/EPIC_test_editor.md","summary":"Reframes tests as flat numbered lists of RCON statements editable from inside the game. Adds a stateful bleap builder for bounded-leap constraints, check meta-commands, and test management commands. The script-format MVP shipped; a dedicated editor panel, click-to-place constraint shapes, and a library browser are designed but not yet built.",
+    "stories":[
+      {"slug":"script-format-bleap-mvp","title":"Script Format + bleap + Test Commands (MVP)","status":"shipped","version":"0.10.0","source":"docs/epics/EPIC_test_editor.md Story 1","summary":"Tests as RCON scripts with a bleap bounded-leap builder and testload/show/edit/run/save commands.","tasks":[
+        {"title":"Add bleap command family to RCON","done":true},
+        {"title":"Add script-format support to test runner","done":true},
+        {"title":"Add testload/testshow/testedit/testinsert/testdelete/testrun/testsave","done":true},
+        {"title":"Convert verify_leap_graph_P0_P1.json to script format","done":true}
+      ]},
+      {"slug":"test-editor-panel","title":"Test Editor Panel","status":"shipped","version":"0.10.21","source":"docs/epics/EPIC_test_editor.md Story 2; docs/design/debug_panel_spec.md","summary":"A docked panel showing the loaded script as a numbered list with inline editing and execution state; EDIT/EXEC/INSPECT modes and soft-wrap shipped with the docked test runner overhaul.","tasks":[
+        {"title":"Numbered scrollable script list with selection","done":true},
+        {"title":"Inline edit of selected line","done":true},
+        {"title":"Execution state (last line, per-check pass/fail)","done":true},
+        {"title":"EDIT/EXEC/INSPECT modes + soft-wrap","done":true}
+      ]},
+      {"slug":"click-to-place-constraint-shapes","title":"Click-to-Place Constraint Shapes","status":"open","version":"","source":"docs/epics/EPIC_test_editor.md Story 3","summary":"Place and resize bleap constraint shapes by clicking in the game world.","tasks":[
+        {"title":"Click-drag platform A/B circles","done":false},
+        {"title":"Click-drag START rectangles","done":false},
+        {"title":"Click-drag END circles","done":false},
+        {"title":"Click two points for DISALLOW paths","done":false}
+      ]},
+      {"slug":"test-library-browser","title":"Test Library Browser","status":"open","version":"","source":"docs/epics/EPIC_test_editor.md Story 4","summary":"A panel listing all tests with last-run pass/fail, filter, and suite reordering.","tasks":[
+        {"title":"Left panel listing all tests","done":false},
+        {"title":"Click a test to load it","done":false},
+        {"title":"Show PASS/FAIL from last run; filter by name","done":false},
+        {"title":"Drag to reorder within a suite","done":false}
+      ]}
+    ]},
+   {"slug":"splay-pose-system","title":"Splay Pose System","status":"shipped","version":"0.9.21","source":"docs/epics/EPIC_splay_system.md","summary":"A system for placing creatures in reusable, world-tethered poses. Splay poses are JSON definitions of connection points and cast directions; instances place posed creatures in levels, auto-creating tethers and IK-overriding the skeleton. Includes asleep behavior, dramatic breakaway, multi-creature splays, instance/pose editor modes, a pose library, and RCON commands.",
+    "stories":[
+      {"slug":"pose-data-format","title":"Splay Pose Data Format","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 1","summary":"JSON pose schema and splay_manager.gd loader with starter poses.","tasks":[
+        {"title":"Create res://data/splay_poses/ directory","done":true},
+        {"title":"splay_manager.gd loads pose JSONs, lookup by name","done":true},
+        {"title":"load_pose / get_all_pose_names / save_pose","done":true},
+        {"title":"Create starter poses (t-pose, hanging, pinned-flat)","done":true}
+      ]},
+      {"slug":"instance-spawning","title":"Splay Instance Spawning","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 2","summary":"Spawns a creature, raycasts tethers from each connection to a surface, and sets behavior.","tasks":[
+        {"title":"spawn_splay(pose, pos, rotation, behavior)","done":true},
+        {"title":"Apply rotation to connections; raycast tethers to surfaces","done":true},
+        {"title":"Tight tether length; skip-and-warn on raycast miss","done":true},
+        {"title":"Set behavior (active/stand_down/asleep)","done":true},
+        {"title":"IK override to settle skeleton into pose","done":true}
+      ]},
+      {"slug":"asleep-mode","title":"Asleep Mode","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 3","summary":"Dormant creature behavior that wakes and becomes active on damage, with closed-eye/ZZZ visuals.","tasks":[
+        {"title":"_asleep flag on quadruped monster","done":true},
+        {"title":"Skip AI + reduced breathing when asleep","done":true},
+        {"title":"Wake to active on any damage","done":true},
+        {"title":"Closed-eye + ZZZ visuals; wake roar","done":true}
+      ]},
+      {"slug":"skeleton-ik-override","title":"Skeleton IK Override for Poses","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 4","summary":"Pose overrides blend the skeleton's rest targets toward connection positions, cleared when tethers sever.","tasks":[
+        {"title":"_pose_overrides dictionary + blended _solve_pose","done":true},
+        {"title":"Configurable override blend factor","done":true},
+        {"title":"set_pose_overrides / clear_pose_overrides","done":true},
+        {"title":"Auto-clear overrides when all tethers severed","done":true}
+      ]},
+      {"slug":"level-integration","title":"Level Integration","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 5","summary":"Splay instances saved in level configs and auto-spawned on load; survive clear as fixtures.","tasks":[
+        {"title":"splays key in level config schema","done":true},
+        {"title":"Auto-spawn splays on level load","done":true},
+        {"title":"Remove splayed creatures on level clear/rebuild","done":true},
+        {"title":"Splays survive clear / clear_splays command","done":true}
+      ]},
+      {"slug":"instance-editor-mode","title":"Splay Instance Editor Mode","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 6","summary":"Editor mode to place, drag, rotate, cycle pose/behavior, and preview splay instances.","tasks":[
+        {"title":"SPLAY mode in editor enum","done":true},
+        {"title":"Click to place, drag to reposition","done":true},
+        {"title":"Rotate, cycle pose, cycle behavior","done":true},
+        {"title":"Overlay with markers + ghost creature preview","done":true},
+        {"title":"Save splay instances to level config","done":true}
+      ]},
+      {"slug":"pose-editor-mode","title":"Splay Pose Editor Mode","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 7","summary":"SPLAY_EDIT mode to modify a pose's connection points, relative positions, and cast directions with live preview.","tasks":[
+        {"title":"SPLAY_EDIT mode in editor enum","done":true},
+        {"title":"Draggable connection-point handles (relative_pos)","done":true},
+        {"title":"Right-click drag to change cast_dir","done":true},
+        {"title":"Add/remove connection points","done":true},
+        {"title":"Live skeleton preview; Ctrl+S saves pose","done":true}
+      ]},
+      {"slug":"splay-rcon-commands","title":"Splay RCON Commands","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 8","summary":"RCON splay list/spawn/clear/status for testing splays without the editor.","tasks":[
+        {"title":"splay list","done":true},
+        {"title":"splay spawn <pose> [x y] [rot] [behavior]","done":true},
+        {"title":"splay clear","done":true},
+        {"title":"splay status","done":true}
+      ]},
+      {"slug":"pose-library-ui","title":"Pose Library UI","status":"shipped","version":"0.9.19","source":"docs/epics/EPIC_splay_system.md Story 9","summary":"In-game browser to preview, place, edit, create, and delete poses with filter/search.","tasks":[
+        {"title":"Scrollable pose list/grid with thumbnails","done":true},
+        {"title":"Full-size preview with connections + cast arrows","done":true},
+        {"title":"Place / Edit / New / Delete buttons","done":true},
+        {"title":"Filter/search by name","done":true}
+      ]},
+      {"slug":"breakaway","title":"Breakaway — Dramatic Freedom","status":"shipped","version":"0.9.21","source":"docs/epics/EPIC_splay_system.md Story 10","summary":"When a splayed creature's tethers exceed 50% aggregate damage, all snap with sound, screen shake, slow-mo, and the creature wakes angry.","tasks":[
+        {"title":"Aggregate tether durability trigger at 50% damage","done":true},
+        {"title":"Per-pose breakaway sound with fallback","done":true},
+        {"title":"Screen shake + snap particles + flash/slow-mo","done":true},
+        {"title":"Clear overrides, become active, brief invincibility","done":true},
+        {"title":"splay breakaway <idx> RCON","done":true}
+      ]},
+      {"slug":"multi-creature-splay","title":"Multi-Creature Splay","status":"shipped","version":"0.9.21","source":"docs/epics/EPIC_splay_system.md Story 11","summary":"A pose can reference multiple creatures with world and inter-creature tethers, per-creature behavior, and partial breakaway.","tasks":[
+        {"title":"creatures array with per-entry offset + connections","done":true},
+        {"title":"Connections target world or creature:<i>:<point>","done":true},
+        {"title":"Spawn all + create world and inter-creature tethers","done":true},
+        {"title":"Aggregate vs partial breakaway","done":true},
+        {"title":"Editor + library multi-creature support","done":true}
+      ]}
+    ]},
+   {"slug":"splay-editor-v2","title":"Splay Editor V2 — Source Detection & Pose Management","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md","summary":"Enhances splay authoring with source/dev-mode detection, Original-vs-Custom save workflows, a full pose library with usage tracking and CRUD, and graceful handling of missing pose references in levels.",
+    "stories":[
+      {"slug":"source-mode-detection","title":"Source Mode Detection","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 1","summary":"Detects whether the game runs from source vs an exported build and shows a DEV badge.","tasks":[
+        {"title":"is_source_mode() utility","done":true},
+        {"title":"Detection via OS.has_feature(editor) / res:// resolution","done":true},
+        {"title":"DEV badge in source mode","done":true}
+      ]},
+      {"slug":"rename-splay-to-ipose","title":"Rename Current Splay to I-Pose","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 2","summary":"Renames the title-screen splay and bundled pose from t-pose to i-pose.","tasks":[
+        {"title":"Rename title_screen splay instance to i-pose","done":true},
+        {"title":"Create/rename data/splay_poses/i-pose.json","done":true},
+        {"title":"Update level config reference","done":true}
+      ]},
+      {"slug":"origin-tracking-save-modes","title":"Splay Edit — Origin Tracking & Save Modes","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 3","summary":"Tracks the edited pose's origin and offers Save Original (source only) vs Save Custom.","tasks":[
+        {"title":"Track _splay_edit_origin_pose_name","done":true},
+        {"title":"Ctrl+S save dialog with Original/Custom options","done":true},
+        {"title":"Save Original writes to res://data/splay_poses/","done":true},
+        {"title":"Save Custom writes to user://; Original greyed off-source","done":true}
+      ]},
+      {"slug":"pose-library-usage-tracking","title":"Pose Library — Usage Tracking","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 4","summary":"Scans level configs to show which levels use each pose; unused poses dimmed.","tasks":[
+        {"title":"Scan res:// and user:// level configs for splays","done":true},
+        {"title":"Build usage map","done":true},
+        {"title":"Display usage per pose; dim unused","done":true}
+      ]},
+      {"slug":"pose-library-crud","title":"Pose Library — CRUD Operations","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 5","summary":"Create, delete, edit, and rename poses with source-aware permissions and in-use guards.","tasks":[
+        {"title":"Add new pose","done":true},
+        {"title":"Delete pose (source/in-use guards)","done":true},
+        {"title":"Edit pose (custom copy off-source)","done":true},
+        {"title":"Rename pose","done":true}
+      ]},
+      {"slug":"missing-pose-references","title":"Level Editor — Missing Pose References","status":"shipped","version":"0.9.20","source":"docs/epics/EPIC_splay_editor_v2.md Story 6","summary":"Handles splay instances referencing deleted poses with red overlays and a replacement workflow.","tasks":[
+        {"title":"Missing-pose splays drawn red with MISSING label","done":true},
+        {"title":"Select missing splay opens library in replacement mode","done":true},
+        {"title":"Reassign or delete the splay instance","done":true},
+        {"title":"Skip missing-pose splays on load (no crash)","done":true}
+      ]}
+    ]},
+   {"slug":"debug-digital-whiteboard","title":"Debug Digital Whiteboard","status":"shipped","version":"0.10.79","source":"docs/epics/EPIC_whiteboard.md; docs/design/whiteboard_implementation.md","summary":"A collaborative world-space whiteboard where humans (drawer GUI) and AIs (RCON) diagram and annotate game systems. Supports 12 component types, groups, annotations, control-point editing, grid/component snapping, and component locking, with full JSON round-trip. Built across six phases.",
+    "stories":[
+      {"slug":"data-model-rendering","title":"Data Model & Rendering","status":"shipped","version":"0.10.77","source":"docs/epics/EPIC_whiteboard.md Phase 1","summary":"Node2D data model with grid, 12 component types, groups, annotations, and serialization.","tasks":[
+        {"title":"Dictionary-based component data model","done":true},
+        {"title":"Grid rendering with coordinate labels","done":true},
+        {"title":"12 component types rendered via _draw()","done":true},
+        {"title":"JSON serialization round-trip","done":true}
+      ]},
+      {"slug":"rcon-crud","title":"RCON Commands — Full CRUD","status":"shipped","version":"0.10.77","source":"docs/epics/EPIC_whiteboard.md Phase 2","summary":"wb command family for AI-driven create, modify, select, annotate, group, and inspect.","tasks":[
+        {"title":"wb management (new/save/load/files/clear/level/dump)","done":true},
+        {"title":"wb component creation commands","done":true},
+        {"title":"wb modification, selection, annotation, group commands","done":true},
+        {"title":"wb list / inspect","done":true}
+      ]},
+      {"slug":"debug-drawer-tab","title":"Debug Drawer Tab","status":"shipped","version":"0.10.77","source":"docs/epics/EPIC_whiteboard.md Phase 3","summary":"WHITEBOARD tab with Board, Tools, Settings, Actions, and Inspector subsections.","tasks":[
+        {"title":"Board subsection (name, new/save/load/clear, picker)","done":true},
+        {"title":"Tools subsection (14 tool buttons)","done":true},
+        {"title":"Settings subsection (color swatches, annotation input)","done":true},
+        {"title":"Actions + Inspector subsections","done":true}
+      ]},
+      {"slug":"world-space-tools","title":"World-Space Tools","status":"shipped","version":"0.10.77","source":"docs/epics/EPIC_whiteboard.md Phase 4","summary":"Mouse-driven tool state machine for drawing, selection, and control-point editing.","tasks":[
+        {"title":"Tool state machine (14 tools)","done":true},
+        {"title":"Click/drag/release with dual creation modes","done":true},
+        {"title":"Control-point dragging per type","done":true},
+        {"title":"Screen-to-world conversion routing","done":true}
+      ]},
+      {"slug":"polish-annotations-selection","title":"Polish — Annotations & Selection","status":"shipped","version":"0.10.77","source":"docs/epics/EPIC_whiteboard.md Phase 5","summary":"Annotation callouts, selection glow, and group visuals.","tasks":[
+        {"title":"Annotation speech bubbles with H/A tags","done":true},
+        {"title":"Selection glow + thicker outline","done":true},
+        {"title":"Group bounding-box visuals","done":true}
+      ]},
+      {"slug":"arc-bezier-snap-lock","title":"Arc, Bezier, Snapping & Locking","status":"shipped","version":"0.10.79","source":"docs/epics/EPIC_whiteboard.md Phase 6; docs/design/whiteboard_implementation.md","summary":"Three-step arc tool, multi-click bezier with auto control handles, grid/component snapping, and component locking.","tasks":[
+        {"title":"Three-step arc tool + control points","done":true},
+        {"title":"Multi-click bezier with Catmull-Rom controls","done":true},
+        {"title":"Grid and component snapping","done":true},
+        {"title":"Component locking (blocks edit/move/CPs)","done":true}
+      ]}
+    ]}
+ ]
+}
