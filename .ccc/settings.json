@@ -4,9 +4,7 @@
   "name": "mdes",
   "emoji": "🪐",
   "description": "Project M.D.E.S. - Maintained Doomed Enviornment, Stranded. Metroidvainia Rougelike game built in Godot 4.6",
-  "paths": [
-    "/private/var/mdes/workspace"
-  ],
+  "paths": [],
   "agents-dir": ".ccc/agents",
   "delegates": [
     {
