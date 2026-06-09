@@ -130,7 +130,10 @@
       "titleBar.activeForeground": "#e7e7e7",
       "titleBar.inactiveBackground": "#3e1f4799",
       "titleBar.inactiveForeground": "#e7e7e799"
-    }
+    },
+    "ccc.delegates.pinned": [
+      "mdes-ember"
+    ]
   },
 
   // ── Recommended extensions ───────────────────────────────────

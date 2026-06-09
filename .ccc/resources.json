@@ -1,54 +1,54 @@
 {
   "$schemaVersion": "1",
-  "root": "/private/var/mdes/workspace",
+  "root": ".",
   "resources": [
+    {
+      "type": "beads-dir",
+      "location": "/home/dax/projects/mdes/beads",
+      "discovered-via": "walk",
+      "registered-at": "2026-06-07T14:56:52Z"
+    },
     {
       "type": "agent.liaison",
       "location": ".ccc/agents/liaison",
-      "discovered-via": "created",
-      "registered-at": "2026-06-06T18:00:58Z"
+      "discovered-via": "convention",
+      "registered-at": "2026-06-07T14:56:52Z"
     },
     {
       "type": "agent.ccc",
       "location": ".ccc/agents/ccc",
-      "discovered-via": "created",
-      "registered-at": "2026-06-06T18:00:58Z"
+      "discovered-via": "convention",
+      "registered-at": "2026-06-07T14:56:52Z"
+    },
+    {
+      "type": "agent.ember",
+      "location": ".ccc/agents/ember",
+      "discovered-via": "convention",
+      "registered-at": "2026-06-07T14:56:52Z"
     },
     {
       "type": "vscode-workspace",
       "location": ".ccc/workspace.code-workspace",
       "discovered-via": "schema-always",
-      "registered-at": "2026-06-06T18:00:59Z"
+      "registered-at": "2026-06-07T14:56:52Z"
+    },
+    {
+      "type": "messages-dir",
+      "location": "messages",
+      "discovered-via": "schema-always",
+      "registered-at": "2026-06-07T14:56:52Z"
     },
     {
       "type": "primary-source-repo",
       "location": ".",
       "discovered-via": "schema-always",
-      "registered-at": "2026-06-06T18:05:00Z"
+      "registered-at": "2026-06-07T14:56:52Z"
     },
     {
       "type": "liaison-agent-dir",
       "location": ".ccc/agents/liaison",
       "discovered-via": "schema-always",
-      "registered-at": "2026-06-06T18:05:00Z"
-    },
-    {
-      "type": "agent.ember",
-      "location": ".ccc/agents/ember",
-      "discovered-via": "created",
-      "registered-at": "2026-06-06T18:05:00Z"
-    },
-    {
-      "type": "beads-dir",
-      "location": "/private/var/mdes/beads",
-      "discovered-via": "walk",
-      "registered-at": "2026-06-06T18:11:51Z"
-    },
-    {
-      "type": "messages-dir",
-      "location": "messages",
-      "discovered-via": "convention",
-      "registered-at": "2026-06-06T18:11:51Z"
+      "registered-at": "2026-06-07T14:56:52Z"
     }
   ]
 }

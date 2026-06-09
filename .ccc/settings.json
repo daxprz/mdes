@@ -4,7 +4,9 @@
   "name": "mdes",
   "emoji": "🪐",
   "description": "Project M.D.E.S. - Maintained Doomed Enviornment, Stranded. Metroidvainia Rougelike game built in Godot 4.6",
-  "paths": [],
+  "paths": [
+    "."
+  ],
   "agents-dir": ".ccc/agents",
   "delegates": [
     {
@@ -26,7 +28,8 @@
       "agent": "ember",
       "instance-pattern": "{PROJECT}-{AGENT}",
       "emoji": "🔥",
-      "model": "opus[1m]"
+      "model": "opus[1m]",
+      "conductor": false
     }
   ],
   "durable": [

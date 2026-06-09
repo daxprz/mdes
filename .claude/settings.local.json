@@ -11,7 +11,9 @@
       "// PERSONAL - Session Management",
       "// ============================================================",
       "Bash(bash /Users/jeremy/.claude/skills/audio-mode/switch.sh develop)",
-      "Skill(gd)"
+      "Skill(gd)",
+      "Read(//Applications/**)",
+      "Read(//usr/local/bin/**)"
     ],
     "additionalDirectories": [
       "/var/tumu/research",
