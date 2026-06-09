@@ -9,14 +9,19 @@ Display recent Godot output from the debug log.
 
 ## Steps
 
+The log path is resolved per-OS by `godot-env.sh` (`$GODOT_LOG`), so source it
+first in each block.
+
 1. If arguments contain a filter pattern, grep for it:
 ```bash
-grep -E "<pattern>" /tmp/godot_debug.log | tail -<count>
+source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
+grep -E "<pattern>" "$GODOT_LOG" | tail -<count>
 ```
 
 2. If no arguments, show last 40 lines:
 ```bash
-tail -40 /tmp/godot_debug.log
+source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
+tail -40 "$GODOT_LOG"
 ```
 
 3. Common filter patterns:

@@ -8,7 +8,25 @@
 #   2. Waits for the port to be ready
 #   3. Bridges stdin/stdout to the TCP socket using socat
 
-GODOT="/Applications/Godot.app/Contents/MacOS/Godot"
+# Resolve the Godot binary per-OS: honor $GODOT_BIN, then PATH, then well-known
+# locations (macOS app bundle / Linux install dirs).
+resolve_godot() {
+    if [ -n "$GODOT_BIN" ] && [ -x "$GODOT_BIN" ]; then echo "$GODOT_BIN"; return; fi
+    if command -v godot  >/dev/null 2>&1; then command -v godot;  return; fi
+    if command -v godot4 >/dev/null 2>&1; then command -v godot4; return; fi
+    case "$(uname -s)" in
+        Darwin)
+            for c in "/Applications/Godot.app/Contents/MacOS/Godot" \
+                     "$HOME/Applications/Godot.app/Contents/MacOS/Godot"; do
+                [ -x "$c" ] && { echo "$c"; return; }
+            done ;;
+        *)
+            for c in /usr/local/bin/godot /usr/bin/godot /opt/godot/godot; do
+                [ -x "$c" ] && { echo "$c"; return; }
+            done ;;
+    esac
+}
+GODOT="$(resolve_godot)"
 PORT="${GODOT_LSP_PORT:-6005}"
 PIDFILE="/tmp/godot-lsp-${PORT}.pid"
 

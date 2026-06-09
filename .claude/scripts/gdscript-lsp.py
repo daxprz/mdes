@@ -15,8 +15,32 @@ import json
 import socket
 import sys
 import os
+import platform
+import shutil
 import subprocess
 from pathlib import Path
+
+
+def resolve_godot_bin():
+    """Locate the Godot binary per-OS: $GODOT_BIN, then PATH, then well-known dirs."""
+    env_bin = os.environ.get("GODOT_BIN", "")
+    if env_bin and os.access(env_bin, os.X_OK):
+        return env_bin
+    for name in ("godot", "godot4"):
+        found = shutil.which(name)
+        if found:
+            return found
+    if platform.system() == "Darwin":
+        candidates = [
+            "/Applications/Godot.app/Contents/MacOS/Godot",
+            os.path.expanduser("~/Applications/Godot.app/Contents/MacOS/Godot"),
+        ]
+    else:
+        candidates = ["/usr/local/bin/godot", "/usr/bin/godot", "/opt/godot/godot"]
+    for c in candidates:
+        if os.path.exists(c) and os.access(c, os.X_OK):
+            return c
+    return None
 
 PORT = int(os.environ.get("GODOT_LSP_PORT", "6005"))
 HOST = "localhost"
@@ -116,10 +140,10 @@ def ensure_godot_lsp():
     except (ConnectionRefusedError, socket.timeout, OSError):
         pass
 
-    # Try to start it
-    godot = "/Applications/Godot.app/Contents/MacOS/Godot"
-    if not os.path.exists(godot):
-        print("Error: Godot not found at expected path", file=sys.stderr)
+    # Try to start it — resolve the Godot binary per-OS.
+    godot = resolve_godot_bin()
+    if not godot:
+        print("Error: Godot binary not found (set GODOT_BIN to override)", file=sys.stderr)
         return False
 
     subprocess.Popen(

@@ -10,16 +10,19 @@ Kill any existing Godot instances and launch fresh.
 
 1. Kill existing instances:
 ```bash
-pkill -f "Godot.*test123" 2>/dev/null
+source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
+pkill -f "$GODOT_PROC_PAT" 2>/dev/null
 sleep 1
 lsof -ti:9999 | xargs kill 2>/dev/null
 sleep 1
 ```
 
-2. Launch Godot graphically with log capture:
+2. Launch Godot graphically with log capture (binary/project resolved per-OS by
+   the sourced `godot-env.sh`):
 ```bash
-nohup /Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 > /tmp/godot_debug.log 2>&1 &
-echo "Godot launched (PID $!)"
+source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
+nohup "$GODOT_BIN" --path "$GODOT_PROJECT" > "$GODOT_LOG" 2>&1 &
+echo "Godot launched (PID $!) — log: $GODOT_LOG"
 ```
 
 3. Wait for startup and verify:

@@ -17,16 +17,17 @@ Options:
 - `--level <name>` — after launch, load this level and clear enemies
 
 ```bash
-pkill -f "Godot.*test123" 2>/dev/null
+source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
+pkill -f "$GODOT_PROC_PAT" 2>/dev/null
 sleep 1
-LOG_DIR="/var/tumu/logs"
-if [ ! -d "$LOG_DIR" ]; then
-  mkdir -p "$LOG_DIR" 2>/dev/null || LOG_DIR="/tmp"
-fi
-nohup /Applications/Godot.app/Contents/MacOS/Godot --path /Users/jeremy/dev/dax/test123 > "$LOG_DIR/godot_debug.log" 2>&1 &
+nohup "$GODOT_BIN" --path "$GODOT_PROJECT" > "$GODOT_LOG" 2>&1 &
 sleep 3
 echo "status" | nc -w2 localhost 9999
 ```
+
+The resolver (`.claude/scripts/godot-env.sh`) deduces the Godot binary and
+project path per-OS (macOS app bundle vs. Linux `godot` on PATH), so no paths
+are hardcoded. Override with `GODOT_BIN` / `GODOT_PROJECT` env vars if needed.
 
 If `--level <name>` was provided, also run:
 ```bash
