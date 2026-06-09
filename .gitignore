@@ -36,3 +36,6 @@ tools/mocap/pose_landmarker_full.task
 
 # Beads work-graph DB (per-machine, lives at /var/<project>/beads/)
 .beads/
+
+# Agent memory (per-machine / per-user, not shared via version control)
+.claude/agent-memory/
