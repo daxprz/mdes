@@ -11,8 +11,7 @@ Kill any existing Godot instances and launch fresh.
 1. Kill existing instances:
 ```bash
 source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
-pkill -f "$GODOT_PROC_PAT" 2>/dev/null
-sleep 1
+godot_kill   # terminates ALL instances for this project (handles the -- pattern)
 lsof -ti:9999 | xargs kill 2>/dev/null
 sleep 1
 ```

@@ -18,8 +18,7 @@ Options:
 
 ```bash
 source "$(git rev-parse --show-toplevel)/.claude/scripts/godot-env.sh"
-pkill -f "$GODOT_PROC_PAT" 2>/dev/null
-sleep 1
+godot_kill   # terminates ALL instances for this project (handles the -- pattern)
 nohup "$GODOT_BIN" --path "$GODOT_PROJECT" > "$GODOT_LOG" 2>&1 &
 sleep 3
 echo "status" | nc -w2 localhost 9999

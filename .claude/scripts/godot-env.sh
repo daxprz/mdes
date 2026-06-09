@@ -42,8 +42,28 @@ if [ -z "${GODOT_BIN:-}" ]; then
   echo "godot-env: could not locate a Godot binary (set GODOT_BIN to override)" >&2
 fi
 
-# --- Process-match pattern for pkill: match this project's running instance ---
-GODOT_PROC_PAT="Godot.*$(basename "$GODOT_PROJECT")"
+# --- Process-match pattern: match this project's running instance ---
+# Match on the --path argument (unique + stable, OS-agnostic) rather than the
+# binary name, which differs by OS (macOS "Godot" vs Linux "godot").
+# NOTE: the pattern starts with "--", so pkill/pgrep MUST be invoked with the
+# "--" end-of-options separator (e.g. `pkill -f -- "$GODOT_PROC_PAT"`), otherwise
+# they parse it as an option flag and silently match nothing. Prefer the
+# godot_running / godot_kill helpers below, which handle this correctly.
+GODOT_PROC_PAT="--path[ =]$GODOT_PROJECT"
+
+# godot_running — succeed (0) if an instance for this project is alive.
+godot_running() { pgrep -f -- "$GODOT_PROC_PAT" >/dev/null 2>&1; }
+
+# godot_kill — terminate every instance for this project (TERM, then KILL).
+godot_kill() {
+  pkill -f -- "$GODOT_PROC_PAT" 2>/dev/null
+  for _ in 1 2 3; do
+    godot_running || return 0
+    sleep 1
+  done
+  pkill -9 -f -- "$GODOT_PROC_PAT" 2>/dev/null
+  sleep 1
+}
 
 # --- Log directory: prefer /var/tumu/logs, fall back to /tmp ---
 LOG_DIR="/var/tumu/logs"

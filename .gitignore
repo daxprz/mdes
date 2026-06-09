@@ -39,3 +39,6 @@ tools/mocap/pose_landmarker_full.task
 
 # Agent memory (per-machine / per-user, not shared via version control)
 .claude/agent-memory/
+
+# Local Godot project-setting overrides (per-machine, e.g. windowed mode for RDP)
+/override.cfg
