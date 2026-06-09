@@ -137,7 +137,7 @@ offset_right = 300.0
 offset_bottom = 70.0
 theme_override_font_sizes/font_size = 48
 horizontal_alignment = 1
-text = "THE ULTIMATE MUFFIN"
+text = "MDES"
 
 [node name="JoinText" type="Label" parent="UI"]
 anchors_preset = 5
