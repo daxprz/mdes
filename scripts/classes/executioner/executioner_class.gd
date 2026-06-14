@@ -643,7 +643,7 @@ func exec_handle_mode_toggle() -> void:
 	if p.device_id >= 0:
 		r1_pressed = Input.is_joy_button_pressed(p.device_id, JOY_BUTTON_RIGHT_SHOULDER)
 	else:
-		r1_pressed = Input.is_key_pressed(KEY_R)
+		r1_pressed = Input.is_key_pressed(KEY_CTRL)
 	if r1_pressed and not p._exec_r1_was_pressed:
 		var anything_out: bool = p._exec_ball_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING] or \
 			p._exec_shackle_state not in [ExecEndState.HELD, ExecEndState.WINDUP, ExecEndState.RETRACTING]

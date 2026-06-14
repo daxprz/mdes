@@ -379,6 +379,10 @@ const ARCHER_ARROW_SPEED_RATE := 1200.0  # Speed increase per second of hold
 const ARCHER_ARROW_GRAVITY := 500.0  # Arrow gravity during flight
 const ARCHER_AIM_LOCK_COOLDOWN := 0.25  # Seconds between target-lock recalculations
 const ARCHER_AIM_MAX_RANGE := 600.0  # Max reticle distance from player
+# Mouse-aim donut: cursor distance from the player maps to right-stick push magnitude.
+# Inside INNER = no push (deadzone hole); at/beyond OUTER = full push (1.0); linear between.
+const MOUSE_AIM_INNER_RADIUS := 48.0   # px — deadzone hole around the player
+const MOUSE_AIM_OUTER_RADIUS := 340.0  # px — full-push saturation radius
 var _archer_aiming: bool = false
 var _archer_aim_hold_time: float = 0.0  # How long L2 has been held (determines pull strength)
 var _archer_arrow_speed: float = ARCHER_ARROW_MIN_SPEED  # Current arrow speed based on pull
@@ -678,6 +682,7 @@ func _draw() -> void:
 	_draw_archer_aim()
 	_draw_executioner()
 	_draw_hud_popup_indicator()
+	_draw_aim_donut()
 	_draw_debug()
 	# Hitbox: show attack area when active
 	if attack_area.monitoring and DebugOverlay.should_draw("hitboxes/player_attack", self):
@@ -688,6 +693,30 @@ func _draw() -> void:
 			var rect := Rect2(area_pos - half, half * 2.0)
 			draw_rect(rect, Color(1.0, 0.3, 0.1, 0.35))
 			draw_rect(rect, Color(1.0, 0.5, 0.2, 0.7), false, 1.5)
+
+
+func _draw_aim_donut() -> void:
+	## Visualize the mouse-aim donut (keyboard players only): the inner deadzone
+	## ring, the outer saturation ring, and the current push vector / magnitude.
+	if device_id != -1:
+		return
+	if not DebugOverlay.should_draw("input/aim_donut", self):
+		return
+	var cursor: Vector2 = get_local_mouse_position()
+	var dist: float = cursor.length()
+	var span: float = maxf(MOUSE_AIM_OUTER_RADIUS - MOUSE_AIM_INNER_RADIUS, 0.001)
+	var mag: float = clampf((dist - MOUSE_AIM_INNER_RADIUS) / span, 0.0, 1.0)
+	# Donut rings (inner = deadzone hole, outer = full-push saturation)
+	draw_arc(Vector2.ZERO, MOUSE_AIM_INNER_RADIUS, 0.0, TAU, 48, Color(0.4, 0.7, 1.0, 0.35), 1.5)
+	draw_arc(Vector2.ZERO, MOUSE_AIM_OUTER_RADIUS, 0.0, TAU, 64, Color(0.4, 0.7, 1.0, 0.6), 2.0)
+	# Push vector — color lerps green (light) -> red (hard) with magnitude
+	var col: Color = Color(0.3, 1.0, 0.3).lerp(Color(1.0, 0.25, 0.2), mag)
+	if dist > 0.001:
+		var dir: Vector2 = cursor / dist
+		draw_line(dir * MOUSE_AIM_INNER_RADIUS, dir * (MOUSE_AIM_INNER_RADIUS + mag * span), col, 3.0)
+		draw_circle(cursor, 4.0, col)
+	draw_string(ThemeDB.fallback_font, Vector2(8, -MOUSE_AIM_OUTER_RADIUS - 6),
+		"aim push %.2f  (d=%.0f px)" % [mag, dist], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, col)
 
 
 func _apply_class_sprite() -> void:
@@ -891,10 +920,11 @@ func _is_trigger_pressed(axis: JoyAxis) -> bool:
 		elif axis == JOY_AXIS_TRIGGER_RIGHT:
 			return _ai_triggers.get("r2", false)
 	if device_id == -1:
+		# Mouse-and-keyboard: left/right mouse buttons map to L2/R2 triggers.
 		if axis == JOY_AXIS_TRIGGER_LEFT:
-			return Input.is_key_pressed(KEY_TAB)
+			return Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
 		elif axis == JOY_AXIS_TRIGGER_RIGHT:
-			return Input.is_key_pressed(KEY_ENTER)
+			return Input.is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)
 		return false
 	var value: float = Input.get_joy_axis(device_id, axis)
 	# Hysteresis: if already aiming, use lower threshold to keep it active
@@ -2038,9 +2068,25 @@ func _check_werewolf_pounce_landing() -> void:
 	if _werewolf_class:
 		_werewolf_class._check_werewolf_pounce_landing()
 
+func _mouse_aim_vector() -> Vector2:
+	## Mouse-and-keyboard equivalent of a right-stick push.
+	## Direction points toward the cursor; magnitude is the cursor's distance from
+	## the player remapped through the radial donut (annulus): inside INNER radius
+	## the push is 0 (deadzone hole), it ramps up from the inner edge ("light"),
+	## and saturates to 1.0 at/beyond OUTER radius ("hard"). Returns dir * magnitude,
+	## matching the [-1,1] disk a physical right stick produces.
+	var to_cursor: Vector2 = get_global_mouse_position() - global_position
+	var dist: float = to_cursor.length()
+	if dist < 0.001:
+		return Vector2.ZERO
+	var span: float = maxf(MOUSE_AIM_OUTER_RADIUS - MOUSE_AIM_INNER_RADIUS, 0.001)
+	var mag: float = clampf((dist - MOUSE_AIM_INNER_RADIUS) / span, 0.0, 1.0)
+	return (to_cursor / dist) * mag
+
+
 func _get_aim_direction_analog() -> Vector2:
-	## Returns full analog aim direction. Right stick takes priority over left.
-	## Falls back to _get_aim_direction() for keyboard or if both sticks are neutral.
+	## Returns full analog aim direction WITH push magnitude (length in [0,1]).
+	## Right stick (controller) or mouse-donut (keyboard); falls back to facing.
 	# AI aim override — persists as long as AI is active
 	if _ai_active:
 		return _ai_aim
@@ -2059,12 +2105,27 @@ func _get_aim_direction_analog() -> Vector2:
 		)
 		if left_stick.length() > 0.2:
 			return left_stick.normalized()
+	else:
+		# Mouse-and-keyboard: cursor offset = right-stick push (donut-scaled).
+		var m: Vector2 = _mouse_aim_vector()
+		if m.length() > 0.001:
+			return m
 	return _get_aim_direction()
 
 
 func _get_aim_direction() -> Vector2:
-	## Returns the direction the player is aiming with D-pad/stick.
+	## Returns the (unit) direction the player is aiming.
+	## Keyboard aims toward the mouse cursor; controllers use the D-pad/stick.
 	## Falls back to facing direction if no directional input.
+	if device_id == -1:
+		var to_cursor: Vector2 = get_global_mouse_position() - global_position
+		if to_cursor.length() > 0.001:
+			var dir: Vector2 = to_cursor.normalized()
+			if dir.x != 0.0:
+				_facing_right = dir.x > 0.0
+				sprite.flip_h = not _facing_right
+			return dir
+		return Vector2(1.0 if _facing_right else -1.0, 0.0)
 	var aim := Vector2.ZERO
 	if _is_device_action_pressed("move_left"):
 		aim.x -= 1.0

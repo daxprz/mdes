@@ -132,6 +132,7 @@
       "titleBar.inactiveForeground": "#e7e7e799"
     },
     "ccc.delegates.pinned": [
+      "mdes-ccc",
       "mdes-ember"
     ]
   },

@@ -49,6 +49,9 @@ func _register_all() -> void:
 	r.call("testing/bounded_leap_checks", "Bounded leap constraint shapes (A/B circles, START/END/DISALLOW) with results")
 	r.call("testing/violations", "Leap constraint violations: pulsing red circles at breach points on failed arcs")
 
+	# -- Input --
+	r.call("input/aim_donut", "Mouse-aim donut: inner/outer push radii, cursor vector, magnitude")
+
 	# -- Body Mechanics --
 	r.call("body_mechanics/collision_shapes", "Body collision sphere (belly)")
 	r.call("body_mechanics/ik_plant_marks", "Foot plant/step indicators and ideal positions")

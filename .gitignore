@@ -2,6 +2,9 @@
 .godot/
 *.translation
 
+# Machine-local ccc-bd symlink (points at this host's CCC workspace bin)
+/bin/ccc-bd
+
 # Python
 .venv/
 __pycache__/

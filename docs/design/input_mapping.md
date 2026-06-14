@@ -22,11 +22,47 @@ All input actions defined in `project.godot`, mapped across controller vendors a
 |----------------------|------------------|------------------|-----------------|------------------|
 | Move (horizontal)    | Left Stick X     | Left Stick X     | A/D             | `move_left`/`move_right` |
 | Move (vertical)      | Left Stick Y     | Left Stick Y     | W/S             | `move_up`/`move_down` |
-| Aim (horizontal)     | Right Stick X    | Right Stick X    | (mouse)         | `ai_cmd` aim_x   |
-| Aim (vertical)       | Right Stick Y    | Right Stick Y    | (mouse)         | `ai_cmd` aim_y   |
+| Aim (horizontal)     | Right Stick X    | Right Stick X    | Mouse cursor X  | `ai_cmd` aim_x   |
+| Aim (vertical)       | Right Stick Y    | Right Stick Y    | Mouse cursor Y  | `ai_cmd` aim_y   |
 | L2 (trigger)         | L2 Trigger       | LT               | Tab             | (hardcoded)      |
 | R2 (trigger)         | R2 Trigger       | RT               | (none)          | (hardcoded)      |
 | R1 (shoulder)        | R1               | RB               | R / Shift       | (hardcoded)      |
+
+## Mouse & Keyboard (cursor aim scheme)
+
+Mouse-and-keyboard play mirrors a game controller: the **left hand stays on
+WASD**, the **right hand drives the mouse** (aim + the two triggers). The goal is
+that every action is reachable *without lifting fingers off WASD* — so the
+shoulder/extra actions sit on mouse buttons, the mouse wheel, and the two
+"hold-while-moving" modifier keys (Shift/Ctrl).
+
+Key placement follows the common WASD ergonomics consensus (keys in the
+"easy zone" — `Q E R F`, `Shift`, `Ctrl`, `Space`, mouse buttons, wheel — host
+the frequent actions; `Alt`/`6-0`/stretch keys are avoided). See Sources below.
+
+| Input          | RCON Action / read | Controller equiv. | Notes |
+|----------------|--------------------|-------------------|-------|
+| Move cursor    | aim (`_poll_aim`)  | Right Stick       | `intent_aim = (cursor - player).normalized()` |
+| **Left mouse** | L2 trigger         | L2 / LT           | `player_side.gd:_is_trigger_pressed` keyboard branch |
+| **Right mouse**| R2 trigger         | R2 / RT           | `player_side.gd:_is_trigger_pressed` keyboard branch |
+| **Middle mouse** | `block`          | L3 (stick-click)  | Hold to block; bound on the `block` input action |
+| Wheel up/down  | `interact`         | Circle / B        | Cycle mode (both directions cycle for now) |
+| **Left Shift** | `grapple`          | L1 (bumper)       | Holdable with WASD; bound on the `grapple` input action |
+| **Left Ctrl**  | R1 (recall)        | R1 (bumper)       | Holdable with WASD; `executioner_class.gd` keyboard branch |
+
+Triggers (L2/R2) and R1 (recall) are still **hardcoded reads**, not input-map
+actions — the mouse/key bindings for them live in code (`player_side.gd`,
+`executioner_class.gd`), while `block`/`grapple`/`interact` are bound in
+`project.godot`. Moving L2/R2/R1 into the input map (so they're remappable +
+`ai_cmd`-drivable) remains the recommended follow-up below.
+
+Scheme chosen 2026-06-09, research-backed (see Sources). `Alt` was explicitly
+rejected — it's in the "difficult zone" per the ergonomics guides.
+
+### Sources
+- walkthroughs.games — "Best Keybinds: Fix Awkward Controls Fast"
+- winorm.com — "The Best Keybindings to Use in Competitive Gaming"
+- Lenovo glossary — WASD hand position; Steam Community keybind discussions
 
 ## Hardcoded Reads (bypass input map)
 
